@@ -7,6 +7,8 @@ import { connect, isConnected, upcomingEvents } from '../google.js';
 import { makeTask } from '../capture.js';
 import { sitesOf, siteData, ruleOf } from '../automations.js';
 import { hostOf, daysUntil } from '../sitecheck.js';
+import { overBudget } from './money.js';
+import { outOfRange } from './positions.js';
 
 const PRIORITY_RANK = { high: 0, medium: 1, low: 2, none: 3 };
 const RECIPE_LABEL = { testing: 'Testing', idea: 'Ideas', final: 'Final' };
@@ -258,13 +260,21 @@ function attentionCard(store, open) {
   const inbox = open.filter((i) => i.inbox).length;
   if (late) add('clock', `${late} task${late === 1 ? '' : 's'} past the deadline`, '#/todos?filter=today', 'Review');
   if (inbox) add('inbox', `${inbox} task${inbox === 1 ? '' : 's'} to organize`, '#/todos?filter=organize', 'Organize');
+  const domains = new Set();
   for (const p of sitesOf(store)) {
     const s = siteData(store, p.id);
     const host = hostOf(p.website);
     if (s.health?.status === 'down') add('globe', `${host} is not answering`, '#/tools', 'Open');
     if (s.ssl?.until && daysUntil(s.ssl.until) <= ruleOf(store, 'ssl').days) add('shield', `The SSL certificate for ${host} expires in ${daysUntil(s.ssl.until)} days`, '#/tools?tab=ssl', 'Open');
-    if (s.domain?.until && daysUntil(s.domain.until) <= ruleOf(store, 'domain').days) add('shield', `The domain ${s.domain.name} expires in ${daysUntil(s.domain.until)} days`, '#/tools?tab=ssl', 'Open');
+    // Sites on the same domain share one line.
+    if (s.domain?.until && daysUntil(s.domain.until) <= ruleOf(store, 'domain').days && !domains.has(s.domain.name) && domains.add(s.domain.name)) add('shield', `The domain ${s.domain.name} expires in ${daysUntil(s.domain.until)} days`, '#/tools?tab=ssl', 'Open');
   }
+  for (const b of overBudget(store)) {
+    add('wallet', `${b.category} is over its budget this month: ${money(b.spent, b.currency)} of ${money(b.budget, b.currency)}`, '#/money', 'Open');
+  }
+  const out = outOfRange(store);
+  if (out.length === 1) add('droplet', `${out[0].pair} on ${out[0].chain} is out of its price range`, '#/positions?filter=out', 'Open');
+  else if (out.length) add('droplet', `${out.length} pool positions are out of their price range`, '#/positions?filter=out', 'Open');
   if (!rows.length) return null;
   return h('section', { class: 'card board-panel' },
     h('div', { class: 'row between board-panel-head' }, h('h3', null, 'Needs attention')),

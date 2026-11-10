@@ -174,6 +174,12 @@ function savedRows(store, cfg, keys) {
 const cacheKeys = (chains) => chains.flatMap((c) => [`${c.id}:v3`, `${c.id}:v4`]);
 const enabledChains = (cfg) => CHAINS.filter((chain) => chainSettings(cfg, chain).enabled);
 
+// Positions outside their price range as of the last saved read, for Home. Nothing is read from a chain here.
+export function outOfRange(store) {
+  const cfg = store.get('settings').uniswap ?? {};
+  return savedRows(store, cfg, cacheKeys(enabledChains(cfg))).filter((r) => !r.inRange);
+}
+
 // Reads every enabled chain in parallel, and v3 and v4 side by side on each. Each part shows as soon as it is read,
 // replacing what was on screen for it; until then the earlier rows stay. A part that fails shows its last good read.
 async function load(store) {

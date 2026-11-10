@@ -259,7 +259,21 @@ export function searchTab(store, view, w) {
       h('section', { class: 'card stack' }, h('h3', null, 'Impressions'), I ? barChart(b.labels, impSeries) : empty('No impressions in this period.'), legend(impSeries))),
     h('div', { class: 'split-2' },
       h('section', { class: 'card stack' }, h('h3', null, 'Top queries'), table(['Query', ...cols.slice(1)], d.queries, format)),
-      h('section', { class: 'card stack' }, h('h3', null, 'Top pages'), table(['Page', ...cols.slice(1)], d.pages, format))));
+      h('section', { class: 'card stack' }, h('h3', null, 'Top pages'), table(['Page', ...cols.slice(1)], d.pages, format))),
+    engine === 'google' ? indexingCard(d) : null);
+}
+
+// What Google holds for the site's sitemaps: how many pages each lists, and whether Google could read it.
+function indexingCard(d) {
+  const body = d.sitemaps === null || d.sitemaps === undefined
+    ? notice({ tone: 'info', text: 'The sitemaps could not be read from Search Console.' })
+    : d.sitemaps.length
+      ? table(['Sitemap', 'Pages submitted', 'Errors', 'Warnings', 'Last read by Google'], d.sitemaps, [null, fmt, fmt, fmt, (v) => v || '—'])
+      : empty('No sitemap is submitted for this property. Submit one in Search Console so new pages are found sooner.');
+  return h('section', { class: 'card stack' },
+    h('h3', null, 'Indexing'),
+    body,
+    h('p', { class: 'muted small' }, 'Search Console does not report how many pages are indexed through its API; the Pages report on its website has that. Tools › Crawl files shows what the sitemap on your site lists today.'));
 }
 
 // --- All sites ---

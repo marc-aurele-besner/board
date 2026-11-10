@@ -9,11 +9,17 @@ import { migrateLegacyProjects, migrateProjectShape } from './modules/projects.j
 import { bell, COLLECTION as NOTIFICATIONS, DEFAULTS as NOTIFICATION_DEFAULTS } from './notifications.js';
 import { openPalette } from './palette.js';
 import { startBackground } from './background.js';
+import { JUMPS, openShortcuts } from './shortcuts.js';
+import { sampleFolder } from './sample.js';
+import { toast } from './toast.js';
 
 const app = document.getElementById('app');
 const STATUS_LABELS = { saved: 'Saved', saving: 'Saving…', error: 'Save failed' };
+// With sample data nothing reaches the disk, so the status never claims a save.
+const statusText = (status) => (sample ? 'Not saved' : STATUS_LABELS[status]);
 
 let store = null;
+let sample = false; // exploring with sample data, kept in memory only
 let lastSection = null;
 let pendingHandle = null; // remembered folder that still needs permission
 let connectError = '';
@@ -60,6 +66,9 @@ function syncUrl(mod) {
 function render() {
   if (!store) return renderConnect();
   const mod = currentModule();
+  // An address that names no section opens Home. Say so once; syncUrl below then corrects the address.
+  const asked = readRoute().id;
+  if (asked !== mod.id) toast(`There is no page at “${asked}”. Showing ${mod.title}.`);
   const main = h('main', { class: 'view' });
   // Only a change of section plays the entrance animation; edits within a section re-render silently.
   if (mod.id !== lastSection) {
@@ -68,7 +77,8 @@ function render() {
   }
   mod.render(main, store);
   syncUrl(mod);
-  app.replaceChildren(
+  // replaceChildren would print a null as text, so the parts that may be absent are filtered out.
+  app.replaceChildren(...[
     h('header', { class: 'topbar' },
       h('a', { href: '#/home', class: 'brand' }, 'Board'),
       h('nav', { class: 'tabs' },
@@ -78,7 +88,7 @@ function render() {
       h('div', { class: 'topbar-end' },
         h('button', { type: 'button', class: 'search-btn', title: 'Search or jump', onclick: () => openPalette(store, modules) },
           icon('search'), h('span', { class: 'grow' }, 'Search or jump…'), h('kbd', null, isMac ? '⌘K' : 'Ctrl K')),
-        h('span', { id: 'save-status', class: `status ${store.status}` }, STATUS_LABELS[store.status]),
+        h('span', { id: 'save-status', class: `status ${store.status}` }, statusText(store.status)),
         bell(store),
         // Settings lives here as an icon, not in the section tabs.
         h('a', {
@@ -95,23 +105,34 @@ function render() {
           'aria-label': isDark() ? 'Switch to light theme' : 'Switch to dark theme',
           onclick: toggleTheme,
         }, icon(isDark() ? 'sun' : 'moon')))),
+    sample
+      ? h('div', { class: 'sample-bar' },
+          icon('info'),
+          h('span', { class: 'grow' }, 'This is sample data. Changes stay in this tab and are gone when you reload.'),
+          fsSupported()
+            ? h('button', { type: 'button', class: 'btn-small primary', onclick: () => window.dispatchEvent(new CustomEvent('board:pick-folder')) }, 'Choose data folder')
+            : h('span', { class: 'muted small' }, 'Open the board in Chrome or Edge to keep your own data.'))
+      : null,
     main,
-  );
+  ].filter(Boolean));
   main.querySelector('[data-autofocus]')?.focus();
 }
 
 function updateStatus(status) {
   const el = document.getElementById('save-status');
   if (!el) return;
-  el.textContent = STATUS_LABELS[status];
+  el.textContent = statusText(status);
   el.className = `status ${status}`;
 }
 
 function renderConnect() {
+  const explore = h('button', { onclick: exploreSample }, 'Explore with sample data');
   if (!fsSupported()) {
     app.replaceChildren(h('section', { class: 'card connect' },
       h('h1', null, 'Board'),
-      h('p', { class: 'error' }, 'This app needs the File System Access API. Open it in Chrome or Edge.')));
+      h('p', { class: 'error' }, 'This app needs the File System Access API. Open it in Chrome or Edge.'),
+      h('p', { class: 'muted small' }, 'You can still look around with sample data. Nothing is saved.'),
+      h('div', { class: 'actions' }, explore)));
     return;
   }
   const actions = [];
@@ -121,11 +142,19 @@ function renderConnect() {
   } else {
     actions.push(h('button', { class: 'primary', onclick: chooseFolder }, 'Choose data folder'));
   }
+  actions.push(explore);
   app.replaceChildren(h('section', { class: 'card connect' },
     h('h1', null, 'Board'),
     h('p', null, 'Your data lives as plain JSON files in a folder you choose. Pick a folder outside this repo.'),
     connectError ? h('p', { class: 'error' }, connectError) : null,
     h('div', { class: 'actions' }, actions)));
+}
+
+// Opens the board on a folder that lives in memory. The background jobs stay off, so nothing is checked or sent
+// on behalf of placeholder projects.
+function exploreSample() {
+  sample = true;
+  return open(sampleFolder());
 }
 
 async function open(handle) {
@@ -146,17 +175,40 @@ async function open(handle) {
   connectError = '';
   currentModule().restore?.(readRoute().params);
   render();
-  startBackground(store);
+  if (!sample) startBackground(store);
 }
 
-// Cmd/Ctrl+K anywhere, or "/" outside a field, opens the search palette.
+const CHORD_MS = 1500;
+let chordAt = 0; // when "g" was pressed, waiting for the letter of a section
+
+// Cmd/Ctrl+K anywhere opens the search palette. The single keys only work outside a field and with nothing open
+// over the page: "/" and "n" open the palette, "?" lists the shortcuts, and "g" then a letter jumps to a section.
 function onShortcut(e) {
   if (!store) return;
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
   const combo = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k';
-  if (!combo && !(e.key === '/' && !typing)) return;
-  e.preventDefault();
-  openPalette(store, modules);
+  if (combo || (e.key === '/' && !typing)) {
+    e.preventDefault();
+    return openPalette(store, modules);
+  }
+  if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (document.querySelector('.modal-overlay, .palette-overlay, .drawer-overlay, .popover')) return;
+  const key = e.key.toLowerCase();
+  if (Date.now() - chordAt < CHORD_MS) {
+    chordAt = 0;
+    const id = JUMPS.find(([letter]) => letter === key)?.[1];
+    if (!id) return;
+    e.preventDefault();
+    location.hash = `#/${id}`;
+  } else if (key === 'g') {
+    chordAt = Date.now();
+  } else if (key === 'n') {
+    e.preventDefault();
+    openPalette(store, modules);
+  } else if (e.key === '?') {
+    e.preventDefault();
+    openShortcuts();
+  }
 }
 
 async function chooseFolder() {

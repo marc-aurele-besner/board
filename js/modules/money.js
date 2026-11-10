@@ -7,6 +7,7 @@ import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { projectIcon } from './projects.js';
 import { barChart, legend } from '../chart.js';
 import { openDialog } from '../modal.js';
+import { toast } from '../toast.js';
 
 
 const COLLECTION = 'finance';
@@ -130,7 +131,7 @@ function bucketKeys(from, to, group) {
 
 // --- Entries ---
 
-function addEntries(store, list) {
+export function addEntries(store, list) {
   store.update(COLLECTION, (d) => {
     for (const e of list) {
       const category = capitalize(e.category) || 'Uncategorized';
@@ -178,10 +179,29 @@ function updateEntry(store, id, patch) {
   });
 }
 
+// Deleting is immediate, with a few seconds to take it back.
 function removeEntry(store, id) {
+  const removed = store.get(COLLECTION).entries.find((e) => e.id === id);
+  if (!removed) return;
   store.update(COLLECTION, (d) => {
     d.entries = d.entries.filter((e) => e.id !== id);
   });
+  toast('Entry deleted', { undo: () => store.update(COLLECTION, (d) => d.entries.push(removed)) });
+}
+
+// Categories that went over their monthly budget this month, each in its budget's currency.
+// An entry in another currency whose rate is not loaded yet is left out, so nothing is flagged on a guess.
+export function overBudget(store) {
+  const { entries, budgets = {} } = store.get(COLLECTION);
+  const month = monthKeyOf(new Date());
+  return Object.entries(budgets)
+    .map(([category, b]) => {
+      const spent = entries
+        .filter((e) => e.type === 'expense' && e.category === category && e.date.startsWith(month))
+        .reduce((s, e) => s + (convert(e.amount, entryCurrency(e), b.currency, knownRate(e.date)) ?? 0), 0);
+      return { category, spent: round2(spent), budget: b.amount, currency: b.currency };
+    })
+    .filter((r) => r.spent > r.budget);
 }
 
 // --- Exchange rates, one per day ---
@@ -714,12 +734,20 @@ function updateBill(store, billId, patch) {
   });
 }
 
-// Deletes a bill with all its charges, after asking.
+// Deletes a bill with all its charges, with a few seconds to take it back. The original file stays in bills/.
 function removeBill(store, billId) {
-  if (!confirm('Delete this bill and all its charges?')) return;
+  const { entries, bills } = store.get(COLLECTION);
+  const charges = entries.filter((e) => e.billId === billId);
+  const bill = bills.find((b) => b.id === billId);
   store.update(COLLECTION, (d) => {
     d.entries = d.entries.filter((e) => e.billId !== billId);
     d.bills = d.bills.filter((b) => b.id !== billId);
+  });
+  toast(`Bill and ${charges.length} charge${charges.length === 1 ? '' : 's'} deleted`, {
+    undo: () => store.update(COLLECTION, (d) => {
+      d.entries.push(...charges);
+      if (bill) d.bills.push(bill);
+    }),
   });
 }
 
@@ -827,7 +855,11 @@ function billGroup(store, items, projectOptions, cur) {
     h('span', { class: 'muted date' }, first.date),
     h('span', { class: 'entry-main grow' },
       h('strong', null, first.source || 'Bill'),
-      h('span', { class: 'muted small' }, ` · ${items.length} charge${items.length === 1 ? '' : 's'}${tax ? ` · tax ${money(tax, cur)}` : ''}`)),
+      h('span', { class: 'muted small' }, `${items.length} charge${items.length === 1 ? '' : 's'}${tax ? ` · tax ${money(tax, cur)}` : ''}`,
+        // The original file opens from here, since the row has no spare column for another button.
+        store.get(COLLECTION).bills.some((b) => b.id === billId)
+          ? [' · ', h('button', { type: 'button', class: 'btn-link-inline', onclick: () => showBill(store, billId) }, 'View original')]
+          : null)),
     categoryChip(store, sameCategory, sameCategory === null ? 'Mixed categories' : 'Category', (category) => updateBill(store, billId, { category })),
     pickChip({
       value: sameProject === undefined ? null : sameProject,

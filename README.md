@@ -15,7 +15,15 @@ Sections (v1):
 - **Inbox**: the emails every project sends and receives through Resend, in one list. Filter by sent or received, project, delivery status (delivered, bounced, opened…) and emails that have a task, or search by subject and address. Open an email to read it, or turn it into a task in its project. Each project has its own Resend key in Settings; projects that share an account can share a key, and their emails are told apart by the project website's domain. Needs `tools/resend-relay.js` running (see Outside services).
 - **Notifications**: the bell in the top bar lists deadlines, automated tasks, site checks, provider outages and Telegram messages.
 
-Tasks have a deadline. The lists **Today**, **To Organize** and **Automated** gather what is due, what arrived without a project or deadline (for example from Telegram), and what the board created by itself. Press Cmd/Ctrl+K or `/` to search, jump, or type a task such as `fix the footer #atlas !high friday`.
+Tasks have a deadline. The lists **Today**, **To Organize** and **Automated** gather what is due, what arrived without a project or deadline (for example from Telegram), and what the board created by itself. Press Cmd/Ctrl+K or `/` to search, jump, or capture something:
+
+- a task: `fix the footer #atlas !high friday`
+- a Money entry: `-42.50 groceries weekly shop` is an expense, `+4200 salary` is income, both dated today
+- a recipe: paste a link to import it into Kitchen
+
+Outside a field, `g` then a letter jumps to a section (`g t` for Tasks, `g m` for Money), `n` starts a new task, and `?` lists every shortcut.
+
+Deleting a task, a Money entry, a bill, a recipe or a recipe iteration shows **Undo** for a few seconds.
 
 ## Run it
 
@@ -33,6 +41,8 @@ Then open `http://localhost:<port>` in **Chrome or Edge**. The File System Acces
 
 On first launch, choose a data folder. Pick a folder **outside this repo** (for example `~/Documents/board-data`). The app writes `todos.json`, `recipes.json` and `finance.json` there. On later visits, click **Reconnect** once to re-grant permission.
 
+To look around first, click **Explore with sample data**. It opens the board on placeholder content kept in memory: nothing is written to disk, the automatic checks stay off, and a reload brings back the folder screen. It also works in Firefox and Safari.
+
 ## Data format
 
 Every file has a `schemaVersion` field. Files are plain JSON and can be edited by hand. Reload the page after editing.
@@ -47,7 +57,7 @@ Every file has a `schemaVersion` field. Files are plain JSON and can be edited b
 | `inbox.json` | `{ emails: [{id, projectId, dir: 'sent'\|'received', from, to, cc, subject, at, status, taskId}], syncedAt }`: the email list from Resend (bodies are read when opened, not saved), up to 1000 per project. `status` is Resend's last event of a sent email. `taskId` is the task made from it. Safe to delete except for those links. |
 | `notifications.json` | `{ items: [{id, kind, text, href, key, at, read}], prefs: { <kind>: {app, telegram} } }` |
 | `recipes.json` | `{ recipes: [{id, title, status: 'idea'\|'testing'\|'final', tags, ingredients, steps, notes, images, versions: [{id, date, changes, rating, notes}], created}] }` |
-| `finance.json` | `{ entries: [{id, date, type: 'income'\|'expense', amount, category, note, created}], categories: [], budgets: { <category>: {amount, currency} } }`. A budget is per month and shows in the category breakdown when the period is one month. |
+| `finance.json` | `{ entries: [{id, date, type: 'income'\|'expense', amount, category, note, created}], categories: [], budgets: { <category>: {amount, currency} } }`. A budget is per month and shows in the category breakdown when the period is one month. A category that goes over is listed on Home and announced once under the bell. |
 
 Writes are debounced (about 300 ms) and serialized. The status pill in the top bar shows *Saving…*, *Saved* or *Save failed*.
 

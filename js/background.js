@@ -3,7 +3,7 @@
 import { checkDeadlines } from './notifications.js';
 import { pollTelegram } from './telegram.js';
 import { runDueFlows } from './cron.js';
-import { sitesOf, siteData, checkSite, runRules, checkProviders, providersDue } from './automations.js';
+import { sitesOf, siteData, checkSite, runRules, checkProviders, providersDue, checkBudgets } from './automations.js';
 
 const MINUTE = 60000;
 const DAY = 24 * 60 * MINUTE;
@@ -36,6 +36,7 @@ export function startBackground(store) {
   const cron = quiet(() => runDueFlows(store));
   const slow = quiet(async () => {
     checkDeadlines(store);
+    checkBudgets(store);
     await checkDueSites(store);
     // Status pages follow the same interval as website health.
     if (providersDue(store)) await checkProviders(store);
