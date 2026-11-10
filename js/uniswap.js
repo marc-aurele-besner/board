@@ -114,15 +114,24 @@ export function chainSettings(cfg, chain) {
 }
 
 // One JSON-RPC request to a chain's node.
-async function rpc(node, method, params) {
+// A node that says "too many requests" is asked once more after a pause.
+async function rpc(node, method, params, retry = true) {
   const res = await fetch(node, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
   });
+  if (res.status === 429 && retry) {
+    await new Promise((resolve) => setTimeout(resolve, 1000 + Math.random() * 1000));
+    return rpc(node, method, params, false);
+  }
   if (!res.ok) throw new Error(`The node answered ${res.status}.`);
   const json = await res.json();
-  if (json.error) throw new Error(`The node refused the call: ${json.error.message ?? 'error'}.`);
+  if (json.error) {
+    const err = new Error(`The node refused the call: ${json.error.message ?? 'error'}.`);
+    err.refused = true; // the node answered and said no, unlike a network error, which may pass
+    throw err;
+  }
   return json.result;
 }
 
@@ -224,20 +233,20 @@ async function transfersTo(chain, node, owner, from, to) {
   return (logs ?? []).map((l) => big(String(l.topics[3]).replace(/^0x/, '')).toString());
 }
 
-// Searches one block range, narrowing it while the node refuses. Returns the ids found and the range searched,
-// or null when even the narrowest range is refused.
+// Searches one block range, narrowing it while the node refuses. Returns the ids found and the range searched.
+// When nothing works, refused says whether the node said no to every width (it will not search this far back)
+// or a request failed (busy or offline: worth trying again on the next load).
 async function searchFrom(chain, node, owner, start, end, span, forward) {
-  let width = span;
-  while (width >= MIN_SPAN) {
+  for (let width = span; width >= MIN_SPAN; width = Math.floor(width / 2)) {
     const from = forward ? start : Math.max(start, end - width + 1);
     const to = forward ? Math.min(end, start + width - 1) : end;
     try {
       return { ids: await transfersTo(chain, node, owner, from, to), from, to, span: width };
-    } catch {
-      width = Math.floor(width / 2);
+    } catch (err) {
+      if (!err.refused) return { ids: null, refused: false };
     }
   }
-  return null;
+  return { ids: null, refused: true };
 }
 
 // Extends a wallet's saved search on a chain. prev is what the last load saved: { node, from, to, span, ids, done }.
@@ -255,13 +264,12 @@ export async function scanV4(chain, node, owner, prev) {
   while (cursor <= head && calls > 0) {
     calls--;
     const r = await searchFrom(chain, node, owner, cursor, head, s.span, true);
-    if (!r) break;
+    if (!r.ids) break;
     r.ids.forEach((id) => found.add(id));
     s.span = r.span;
     s.to = r.to;
     cursor = r.to + 1;
   }
-  if (s.from > s.to) s.from = s.to + 1;
 
   // Then older blocks, while the node keeps them.
   while (!s.done && calls > 0) {
@@ -271,8 +279,8 @@ export async function scanV4(chain, node, owner, prev) {
     }
     calls--;
     const r = await searchFrom(chain, node, owner, chain.v4.start, s.from - 1, s.span, false);
-    if (!r) {
-      s.done = true;
+    if (!r.ids) {
+      s.done = r.refused;
       break;
     }
     r.ids.forEach((id) => found.add(id));
@@ -296,8 +304,9 @@ export async function readV4Position(chain, node, tokenId) {
   let ownerHex;
   try {
     ownerHex = await rpcCall(node, chain.v4.positions, SEL.ownerOf + id);
-  } catch {
-    return null; // ownerOf reverts for a burned token
+  } catch (err) {
+    if (err.refused) return null; // ownerOf reverts for a burned token
+    throw err;
   }
   const [info, liq] = await Promise.all([
     rpcCall(node, chain.v4.positions, SEL.getPoolAndPositionInfo + id),
