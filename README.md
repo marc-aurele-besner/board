@@ -21,6 +21,8 @@ python3 -m http.server 8000
 
 Then open `http://localhost:<port>` in **Chrome or Edge**. The File System Access API is not available in Firefox or Safari.
 
+`bunx serve` revalidates every file on reload, so the browser always runs the code you just edited. `python3 -m http.server` sends no cache headers, so Chrome reuses the modules it cached earlier and keeps running the old code after a reload: with that server, hard reload the page (Cmd+Shift+R) after every change.
+
 On first launch, choose a data folder. Pick a folder **outside this repo** (for example `~/Documents/board-data`). The app writes `todos.json`, `recipes.json` and `finance.json` there. On later visits, click **Reconnect** once to re-grant permission.
 
 ## Data format
