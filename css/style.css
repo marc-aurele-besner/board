@@ -875,6 +875,10 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .entry-row.child { padding-left: 4px; background: var(--surface-2); }
 .entry-row.child .entry-toggle::before { content: '↳'; color: var(--muted); display: inline-block; width: 26px; text-align: center; }
 .entry-row.group-head { font-weight: 500; }
+/* `.entries li` (flex) would otherwise beat `.entry-row` (grid) and shrink rows to their content. */
+.entries .entry-group { display: block; padding: 0; border-bottom: 1px solid var(--border); }
+.entries .entry-row { display: grid; width: 100%; }
+.entries .entry-group > .entry-row { border-bottom: 0; }
 .entry-group > .entry-row .chevron .icon { transition: transform 0.15s ease; }
 .entry-group > .entry-row .chevron.open .icon { transform: rotate(180deg); }
 .entry-children { list-style: none; margin: 0; padding: 0 0 6px 0; display: flex; flex-direction: column; }
