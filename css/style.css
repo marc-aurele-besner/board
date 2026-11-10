@@ -1086,6 +1086,8 @@ kbd { font: 0.72rem var(--font); padding: 1px 6px; border-radius: 5px; border: 1
 a { color: var(--accent); }
 .icon-btn:hover { color: var(--text); }
 .bell { position: relative; }
+.settings-link { display: inline-grid; place-items: center; border-radius: 8px; }
+.settings-link.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
 .bell-count { position: absolute; top: 0; right: -2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--danger); color: var(--surface); font: 700 10px/16px var(--font); text-align: center; }
 @media (max-width: 1500px) { .search-btn { width: 150px; } }
 @media (max-width: 1280px) { .tab:not(.active) .tab-label { display: none; } }

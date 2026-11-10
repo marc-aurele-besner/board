@@ -946,6 +946,7 @@ export default {
   id: 'settings',
   title: 'Settings',
   icon: 'settings',
+  hidden: true, // opened from the gear in the top bar
   collection: COLLECTION,
   defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '', relay: '' }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) } },
   render: draw,
