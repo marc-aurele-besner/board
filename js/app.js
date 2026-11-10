@@ -29,8 +29,8 @@ function toggleTheme() {
   render();
 }
 
-const collectionDefaults = () => Object.fromEntries(modules.map((m) => [m.collection, m.defaults]));
-const currentModule = () => modules.find((m) => m.id === location.hash.replace(/^#\//, '')) ?? modules[0];
+const collectionDefaults = () => Object.fromEntries(modules.filter((m) => m.collection).map((m) => [m.collection, m.defaults]));
+const currentModule = () => modules.find((m) => m.id === (location.hash.replace(/^#\//, '') || 'home')) ?? modules[0];
 
 function render() {
   if (!store) return renderConnect();
@@ -39,9 +39,9 @@ function render() {
   mod.render(main, store);
   app.replaceChildren(
     h('header', { class: 'topbar' },
-      h('div', { class: 'brand' }, 'Board'),
+      h('a', { href: '#/home', class: 'brand' }, 'Board'),
       h('nav', { class: 'tabs' },
-        modules.map((m) => h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab' }, icon(m.icon), m.title))),
+        modules.filter((m) => !m.hidden).map((m) => h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab' }, icon(m.icon), m.title))),
       h('div', { class: 'topbar-end' },
         h('span', { id: 'save-status', class: `status ${store.status}` }, STATUS_LABELS[store.status]),
         h('button', {

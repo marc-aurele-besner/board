@@ -79,7 +79,20 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
-.brand { font-weight: 700; letter-spacing: 0.02em; }
+.brand { font-weight: 700; letter-spacing: 0.02em; color: var(--text); text-decoration: none; }
+
+/* Home */
+.home-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--gap); align-items: start; }
+.home-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.home-card .more { font-size: 0.85rem; color: var(--accent); text-decoration: none; }
+.home-card .more:hover { text-decoration: underline; }
+.stats { display: flex; gap: 18px; flex-wrap: wrap; }
+.stats > div { display: flex; flex-direction: column; }
+.stats strong { font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+.home-list { display: flex; flex-direction: column; gap: 6px; }
+.home-list li { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.home-list li:last-child { border-bottom: none; }
+.home-list .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
 .tab {
   padding: 6px 12px;
