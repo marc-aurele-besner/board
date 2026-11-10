@@ -47,6 +47,13 @@ export const money = (n) => currencyFormat.format(n);
 
 export const empty = (text) => h('p', { class: 'empty' }, text);
 
+// A loading bar for work whose length is not known, with a label saying what is happening.
+export function progress(label) {
+  return h('div', { class: 'progress', role: 'status', 'aria-live': 'polite' },
+    h('div', { class: 'progress-label' }, label),
+    h('div', { class: 'progress-track' }, h('div', { class: 'progress-bar' })));
+}
+
 // A status box with an icon, the message, and optional action buttons. tone: 'error' | 'ok' | 'info'.
 export function notice({ tone = 'error', text, actions = [] }) {
   const iconName = tone === 'error' ? 'alert' : tone === 'ok' ? 'check' : 'info';

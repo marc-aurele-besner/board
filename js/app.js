@@ -11,6 +11,7 @@ const app = document.getElementById('app');
 const STATUS_LABELS = { saved: 'Saved', saving: 'Saving…', error: 'Save failed' };
 
 let store = null;
+let lastSection = null;
 let pendingHandle = null; // remembered folder that still needs permission
 let connectError = '';
 
@@ -52,6 +53,11 @@ function render() {
   if (!store) return renderConnect();
   const mod = currentModule();
   const main = h('main', { class: 'view' });
+  // Only a change of section plays the entrance animation; edits within a section re-render silently.
+  if (mod.id !== lastSection) {
+    main.classList.add('enter');
+    lastSection = mod.id;
+  }
   mod.render(main, store);
   syncUrl(mod);
   app.replaceChildren(

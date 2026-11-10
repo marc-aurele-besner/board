@@ -1,4 +1,4 @@
-import { h, uid, now, todayISO, monthKey, money, empty, icon, notice } from '../ui.js';
+import { h, uid, now, todayISO, monthKey, money, empty, icon, notice, progress } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { ask, parseJson } from '../ai.js';
 import { readPdf } from '../pdf-reader.js';
@@ -10,7 +10,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 // View state: the month being shown (YYYY-MM).
 const view = { month: monthKey(todayISO()) };
 // A bill is read into charges (the line items) and a bill total. Only the charges become entries.
-const receipt = { status: 'idle', items: [], total: null, vendor: '', error: '', fileName: '' };
+const receipt = { status: 'idle', items: [], total: null, vendor: '', error: '', fileName: '', stage: '' };
 // Monthly spending review (task 6).
 const spend = { month: '', status: 'idle', text: '' };
 
@@ -66,9 +66,10 @@ function removeEntry(store, id) {
 
 // The message parts for a dropped file. A PDF with a text layer is sent as text (any model can read it);
 // a scanned PDF or an image is sent as images (needs a model that reads images).
-async function documentContent(file) {
+async function documentContent(file, say) {
   const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
   if (isPdf) {
+    say('Reading the PDF pages…');
     const pdf = await readPdf(file);
     const note = pdf.truncated ? ` Only the first ${pdf.images.length} pages are included; the document has ${pdf.pages}.` : '';
     if (pdf.text) {
@@ -111,13 +112,20 @@ async function readReceipt(store, file, categories) {
   receipt.fileName = file.name;
   receipt.items = [];
   receipt.total = null;
-  store.refresh();
+  // Each step updates the loading bar's label, so the wait shows what is happening.
+  const say = (stage) => {
+    receipt.stage = stage;
+    store.refresh();
+  };
+  say('Reading the file…');
   try {
-    const content = await documentContent(file);
+    const content = await documentContent(file, say);
+    say('Asking the model to read the charges…');
     const reply = await ask(store, 'task-receipt', [
       { role: 'system', content: receiptPrompt(categories) },
       { role: 'user', content },
     ]);
+    say('Checking the charges against the total…');
     const parsed = parseJson(reply);
     const doc = Array.isArray(parsed) ? { items: parsed } : parsed;
     const documentDate = DATE.test(doc.date) ? doc.date : todayISO();
@@ -159,7 +167,11 @@ function totalCheck(itemsTotal) {
 
 function receiptPanel(store) {
   if (receipt.status === 'idle') return null;
-  if (receipt.status === 'loading') return h('div', { class: 'panel-mini' }, `Reading ${receipt.fileName}…`);
+  if (receipt.status === 'loading') {
+    return h('div', { class: 'panel-mini' },
+      h('strong', null, receipt.fileName),
+      progress(receipt.stage || 'Reading…'));
+  }
   if (receipt.status === 'error') {
     return notice({
       text: receipt.error,
