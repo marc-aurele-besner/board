@@ -2,7 +2,7 @@
 // Nothing here runs when the board is closed; there is no server.
 import { checkDeadlines } from './notifications.js';
 import { pollTelegram } from './telegram.js';
-import { sitesOf, siteData, checkSite, runRules, checkProviders, providersDue } from './automations.js';
+import { sitesOf, siteData, checkSite, runRules, checkProviders, providersDue, checkBudgets } from './automations.js';
 
 const MINUTE = 60000;
 const DAY = 24 * 60 * MINUTE;
@@ -34,6 +34,7 @@ export function startBackground(store) {
   const telegram = quiet(() => pollTelegram(store));
   const slow = quiet(async () => {
     checkDeadlines(store);
+    checkBudgets(store);
     await checkDueSites(store);
     // Status pages follow the same interval as website health.
     if (providersDue(store)) await checkProviders(store);

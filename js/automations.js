@@ -1,11 +1,11 @@
 // Automations: site checks that run on their own, and rules that turn what they find into tasks.
 // A task made by a rule carries `auto` (which rule) and `autoRef` (what it is about), so it is flagged in Tasks
 // and a rule never makes a second task while its first one is still open.
-import { statusOf, now, todayISO } from './ui.js';
+import { statusOf, now, todayISO, money } from './ui.js';
 import { makeTask } from './capture.js';
 import { notify } from './notifications.js';
 import { checkHealth, checkDomain, checkCertificate, checkDns, readMeta, readCrawlFiles, checkProvider, hostOf, daysUntil } from './sitecheck.js';
-import { nextRecurringDue } from './modules/money.js';
+import { nextRecurringDue, overBudget } from './modules/money.js';
 
 // [key, title, description, has a "days before" setting]
 export const RULES = [
@@ -93,6 +93,19 @@ export function poolsChanged(store, rows) {
     if (ruleOf(store, 'pools').on) {
       makeAuto(store, { kind: 'pools', ref, priority: 'medium', text: `Rebalance ${r.pair} on ${r.chain}`, why: 'the position left its price range.' });
     }
+  }
+}
+
+// Announces a category that went over its monthly budget. Once per category and month.
+export function checkBudgets(store) {
+  const month = todayISO().slice(0, 7);
+  for (const b of overBudget(store)) {
+    notify(store, {
+      kind: 'budget',
+      text: `${b.category} is over its budget this month: ${money(b.spent, b.currency)} of ${money(b.budget, b.currency)}.`,
+      href: '#/money',
+      key: `budget:${b.category}:${month}`,
+    });
   }
 }
 
