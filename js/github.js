@@ -3,9 +3,37 @@
 // requests. Results are cached in memory and in localStorage for 15 minutes.
 
 const TTL_MS = 15 * 60 * 1000;
-const API = 'https://api.github.com/repos';
-const HEADERS = { Accept: 'application/vnd.github+json' };
+const API = 'https://api.github.com';
 const memory = new Map(); // "owner/repo" -> { status: 'loading' | 'ok' | 'error', issues?, prs?, error?, at? }
+let token = ''; // personal access token from settings; enables private repos and a higher rate limit
+
+const headers = () => ({
+  Accept: 'application/vnd.github+json',
+  ...(token ? { Authorization: `Bearer ${token}` } : {}),
+});
+
+// Called on startup and whenever the token changes. Cached results may be stale for the new token, so they are dropped.
+export function configure(newToken) {
+  token = newToken ?? '';
+  memory.clear();
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('board:gh:')) localStorage.removeItem(key);
+    }
+  } catch {
+    /* storage blocked */
+  }
+}
+
+// Asks GitHub who the token belongs to. Throws with a readable message when it is rejected.
+export async function checkGithubToken(value) {
+  const res = await fetch(`${API}/user`, {
+    headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${value}` },
+  });
+  if (!res.ok) throw new Error(res.status === 401 ? 'GitHub rejected this token. Check that it was copied in full and has not expired.' : `GitHub error ${res.status}`);
+  const user = await res.json();
+  return user.login;
+}
 
 const storageKey = (repo) => `board:gh:${repo}`;
 
@@ -27,15 +55,16 @@ function writeStored(repo, data) {
 }
 
 function explain(status) {
-  if (status === 404) return 'Not found, or private';
+  if (status === 401) return 'Token rejected. Check it in Settings';
+  if (status === 404) return token ? 'Not found, or the token cannot see it' : 'Not found, or private. Add a token in Settings';
   if (status === 403 || status === 429) return 'GitHub rate limit reached, try again later';
   return `GitHub error ${status}`;
 }
 
 async function fetchStats(repo) {
   const [infoRes, pullsRes] = await Promise.all([
-    fetch(`${API}/${repo}`, { headers: HEADERS }),
-    fetch(`${API}/${repo}/pulls?state=open&per_page=1`, { headers: HEADERS }),
+    fetch(`${API}/repos/${repo}`, { headers: headers() }),
+    fetch(`${API}/repos/${repo}/pulls?state=open&per_page=1`, { headers: headers() }),
   ]);
   for (const res of [infoRes, pullsRes]) {
     if (!res.ok) throw new Error(explain(res.status));

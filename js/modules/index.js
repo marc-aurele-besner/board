@@ -5,5 +5,6 @@ import todos from './todos.js';
 import projects from './projects.js';
 import kitchen from './kitchen.js';
 import money from './money.js';
+import settings from './settings.js';
 
-export const modules = [home, todos, projects, kitchen, money];
+export const modules = [home, todos, projects, kitchen, money, settings];

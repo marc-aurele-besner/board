@@ -2,6 +2,7 @@
 import { fsSupported, pickFolder, loadHandle, hasPermission } from './storage.js';
 import { createStore } from './store.js';
 import { h, icon } from './ui.js';
+import { configure } from './github.js';
 import { modules } from './modules/index.js';
 import { migrateLegacyProjects } from './modules/projects.js';
 
@@ -44,6 +45,7 @@ function render() {
         modules.filter((m) => !m.hidden).map((m) => h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab' }, icon(m.icon), m.title))),
       h('div', { class: 'topbar-end' },
         h('span', { id: 'save-status', class: `status ${store.status}` }, STATUS_LABELS[store.status]),
+        h('a', { href: '#/settings', class: 'icon-btn settings-link', title: 'Settings', 'aria-label': 'Settings' }, icon('settings')),
         h('button', {
           type: 'button',
           class: 'icon-btn theme-toggle',
@@ -93,6 +95,7 @@ async function open(handle) {
     return renderConnect();
   }
   store = next;
+  configure(store.get('settings').github?.token ?? '');
   migrateLegacyProjects(store);
   store.subscribe(render);
   store.onStatus(updateStatus);
