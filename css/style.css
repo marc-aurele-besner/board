@@ -907,3 +907,26 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .k-import { gap: 8px; }
 .k-import-form { display: flex; gap: 6px; }
 .k-import-form input { flex: 1; min-width: 0; }
+
+/* LP positions: Uniswap v3 positions read from the chain */
+.lp-head { align-items: flex-start; gap: var(--gap); }
+.lp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--gap); }
+.lp-stat { display: flex; flex-direction: column; gap: 4px; }
+.lp-stat strong { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.lp-filters { gap: 6px; flex-wrap: wrap; }
+.lp-chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 0.85rem; cursor: pointer; }
+.lp-chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.lp-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.lp-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.lp-table th, .lp-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+.lp-table th { color: var(--muted); font-weight: 500; font-size: 0.8rem; }
+.lp-table tr:last-child td { border-bottom: 0; }
+.lp-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.range-text { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.range-status { display: inline-block; margin-top: 4px; font-size: 0.75rem; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.range-status.in { color: var(--income); border-color: var(--income); }
+.range-status.out { color: var(--expense); border-color: var(--expense); }
+.dist-cell { min-width: 140px; }
+.dist-bar { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: var(--surface-2); margin-bottom: 4px; }
+.dist-a { background: var(--accent); }
+.dist-b { background: var(--muted); opacity: 0.45; }
