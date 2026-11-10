@@ -930,3 +930,15 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .dist-bar { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: var(--surface-2); margin-bottom: 4px; }
 .dist-a { background: var(--accent); }
 .dist-b { background: var(--muted); opacity: 0.45; }
+
+/* Settings: grouped nav with icons, and the GitHub token guide */
+.settings-tab { display: flex; align-items: center; gap: 10px; }
+.settings-group { display: flex; flex-direction: column; gap: 2px; }
+.settings-group + .settings-group { margin-top: 12px; }
+.settings-group-title { margin: 0 10px 2px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.token-guide { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; }
+.token-guide h3 { margin: 0 0 4px; font-size: 0.95rem; }
+@media (max-width: 720px) {
+  .settings-group { display: contents; }
+  .settings-group-title { display: none; }
+}
