@@ -1,5 +1,6 @@
 import { h, uid, now, icon, empty, statusOf } from '../ui.js';
-import { repoStats, refreshRepo } from '../github.js';
+import { repoStats, refreshRepo, openItems } from '../github.js';
+import { ask } from '../ai.js';
 
 const COLLECTION = 'projects';
 const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
@@ -361,6 +362,52 @@ function repoTable(store, p) {
     })));
 }
 
+// "Triage with AI" (task 5): what needs attention across a project's repos.
+const triage = { projectId: null, status: 'idle', text: '' };
+
+async function runTriage(store, p) {
+  triage.projectId = p.id;
+  triage.status = 'loading';
+  store.refresh();
+  try {
+    const repos = p.github.repos.slice(0, 3);
+    const lists = await Promise.all(repos.map(async (repo) => (await openItems(repo)).map((i) => ({ repo, ...i }))));
+    const all = lists.flat();
+    if (!all.length) {
+      triage.status = 'ok';
+      triage.text = 'No open issues or pull requests in these repos.';
+    } else {
+      triage.text = (await ask(store, 'task-review', [
+        {
+          role: 'system',
+          content: 'You triage GitHub issues and pull requests. Given the open items as JSON, reply in plain text: first what needs attention now, then what looks stale (no update in 30 days or more), then one suggested next action per item in a single line. Be concise.',
+        },
+        { role: 'user', content: JSON.stringify(all) },
+      ])).trim();
+      triage.status = 'ok';
+    }
+  } catch (err) {
+    triage.status = 'error';
+    triage.text = err.message;
+  }
+  store.refresh();
+}
+
+function triageBlock(store, p) {
+  if (!p.github.repos.length) return null;
+  const mine = triage.projectId === p.id ? triage : { status: 'idle' };
+  const button = h('button', {
+    type: 'button',
+    class: 'btn-small',
+    disabled: mine.status === 'loading',
+    onclick: () => runTriage(store, p),
+  }, 'Triage with AI');
+  if (mine.status === 'idle') return h('div', { class: 'row' }, button);
+  if (mine.status === 'loading') return h('div', { class: 'stack' }, button, h('p', { class: 'muted small' }, 'Reading issues and PRs…'));
+  if (mine.status === 'error') return h('div', { class: 'stack' }, button, h('p', { class: 'error small', role: 'alert' }, mine.text));
+  return h('div', { class: 'stack' }, button, h('div', { class: 'card-inset' }, h('pre', { class: 'ai-text' }, mine.text)));
+}
+
 function projectView(store, p, items, categories) {
   const open = items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
   const done = items.filter((i) => i.projectId === p.id && statusOf(i) === 'done').length;
@@ -388,6 +435,7 @@ function projectView(store, p, items, categories) {
       h('div', { class: 'card-inset' }, h('strong', null, gh(t.prs)), h('span', { class: 'muted' }, 'open PRs'))),
 
     p.description ? h('p', null, p.description) : h('p', { class: 'muted' }, 'No description yet.'),
+    triageBlock(store, p),
 
     p.website
       ? h('section', { class: 'stack' },

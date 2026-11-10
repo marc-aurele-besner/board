@@ -1,4 +1,5 @@
 import { h, uid, now, todayISO, empty } from '../ui.js';
+import { ask } from '../ai.js';
 
 const COLLECTION = 'recipes';
 const STATUSES = [
@@ -20,6 +21,45 @@ const averageRating = (versions) => {
   return rated.length ? rated.reduce((a, b) => a + b, 0) / rated.length : null;
 };
 const stars = (n) => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
+
+// "Suggest variations" (task 4): next experiments for the open recipe, based on its past attempts.
+const ideas = { recipeId: null, status: 'idle', text: '' };
+
+async function runIdeas(store, r) {
+  ideas.recipeId = r.id;
+  ideas.status = 'loading';
+  store.refresh();
+  try {
+    ideas.text = (await ask(store, 'task-recipe', [
+      {
+        role: 'system',
+        content: 'You help a home cook improve a recipe. Given the recipe and its past attempts as JSON, suggest three concrete variations to test next. For each, give the change and a one-line reason. Plain text, concise.',
+      },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          title: r.title,
+          ingredients: r.ingredients,
+          steps: r.steps,
+          notes: r.notes,
+          attempts: r.versions.map((v) => ({ date: v.date, changes: v.changes, rating: v.rating, notes: v.notes })),
+        }),
+      },
+    ])).trim();
+    ideas.status = 'ok';
+  } catch (err) {
+    ideas.status = 'error';
+    ideas.text = err.message;
+  }
+  store.refresh();
+}
+
+function ideasBlock(r) {
+  if (ideas.recipeId !== r.id || ideas.status === 'idle') return null;
+  if (ideas.status === 'loading') return h('p', { class: 'muted small' }, 'Thinking about variations…');
+  if (ideas.status === 'error') return h('p', { class: 'error small', role: 'alert' }, ideas.text);
+  return h('div', { class: 'card-inset' }, h('pre', { class: 'ai-text' }, ideas.text));
+}
 
 function addRecipe(store, v) {
   const title = v.title.trim();
@@ -147,7 +187,15 @@ function recipeDetail(store, r) {
       h('div', { class: 'row end' }, h('button', { class: 'primary', type: 'submit' }, 'Save recipe'))),
 
     h('section', { class: 'stack' },
-      h('h3', null, 'Log an iteration'),
+      h('div', { class: 'row between' },
+        h('h3', null, 'Log an iteration'),
+        h('button', {
+          type: 'button',
+          class: 'btn-small',
+          disabled: ideas.status === 'loading',
+          onclick: () => runIdeas(store, r),
+        }, 'Suggest variations with AI')),
+      ideasBlock(r),
       h('form', {
         class: 'stack card-inset',
         onsubmit: (e) => {

@@ -1,6 +1,53 @@
 import { h, icon, money, monthKey, todayISO, statusOf, empty } from '../ui.js';
 import { projectIcon } from './projects.js';
 import { repoStats } from '../github.js';
+import { ask } from '../ai.js';
+
+// "Plan my day" (task 2): a plain-text plan built from the open todos.
+const plan = { status: 'idle', text: '' };
+
+async function runPlan(store) {
+  const projects = store.get('projects').projects;
+  const open = store.get('todos').items.filter((i) => statusOf(i) !== 'done').slice(0, 40);
+  plan.status = 'loading';
+  store.refresh();
+  try {
+    plan.text = (await ask(store, 'task-plan', [
+      {
+        role: 'system',
+        content: 'You plan a personal day. Given open todos as JSON, reply in plain text with three short sections titled Now, Next and Later, each with up to four bullet points. Name the project in brackets when it helps. Be concise.',
+      },
+      {
+        role: 'user',
+        content: JSON.stringify(open.map((i) => ({
+          text: i.text,
+          status: statusOf(i),
+          priority: i.priority ?? 'none',
+          project: projects.find((p) => p.id === i.projectId)?.name ?? 'Personal',
+          category: i.category || '',
+        }))),
+      },
+    ])).trim();
+    plan.status = 'ok';
+  } catch (err) {
+    plan.status = 'error';
+    plan.text = err.message;
+  }
+  store.refresh();
+}
+
+function planBlock(store) {
+  const button = h('button', {
+    type: 'button',
+    class: 'btn-small',
+    disabled: plan.status === 'loading',
+    onclick: () => runPlan(store),
+  }, 'Plan my day with AI');
+  if (plan.status === 'idle') return button;
+  if (plan.status === 'loading') return h('div', { class: 'stack' }, button, h('p', { class: 'muted small' }, 'Planning…'));
+  if (plan.status === 'error') return h('div', { class: 'stack' }, button, h('p', { class: 'error small', role: 'alert' }, plan.text));
+  return h('div', { class: 'stack' }, button, h('pre', { class: 'plan-text' }, plan.text));
+}
 
 const PRIORITY_RANK = { high: 0, medium: 1, low: 2, none: 3 };
 const RECIPE_LABEL = { testing: 'Testing', idea: 'Ideas', final: 'Final' };
@@ -106,7 +153,8 @@ function draw(root, store) {
                     statusOf(i) === 'doing' ? h('span', { class: 'pill doing' }, 'Doing') : null,
                     i.priority === 'high' ? h('span', { class: 'pill priority-high' }, 'High') : null)))
             : h('p', { class: 'muted' }, 'Nothing urgent or in progress. Good time to plan.'),
-          quickAdd('Add a todo', '#/todos')),
+          quickAdd('Add a todo', '#/todos'),
+          planBlock(store)),
 
         card('Projects by category', '#/projects',
           groups.some((g) => g.projects.length)

@@ -106,6 +106,21 @@ export function repoStats(repo, onChange) {
   return entry;
 }
 
+// The newest open issues and PRs of a repo, for triage. Each entry is { number, title, pr, updated, author, labels }.
+export async function openItems(repo) {
+  const res = await fetch(`${API}/repos/${repo}/issues?state=open&per_page=30`, { headers: headers() });
+  if (!res.ok) throw new Error(explain(res.status));
+  const list = await res.json();
+  return list.map((i) => ({
+    number: i.number,
+    title: i.title,
+    pr: Boolean(i.pull_request),
+    updated: i.updated_at,
+    author: i.user?.login ?? '',
+    labels: (i.labels ?? []).map((l) => l.name),
+  }));
+}
+
 // Drops the cached copy and fetches again.
 export function refreshRepo(repo, onChange) {
   memory.delete(repo);
