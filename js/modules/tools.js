@@ -2,12 +2,14 @@
 import { h, icon, empty, notice } from '../ui.js';
 import { projectIcon } from './projects.js';
 import { hostOf, daysUntil } from '../sitecheck.js';
-import { sitesOf, siteData, checkSite, checkAllSites, runRules, autoTaskFor, ruleOf, TOOLS_DEFAULTS } from '../automations.js';
+import { sitesOf, siteData, checkSite, checkAllSites, runRules, autoTaskFor, ruleOf, emailGaps, TOOLS_DEFAULTS } from '../automations.js';
 import { makeTask } from '../capture.js';
 import { toast } from '../toast.js';
 
 const COLLECTION = 'tools';
-const TABS = [['health', 'Website health', 'globe'], ['ssl', 'SSL and domains', 'shield'], ['meta', 'Metadata preview', 'link']];
+const TABS = [['health', 'Website health', 'globe'], ['ssl', 'SSL and domains', 'shield'], ['dns', 'DNS and email', 'mail'], ['meta', 'Metadata preview', 'link']];
+// What "Check all now" looks up on each tab.
+const TAB_PARTS = { health: ['health'], ssl: ['ssl', 'domain'], dns: ['dns'] };
 const EVERY = [[15, '15 minutes'], [60, 'hour'], [360, '6 hours'], [1440, 'day']];
 const STATUS = { up: ['Up', 'done'], slow: ['Slow', 'medium'], down: ['Down', 'high'] };
 
@@ -35,15 +37,19 @@ const check = (store, p, parts) =>
     if (made) toast(`${made} task${made === 1 ? '' : 's'} created automatically`);
   });
 
+// What a rule's task is about: the registered domain for domain and mail rules, the host otherwise.
+const refOf = (store, p, kind) =>
+  kind === 'domain' ? siteData(store, p.id).domain?.name : kind === 'email' ? siteData(store, p.id).dns?.domain : hostOf(p.website);
+
 // A task for a site, made by hand from a row. It is linked to the rule it belongs to, so the rule does not add another.
 function addTask(store, p, kind, text, due = '') {
-  const ref = kind === 'domain' ? siteData(store, p.id).domain?.name : hostOf(p.website);
+  const ref = refOf(store, p, kind);
   store.update('todos', (d) => d.items.push(makeTask({ text, projectId: p.id, priority: 'medium', due, ...(kind ? { auto: kind, autoRef: ref } : {}) })));
   toast(`Task added to ${p.name}`);
 }
 
 function taskCell(store, p, kind, text, due) {
-  const ref = kind === 'domain' ? siteData(store, p.id).domain?.name : hostOf(p.website);
+  const ref = refOf(store, p, kind);
   return autoTaskFor(store, kind, ref)
     ? h('a', { href: '#/todos?filter=auto', class: 'btn-link' }, 'Task open')
     : h('button', { type: 'button', class: 'btn-small', onclick: () => addTask(store, p, kind, text, due) }, 'Create task');
@@ -126,6 +132,59 @@ function sslTab(store, sites) {
     h('p', { class: 'muted small' }, 'The certificate date comes from the public certificate logs (Cert Spotter, then crt.sh): the newest certificate issued for the host. The domain date comes from its registry (RDAP). Only the site’s address is sent to them.'));
 }
 
+// --- DNS and email ---
+
+// SPF ends with how strictly mail from other servers is treated; "+all" lets anyone send as the domain.
+const SPF_ALL = { '-all': ['Strict', 'done'], '~all': ['Soft fail', 'done'], '?all': ['Neutral', 'medium'], '+all': ['Anyone may send', 'high'], all: ['Anyone may send', 'high'] };
+const DMARC_POLICY = { reject: ['Reject', 'done'], quarantine: ['Quarantine', 'done'], none: ['Monitor only', 'medium'] };
+
+function dnsTab(store, sites) {
+  const email = ruleOf(store, 'email');
+  return h('div', { class: 'stack-lg' },
+    notice({
+      tone: 'info',
+      text: email.on
+        ? 'A task is created automatically when a domain that receives mail has no SPF or DMARC record.'
+        : 'Tasks for missing SPF or DMARC records are created only when you ask.',
+      actions: [h('a', { href: '#/settings?section=automations', class: 'btn-small' }, 'Change the rules')],
+    }),
+    h('div', { class: 'card mon-scroll' },
+      h('table', { class: 'mon-table tool-table' },
+        h('thead', null, h('tr', null, ['Site', 'Mail servers', 'SPF', 'DMARC', 'DKIM', 'CAA', 'Task', ''].map((t) => h('th', null, t)))),
+        h('tbody', null, sites.flatMap((p) => {
+          const d = siteData(store, p.id).dns;
+          const host = hostOf(p.website);
+          const busy = view.busy.has(p.id) || view.busy.has('all');
+          const site = h('td', null, h('div', { class: 'row' }, projectIcon(p), h('div', null, h('strong', null, p.name), h('div', { class: 'muted small' }, d?.domain ?? host))));
+          const again = h('td', null, h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Look up again', 'aria-label': `Look up ${host} again`, onclick: () => check(store, p, ['dns']) }, icon('refresh')));
+          if (!d?.domain) return [h('tr', null, site, h('td', { colspan: 6 }, h('span', { class: 'muted small' }, busy ? 'Looking up…' : d?.error ?? 'Not looked up yet')), again)];
+          const mail = d.mx.length > 0;
+          const noMail = () => h('span', { class: 'muted small' }, 'No mail');
+          const gaps = emailGaps(d);
+          const [spfText, spfTone] = !d.spf.record ? ['Missing', 'high'] : SPF_ALL[d.spf.all.toLowerCase()] ?? ['No “all” rule', 'medium'];
+          const [dmarcText, dmarcTone] = !d.dmarc.record ? ['Missing', 'high'] : DMARC_POLICY[d.dmarc.policy] ?? ['Unclear policy', 'medium'];
+          const issuers = d.caa.filter((c) => / issue "/.test(c)).map((c) => c.match(/"([^"]*)"/)?.[1]).filter(Boolean);
+          const records = [['A', d.a], ['AAAA', d.aaaa], ['NS', d.ns], ['MX', d.mx], ['SPF', [d.spf.record]], ['DMARC', [d.dmarc.record]], ['DKIM selectors', d.dkim], ['CAA', d.caa]];
+          return [
+            h('tr', null,
+              site,
+              h('td', null, mail ? [h('strong', null, String(d.mx.length)), h('div', { class: 'muted small' }, d.mx[0])] : noMail()),
+              h('td', null, mail || d.spf.record ? pillOf(spfText, spfTone) : noMail()),
+              h('td', null, mail || d.dmarc.record ? pillOf(dmarcText, dmarcTone) : noMail()),
+              h('td', null, d.dkim.length ? d.dkim.join(', ') : h('span', { class: 'muted small' }, mail ? 'None found' : '')),
+              h('td', null, issuers.length ? [...new Set(issuers)].join(', ') : h('span', { class: 'muted small' }, 'Any authority')),
+              h('td', null, gaps.length ? taskCell(store, p, 'email', `Add ${gaps.join(' and ')} records for ${d.domain}`) : h('span', { class: 'muted small' }, mail ? 'Not needed' : '')),
+              again),
+            h('tr', { class: 'dns-raw' },
+              h('td', { colspan: 8 },
+                h('details', null,
+                  h('summary', { class: 'muted small' }, `Records for ${d.domain} · looked up ${timeOf(d.at)}${d.error ? ` · last try failed: ${d.error}` : ''}`),
+                  h('dl', { class: 'dns-records' }, records.flatMap(([k, v]) => [h('dt', null, k), h('dd', null, v.filter(Boolean).length ? v.filter(Boolean).map((x) => h('code', null, x)) : h('span', { class: 'muted small' }, 'None'))]))))),
+          ];
+        })))),
+    h('p', { class: 'muted small' }, 'Records come from Cloudflare’s public DNS resolver (DNS over HTTPS); only the domain names are sent. DKIM keys sit under a name the mail service picks, so only common selectors are tried: “None found” does not mean the domain signs nothing.'));
+}
+
 // --- Metadata preview ---
 
 // How a shared link looks on one network. The picture is the site's own og:image, loaded from the site.
@@ -202,7 +261,7 @@ function draw(root, store) {
   const all = view.busy.has('all');
   const body = !sites.length
     ? h('div', { class: 'card stack' }, empty('No project has a website yet. Add one on a project page and it appears here.'), h('div', null, h('a', { href: '#/projects', class: 'btn-link' }, 'Open Projects')))
-    : view.tab === 'ssl' ? sslTab(store, sites) : view.tab === 'meta' ? metaTab(store, sites) : healthTab(store, sites);
+    : view.tab === 'ssl' ? sslTab(store, sites) : view.tab === 'dns' ? dnsTab(store, sites) : view.tab === 'meta' ? metaTab(store, sites) : healthTab(store, sites);
 
   root.replaceChildren(
     h('div', { class: 'stack-lg tools' },
@@ -223,7 +282,7 @@ function draw(root, store) {
                 class: 'btn-small primary',
                 disabled: all,
                 onclick: () => run(store, 'all', async () => {
-                  const made = await checkAllSites(store, view.tab === 'ssl' ? ['ssl', 'domain'] : ['health']);
+                  const made = await checkAllSites(store, TAB_PARTS[view.tab] ?? ['health']);
                   toast(made ? `${made} task${made === 1 ? '' : 's'} created automatically` : 'All sites checked');
                 }),
               }, icon('refresh'), all ? 'Checking…' : 'Check all now'))

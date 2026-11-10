@@ -7,6 +7,7 @@
 //   - api.certspotter.com, then crt.sh: the public certificate transparency logs, for the newest certificate
 //     issued for the host. The second is asked only when the first does not answer.
 //   - r.jina.ai: the page reader already used for recipes, for the home page's HTML.
+//   - cloudflare-dns.com: DNS over HTTPS, for the records that say who may send mail and issue certificates.
 
 const TIMEOUT_MS = 12000;
 const SLOW_MS = 1500;
@@ -114,6 +115,49 @@ export async function readMeta(website) {
     ogUrl: meta('meta[property="og:url"]'),
     twitterCard: meta('meta[name="twitter:card"]'),
     twitterImage: abs(meta('meta[name="twitter:image"]') || meta('meta[name="twitter:image:src"]')),
+  };
+}
+
+// --- DNS and email ---
+
+const DOH = 'https://cloudflare-dns.com/dns-query';
+const DNS_TYPES = { A: 1, NS: 2, MX: 15, TXT: 16, AAAA: 28, CAA: 257 };
+// DKIM keys live under a selector the sender picks, which DNS cannot list, so the common ones are tried.
+const DKIM_SELECTORS = ['google', 'default', 'selector1', 'selector2', 'k1', 's1', 'mail'];
+
+// A TXT answer can be split into several quoted strings; joined, they are the record.
+const txtOf = (data) => (data.match(/"(?:[^"\\]|\\.)*"/g) ?? [data]).map((x) => x.replace(/^"|"$/g, '')).join('');
+
+async function resolve(name, type) {
+  const res = await timed(`${DOH}?name=${encodeURIComponent(name)}&type=${type}`, { headers: { accept: 'application/dns-json' } });
+  if (!res.ok) throw new Error(`The DNS lookup answered ${res.status}.`);
+  const data = await res.json();
+  // Status 3 is "no such name": an answer, not a failure.
+  if (data.Status !== 0 && data.Status !== 3) throw new Error(`The DNS lookup failed for ${name}.`);
+  return (data.Answer ?? []).filter((a) => a.type === DNS_TYPES[type]).map((a) => (type === 'TXT' ? txtOf(a.data) : a.data));
+}
+
+export async function checkDns(host) {
+  const domain = registrable(host);
+  const [a, aaaa, caa, mx, ns, txt, dmarcTxt, ...dkim] = await Promise.all([
+    resolve(host, 'A'), resolve(host, 'AAAA'), resolve(domain, 'CAA'), resolve(domain, 'MX'), resolve(domain, 'NS'), resolve(domain, 'TXT'),
+    resolve(`_dmarc.${domain}`, 'TXT'),
+    ...DKIM_SELECTORS.map((sel) => resolve(`${sel}._domainkey.${domain}`, 'TXT').catch(() => [])),
+  ]);
+  const spf = txt.find((t) => /^v=spf1\b/i.test(t)) ?? '';
+  const dmarc = dmarcTxt.find((t) => /^v=DMARC1\b/i.test(t)) ?? '';
+  return {
+    domain,
+    a,
+    aaaa,
+    caa,
+    ns: ns.map((n) => n.replace(/\.$/, '')),
+    // "10 mx.example.com." becomes "mx.example.com", lowest preference first. A null MX ("0 .") says the domain takes no mail.
+    mx: mx.map((m) => m.split(' ')).sort((x, y) => Number(x[0]) - Number(y[0])).map((m) => (m[1] ?? m[0]).replace(/\.$/, '')).filter(Boolean),
+    spf: { record: spf, all: spf.match(/[~?+-]?all\b/i)?.[0] ?? '' },
+    dmarc: { record: dmarc, policy: dmarc.match(/\bp=(\w+)/i)?.[1]?.toLowerCase() ?? '' },
+    // An empty key ("p=") is a revoked selector, often a wildcard answering for every name.
+    dkim: DKIM_SELECTORS.filter((_, i) => dkim[i].some((t) => /\bp=[A-Za-z0-9+/]/.test(t))),
   };
 }
 

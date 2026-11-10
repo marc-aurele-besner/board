@@ -4,7 +4,7 @@
 import { statusOf, now, todayISO } from './ui.js';
 import { makeTask } from './capture.js';
 import { notify } from './notifications.js';
-import { checkHealth, checkDomain, checkCertificate, readMeta, hostOf, daysUntil } from './sitecheck.js';
+import { checkHealth, checkDomain, checkCertificate, checkDns, readMeta, hostOf, daysUntil } from './sitecheck.js';
 import { nextRecurringDue } from './modules/money.js';
 
 // [key, title, description, has a "days before" setting]
@@ -12,14 +12,15 @@ export const RULES = [
   ['domain', 'Domain renewal', 'Create a task in the project before its domain expires. The deadline is the expiry date.', true],
   ['ssl', 'SSL certificate expiry', 'Create a task before a certificate expires.', true],
   ['health', 'Website down', 'Create a high-priority task when a website fails two checks in a row.', false],
+  ['email', 'Email authentication', 'Create a task when a domain that receives mail has no SPF or DMARC record.', false],
   ['recurring', 'Recurring bill due', 'Create a task before a recurring expense in Money is due.', true],
   ['pools', 'Position out of range', 'Create a task when a liquidity position leaves its price range.', false],
 ];
-const RULE_DEFAULTS = { domain: { on: true, days: 30 }, ssl: { on: true, days: 14 }, health: { on: true }, recurring: { on: false, days: 3 }, pools: { on: false } };
+const RULE_DEFAULTS = { domain: { on: true, days: 30 }, ssl: { on: true, days: 14 }, health: { on: true }, email: { on: false }, recurring: { on: false, days: 3 }, pools: { on: false } };
 export const ruleOf = (store, key) => ({ ...RULE_DEFAULTS[key], ...(store.get('settings').automations?.[key] ?? {}) });
 
 // What each source is called on a task's "Auto" flag.
-export const AUTO_SOURCES = { domain: 'the domain check', ssl: 'the SSL check', health: 'the website health check', recurring: 'a recurring bill', pools: 'Liquidity Pools', telegram: 'a Telegram message' };
+export const AUTO_SOURCES = { domain: 'the domain check', ssl: 'the SSL check', health: 'the website health check', email: 'the DNS check', recurring: 'a recurring bill', pools: 'Liquidity Pools', telegram: 'a Telegram message' };
 
 export const TOOLS_DEFAULTS = { sites: {}, every: 60 }; // minutes between automatic checks
 export const sitesOf = (store) => store.get('projects').projects.filter((p) => hostOf(p.website ?? ''));
@@ -34,6 +35,10 @@ function makeAuto(store, { kind, ref, text, due = '', projectId = null, why, pri
   return true;
 }
 
+// The mail records a domain that receives mail should have but lacks. A domain without MX is skipped: it sends nothing to protect.
+export const emailGaps = (dns) =>
+  !dns?.domain || dns.error || !dns.mx?.length ? [] : [dns.spf?.record ? '' : 'SPF', dns.dmarc?.record ? '' : 'DMARC'].filter(Boolean);
+
 // Applies every rule that is switched on to what is known now. Returns how many tasks it made.
 export function runRules(store) {
   let made = 0;
@@ -43,6 +48,7 @@ export function runRules(store) {
   const ssl = ruleOf(store, 'ssl');
   const domain = ruleOf(store, 'domain');
   const health = ruleOf(store, 'health');
+  const email = ruleOf(store, 'email');
   for (const p of sitesOf(store)) {
     const host = hostOf(p.website);
     const s = siteData(store, p.id);
@@ -55,6 +61,10 @@ export function runRules(store) {
     const last = (s.history ?? []).slice(-2);
     if (health.on && last.length === 2 && last.every((c) => !c.ok)) {
       count(makeAuto(store, { kind: 'health', ref: host, projectId: p.id, due: todayISO(), text: `${host} is not answering`, why: 'two checks in a row failed.' }));
+    }
+    const gaps = emailGaps(s.dns);
+    if (email.on && gaps.length) {
+      count(makeAuto(store, { kind: 'email', ref: s.dns.domain, projectId: p.id, priority: 'medium', text: `Add ${gaps.join(' and ')} records for ${s.dns.domain}`, why: `${s.dns.domain} receives mail but has no ${gaps.join(' or ')} record, so others can send mail in its name.` }));
     }
   }
   const recurring = ruleOf(store, 'recurring');
@@ -98,13 +108,14 @@ export async function checkSite(store, project, parts = ['health', 'ssl', 'domai
     parts.includes('ssl') ? attempt(() => checkCertificate(host)).then((r) => (found.ssl = r)) : null,
     parts.includes('domain') ? attempt(() => checkDomain(host)).then((r) => (found.domain = r)) : null,
     parts.includes('meta') ? attempt(() => readMeta(project.website)).then((r) => (found.meta = r)) : null,
+    parts.includes('dns') ? attempt(() => checkDns(host)).then((r) => (found.dns = r)) : null,
   ]);
   const before = siteData(store, project.id);
   const wasUp = before.health ? before.health.status !== 'down' : true;
   store.update('tools', (d) => {
     const s = (d.sites[project.id] ??= {});
     // A lookup that failed keeps the last good answer, so one bad moment does not erase a known expiry date.
-    for (const key of ['ssl', 'domain', 'meta']) {
+    for (const key of ['ssl', 'domain', 'meta', 'dns']) {
       if (!found[key]) continue;
       s[key] = found[key].error && s[key] && !s[key].error ? { ...s[key], error: found[key].error, at: found[key].at } : found[key];
     }
