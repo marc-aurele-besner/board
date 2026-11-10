@@ -4,7 +4,7 @@ import { configure, checkGithubToken } from '../github.js';
 import { connect, disconnect, isConnected } from '../google.js';
 import { editText, pill } from '../inline.js';
 import { modelChip } from '../model-picker.js';
-import { isAddress, CHAINS, chainSettings, savedNode } from '../uniswap.js';
+import { isAddress, CHAINS, chainSettings, savedNode, parseV4Link } from '../uniswap.js';
 import { telegramCard, analyticsCard, searchCard, notificationsCard, automationsCard, dataCard } from './settings-more.js';
 
 const COLLECTION = 'settings';
@@ -514,10 +514,12 @@ function categoriesCard(store) {
 
 const uniswapView = { message: '', ok: null };
 
-// Public wallet addresses whose Uniswap v3 positions the LP tab reads, and the chains and nodes to read them from.
+// Public wallet addresses whose Uniswap positions the LP tab reads, v4 positions added by hand, and the chains and
+// nodes to read them from.
 function uniswapCard(store) {
   const cfg = store.get(COLLECTION).uniswap ?? { wallets: [], chains: {} };
   const wallets = cfg.wallets ?? [];
+  const v4ids = cfg.v4ids ?? [];
   const save = (patch) => {
     store.update(COLLECTION, (d) => {
       d.uniswap = { wallets: [], chains: {}, ...d.uniswap, ...patch };
@@ -542,6 +544,29 @@ function uniswapCard(store) {
     }
     store.refresh();
   };
+  // A v4 position the search cannot reach: a link from the Uniswap app, or a position number and its chain.
+  const addV4 = (e) => {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const text = String(form.get('position') ?? '').trim();
+    const picked = Number(form.get('chain'));
+    const entry = parseV4Link(text) ?? (/^\d+$/.test(text) ? { chainId: picked, tokenId: text } : null);
+    if (!entry) {
+      uniswapView.ok = false;
+      uniswapView.message = 'Paste a v4 position link from app.uniswap.org, or type the position number and pick its chain.';
+    } else if (v4ids.some((x) => x.chainId === entry.chainId && String(x.tokenId) === entry.tokenId)) {
+      uniswapView.ok = false;
+      uniswapView.message = 'That position is already in the list.';
+    } else {
+      save({ v4ids: [...v4ids, entry] });
+      e.currentTarget.reset();
+      uniswapView.ok = true;
+      uniswapView.message = 'Position added. Open LP positions to read it.';
+    }
+    store.refresh();
+  };
+  const chainName = (id) => CHAINS.find((c) => c.id === id)?.name ?? `Chain ${id}`;
+
   const saveChains = (e) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -566,7 +591,7 @@ function uniswapCard(store) {
 
   return h('section', { class: 'card panel' },
     h('h2', null, 'Uniswap'),
-    h('p', { class: 'muted small' }, 'Add the public address of each wallet that holds Uniswap v3 positions. The board only reads them. It never asks for a key and never signs anything.'),
+    h('p', { class: 'muted small' }, 'Add the public address of each wallet that holds Uniswap v3 or v4 positions. The board only reads them. It never asks for a key and never signs anything.'),
     wallets.length
       ? h('ul', { class: 'stack' }, wallets.map((w, i) => h('li', { class: 'row between' },
         h('span', null, w.label ? `${w.label} · ` : '', copyable(w.address)),
@@ -576,6 +601,16 @@ function uniswapCard(store) {
       h('input', { name: 'label', placeholder: 'Label (optional)', 'aria-label': 'Wallet label' }),
       h('input', { name: 'address', placeholder: '0x…', spellcheck: false, 'aria-label': 'Wallet address' }),
       h('button', { type: 'submit', class: 'btn-small' }, 'Add wallet')),
+    h('p', { class: 'muted small' }, 'v4 positions are found by searching each wallet\'s history on the chain. Most public nodes only search recent blocks, so add an older v4 position here by its link or number.'),
+    v4ids.length
+      ? h('ul', { class: 'stack' }, v4ids.map((x, i) => h('li', { class: 'row between' },
+        h('span', null, `${chainName(x.chainId)} · v4 #${x.tokenId}`),
+        h('button', { type: 'button', class: 'btn-small', onclick: () => save({ v4ids: v4ids.filter((_, j) => j !== i) }) }, 'Remove'))))
+      : null,
+    h('form', { class: 'row', onsubmit: addV4 },
+      h('input', { name: 'position', placeholder: 'v4 position link or number', spellcheck: false, 'aria-label': 'v4 position link or number' }),
+      h('select', { name: 'chain', 'aria-label': 'Chain of the position' }, CHAINS.map((c) => h('option', { value: String(c.id) }, c.name))),
+      h('button', { type: 'submit', class: 'btn-small' }, 'Add position')),
     h('form', { class: 'stack', onsubmit: saveChains },
       h('p', { class: 'muted small' }, 'Chains: the networks the LP tab reads. A node is the JSON-RPC address to read from. Leave it empty to use the public node shown as the placeholder.'),
       CHAINS.map((chain) => {

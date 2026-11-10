@@ -9,6 +9,7 @@ Sections (v1):
 - **Kitchen**: recipe ideas, recipes you are testing, and final recipes. Log each iteration with notes and a rating.
 - **Money**: rough income and expenses per month, with totals and a per-category breakdown.
 - **Tools**: checks on each project's website: is it reachable, when its SSL certificate and domain expire, whether its domain has SPF, DMARC and DKIM records for mail, what its robots.txt, sitemap, llms.txt and security.txt say, and how a shared link to it looks. **Provider status** follows the status pages of the services you rely on (GitHub, Vercel, Cloudflare, and any other Statuspage page).
+- **Liquidity Pools**: Uniswap v3 and v4 positions of the wallets you add in Settings, on Ethereum, Base, Arbitrum One, Optimism, Polygon, BNB Chain, Avalanche, Unichain and Robinhood Chain: range, value, unclaimed fees and token split. Read-only: only public addresses are used. v4 positions cannot be listed with a call, so the board finds them by searching each wallet's history on the chain, and remembers how far it got. Most public nodes keep only recent history, so add an older v4 position by its link or number in Settings, or set a node that keeps full history. When a chain cannot be read, its last good read is shown and marked as outdated.
 - **Notifications**: the bell in the top bar lists deadlines, automated tasks, site checks, provider outages and Telegram messages.
 
 Tasks have a deadline. The lists **Today**, **To Organize** and **Automated** gather what is due, what arrived without a project or deadline (for example from Telegram), and what the board created by itself. Press Cmd/Ctrl+K or `/` to search, jump, or type a task such as `fix the footer #atlas !high friday`.
@@ -38,6 +39,7 @@ Every file has a `schemaVersion` field. Files are plain JSON and can be edited b
 | `projects.json` | `{ projects: [{id, name, color, description, github: {org, repos: ['owner/repo']}, created}] }`. `github.org` and `github.repos` may be empty, for non-coding projects. |
 | `todos.json` | `{ items: [{id, text, description, status, priority, category, projectId, due, auto, autoRef, inbox, created}] }`. `projectId: null` means Personal. `due` is a `YYYY-MM-DD` deadline or empty. `auto` names what created the task (`domain`, `ssl`, `health`, `email`, `crawl`, `recurring`, `pools`, `telegram`), and `inbox: true` keeps it in To Organize. Array order is the display order (drag the grip to reorder). |
 | `tools.json` | `{ sites: { <projectId>: { health, history, ssl, domain, dns, crawl, meta } }, every, providers: [{id, name, url}], status: { <providerId>: {indicator, description, components, incidents, at} } }`: the last result of each check, the minutes between automatic health and status checks, and the followed status pages. |
+| `pools.json` | `{ cache: { "<chainId>:<v3\|v4>": {at, rows} }, prices: { <chainId>: {at, usd} }, scan: { <chainId>: { <wallet>: {node, from, to, span, ids, done} } } }`: the last good read of each chain and version, shown marked as outdated when a read fails; the last token prices; and how far each v4 search got. Safe to delete: it is rebuilt by the next read. |
 | `notifications.json` | `{ items: [{id, kind, text, href, key, at, read}], prefs: { <kind>: {app, telegram} } }` |
 | `recipes.json` | `{ recipes: [{id, title, status: 'idea'\|'testing'\|'final', tags, ingredients, steps, notes, images, versions: [{id, date, changes, rating, notes}], created}] }` |
 | `finance.json` | `{ entries: [{id, date, type: 'income'\|'expense', amount, category, note, created}], categories: [], budgets: { <category>: {amount, currency} } }`. A budget is per month and shows in the category breakdown when the period is one month. |
@@ -60,6 +62,9 @@ Nothing runs on a server, and everything automatic runs only while the board is 
 | Metadata preview, crawl files, recipe import | `r.jina.ai` (page reader) | the page or file address |
 | Telegram | `api.telegram.org` | your bot token, and the messages you exchange with your bot |
 | Calendar, Analytics, Search Console | Google, with your own OAuth Client ID | a read-only sign-in that lasts about an hour |
+| Liquidity Pools | each chain's node (a public node by default, or the one you set) | your wallet addresses and the position numbers |
+| Liquidity Pools prices | `coins.llama.fi` (DefiLlama) | the token addresses in your positions |
+| Liquidity Pools logos | `raw.githubusercontent.com` (Uniswap's token lists, Trust Wallet's chain logos) | nothing but the request itself |
 | Bing search data | Bing Webmaster API, through `tools/bing-relay.js` on your machine (Bing does not answer web pages directly) | your API key and the site address |
 
 The typefaces (Inter, Space Grotesk) are in `fonts/`, under the SIL Open Font License, so no font is fetched from another site.
