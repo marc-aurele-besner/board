@@ -1,10 +1,75 @@
-import { h, icon, money, monthKey, todayISO, statusOf, empty } from '../ui.js';
+import { h, icon, money, monthKey, todayISO, statusOf, empty, uid, now } from '../ui.js';
+import { connect, isConnected, upcomingEvents } from '../google.js';
 import { projectIcon, labelsOf } from './projects.js';
 import { repoStats } from '../github.js';
 import { ask } from '../ai.js';
 
 // "Plan my day" (task 2): a plain-text plan built from the open tasks.
 const plan = { status: 'idle', text: '' };
+
+// Google Calendar: the next two days of events, loaded after the user connects.
+const cal = { status: 'idle', events: [], error: '' };
+
+const timeLabel = (e) => (e.allDay ? 'All day' : new Date(e.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+
+function loadCalendar(store) {
+  cal.status = 'loading';
+  store.refresh();
+  upcomingEvents(2)
+    .then((events) => {
+      cal.events = events;
+      cal.status = 'ok';
+    })
+    .catch((err) => {
+      cal.status = 'error';
+      cal.error = err.message;
+    })
+    .finally(() => store.refresh());
+}
+
+function connectCalendar(store, clientId) {
+  connect(clientId)
+    .then(() => loadCalendar(store))
+    .catch((err) => {
+      cal.status = 'error';
+      cal.error = err.message;
+      store.refresh();
+    });
+}
+
+// Turns a calendar event into a task in Personal, with its time and place in the description.
+function eventAsTask(store, e) {
+  const description = [timeLabel(e), e.location].filter(Boolean).join(' · ');
+  store.update('todos', (d) =>
+    d.items.push({ id: uid(), text: e.title, description, status: 'todo', priority: 'none', category: '', projectId: null, created: now() }));
+}
+
+function calendarCard(store) {
+  const clientId = store.get('settings').google?.clientId ?? '';
+  let body;
+  if (!isConnected()) {
+    body = h('div', { class: 'stack' },
+      h('p', { class: 'muted small' }, clientId ? 'Connect to see the next two days.' : 'Add a Google OAuth Client ID in Settings to connect.'),
+      h('button', { type: 'button', class: 'btn-small', disabled: !clientId, onclick: () => connectCalendar(store, clientId) }, 'Connect Google Calendar'));
+  } else if (cal.status === 'loading') {
+    body = h('p', { class: 'muted small' }, 'Loading events…');
+  } else if (cal.status === 'error') {
+    body = h('div', { class: 'stack' }, h('p', { class: 'error small', role: 'alert' }, cal.error),
+      h('button', { type: 'button', class: 'btn-small', onclick: () => loadCalendar(store) }, 'Try again'));
+  } else if (cal.status === 'ok') {
+    body = cal.events.length
+      ? h('ul', { class: 'home-list' },
+          cal.events.map((e) =>
+            h('li', null,
+              h('span', { class: 'muted small time' }, timeLabel(e)),
+              h('span', { class: 'grow' }, e.title),
+              h('button', { type: 'button', class: 'btn-small', title: 'Add as a task', onclick: () => eventAsTask(store, e) }, 'Task'))))
+      : h('p', { class: 'muted small' }, 'No events in the next two days.');
+  } else {
+    body = h('button', { type: 'button', class: 'btn-small', onclick: () => loadCalendar(store) }, 'Load events');
+  }
+  return card('Calendar', '#/settings?section=google', body);
+}
 
 async function runPlan(store) {
   const projects = store.get('projects').projects;
@@ -157,6 +222,7 @@ function draw(root, store) {
           quickAdd('Add a task', '#/todos'),
           planBlock(store)),
 
+        calendarCard(store),
         card('Projects by category', '#/projects',
           groups.some((g) => g.projects.length)
             ? h('div', { class: 'groups' },

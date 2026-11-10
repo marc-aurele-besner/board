@@ -604,7 +604,7 @@ function categoriesPanel(store, categories, projects) {
           store.refresh();
         },
       }, 'Done')),
-    h('p', { class: 'muted' }, 'Labels group projects (Personal, Web, Crypto…). A project can have several. Task categories can be scoped to a label in the Todos section.'),
+    h('p', { class: 'muted' }, 'Labels group projects (Personal, Web, Crypto…). A project can have several. Task categories can be scoped to a label in the Tasks section.'),
     view.error ? h('p', { class: 'error', role: 'alert' }, view.error) : null,
     h('ul', { class: 'stack' },
       categories.map((c) => {

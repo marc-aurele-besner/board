@@ -89,6 +89,7 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
 .head-actions .muted { margin-left: auto; }
 .meta-inline { gap: 6px; flex-wrap: wrap; }
 .tree-row { display: block; }
+.time { min-width: 64px; font-variant-numeric: tabular-nums; }
 
 /* Labels: several per project, picked as chips in the project form */
 .labels { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px 8px; min-width: 0; }

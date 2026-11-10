@@ -1,5 +1,6 @@
 import { h, icon, empty } from '../ui.js';
 import { configure, checkGithubToken } from '../github.js';
+import { connect, disconnect, isConnected } from '../google.js';
 import { editText } from '../inline.js';
 import { modelChip } from '../model-picker.js';
 
@@ -32,6 +33,7 @@ const SECTIONS = [
   ['github', 'GitHub'],
   ['openrouter', 'OpenRouter'],
   ['models', 'Models & tasks'],
+  ['google', 'Google Calendar'],
 ];
 
 // Model used by a task: its own pin, else the default model. Empty string when neither is set.
@@ -262,6 +264,84 @@ function modelsPanel(store) {
       h('button', { class: 'primary', type: 'submit' }, 'Add task')));
 }
 
+// --- Google Calendar ---
+
+// Connection state and the last message shown on the card.
+const google = { message: '' };
+
+function googleCard(store) {
+  const clientId = store.get(COLLECTION).google?.clientId ?? '';
+  const connected = isConnected();
+
+  const save = (value) => {
+    store.update(COLLECTION, (d) => {
+      d.google = { ...d.google, clientId: value };
+    });
+    google.message = '';
+    store.refresh();
+  };
+  const connectNow = () => {
+    google.message = 'Waiting for Google…';
+    store.refresh();
+    connect(clientId)
+      .then(() => {
+        google.message = 'Connected. Home now shows your calendar.';
+      })
+      .catch((err) => {
+        google.message = err.message;
+      })
+      .finally(() => store.refresh());
+  };
+  const disconnectNow = () => {
+    disconnect();
+    google.message = 'Disconnected.';
+    store.refresh();
+  };
+
+  return h('section', { class: 'card panel' },
+    h('header', { class: 'panel-head' },
+      h('div', null,
+        h('h2', null, 'Google Calendar'),
+        h('p', { class: 'muted' }, 'Shows the next two days of events on Home, read-only. Nothing is stored on disk. The connection lasts about an hour, then you connect again.')),
+      h('div', { class: 'row' },
+        connected
+          ? h('span', { class: 'pill tone-done' }, 'Connected')
+          : h('span', { class: 'pill tone-plain' }, 'Not connected'))),
+
+    h('div', { class: 'cred-body' },
+      h('div', { class: 'svc-section' },
+        h('h3', null, 'Setup'),
+        h('ol', { class: 'steps' }, [
+          ['Open ', link('https://console.cloud.google.com/', 'Google Cloud Console'), ' and create a project, or pick one.'],
+          ['APIs & Services → Library: enable ', link('https://console.cloud.google.com/apis/library/calendar-json.googleapis.com', 'Google Calendar API'), '.'],
+          ['APIs & Services → OAuth consent screen: choose External, and add your own Google account as a test user.'],
+          ['APIs & Services → Credentials → Create credentials → OAuth client ID → Web application.'],
+          ['Under Authorized JavaScript origins, add the exact address you open the board at, such as http://localhost:8000.'],
+          ['Copy the Client ID (it ends in .apps.googleusercontent.com) and paste it here.'],
+        ].map((s) => h('li', null, h('span', { class: 'step-text' }, s))))),
+
+      h('form', {
+        class: 'svc-section',
+        onsubmit: (e) => {
+          e.preventDefault();
+          save(new FormData(e.currentTarget).get('clientId').trim());
+        },
+      },
+        h('h3', null, 'OAuth Client ID'),
+        h('input', {
+          name: 'clientId',
+          value: clientId,
+          placeholder: '123456789-abc….apps.googleusercontent.com',
+          autocomplete: 'off',
+          spellcheck: false,
+        }),
+        h('div', { class: 'svc-actions' },
+          h('button', { class: 'primary', type: 'submit' }, 'Save'),
+          h('button', { type: 'button', onclick: connectNow, disabled: !clientId }, connected ? 'Reconnect' : 'Connect Google Calendar'),
+          connected ? h('button', { type: 'button', onclick: disconnectNow }, 'Disconnect') : null),
+        google.message ? h('p', { class: 'test-result', role: 'status' }, google.message) : null)));
+}
+
 // --- Page ---
 
 function draw(root, store) {
@@ -306,7 +386,8 @@ function draw(root, store) {
 
   const content = view.section === 'openrouter' ? openrouter
     : view.section === 'models' ? modelsPanel(store)
-      : github;
+      : view.section === 'google' ? googleCard(store)
+        : github;
 
   const nav = h('nav', { class: 'settings-nav', 'aria-label': 'Settings sections' },
     SECTIONS.map(([key, label]) =>
@@ -335,10 +416,10 @@ export default {
   icon: 'settings',
   hidden: true, // opened from the gear icon in the top bar
   collection: COLLECTION,
-  defaults: { github: { token: '' }, openrouter: { key: '' }, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) } },
+  defaults: { github: { token: '' }, openrouter: { key: '' }, google: { clientId: '' }, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) } },
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),
   restore: (p = {}) => {
-    view.section = ['github', 'openrouter', 'models'].includes(p.section) ? p.section : 'github';
+    view.section = ['github', 'openrouter', 'models', 'google'].includes(p.section) ? p.section : 'github';
   },
 };
