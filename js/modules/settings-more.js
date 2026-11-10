@@ -1,5 +1,5 @@
 // Settings sections for Telegram, Google Analytics, the search consoles, notifications and automations.
-import { h, icon, empty, notice, statusOf } from '../ui.js';
+import { h, icon, empty, notice, statusOf, copyable } from '../ui.js';
 import { editText } from '../inline.js';
 import { connect, isConnected } from '../google.js';
 import { checkBot, findChat, pollTelegram, hasTelegram } from '../telegram.js';
@@ -44,15 +44,15 @@ export function telegramCard(store) {
       h('div', { class: 'svc-section' },
         h('h3', null, 'Setup'),
         steps([
-          ['In Telegram, open a chat with ', h('code', null, '@BotFather'), ' and send ', h('code', null, '/newbot'), '.'],
+          ['In Telegram, open a chat with ', copyable('@BotFather'), ' (', link('https://t.me/BotFather', 'open it'), ') and send ', copyable('/newbot'), '.'],
           'Pick a name. BotFather replies with a token such as 123456:ABC…. Paste it here and save.',
           'Send any message to your new bot, then press “Find my chat”, so the board knows which chat is yours.',
           'Only messages from that chat become tasks. Everything else is ignored.',
         ]),
         h('h3', null, 'What to send'),
         h('ul', { class: 'stack' },
-          h('li', null, h('code', null, 'fix the footer #atlas !high friday'), h('div', { class: 'muted small' }, 'A project, a priority and a deadline: filed in that project.')),
-          h('li', null, h('code', null, 'call the plumber'), h('div', { class: 'muted small' }, 'No project or no deadline: goes to To Organize.'))),
+          h('li', null, copyable('fix the footer #atlas !high friday'), h('div', { class: 'muted small' }, 'A project, a priority and a deadline: filed in that project.')),
+          h('li', null, copyable('call the plumber'), h('div', { class: 'muted small' }, 'No project or no deadline: goes to To Organize.'))),
         h('p', { class: 'muted small' }, 'The board has no server. It reads the bot’s new messages while it is open, about once a minute, so a task sent at night appears the next time you open it.')),
       h('form', {
         class: 'svc-section',
