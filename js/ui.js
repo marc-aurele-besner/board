@@ -41,6 +41,9 @@ export const money = (n) => currencyFormat.format(n);
 
 export const empty = (text) => h('p', { class: 'empty' }, text);
 
+// Todo status replaced the old `done` flag. Items saved before that fall back to `done`.
+export const statusOf = (item) => item.status ?? (item.done ? 'done' : 'todo');
+
 // Stroke icons (Lucide-style, 24×24 grid). Markup here is trusted static code.
 const ICON_PATHS = {
   'check-square': '<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',

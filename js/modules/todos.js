@@ -1,17 +1,37 @@
-import { h, uid, now, icon } from '../ui.js';
+import { h, uid, now, icon, statusOf } from '../ui.js';
 import { makeProject, projectIcon } from './projects.js';
 
 const COLLECTION = 'todos';
+const STATUSES = [
+  ['todo', 'To do'],
+  ['doing', 'Doing'],
+  ['done', 'Done'],
+];
+const PRIORITIES = [
+  ['none', 'No priority'],
+  ['low', 'Low'],
+  ['medium', 'Medium'],
+  ['high', 'High'],
+];
+const STATUS_FILTERS = [['open', 'Open'], ['all', 'All'], ...STATUSES];
 
 // View state lives here so it survives re-renders.
-// filter: 'all' | 'personal' | <project id>. expanded: ids with the description editor open.
-const view = { filter: 'all', showDone: false, expanded: new Set(), dragId: null };
+// filter: 'all' | 'personal' | <project id>. status: a STATUS_FILTERS key. category: '' means any.
+// expanded: ids with the details editor open.
+const view = { filter: 'all', status: 'open', category: '', expanded: new Set(), dragId: null };
 
 const isProjectFilter = (f) => f !== 'all' && f !== 'personal';
 const matchesFilter = (item) =>
   view.filter === 'all' || (view.filter === 'personal' ? item.projectId === null : item.projectId === view.filter);
+const matchesStatus = (item) => {
+  const s = statusOf(item);
+  if (view.status === 'open') return s !== 'done';
+  return view.status === 'all' || s === view.status;
+};
+const matchesCategory = (item) => !view.category || item.category === view.category;
 const projectsOf = (store) => store.get('projects').projects;
 const formValues = (form) => Object.fromEntries(new FormData(form));
+const label = (list, key) => list.find(([k]) => k === key)?.[1] ?? '';
 
 // "buy milk #home" files the item under project "home" (created if missing).
 // Extra lines from a multi-line paste arrive as the description.
@@ -32,7 +52,7 @@ function addItem(store, raw, description = '') {
     projectId = project.id;
   }
   store.update(COLLECTION, (d) =>
-    d.items.push({ id: uid(), text, description, done: false, projectId, created: now() }));
+    d.items.push({ id: uid(), text, description, status: 'todo', priority: 'none', category: '', projectId, created: now() }));
 }
 
 // Pasting several lines: first non-empty line is the title, the rest is the description.
@@ -46,10 +66,14 @@ function pasteAsTodo(store, e) {
   addItem(store, lines[first], lines.slice(first + 1).join('\n').trim());
 }
 
-const toggleItem = (store, id, done) =>
+// Checkbox: done or back to to-do.
+const setStatus = (store, id, status) =>
   store.update(COLLECTION, (d) => {
     const item = d.items.find((i) => i.id === id);
-    if (item) item.done = done;
+    if (item) {
+      item.status = status;
+      delete item.done;
+    }
   });
 
 const removeItem = (store, id) =>
@@ -62,8 +86,12 @@ function saveDetails(store, id, v) {
   store.update(COLLECTION, (d) => {
     const item = d.items.find((i) => i.id === id);
     if (!item) return;
-    item.description = v.description.trim();
+    item.status = STATUSES.some(([k]) => k === v.status) ? v.status : 'todo';
+    item.priority = PRIORITIES.some(([k]) => k === v.priority) ? v.priority : 'none';
+    item.category = v.category.trim();
     item.projectId = v.project || null; // empty value means Personal
+    item.description = v.description.trim();
+    delete item.done;
   });
 }
 
@@ -104,12 +132,15 @@ function clearDropMarks(el) {
   el.classList.remove('drop-before', 'drop-after');
 }
 
-function todoItem(store, item, projects, projectLabel) {
+// ctx: { projects, categories, projectLabel }
+function todoItem(store, item, ctx) {
   const expanded = view.expanded.has(item.id);
+  const status = statusOf(item);
   const hasDescription = Boolean(item.description);
+  const priority = item.priority ?? 'none';
 
   const li = h('li', {
-    class: item.done ? 'todo-item done' : 'todo-item',
+    class: status === 'done' ? 'todo-item done' : 'todo-item',
     'data-id': item.id,
     ondragstart: (e) => {
       view.dragId = item.id;
@@ -151,19 +182,22 @@ function todoItem(store, item, projects, projectLabel) {
       }, icon('grip')),
       h('input', {
         type: 'checkbox',
-        checked: item.done,
+        checked: status === 'done',
         'aria-label': `Mark "${item.text}" done`,
-        onchange: (e) => toggleItem(store, item.id, e.target.checked),
+        onchange: (e) => setStatus(store, item.id, e.target.checked ? 'done' : 'todo'),
       }),
       h('span', { class: 'grow todo-text' }, item.text),
-      projectLabel ? h('span', { class: 'badge' }, projectLabel) : null,
+      ctx.projectLabel ? h('span', { class: 'badge' }, ctx.projectLabel) : null,
+      status === 'doing' ? h('span', { class: 'pill doing' }, 'Doing') : null,
+      priority !== 'none' ? h('span', { class: `pill priority-${priority}` }, label(PRIORITIES, priority)) : null,
+      item.category ? h('span', { class: 'tag' }, item.category) : null,
       hasDescription
         ? h('span', { class: 'desc-indicator', title: 'Has a description', 'aria-label': 'Has a description' }, icon('align-left'))
         : null,
       h('button', {
         type: 'button',
         class: expanded ? 'icon-btn chevron open' : 'icon-btn chevron',
-        title: expanded ? 'Close details' : 'Open to write a description',
+        title: expanded ? 'Close details' : 'Open details',
         'aria-label': expanded ? 'Close details' : 'Open details',
         'aria-expanded': String(expanded),
         onclick: () => toggleExpanded(store, item.id),
@@ -184,11 +218,27 @@ function todoItem(store, item, projects, projectLabel) {
             saveDetails(store, item.id, formValues(e.currentTarget));
           },
         },
-          h('label', null, 'Project',
-            h('select', { name: 'project', value: item.projectId ?? '' },
-              h('option', { value: '' }, 'Personal'),
-              [...projects].sort((a, b) => a.name.localeCompare(b.name))
-                .map((p) => h('option', { value: p.id }, p.name)))),
+          h('div', { class: 'row' },
+            h('label', { class: 'grow' }, 'Status',
+              h('select', { name: 'status', value: status },
+                STATUSES.map(([k, l]) => h('option', { value: k }, l)))),
+            h('label', { class: 'grow' }, 'Priority',
+              h('select', { name: 'priority', value: priority },
+                PRIORITIES.map(([k, l]) => h('option', { value: k }, l))))),
+          h('div', { class: 'row' },
+            h('label', { class: 'grow' }, 'Project',
+              h('select', { name: 'project', value: item.projectId ?? '' },
+                h('option', { value: '' }, 'Personal'),
+                [...ctx.projects].sort((a, b) => a.name.localeCompare(b.name))
+                  .map((p) => h('option', { value: p.id }, p.name)))),
+            h('label', { class: 'grow' }, 'Category',
+              h('input', {
+                name: 'category',
+                value: item.category ?? '',
+                list: 'todo-categories',
+                placeholder: 'e.g. errands, research',
+                autocomplete: 'off',
+              }))),
           h('label', null, 'Description',
             h('textarea', { name: 'description', rows: 4, placeholder: 'Notes, links, steps… paste freely' }, item.description)),
           h('div', { class: 'row end' },
@@ -210,13 +260,16 @@ function draw(root, store) {
   const { items } = store.get(COLLECTION);
   if (isProjectFilter(view.filter) && !projects.some((p) => p.id === view.filter)) view.filter = 'all';
 
-  const openCount = (pred) => items.filter((i) => !i.done && pred(i)).length;
+  const categories = [...new Set(items.map((i) => i.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  if (view.category && !categories.includes(view.category)) view.category = '';
+
+  const openCount = (pred) => items.filter((i) => statusOf(i) !== 'done' && pred(i)).length;
   const projectName = (id) => projects.find((p) => p.id === id)?.name ?? '';
   const currentLabel =
     view.filter === 'all' ? 'All' : view.filter === 'personal' ? 'Personal' : projectName(view.filter);
 
   // Personal and project lists accept dropped todos; "All" does not, since it has no project.
-  const navItem = (key, label, count, leading) => {
+  const navItem = (key, text, count, leading) => {
     const accepts = key !== 'all';
     return h('button', {
       type: 'button',
@@ -240,12 +293,12 @@ function draw(root, store) {
       },
     },
       leading ?? null,
-      h('span', { class: 'grow' }, label),
+      h('span', { class: 'grow' }, text),
       h('span', { class: 'count' }, String(count)));
   };
 
   // Stored order is the display order, so the list is not re-sorted here.
-  const visible = items.filter((i) => (view.showDone || !i.done) && matchesFilter(i));
+  const visible = items.filter((i) => matchesFilter(i) && matchesStatus(i) && matchesCategory(i));
 
   root.replaceChildren(
     h('div', { class: 'split' },
@@ -261,17 +314,32 @@ function draw(root, store) {
 
       h('section', { class: 'card main-pane' },
         h('div', { class: 'row between' },
-          h('h2', null, currentLabel),
-          h('label', { class: 'check' },
-            h('input', {
-              type: 'checkbox',
-              checked: view.showDone,
+          h('h2', null, currentLabel)),
+
+        h('div', { class: 'toolbar' },
+          h('label', null, 'Show',
+            h('select', {
+              value: view.status,
+              'aria-label': 'Filter by status',
               onchange: (e) => {
-                view.showDone = e.target.checked;
+                view.status = e.target.value;
                 store.refresh();
               },
-            }),
-            ' Show done')),
+            }, STATUS_FILTERS.map(([k, l]) => h('option', { value: k }, l)))),
+          categories.length
+            ? h('label', null, 'Category',
+                h('select', {
+                  value: view.category,
+                  'aria-label': 'Filter by category',
+                  onchange: (e) => {
+                    view.category = e.target.value;
+                    store.refresh();
+                  },
+                }, h('option', { value: '' }, 'All categories'),
+                  categories.map((c) => h('option', { value: c }, c))))
+            : null),
+
+        h('datalist', { id: 'todo-categories' }, categories.map((c) => h('option', { value: c }))),
 
         h('form', {
           class: 'quick',
@@ -294,9 +362,11 @@ function draw(root, store) {
         visible.length
           ? h('ul', { class: 'todo-list' },
               visible.map((item) =>
-                todoItem(store, item, projects, view.filter === 'all' ? projectName(item.projectId) : ''))
-            )
-          : h('p', { class: 'empty' }, 'Nothing here yet. Type above and press Enter.'))));
+                todoItem(store, item, {
+                  projects,
+                  projectLabel: view.filter === 'all' ? projectName(item.projectId) : '',
+                })))
+          : h('p', { class: 'empty' }, 'Nothing matches these filters.'))));
 }
 
 export default {

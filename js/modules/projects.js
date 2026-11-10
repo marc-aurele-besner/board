@@ -1,4 +1,4 @@
-import { h, uid, now, icon, empty } from '../ui.js';
+import { h, uid, now, icon, empty, statusOf } from '../ui.js';
 
 const COLLECTION = 'projects';
 const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
@@ -177,7 +177,7 @@ function projectList(store, projects, items) {
   if (!projects.length) return empty('No projects yet. Create one above.');
   return h('ul', { class: 'project-list' },
     [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => {
-      const open = items.filter((i) => i.projectId === p.id && !i.done).length;
+      const open = items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
       return h('li', {
         class: p.id === view.selectedId ? 'project-item active' : 'project-item',
         onclick: () => select(store, p.id),
@@ -191,8 +191,8 @@ function projectList(store, projects, items) {
 }
 
 function projectView(store, p, items) {
-  const open = items.filter((i) => i.projectId === p.id && !i.done).length;
-  const done = items.filter((i) => i.projectId === p.id && i.done).length;
+  const open = items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
+  const done = items.filter((i) => i.projectId === p.id && statusOf(i) === 'done').length;
   const hasGithub = p.github.org || p.github.repos.length;
   const link = (href, text, iconName) =>
     h('li', null, icon(iconName), h('a', { href, target: '_blank', rel: 'noopener' }, text));
