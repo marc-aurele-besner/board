@@ -280,6 +280,13 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .rich-path { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .rich-block { display: flex; flex-direction: column; gap: 2px; }
 
+/* Repo overview and icons */
+.overview { display: flex; flex-direction: column; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.readme { max-height: 260px; overflow: auto; white-space: pre-wrap; font-size: 0.8rem; background: var(--surface-2); padding: 10px; border-radius: 8px; margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tag-dir { font-weight: 600; }
+.pp-icon-row { display: flex; align-items: center; gap: 10px; }
+.favicon-pending { opacity: 0.55; }
+
 /* Projects page, left pane: compact rows, like the Tasks list */
 .side-pane { gap: 6px; }
 .side-tools { gap: 6px; }
