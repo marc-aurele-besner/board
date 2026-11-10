@@ -266,7 +266,7 @@ function deleteProject(store, project) {
     t.items.forEach((i) => {
       if (i.projectId === project.id) i.projectId = null;
     });
-    // Todo categories scoped to this project have nothing left to apply to.
+    // Task categories scoped to this project have nothing left to apply to.
     if (Array.isArray(t.categories)) t.categories = t.categories.filter((c) => !(c.scope === 'project' && c.projectId === project.id));
   });
   store.update(COLLECTION, (d) => {
@@ -400,7 +400,7 @@ function projectList(store, projects, items, categories) {
         h('div', { class: 'grow' },
           h('strong', null, p.name),
           h('div', { class: 'muted small' }, [labels.map((l) => l.name).join(', '), githubLine(p)].filter(Boolean).join(' · '))),
-        h('span', { class: 'count', title: 'Open todos' }, String(open)));
+        h('span', { class: 'count', title: 'Open tasks' }, String(open)));
     }));
 }
 
@@ -502,8 +502,8 @@ function projectView(store, p, items, categories) {
         h('button', { type: 'button', class: 'danger', onclick: () => deleteProject(store, p) }, icon('x'), 'Delete'))),
 
     h('div', { class: 'stats' },
-      h('div', { class: 'card-inset' }, h('strong', null, String(open)), h('span', { class: 'muted' }, 'open todos')),
-      h('div', { class: 'card-inset' }, h('strong', null, String(done)), h('span', { class: 'muted' }, 'done todos')),
+      h('div', { class: 'card-inset' }, h('strong', null, String(open)), h('span', { class: 'muted' }, 'open tasks')),
+      h('div', { class: 'card-inset' }, h('strong', null, String(done)), h('span', { class: 'muted' }, 'done tasks')),
       h('div', { class: 'card-inset' }, h('strong', null, gh(t.issues)), h('span', { class: 'muted' }, 'open issues')),
       h('div', { class: 'card-inset' }, h('strong', null, gh(t.prs)), h('span', { class: 'muted' }, 'open PRs'))),
 
@@ -604,7 +604,7 @@ function categoriesPanel(store, categories, projects) {
           store.refresh();
         },
       }, 'Done')),
-    h('p', { class: 'muted' }, 'Labels group projects (Personal, Web, Crypto…). A project can have several. Todo categories can be scoped to a label in the Todos section.'),
+    h('p', { class: 'muted' }, 'Labels group projects (Personal, Web, Crypto…). A project can have several. Task categories can be scoped to a label in the Todos section.'),
     view.error ? h('p', { class: 'error', role: 'alert' }, view.error) : null,
     h('ul', { class: 'stack' },
       categories.map((c) => {

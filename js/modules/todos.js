@@ -62,7 +62,7 @@ const formValues = (form) => Object.fromEntries(new FormData(form));
 const sameLower = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
 const label = (list, key) => list.find(([k]) => k === key)?.[1] ?? '';
 
-// Todo categories. Each has a scope: 'all' (every project), 'project' (one project),
+// Task categories. Each has a scope: 'all' (every project), 'project' (one project),
 // or 'projectCategory' (every project in a project category such as Web).
 const todoCategories = (store) => store.get(COLLECTION).categories ?? [];
 
@@ -573,7 +573,7 @@ function categoriesManager(store) {
 
   return h('section', { class: 'panel-mini stack' },
     h('div', { class: 'row between' },
-      h('strong', null, 'Todo categories'),
+      h('strong', null, 'Task categories'),
       h('button', {
         type: 'button',
         class: 'btn-small',
@@ -772,7 +772,7 @@ function draw(root, store) {
         },
           h('input', {
             name: 'todo',
-            placeholder: 'Add a todo… #project to file it, paste several lines for a description',
+            placeholder: 'Add a task… #project to file it, paste several lines for a description',
             'aria-label': 'New todo',
             autocomplete: 'off',
             'data-autofocus': true,
@@ -803,7 +803,7 @@ function draw(root, store) {
 
 export default {
   id: 'todos',
-  title: 'Todos',
+  title: 'Tasks',
   icon: 'check-square',
   collection: COLLECTION,
   defaults: { items: [], categories: [] },

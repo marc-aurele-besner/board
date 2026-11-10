@@ -10,8 +10,8 @@ const OPENROUTER_MODELS = 'https://openrouter.ai/api/v1/models';
 // Tasks the board can run with an AI model. Each one can be pinned to its own model.
 export const DEFAULT_TASKS = [
   { id: 'task-summary', name: 'Project summaries', description: 'Summarize a project’s todos and notes into a short status.' },
-  { id: 'task-plan', name: 'Next steps', description: 'Turn open todos into a prioritized plan for the day.' },
-  { id: 'task-tidy', name: 'Tidy todos', description: 'Rewrite messy todo titles and suggest a category.' },
+  { id: 'task-plan', name: 'Next steps', description: 'Turn open tasks into a prioritized plan for the day.' },
+  { id: 'task-tidy', name: 'Tidy tasks', description: 'Rewrite messy todo titles and suggest a category.' },
   { id: 'task-recipe', name: 'Recipe ideas', description: 'Suggest variations and substitutions for a kitchen recipe.' },
   { id: 'task-review', name: 'Issue & PR triage', description: 'Summarize open GitHub issues and PRs and flag stale ones.' },
   { id: 'task-budget', name: 'Spending review', description: 'Explain the month’s expenses and point out unusual categories.' },

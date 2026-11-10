@@ -3,7 +3,7 @@ import { projectIcon, labelsOf } from './projects.js';
 import { repoStats } from '../github.js';
 import { ask } from '../ai.js';
 
-// "Plan my day" (task 2): a plain-text plan built from the open todos.
+// "Plan my day" (task 2): a plain-text plan built from the open tasks.
 const plan = { status: 'idle', text: '' };
 
 async function runPlan(store) {
@@ -15,7 +15,7 @@ async function runPlan(store) {
     plan.text = (await ask(store, 'task-plan', [
       {
         role: 'system',
-        content: 'You plan a personal day. Given open todos as JSON, reply in plain text with three short sections titled Now, Next and Later, each with up to four bullet points. Name the project in brackets when it helps. Be concise.',
+        content: 'You plan a personal day. Given open tasks as JSON, reply in plain text with three short sections titled Now, Next and Later, each with up to four bullet points. Name the project in brackets when it helps. Be concise.',
       },
       {
         role: 'user',
@@ -134,7 +134,7 @@ function draw(root, store) {
         h('h2', null, greeting()),
         h('p', { class: 'muted' }, today),
         h('div', { class: 'stats' },
-          h('div', null, h('strong', null, String(open.length)), h('span', { class: 'muted' }, 'open todos')),
+          h('div', null, h('strong', null, String(open.length)), h('span', { class: 'muted' }, 'open tasks')),
           h('div', null, h('strong', null, String(doing.length)), h('span', { class: 'muted' }, 'in progress')),
           h('div', null, h('strong', null, String(projects.length)), h('span', { class: 'muted' }, 'projects')),
           h('div', null,
@@ -154,7 +154,7 @@ function draw(root, store) {
                     statusOf(i) === 'doing' ? h('span', { class: 'pill doing' }, 'Doing') : null,
                     i.priority === 'high' ? h('span', { class: 'pill priority-high' }, 'High') : null)))
             : h('p', { class: 'muted' }, 'Nothing urgent or in progress. Good time to plan.'),
-          quickAdd('Add a todo', '#/todos'),
+          quickAdd('Add a task', '#/todos'),
           planBlock(store)),
 
         card('Projects by category', '#/projects',
