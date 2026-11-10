@@ -92,6 +92,12 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
 .home-list { display: flex; flex-direction: column; gap: 6px; }
 .home-list li { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
 .home-list li:last-child { border-bottom: none; }
+.home-hero h2 { font-size: 1.5rem; margin-bottom: 2px; }
+.home-hero .stats { margin-top: 12px; }
+.groups { display: flex; flex-direction: column; gap: 12px; }
+.group { display: flex; flex-direction: column; gap: 4px; }
+.quick-link { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--accent); text-decoration: none; }
+.quick-link .icon { width: 14px; height: 14px; }
 .home-list .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
 .tab {

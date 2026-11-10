@@ -1,8 +1,15 @@
 import { h, icon, money, monthKey, todayISO, statusOf, empty } from '../ui.js';
 import { projectIcon } from './projects.js';
+import { repoStats } from '../github.js';
 
 const PRIORITY_RANK = { high: 0, medium: 1, low: 2, none: 3 };
-const LABEL = { testing: 'Testing', idea: 'Ideas', final: 'Final' };
+const RECIPE_LABEL = { testing: 'Testing', idea: 'Ideas', final: 'Final' };
+
+let liveStore = null;
+// Refresh when repo counts arrive, but only while the home page is showing.
+const onRepoChange = () => {
+  if (liveStore && (location.hash === '#/home' || location.hash === '')) liveStore.refresh();
+};
 
 // A card with a title and a link to the full section.
 function card(title, href, ...children) {
@@ -13,22 +20,48 @@ function card(title, href, ...children) {
     ...children);
 }
 
+const greeting = () => {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+};
+
 const lastActivity = (recipe) =>
   recipe.versions.reduce((latest, v) => (v.date > latest ? v.date : latest), recipe.created.slice(0, 10));
 
 function draw(root, store) {
+  liveStore = store;
   const items = store.get('todos').items;
   const projects = store.get('projects').projects;
+  const categories = store.get('projects').categories ?? [];
   const recipes = store.get('recipes').recipes;
   const entries = store.get('finance').entries;
 
   const open = items.filter((i) => statusOf(i) !== 'done');
   const doing = open.filter((i) => statusOf(i) === 'doing');
-  const attention = open
+  const focus = open
     .filter((i) => statusOf(i) === 'doing' || i.priority === 'high')
     .sort((a, b) => (PRIORITY_RANK[a.priority ?? 'none'] - PRIORITY_RANK[b.priority ?? 'none']) || a.created.localeCompare(b.created))
     .slice(0, 6);
-  const personalOpen = open.filter((i) => i.projectId === null).length;
+
+  // Projects grouped by category. Uncategorized projects get their own group.
+  const groups = [...categories.map((c) => ({ id: c.id, name: c.name, projects: projects.filter((p) => p.categoryId === c.id) }))];
+  const uncategorized = projects.filter((p) => !categories.some((c) => c.id === p.categoryId));
+  if (uncategorized.length) groups.push({ id: null, name: 'Uncategorized', projects: uncategorized });
+  groups.forEach((g) => g.projects.sort((a, b) => a.name.localeCompare(b.name)));
+
+  // GitHub totals over every linked repo. Each lookup starts a fetch the first time.
+  const repos = [...new Set(projects.flatMap((p) => p.github.repos))];
+  const gh = { issues: 0, prs: 0, loading: 0, failed: 0 };
+  for (const r of repos) {
+    const s = repoStats(r, onRepoChange);
+    if (s.status === 'ok') {
+      gh.issues += s.issues;
+      gh.prs += s.prs;
+    } else if (s.status === 'loading') gh.loading += 1;
+    else gh.failed += 1;
+  }
 
   const testing = recipes
     .filter((r) => r.status === 'testing')
@@ -46,53 +79,80 @@ function draw(root, store) {
   const topCategories = [...byCategory].sort((a, b) => b[1] - a[1]).slice(0, 3);
 
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const quickAdd = (text, href) => h('a', { href, class: 'quick-link' }, icon('plus'), text);
 
   root.replaceChildren(
     h('div', { class: 'stack-lg' },
-      h('div', null,
-        h('h2', null, 'Home'),
-        h('p', { class: 'muted' }, today)),
+      h('div', { class: 'home-hero' },
+        h('h2', null, greeting()),
+        h('p', { class: 'muted' }, today),
+        h('div', { class: 'stats' },
+          h('div', null, h('strong', null, String(open.length)), h('span', { class: 'muted' }, 'open todos')),
+          h('div', null, h('strong', null, String(doing.length)), h('span', { class: 'muted' }, 'in progress')),
+          h('div', null, h('strong', null, String(projects.length)), h('span', { class: 'muted' }, 'projects')),
+          h('div', null,
+            h('strong', null, gh.loading && !gh.issues && !gh.prs ? '…' : String(gh.issues)),
+            h('span', { class: 'muted' }, 'open issues')),
+          h('div', null,
+            h('strong', null, gh.loading && !gh.issues && !gh.prs ? '…' : String(gh.prs)),
+            h('span', { class: 'muted' }, 'open PRs')))),
 
       h('div', { class: 'home-grid' },
-        card('Todos', '#/todos',
-          h('div', { class: 'stats' },
-            h('div', null, h('strong', null, String(open.length)), h('span', { class: 'muted' }, 'open')),
-            h('div', null, h('strong', null, String(doing.length)), h('span', { class: 'muted' }, 'doing')),
-            h('div', null, h('strong', null, String(personalOpen)), h('span', { class: 'muted' }, 'personal'))),
-          attention.length
+        card('Focus', '#/todos',
+          focus.length
             ? h('ul', { class: 'home-list' },
-                attention.map((i) =>
+                focus.map((i) =>
                   h('li', null,
                     h('span', { class: 'grow' }, i.text),
                     statusOf(i) === 'doing' ? h('span', { class: 'pill doing' }, 'Doing') : null,
                     i.priority === 'high' ? h('span', { class: 'pill priority-high' }, 'High') : null)))
-            : h('p', { class: 'muted' }, 'Nothing urgent or in progress.')),
+            : h('p', { class: 'muted' }, 'Nothing urgent or in progress. Good time to plan.'),
+          quickAdd('Add a todo', '#/todos')),
 
-        card('Projects', '#/projects',
-          projects.length
-            ? h('ul', { class: 'home-list' },
-                [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => {
-                  const n = open.filter((i) => i.projectId === p.id).length;
-                  return h('li', null,
-                    projectIcon(p),
-                    h('span', { class: 'grow' }, p.name),
-                    h('span', { class: 'count' }, `${n} open`));
-                }))
-            : empty('No projects yet.')),
+        card('Projects by category', '#/projects',
+          groups.some((g) => g.projects.length)
+            ? h('div', { class: 'groups' },
+                groups.filter((g) => g.projects.length).map((g) =>
+                  h('div', { class: 'group' },
+                    h('div', { class: 'row between' },
+                      h('strong', null, g.name),
+                      h('span', { class: 'muted' }, `${g.projects.length} project${g.projects.length === 1 ? '' : 's'}`)),
+                    h('ul', { class: 'home-list' },
+                      g.projects.map((p) => {
+                        const n = open.filter((i) => i.projectId === p.id).length;
+                        return h('li', null,
+                          projectIcon(p),
+                          h('span', { class: 'grow' }, p.name),
+                          h('span', { class: 'count' }, `${n} open`));
+                      })))))
+            : empty('No projects yet.'),
+          quickAdd('New project', '#/projects')),
+
+        card('GitHub', '#/projects',
+          repos.length
+            ? h('div', { class: 'stack' },
+                h('div', { class: 'stats' },
+                  h('div', null, h('strong', null, String(gh.issues)), h('span', { class: 'muted' }, 'open issues')),
+                  h('div', null, h('strong', null, String(gh.prs)), h('span', { class: 'muted' }, 'open PRs')),
+                  h('div', null, h('strong', null, String(repos.length)), h('span', { class: 'muted' }, 'repos'))),
+                gh.loading ? h('p', { class: 'muted' }, `Loading ${gh.loading} repo${gh.loading > 1 ? 's' : ''}…`) : null,
+                gh.failed ? h('p', { class: 'muted' }, `${gh.failed} repo${gh.failed > 1 ? 's' : ''} could not be read (private, missing, or rate limited).`) : null)
+            : h('p', { class: 'muted' }, 'No repos linked yet. Link one from a project to see its issues and PRs here.')),
 
         card('Kitchen', '#/kitchen',
           h('div', { class: 'stats' },
             ['idea', 'testing', 'final'].map((s) =>
               h('div', null,
                 h('strong', null, String(recipes.filter((r) => r.status === s).length)),
-                h('span', { class: 'muted' }, LABEL[s]))) ),
+                h('span', { class: 'muted' }, RECIPE_LABEL[s])))),
           testing.length
             ? h('ul', { class: 'home-list' },
                 testing.slice(0, 5).map((r) =>
                   h('li', null,
                     h('span', { class: 'grow' }, r.title),
                     h('span', { class: 'muted' }, `${r.versions.length} tries · ${lastActivity(r)}`))))
-            : h('p', { class: 'muted' }, 'No recipes in testing right now.')),
+            : h('p', { class: 'muted' }, 'No recipes in testing right now.'),
+          quickAdd('Open kitchen', '#/kitchen')),
 
         card(`Money · ${month}`, '#/money',
           h('div', { class: 'stats' },
