@@ -1,33 +1,101 @@
-import { h, uid, now, todayISO, monthKey, money, empty, icon, notice, progress, CURRENCIES } from '../ui.js';
+import { h, uid, now, todayISO, money, empty, icon, notice, progress, CURRENCIES } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { ask, parseJson } from '../ai.js';
 import { readPdf } from '../pdf-reader.js';
-import { knownRate, fetchDayRate, manualRate, setManualRate, convert } from '../fx.js';
+import { knownRate, fetchDayRate, fetchRateRange, manualRate, setManualRate, convert } from '../fx.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
+import { barChart, legend } from '../chart.js';
 
 const COLLECTION = 'finance';
 const TYPES = [['expense', 'Expense'], ['income', 'Income']];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_CURRENCY = 'USD'; // entries saved before currencies existed are treated as USD
+const DAY = 86400000;
+const RANGES = [
+  ['month', 'This month'],
+  ['today', 'Today'],
+  ['yesterday', 'Yesterday'],
+  ['7', '7 days'],
+  ['30', '30 days'],
+  ['90', '90 days'],
+  ['year', 'Last year'],
+  ['all', 'All'],
+];
+const GROUPS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month'], ['year', 'Year']];
 
-// View state: the month shown, and the currency totals are shown in.
-const view = { month: monthKey(todayISO()), currency: DEFAULT_CURRENCY };
+// View state: the currency totals are shown in, the period, and how it is grouped in the chart.
+const view = { currency: DEFAULT_CURRENCY, range: 'month', group: 'day' };
 // A bill is read into charges (the line items), a currency and a bill total. Only the charges become entries.
 const receipt = { status: 'idle', items: [], total: null, currency: DEFAULT_CURRENCY, vendor: '', error: '', fileName: '', stage: '' };
-// Monthly spending review (task 6).
-const spend = { month: '', status: 'idle', text: '' };
-// Exchange rate: the reference rate from the service, or null until it arrives.
+// Spending review (task 6): the text for the period it was asked for.
+const spend = { range: '', status: 'idle', text: '' };
 // Rates: days asked for, days still loading, and days that failed with the reason.
 const fx = { requested: new Set(), pending: 0, failed: new Map() };
-let shownDays = []; // the days of the month on screen, whose rates are needed
+let shownDays = []; // days whose rates the page needs
 
+// --- Dates ---
+
+const pad = (n) => String(n).padStart(2, '0');
+const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const parseYmd = (s) => {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
+const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const round2 = (n) => Math.round(n * 100) / 100;
 const formValues = (form) => Object.fromEntries(new FormData(form));
 const entryCurrency = (e) => e.currency ?? DEFAULT_CURRENCY;
 // An entry's amount in the shown currency, at the rate of the entry's own day. null when that rate is not known yet.
 const shownAmount = (e) => convert(e.amount, entryCurrency(e), view.currency, knownRate(e.date));
 
-// Adds entries. Each carries its currency, optional project, and `source` naming the bill it came from.
+// The period as dates: from (inclusive) to (exclusive).
+function windowFor(range, entries) {
+  const today = startOfDay(new Date());
+  const tomorrow = addDays(today, 1);
+  if (range === 'today') return { from: today, to: tomorrow };
+  if (range === 'yesterday') return { from: addDays(today, -1), to: today };
+  if (range === 'month') return { from: new Date(today.getFullYear(), today.getMonth(), 1), to: new Date(today.getFullYear(), today.getMonth() + 1, 1) };
+  if (range === 'year') return { from: new Date(today.getFullYear() - 1, 0, 1), to: new Date(today.getFullYear(), 0, 1) };
+  if (range === 'all') {
+    const first = entries.map((e) => e.date).sort()[0];
+    return { from: first ? parseYmd(first) : today, to: tomorrow };
+  }
+  return { from: addDays(today, -(Number(range) - 1)), to: tomorrow };
+}
+
+// The key of the chart bucket a day falls into, for the chosen grouping.
+function bucketKey(date, group) {
+  if (group === 'day') return ymd(date);
+  if (group === 'week') return ymd(addDays(date, -((date.getDay() + 6) % 7))); // weeks start on Monday
+  if (group === 'month') return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
+  return String(date.getFullYear());
+}
+
+function bucketLabel(key, group) {
+  if (group === 'day' || group === 'week') {
+    const d = parseYmd(key);
+    return group === 'week' ? `W ${d.getMonth() + 1}/${d.getDate()}` : `${d.getMonth() + 1}/${d.getDate()}`;
+  }
+  if (group === 'month') {
+    const [y, m] = key.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+  }
+  return key;
+}
+
+// Every bucket between the two dates, in order, so empty periods still show as empty bars.
+function bucketKeys(from, to, group) {
+  const keys = [];
+  for (let d = from; d < to; d = addDays(d, 1)) {
+    const k = bucketKey(d, group);
+    if (!keys.includes(k)) keys.push(k);
+  }
+  return keys;
+}
+
+// --- Entries ---
+
 function addEntries(store, list) {
   store.update(COLLECTION, (d) => {
     for (const e of list) {
@@ -52,10 +120,8 @@ function addEntries(store, list) {
 function addEntry(store, v) {
   const amount = round2(Number(v.amount));
   if (!(amount > 0)) return;
-  const date = v.date || todayISO();
-  view.month = monthKey(date); // show the month the entry landed in
   addEntries(store, [{
-    date,
+    date: v.date || todayISO(),
     type: v.type === 'income' ? 'income' : 'expense',
     amount,
     currency: v.currency,
@@ -82,22 +148,30 @@ function removeEntry(store, id) {
 
 // --- Exchange rates, one per day ---
 
-// Asks for the rates of the given days that are not known yet. Called after a render, never inside one.
+// Asks for the rates of the given days that are not known yet. Long spans are fetched in one request.
 function scheduleRates(store, dayList) {
-  const missing = [...new Set(dayList)].filter((d) => knownRate(d) === null && !fx.requested.has(d));
+  const missing = [...new Set(dayList)].filter((d) => knownRate(d) === null && !fx.requested.has(d)).sort();
   if (!missing.length) return;
   for (const d of missing) fx.requested.add(d);
   fx.pending += missing.length;
   store.refresh();
-  for (const d of missing) {
-    fetchDayRate(d)
-      .then(() => fx.failed.delete(d))
-      .catch((err) => fx.failed.set(d, err.message))
-      .finally(() => {
-        fx.pending -= 1;
-        store.refresh();
-      });
-  }
+  const span = (Date.parse(missing.at(-1)) - Date.parse(missing[0])) / DAY;
+  const work = span <= 400
+    ? fetchRateRange(missing[0], missing.at(-1))
+    : Promise.all(missing.map((d) => fetchDayRate(d)));
+  work
+    .then(() => {
+      for (const d of missing) {
+        if (knownRate(d) !== null) fx.failed.delete(d);
+        else fx.failed.set(d, 'No rate was published for this day.');
+      }
+    }, (err) => {
+      for (const d of missing) if (knownRate(d) === null) fx.failed.set(d, err.message);
+    })
+    .finally(() => {
+      fx.pending = Math.max(0, fx.pending - missing.length);
+      store.refresh();
+    });
 }
 
 // Forgets the failed days and asks for them again.
@@ -256,7 +330,7 @@ function receiptPanel(store) {
   const source = receipt.vendor || receipt.fileName;
   const cur = receipt.currency;
 
-  return h('div', { class: 'panel-mini receipt' },
+  return h('section', { class: 'card stack receipt' },
     h('div', { class: 'row between' },
       h('div', null,
         h('strong', null, `${receipt.items.length} charges from ${source}`),
@@ -285,7 +359,6 @@ function receiptPanel(store) {
               projectId: x.projectId,
               source,
             })));
-            view.month = monthKey(receipt.items[0].date);
             receipt.status = 'idle';
             receipt.items = [];
             store.refresh();
@@ -410,15 +483,15 @@ function dropZone(store, categories) {
       h('span', { class: 'muted small' }, 'Images or PDFs. Each charge is proposed for you to assign before it is added.')));
 }
 
-// --- Spending review ---
+// --- Spending review (AI) ---
 
-async function reviewSpending(store, month, monthEntries) {
-  spend.month = month;
+async function reviewSpending(store, range, periodEntries) {
+  spend.range = range;
   spend.status = 'loading';
   store.refresh();
   try {
     const byCategory = {};
-    for (const e of monthEntries) {
+    for (const e of periodEntries) {
       const key = `${e.type}:${e.category}`;
       const value = shownAmount(e);
       if (value !== null) byCategory[key] = round2((byCategory[key] ?? 0) + value);
@@ -426,15 +499,15 @@ async function reviewSpending(store, month, monthEntries) {
     spend.text = (await ask(store, 'task-budget', [
       {
         role: 'system',
-        content: `You review a personal monthly budget. Amounts are in ${view.currency}. Given the month’s totals, totals by category and the entries as JSON, reply in plain text: the overall picture in two sentences, then the three things worth a second look, then one practical suggestion. Be concise and do not invent figures.`,
+        content: `You review a personal budget. Amounts are in ${view.currency}. Given the totals, totals by category and the entries as JSON, reply in plain text: the overall picture in two sentences, then the three things worth a second look, then one practical suggestion. Be concise and do not invent figures.`,
       },
       {
         role: 'user',
         content: JSON.stringify({
-          month,
+          period: range,
           currency: view.currency,
           byCategory,
-          entries: monthEntries.slice(0, 80).map((e) => ({ date: e.date, type: e.type, amount: shownAmount(e), category: e.category, note: e.note })),
+          entries: periodEntries.slice(0, 80).map((e) => ({ date: e.date, type: e.type, amount: shownAmount(e), category: e.category, note: e.note })),
         }),
       },
     ])).trim();
@@ -446,202 +519,266 @@ async function reviewSpending(store, month, monthEntries) {
   store.refresh();
 }
 
-function spendingBlock(store, month, monthEntries) {
+function spendingBlock(store, range, periodEntries) {
   const button = h('button', {
     type: 'button',
     class: 'btn-small',
-    disabled: spend.status === 'loading' || !monthEntries.length,
-    onclick: () => reviewSpending(store, month, monthEntries),
-  }, 'Review this month with AI');
-  if (spend.month !== month || spend.status === 'idle') return h('div', { class: 'row' }, button);
-  if (spend.status === 'loading') return h('div', { class: 'stack' }, button, h('p', { class: 'muted small' }, 'Reviewing the month…'));
+    disabled: spend.status === 'loading' || !periodEntries.length || !hasOpenRouter(store),
+    onclick: () => reviewSpending(store, range, periodEntries),
+  }, icon('activity'), 'Review this period with AI');
+  if (!hasOpenRouter(store)) return setupBanner('openrouter', 'The spending review needs an OpenRouter key.');
+  if (spend.range !== range || spend.status === 'idle') return button;
+  if (spend.status === 'loading') return h('div', { class: 'stack' }, button, h('p', { class: 'muted small' }, 'Reviewing…'));
   if (spend.status === 'error') return h('div', { class: 'stack' }, button, notice({ text: spend.text }));
   return h('div', { class: 'stack' }, button, h('div', { class: 'card-inset' }, h('pre', { class: 'ai-text' }, spend.text)));
 }
 
 // --- Page ---
 
+const bar = (label, amount, total, cur) =>
+  h('li', null,
+    h('div', { class: 'row between' }, h('span', null, label), h('span', null, `${money(amount, cur)} · ${total ? Math.round((amount / total) * 100) : 0}%`)),
+    h('div', { class: 'bar-track' }, h('div', { class: 'bar-fill', style: { width: `${total ? (amount / total) * 100 : 0}%` } })));
+
 function draw(root, store) {
   const { entries, categories } = store.get(COLLECTION);
-  // The days on screen need their rates. They are asked for after this render, so the refresh does not run inside it.
-  shownDays = entries.filter((e) => monthKey(e.date) === view.month).map((e) => e.date).concat(todayISO());
-  setTimeout(() => scheduleRates(store, shownDays), 0);
   const projects = store.get('projects').projects;
+  const projectById = new Map(projects.map((p) => [p.id, p]));
   const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, color: p.color }));
   const cur = view.currency;
-  const monthEntries = entries
-    .filter((e) => monthKey(e.date) === view.month)
+
+  const w = windowFor(view.range, entries);
+  const fromKey = ymd(w.from);
+  const toKey = ymd(w.to);
+  const inPeriod = entries
+    .filter((e) => e.date >= fromKey && e.date < toKey)
     .sort((a, b) => b.date.localeCompare(a.date) || b.created.localeCompare(a.created));
 
-  // Totals in the shown currency. Entries that cannot be converted yet are counted separately.
-  let unconverted = 0;
-  const total = (type) => {
-    let sum = 0;
-    for (const e of monthEntries) {
-      if (e.type !== type) continue;
-      const v = shownAmount(e);
-      if (v === null) unconverted += 1;
-      else sum += v;
-    }
-    return round2(sum);
-  };
-  const income = total('income');
-  const expense = total('expense');
-  const net = round2(income - expense);
+  // Rates for the days on screen, asked for after this render.
+  shownDays = inPeriod.map((e) => e.date).concat(todayISO());
+  setTimeout(() => scheduleRates(store, shownDays), 0);
 
-  // Expense totals per category, largest first.
+  // Totals, buckets and breakdowns in the shown currency. Entries whose rate is not known yet are counted apart.
+  let unconverted = 0;
+  const keys = bucketKeys(w.from, w.to, view.group);
+  const incomeByBucket = new Map(keys.map((k) => [k, 0]));
+  const expenseByBucket = new Map(keys.map((k) => [k, 0]));
   const byCategory = new Map();
-  for (const e of monthEntries) {
-    const v = e.type === 'expense' ? shownAmount(e) : null;
-    if (v !== null) byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + v);
+  const byProject = new Map();
+  let income = 0;
+  let expense = 0;
+  for (const e of inPeriod) {
+    const v = shownAmount(e);
+    if (v === null) {
+      unconverted += 1;
+      continue;
+    }
+    const key = bucketKey(parseYmd(e.date), view.group);
+    if (e.type === 'income') {
+      income += v;
+      incomeByBucket.set(key, (incomeByBucket.get(key) ?? 0) + v);
+    } else {
+      expense += v;
+      expenseByBucket.set(key, (expenseByBucket.get(key) ?? 0) + v);
+      byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + v);
+      const name = projectById.get(e.projectId)?.name ?? 'No project';
+      byProject.set(name, (byProject.get(name) ?? 0) + v);
+    }
   }
-  const breakdown = [...byCategory].sort((a, b) => b[1] - a[1]);
+  income = round2(income);
+  expense = round2(expense);
+  const net = round2(income - expense);
+  const categoryRows = [...byCategory].sort((a, b) => b[1] - a[1]);
+  const projectRows = [...byProject].sort((a, b) => b[1] - a[1]);
+
+  const labels = keys.map((k) => bucketLabel(k, view.group));
+  const series = [
+    { name: 'Income', color: 'var(--income)', values: keys.map((k) => round2(incomeByBucket.get(k) ?? 0)) },
+    { name: 'Expenses', color: 'var(--expense)', values: keys.map((k) => round2(expenseByBucket.get(k) ?? 0)) },
+  ];
+  const rangeLabel = RANGES.find(([k]) => k === view.range)?.[1] ?? '';
 
   root.replaceChildren(
-    h('div', { class: 'stack-lg' },
-      h('div', { class: 'row between head' },
-        h('h2', null, 'Money'),
-        h('div', { class: 'row' },
-          h('label', { class: 'inline' }, 'Show in',
-            h('select', {
-              value: view.currency,
-              'aria-label': 'Show totals in currency',
-              onchange: (e) => {
-                view.currency = e.target.value;
+    h('div', { class: 'money stack-lg' },
+      h('header', { class: 'row between money-head' },
+        h('div', null,
+          h('h2', null, 'Money'),
+          h('p', { class: 'muted small' }, `${rangeLabel} · ${entries.length} entries`)),
+        h('div', { class: 'segmented money-currency', role: 'group', 'aria-label': 'Show totals in' },
+          CURRENCIES.map((c) =>
+            h('button', {
+              type: 'button',
+              class: c === cur ? 'seg active' : 'seg',
+              'aria-pressed': String(c === cur),
+              onclick: () => {
+                view.currency = c;
                 store.refresh();
               },
-            }, CURRENCIES.map((c) => h('option', { value: c }, c)))),
-          h('input', {
-            type: 'month',
-            value: view.month,
-            'aria-label': 'Month',
-            onchange: (e) => {
-              view.month = e.target.value || view.month;
-              store.refresh();
-            },
-          }))),
+            }, c)))),
 
       fxBanner(store),
-
-      hasOpenRouter(store) ? null : setupBanner('openrouter', 'Reading bills and screenshots needs an OpenRouter key.'),
-      dropZone(store, categories),
       receiptPanel(store),
 
-      h('div', { class: 'summary' },
-        h('div', { class: 'card stat' }, h('span', { class: 'muted' }, 'Income'), h('strong', { class: 'income' }, money(income, cur))),
-        h('div', { class: 'card stat' }, h('span', { class: 'muted' }, 'Expenses'), h('strong', { class: 'expense' }, money(expense, cur))),
-        h('div', { class: 'card stat' }, h('span', { class: 'muted' }, 'Net'),
-          h('strong', { class: net < 0 ? 'expense' : 'income' }, money(net, cur)))),
-      unconverted
-        ? h('p', { class: 'muted small' }, `${unconverted} ${unconverted === 1 ? 'entry' : 'entries'} in another currency ${unconverted === 1 ? 'is' : 'are'} left out until a rate is available.`)
-        : null,
+      h('div', { class: 'money-controls' },
+        h('div', { class: 'period', role: 'group', 'aria-label': 'Period' },
+          RANGES.map(([k, l]) =>
+            h('button', {
+              type: 'button',
+              class: view.range === k ? 'period-btn active' : 'period-btn',
+              'aria-pressed': String(view.range === k),
+              onclick: () => {
+                view.range = k;
+                store.refresh();
+              },
+            }, l))),
+        h('div', { class: 'period', role: 'group', 'aria-label': 'Group by' },
+          GROUPS.map(([k, l]) =>
+            h('button', {
+              type: 'button',
+              class: view.group === k ? 'period-btn active' : 'period-btn',
+              'aria-pressed': String(view.group === k),
+              onclick: () => {
+                view.group = k;
+                store.refresh();
+              },
+            }, l)))),
 
-      spendingBlock(store, view.month, monthEntries),
+      h('div', { class: 'money-grid' },
+        h('div', { class: 'money-main stack-lg' },
+          h('div', { class: 'summary money-stats' },
+            h('div', { class: 'card stat' }, h('span', { class: 'muted' }, 'Income'), h('strong', { class: 'income' }, money(income, cur))),
+            h('div', { class: 'card stat' }, h('span', { class: 'muted' }, 'Expenses'), h('strong', { class: 'expense' }, money(expense, cur))),
+            h('div', { class: 'card stat' }, h('span', { class: 'muted' }, 'Net'),
+              h('strong', { class: net < 0 ? 'expense' : 'income' }, money(net, cur))),
+            h('div', { class: 'card stat' }, h('span', { class: 'muted' }, 'Average per day'),
+              h('strong', null, money(round2(expense / Math.max(1, keys.length)), cur)),
+              h('span', { class: 'muted small' }, 'spent'))),
 
-      h('div', { class: 'split' },
-        h('section', { class: 'card main-pane' },
-          h('h3', null, 'Quick add'),
-          h('form', {
-            class: 'stack',
-            onsubmit: (e) => {
-              e.preventDefault();
-              addEntry(store, formValues(e.currentTarget));
+          unconverted
+            ? h('p', { class: 'muted small' }, `${unconverted} ${unconverted === 1 ? 'entry' : 'entries'} ${unconverted === 1 ? 'is' : 'are'} left out until its rate loads.`)
+            : null,
+
+          h('section', { class: 'card stack' },
+            h('div', { class: 'row between' },
+              h('h3', null, 'Income and expenses'),
+              legend(series)),
+            inPeriod.length
+              ? barChart(labels, series, { grouped: true, format: (v) => money(v, cur) })
+              : empty('No entries in this period.')),
+
+          h('div', { class: 'split-2' },
+            h('section', { class: 'card stack' },
+              h('h3', null, 'Expenses by category'),
+              categoryRows.length
+                ? h('ul', { class: 'bars' }, categoryRows.map(([name, v]) => bar(name, v, expense, cur)))
+                : empty('No expenses in this period.')),
+            h('section', { class: 'card stack' },
+              h('h3', null, 'Expenses by project'),
+              projectRows.length
+                ? h('ul', { class: 'bars' }, projectRows.map(([name, v]) => bar(name, v, expense, cur)))
+                : empty('No expenses in this period.'))),
+
+          h('section', { class: 'card stack' },
+            h('h3', null, 'Entries'),
+            inPeriod.length
+              ? h('ul', { class: 'entries' },
+                  inPeriod.map((e) => {
+                    const converted = shownAmount(e);
+                    return h('li', null,
+                      editText({
+                        value: e.date,
+                        className: 'muted date',
+                        onSave: (date) => {
+                          if (DATE.test(date)) updateEntry(store, e.id, { date });
+                          else store.refresh();
+                        },
+                      }),
+                      h('span', { class: 'grow' },
+                        editText({
+                          value: e.category,
+                          placeholder: 'Category',
+                          onSave: (category) => updateEntry(store, e.id, { category }),
+                        }),
+                        editText({
+                          value: e.note,
+                          placeholder: 'Add a note',
+                          allowEmpty: true,
+                          className: 'muted',
+                          onSave: (note) => updateEntry(store, e.id, { note }),
+                        }),
+                        e.source ? h('span', { class: 'muted small' }, `from ${e.source}`) : null),
+                      pickChip({
+                        value: e.projectId ?? null,
+                        options: projectOptions,
+                        nullable: true,
+                        nullLabel: 'No project',
+                        onPick: (projectId) => updateEntry(store, e.id, { projectId }),
+                      }),
+                      pickChip({
+                        value: e.type,
+                        options: TYPES.map(([v, l]) => ({ value: v, label: l, tone: v === 'income' ? 'done' : 'high' })),
+                        onPick: (type) => updateEntry(store, e.id, { type }),
+                      }),
+                      h('span', { class: 'amount' },
+                        editText({
+                          value: e.amount.toFixed(2),
+                          className: e.type === 'income' ? 'income' : 'expense',
+                          onSave: (v) => {
+                            const n = round2(Number(v));
+                            if (n > 0) updateEntry(store, e.id, { amount: n });
+                            else store.refresh();
+                          },
+                        }),
+                        pickChip({
+                          value: entryCurrency(e),
+                          options: CURRENCIES.map((c) => ({ value: c, label: c })),
+                          onPick: (currency) => updateEntry(store, e.id, { currency }),
+                        }),
+                        entryCurrency(e) !== cur && converted !== null
+                          ? h('span', { class: 'muted small' }, `≈ ${money(converted, cur)}`)
+                          : null),
+                      h('button', {
+                        type: 'button',
+                        class: 'icon-btn',
+                        title: 'Delete',
+                        'aria-label': `Delete entry ${e.category} ${e.amount.toFixed(2)}`,
+                        onclick: () => removeEntry(store, e.id),
+                      }, icon('x')));
+                  }))
+              : empty('No entries in this period.'))),
+
+        h('aside', { class: 'money-side stack-lg' },
+          h('section', { class: 'card stack' },
+            h('h3', null, 'Add a bill or screenshot'),
+            hasOpenRouter(store) ? null : setupBanner('openrouter', 'Reading bills needs an OpenRouter key.'),
+            dropZone(store, categories)),
+
+          h('section', { class: 'card stack' },
+            h('h3', null, 'Add an entry'),
+            h('form', {
+              class: 'stack',
+              onsubmit: (e) => {
+                e.preventDefault();
+                addEntry(store, formValues(e.currentTarget));
+              },
             },
-          },
-            h('div', { class: 'row' },
-              h('select', { name: 'type', 'aria-label': 'Type' },
-                h('option', { value: 'expense' }, 'Expense'),
-                h('option', { value: 'income' }, 'Income')),
-              h('input', { name: 'amount', type: 'number', step: '0.01', min: '0', placeholder: 'Amount', required: true, inputmode: 'decimal', 'aria-label': 'Amount' }),
-              h('select', { name: 'currency', value: cur, 'aria-label': 'Currency' },
-                CURRENCIES.map((c) => h('option', { value: c }, c)))),
-            h('div', { class: 'row' },
-              h('input', { name: 'category', list: 'finance-categories', placeholder: 'Category', 'aria-label': 'Category', autocomplete: 'off' }),
-              h('input', { name: 'date', type: 'date', value: todayISO(), 'aria-label': 'Date' })),
-            h('input', { name: 'note', placeholder: 'Note (optional)', 'aria-label': 'Note', autocomplete: 'off' }),
-            h('div', { class: 'row end' }, h('button', { class: 'primary', type: 'submit' }, 'Add entry')),
-            h('datalist', { id: 'finance-categories' }, categories.map((c) => h('option', { value: c }))))),
+              h('div', { class: 'row' },
+                h('select', { name: 'type', 'aria-label': 'Type' },
+                  h('option', { value: 'expense' }, 'Expense'),
+                  h('option', { value: 'income' }, 'Income')),
+                h('input', { name: 'amount', type: 'number', step: '0.01', min: '0', placeholder: 'Amount', required: true, inputmode: 'decimal', 'aria-label': 'Amount' }),
+                h('select', { name: 'currency', value: cur, 'aria-label': 'Currency' },
+                  CURRENCIES.map((c) => h('option', { value: c }, c)))),
+              h('div', { class: 'row' },
+                h('input', { name: 'category', list: 'finance-categories', placeholder: 'Category', 'aria-label': 'Category', autocomplete: 'off' }),
+                h('input', { name: 'date', type: 'date', value: todayISO(), 'aria-label': 'Date' })),
+              h('input', { name: 'note', placeholder: 'Note (optional)', 'aria-label': 'Note', autocomplete: 'off' }),
+              h('div', { class: 'row end' }, h('button', { class: 'primary', type: 'submit' }, 'Add entry')),
+              h('datalist', { id: 'finance-categories' }, categories.map((c) => h('option', { value: c }))))),
 
-        h('section', { class: 'card main-pane' },
-          h('h3', null, `Expenses by category (${cur})`),
-          breakdown.length
-            ? h('ul', { class: 'bars' },
-                breakdown.map(([name, amount]) =>
-                  h('li', null,
-                    h('div', { class: 'row between' }, h('span', null, name), h('span', null, money(amount, cur))),
-                    h('div', { class: 'bar-track' },
-                      h('div', { class: 'bar-fill', style: { width: `${expense ? (amount / expense) * 100 : 0}%` } })))))
-            : empty('No expenses this month.'))),
-
-      h('section', { class: 'card main-pane' },
-        h('h3', null, 'Entries'),
-        monthEntries.length
-          ? h('ul', { class: 'entries' },
-              monthEntries.map((e) => {
-                const converted = shownAmount(e);
-                const original = entryCurrency(e);
-                return h('li', null,
-                  editText({
-                    value: e.date,
-                    className: 'muted date',
-                    onSave: (date) => {
-                      if (DATE.test(date)) updateEntry(store, e.id, { date });
-                      else store.refresh();
-                    },
-                  }),
-                  h('span', { class: 'grow' },
-                    editText({
-                      value: e.category,
-                      placeholder: 'Category',
-                      onSave: (category) => updateEntry(store, e.id, { category }),
-                    }),
-                    editText({
-                      value: e.note,
-                      placeholder: 'Add a note',
-                      allowEmpty: true,
-                      className: 'muted',
-                      onSave: (note) => updateEntry(store, e.id, { note }),
-                    }),
-                    e.source ? h('span', { class: 'muted small' }, `from ${e.source}`) : null),
-                  pickChip({
-                    value: e.projectId ?? null,
-                    options: projectOptions,
-                    nullable: true,
-                    nullLabel: 'No project',
-                    onPick: (projectId) => updateEntry(store, e.id, { projectId }),
-                  }),
-                  pickChip({
-                    value: e.type,
-                    options: TYPES.map(([v, l]) => ({ value: v, label: l, tone: v === 'income' ? 'done' : 'high' })),
-                    onPick: (type) => updateEntry(store, e.id, { type }),
-                  }),
-                  h('span', { class: 'amount' },
-                    editText({
-                      value: e.amount.toFixed(2),
-                      className: e.type === 'income' ? 'income' : 'expense',
-                      onSave: (v) => {
-                        const n = round2(Number(v));
-                        if (n > 0) updateEntry(store, e.id, { amount: n });
-                        else store.refresh();
-                      },
-                    }),
-                    pickChip({
-                      value: original,
-                      options: CURRENCIES.map((c) => ({ value: c, label: c })),
-                      onPick: (currency) => updateEntry(store, e.id, { currency }),
-                    }),
-                    original !== cur && converted !== null
-                      ? h('span', { class: 'muted small' }, `≈ ${money(converted, cur)}`)
-                      : null),
-                  h('button', {
-                    type: 'button',
-                    class: 'icon-btn',
-                    title: 'Delete',
-                    'aria-label': `Delete entry ${e.category} ${e.amount.toFixed(2)}`,
-                    onclick: () => removeEntry(store, e.id),
-                  }, icon('x')));
-              }))
-          : empty('No entries for this month.'))));
+          h('section', { class: 'card stack' },
+            h('h3', null, 'Review'),
+            spendingBlock(store, view.range, inPeriod))))));
 }
 
 export default {
@@ -651,9 +788,10 @@ export default {
   collection: COLLECTION,
   defaults: { entries: [], categories: [] },
   render: draw,
-  serialize: () => ({ month: view.month, cur: view.currency }),
+  serialize: () => ({ cur: view.currency, range: view.range === 'month' ? '' : view.range, group: view.group === 'day' ? '' : view.group }),
   restore: (p = {}) => {
-    view.month = /^\d{4}-\d{2}$/.test(p.month ?? '') ? p.month : monthKey(todayISO());
     view.currency = CURRENCIES.includes(p.cur) ? p.cur : DEFAULT_CURRENCY;
+    view.range = RANGES.some(([k]) => k === p.range) ? p.range : 'month';
+    view.group = GROUPS.some(([k]) => k === p.group) ? p.group : 'day';
   },
 };
