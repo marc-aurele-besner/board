@@ -1,5 +1,5 @@
 // Tools: checks that run against the website of each project, and the status of the services they rely on.
-import { h, icon, empty, notice, uid } from '../ui.js';
+import { h, icon, refreshIcon, empty, notice, uid } from '../ui.js';
 import { projectIcon } from './projects.js';
 import { hostOf, daysUntil, statusPageOf } from '../sitecheck.js';
 import { sitesOf, siteData, checkSite, checkAllSites, runRules, autoTaskFor, ruleOf, emailGaps, checkProviders, TOOLS_DEFAULTS } from '../automations.js';
@@ -91,7 +91,7 @@ function healthTab(store, sites) {
         h('div', { class: 'row between' },
           h('span', { class: 'muted small' }, `Checked ${timeOf(s.health?.at)}`),
           h('div', { class: 'row' },
-            h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => check(store, p, ['health']) }, icon('refresh'), 'Check now'),
+            h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => check(store, p, ['health']) }, refreshIcon(busy), 'Check now'),
             s.health?.status === 'down' || s.health?.status === 'slow'
               ? taskCell(store, p, 'health', `Look into ${host}: ${s.health.status === 'down' ? 'not answering' : 'slow'}`)
               : null)));
@@ -127,7 +127,7 @@ function sslTab(store, sites) {
             h('td', null, cell(s.domain, () => [daysPill(s.domain.until), h('div', { class: 'muted small' }, `${s.domain.name} · renews by ${s.domain.until}`)])),
             h('td', null, s.domain?.registrar ?? ''),
             h('td', null, s.domain?.until && daysUntil(s.domain.until) <= 60 ? taskCell(store, p, 'domain', `Renew the domain ${s.domain.name}`, s.domain.until) : h('span', { class: 'muted small' }, s.domain?.until ? 'Not needed yet' : '')),
-            h('td', null, h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Look up again', 'aria-label': `Look up ${host} again`, onclick: () => check(store, p, ['ssl', 'domain']) }, icon('refresh'))));
+            h('td', null, h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Look up again', 'aria-label': `Look up ${host} again`, onclick: () => check(store, p, ['ssl', 'domain']) }, refreshIcon(busy))));
         })))),
     h('p', { class: 'muted small' }, 'The certificate date comes from the public certificate logs (Cert Spotter, then crt.sh): the newest certificate issued for the host. The domain date comes from its registry (RDAP). Only the site’s address is sent to them.'));
 }
@@ -156,7 +156,7 @@ function dnsTab(store, sites) {
           const host = hostOf(p.website);
           const busy = view.busy.has(p.id) || view.busy.has('all');
           const site = h('td', null, h('div', { class: 'row' }, projectIcon(p), h('div', null, h('strong', null, p.name), h('div', { class: 'muted small' }, d?.domain ?? host))));
-          const again = h('td', null, h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Look up again', 'aria-label': `Look up ${host} again`, onclick: () => check(store, p, ['dns']) }, icon('refresh')));
+          const again = h('td', null, h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Look up again', 'aria-label': `Look up ${host} again`, onclick: () => check(store, p, ['dns']) }, refreshIcon(busy)));
           if (!d?.domain) return [h('tr', null, site, h('td', { colspan: 6 }, h('span', { class: 'muted small' }, busy ? 'Looking up…' : d?.error ?? 'Not looked up yet')), again)];
           const mail = d.mx.length > 0;
           const noMail = () => h('span', { class: 'muted small' }, 'No mail');
@@ -212,7 +212,7 @@ function crawlTab(store, sites) {
   const c = siteData(store, p.id).crawl;
   const host = hostOf(p.website);
   const busy = view.busy.has(p.id) || view.busy.has('all');
-  const read = h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => check(store, p, ['crawl']) }, icon('refresh'), busy ? 'Reading…' : c ? 'Read again' : 'Read the files');
+  const read = h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => check(store, p, ['crawl']) }, refreshIcon(busy), busy ? 'Reading…' : c ? 'Read again' : 'Read the files');
   if (!c?.robots) {
     return h('div', { class: 'stack-lg' }, siteChips(store, sites, p),
       c?.error ? notice({ text: c.error }) : null,
@@ -303,10 +303,10 @@ const readAll = (store, part, label) =>
       const made = await checkAllSites(store, [part]);
       toast(made ? `${made} task${made === 1 ? '' : 's'} created automatically` : 'All sites read');
     }),
-  }, icon('refresh'), view.busy.has('all') ? 'Reading…' : label);
+  }, refreshIcon(view.busy.has('all')), view.busy.has('all') ? 'Reading…' : label);
 
 const againButton = (store, p, part, busy) =>
-  h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Read again', 'aria-label': `Read ${hostOf(p.website)} again`, onclick: () => check(store, p, [part]) }, icon('refresh'));
+  h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Read again', 'aria-label': `Read ${hostOf(p.website)} again`, onclick: () => check(store, p, [part]) }, refreshIcon(busy));
 
 const tick = (found, title) => h('span', { class: found ? 'tick ok' : 'tick miss', title }, icon(found ? 'check' : 'x'));
 
@@ -356,7 +356,7 @@ function metaTab(store, sites) {
   const m = siteData(store, p.id).meta;
   const busy = view.busy.has(p.id);
   const chips = siteChips(store, sites, p);
-  const read = h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => check(store, p, ['meta']) }, icon('refresh'), busy ? 'Reading…' : m ? 'Read again' : 'Read the page');
+  const read = h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => check(store, p, ['meta']) }, refreshIcon(busy), busy ? 'Reading…' : m ? 'Read again' : 'Read the page');
   if (!m || (m.error && !m.title && !m.ogTitle)) {
     return h('div', { class: 'stack-lg' }, chips,
       m?.error ? notice({ text: m.error }) : null,
@@ -447,7 +447,7 @@ function providerCard(store, pr) {
     h('div', { class: 'row between' },
       h('span', { class: 'muted small' }, `Read ${timeOf(s?.at)}`),
       h('div', { class: 'row' },
-        h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Read again', 'aria-label': `Read ${pr.name} again`, onclick: () => run(store, pr.id, () => checkProviders(store, [pr.id])) }, icon('refresh')),
+        h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Read again', 'aria-label': `Read ${pr.name} again`, onclick: () => run(store, pr.id, () => checkProviders(store, [pr.id])) }, refreshIcon(busy)),
         h('button', { type: 'button', class: 'icon-btn', title: 'Stop following', 'aria-label': `Stop following ${pr.name}`, onclick: () => unfollow(store, pr) }, icon('x')))));
 }
 
@@ -520,7 +520,7 @@ function draw(root, store) {
                   const made = await checkAllSites(store, TAB_PARTS[view.tab] ?? ['health']);
                   toast(made ? `${made} task${made === 1 ? '' : 's'} created automatically` : 'All sites checked');
                 }),
-              }, icon('refresh'), all ? 'Checking…' : 'Check all now'))
+              }, refreshIcon(all), all ? 'Checking…' : 'Check all now'))
           : null),
       h('nav', { class: 'sub-tabs', role: 'tablist', 'aria-label': 'Tools' },
         TABS.map(([key, label, iconName]) =>

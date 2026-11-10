@@ -1,4 +1,4 @@
-import { h, icon, money, empty, notice } from '../ui.js';
+import { h, icon, refreshIcon, money, empty, notice } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { poolsChanged } from '../automations.js';
 import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position } from '../uniswap.js';
@@ -482,7 +482,7 @@ function draw(root, store) {
           `Uniswap v3 and v4 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`,
           state.at ? ` ${updatedText()}.` : '')),
       h('button', { type: 'button', class: 'btn-small', disabled: reading || chainCount === 0, onclick: () => load(store) },
-        h('span', { class: reading ? 'spin-icon' : '' }, icon('refresh')),
+        refreshIcon(reading),
         reading ? 'Reading…' : 'Refresh')),
 
     state.shallow.length

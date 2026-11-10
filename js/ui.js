@@ -161,3 +161,6 @@ export function icon(name) {
   span.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON_PATHS[name] ?? ''}</svg>`;
   return span;
 }
+
+// The refresh icon of a reload button; it spins while the load runs, so a click visibly does something.
+export const refreshIcon = (busy) => (busy ? h('span', { class: 'spin-icon' }, icon('refresh')) : icon('refresh'));
