@@ -241,7 +241,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 /* Monitoring layout: section tabs on their own row, period buttons on a second row */
 .mon-head h2 { margin: 0; }
 .mon-head p { margin: 2px 0 0; }
-.sub-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.sub-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--border); overflow: visible; }
 .sub-tab { background: none; border: none; border-radius: 0; min-height: 0; padding: 8px 14px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; }
 .sub-tab:hover { background: none; color: var(--text); }
 .sub-tab.active { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
@@ -863,3 +863,21 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .label-colours li { display: flex; align-items: center; gap: 10px; }
 .label-colours input[type='color'] { width: 40px; height: 30px; padding: 2px; }
 .app-seg .seg { min-width: 96px; }
+
+/* Money entries: one line each; bills open to their charges */
+.entries { display: flex; flex-direction: column; list-style: none; margin: 0; padding: 0; }
+.entry-row { display: grid; grid-template-columns: 26px 96px minmax(0, 1fr) 150px 150px 150px 26px; gap: 10px; align-items: center; padding: 6px 4px; border-bottom: 1px solid var(--border); min-width: 0; }
+.entry-row .amount { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 0; }
+.entry-row .entry-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.entry-row .entry-main > span, .entry-row .entry-main > .editable { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry-row .entry-cat { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry-toggle { width: 26px; }
+.entry-row.child { padding-left: 4px; background: var(--surface-2); }
+.entry-row.child .entry-toggle::before { content: '↳'; color: var(--muted); display: inline-block; width: 26px; text-align: center; }
+.entry-row.group-head { font-weight: 500; }
+.entry-group > .entry-row .chevron .icon { transition: transform 0.15s ease; }
+.entry-group > .entry-row .chevron.open .icon { transform: rotate(180deg); }
+.entry-children { list-style: none; margin: 0; padding: 0 0 6px 0; display: flex; flex-direction: column; }
+@media (max-width: 900px) {
+  .entry-row { grid-template-columns: 26px 80px minmax(0, 1fr) 120px 26px; }
+}
