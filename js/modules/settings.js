@@ -4,6 +4,7 @@ import { configure, checkGithubToken } from '../github.js';
 import { connect, disconnect, isConnected } from '../google.js';
 import { editText } from '../inline.js';
 import { modelChip } from '../model-picker.js';
+import { isAddress, DEFAULT_NODE } from '../uniswap.js';
 
 const COLLECTION = 'settings';
 const OPENROUTER_CHECK = 'https://openrouter.ai/api/v1/auth/key';
@@ -36,6 +37,7 @@ const SECTIONS = [
   ['models', 'Models & tasks'],
   ['google', 'Google Calendar'],
   ['exchange', 'Exchange rates'],
+  ['uniswap', 'Uniswap'],
   ['appearance', 'Appearance'],
 ];
 
@@ -455,6 +457,64 @@ export function applyAppearance() {
   document.body.classList.toggle('compact', density === 'compact');
 }
 
+const uniswapView = { message: '', ok: null };
+
+// Public wallet addresses whose Uniswap v3 positions the LP tab reads, and the node to read them from.
+function uniswapCard(store) {
+  const cfg = store.get(COLLECTION).uniswap ?? { wallets: [], node: '' };
+  const wallets = cfg.wallets ?? [];
+  const save = (patch) => {
+    store.update(COLLECTION, (d) => {
+      d.uniswap = { wallets: [], node: '', ...d.uniswap, ...patch };
+    });
+    store.refresh();
+  };
+  const addWallet = (e) => {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const address = String(form.get('address') ?? '').trim();
+    if (!isAddress(address)) {
+      uniswapView.ok = false;
+      uniswapView.message = 'That is not an Ethereum address. It starts with 0x and has 40 hex characters.';
+    } else if (wallets.some((w) => w.address.toLowerCase() === address.toLowerCase())) {
+      uniswapView.ok = false;
+      uniswapView.message = 'That address is already in the list.';
+    } else {
+      save({ wallets: [...wallets, { address, label: String(form.get('label') ?? '').trim() }] });
+      e.currentTarget.reset();
+      uniswapView.ok = true;
+      uniswapView.message = 'Wallet added. Open LP positions to read it.';
+    }
+    store.refresh();
+  };
+  const saveNode = (e) => {
+    e.preventDefault();
+    const node = String(new FormData(e.currentTarget).get('node') ?? '').trim();
+    save({ node });
+    uniswapView.ok = true;
+    uniswapView.message = node ? 'Node saved.' : 'Using the default public node.';
+    store.refresh();
+  };
+
+  return h('section', { class: 'card panel' },
+    h('h2', null, 'Uniswap'),
+    h('p', { class: 'muted small' }, 'Add the public address of each wallet that holds Uniswap v3 positions. The board only reads them. It never asks for a key and never signs anything.'),
+    wallets.length
+      ? h('ul', { class: 'stack' }, wallets.map((w, i) => h('li', { class: 'row between' },
+        h('span', null, w.label ? `${w.label} · ` : '', h('code', null, w.address)),
+        h('button', { type: 'button', class: 'btn-small', onclick: () => save({ wallets: wallets.filter((_, j) => j !== i) }) }, 'Remove'))))
+      : h('p', { class: 'muted small' }, 'No wallets yet.'),
+    h('form', { class: 'row', onsubmit: addWallet },
+      h('input', { name: 'label', placeholder: 'Label (optional)', 'aria-label': 'Wallet label' }),
+      h('input', { name: 'address', placeholder: '0x…', spellcheck: false, 'aria-label': 'Wallet address' }),
+      h('button', { type: 'submit', class: 'btn-small' }, 'Add wallet')),
+    h('form', { class: 'row', onsubmit: saveNode },
+      h('input', { name: 'node', value: cfg.node ?? '', placeholder: DEFAULT_NODE, spellcheck: false, 'aria-label': 'Ethereum node URL' }),
+      h('button', { type: 'submit', class: 'btn-small' }, 'Save node')),
+    h('p', { class: 'muted small' }, 'Node: the Ethereum JSON-RPC address the board reads from. Leave it empty to use the default public node.'),
+    uniswapView.message ? notice({ tone: uniswapView.ok ? 'info' : 'error', text: uniswapView.message }) : null);
+}
+
 function setStored(key, value) {
   try {
     if (value) localStorage.setItem(key, value);
@@ -668,6 +728,7 @@ function draw(root, store) {
       : view.section === 'google' ? googleCard(store)
         : view.section === 'exchange' ? exchangeCard(store)
         : view.section === 'appearance' ? appearanceCard(store)
+        : view.section === 'uniswap' ? uniswapCard(store)
         : h('div', { class: 'stack-lg' }, github, orgKeysCard(store));
 
   const nav = h('nav', { class: 'settings-nav', 'aria-label': 'Settings sections' },
@@ -697,10 +758,10 @@ export default {
   icon: 'settings',
   hidden: true, // opened from the gear icon in the top bar
   collection: COLLECTION,
-  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) } },
+  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], node: '' }, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) } },
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),
   restore: (p = {}) => {
-    view.section = ['github', 'openrouter', 'models', 'google', 'exchange', 'appearance'].includes(p.section) ? p.section : 'github';
+    view.section = ['github', 'openrouter', 'models', 'google', 'exchange', 'uniswap', 'appearance'].includes(p.section) ? p.section : 'github';
   },
 };

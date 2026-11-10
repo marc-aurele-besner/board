@@ -6,6 +6,7 @@ const SECTIONS = {
   google: ['google', 'Google Calendar'],
   github: ['github', 'GitHub'],
   exchange: ['exchange', 'Exchange rates'],
+  uniswap: ['uniswap', 'Uniswap'],
 };
 
 export const settingsHref = (key) => `#/settings?section=${SECTIONS[key][0]}`;
