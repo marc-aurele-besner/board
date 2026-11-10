@@ -57,7 +57,29 @@ export function createStore(dir, collections) {
     }
   }
 
+  // Files kept beside the JSON files, such as the originals of bills. Paths are relative to the data folder ("bills/x.pdf").
+  async function fileHandle(path, create) {
+    const parts = path.split('/');
+    let folder = dir;
+    for (const part of parts.slice(0, -1)) folder = await folder.getDirectoryHandle(part, { create });
+    return folder.getFileHandle(parts[parts.length - 1], { create });
+  }
+  const files = {
+    async write(path, blob) {
+      const handle = await fileHandle(path, true);
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return path;
+    },
+    async read(path) {
+      const handle = await fileHandle(path, false);
+      return handle.getFile();
+    },
+  };
+
   return {
+    files,
     load,
     get: (name) => data[name],
     // Mutate a collection in place, then save and re-render.

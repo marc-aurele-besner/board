@@ -902,3 +902,8 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .issue-link { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 6px; font-size: 0.8rem; color: var(--accent); border: 1px solid var(--border); text-decoration: none; white-space: nowrap; }
 .issue-link:hover { border-color: var(--accent); }
 .issue-link .icon { width: 12px; height: 12px; }
+
+/* Kitchen: import from a link */
+.k-import { gap: 8px; }
+.k-import-form { display: flex; gap: 6px; }
+.k-import-form input { flex: 1; min-width: 0; }

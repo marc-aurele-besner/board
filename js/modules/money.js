@@ -8,8 +8,6 @@ import { projectIcon } from './projects.js';
 import { barChart, legend } from '../chart.js';
 import { openDialog } from '../modal.js';
 
-// Bills larger than this are read, but their original file is not kept with the entries.
-const BILL_LIMIT = 1.5 * 1024 * 1024;
 
 const COLLECTION = 'finance';
 const TYPES = [['expense', 'Expense'], ['income', 'Income']];
@@ -279,7 +277,7 @@ async function readReceipt(store, file, categories) {
   };
   say('Reading the file…');
   try {
-    receipt.original = { name: file.name, type: file.type, dataUrl: file.size <= BILL_LIMIT ? await readAsDataUrl(file) : '' };
+    receipt.original = { name: file.name, type: file.type, blob: file, dataUrl: '' };
     const content = await documentContent(file, say);
     say('Asking the model to read the charges…');
     const reply = await ask(store, 'task-receipt', [
@@ -345,28 +343,34 @@ function totalCheck(itemsTotal) {
   });
 }
 
-// The original bill is kept with its entries, so it can be opened from the list later.
-function addBill(store, original) {
+// The original bill is kept as a file in the data folder (bills/), and the bill links to it.
+// Bills saved before that kept a copy inside the JSON; those still open.
+async function addBill(store, original) {
   const id = uid();
+  const safeName = original.name.replace(/[^\w.-]+/g, '_');
+  const file = original.blob ? await store.files.write(`bills/${id}-${safeName}`, original.blob) : '';
   store.update(COLLECTION, (d) => {
-    d.bills.push({ id, name: original.name, type: original.type, dataUrl: original.dataUrl, created: now() });
+    d.bills.push({ id, name: original.name, type: original.type, file, dataUrl: file ? '' : original.dataUrl, created: now() });
   });
   return id;
 }
 
-// Opens an original bill: an image, or a PDF shown in a frame.
-function showOriginal(file) {
-  const body = file.dataUrl
-    ? file.type.startsWith('image/')
-      ? h('img', { class: 'bill-img', src: file.dataUrl, alt: file.name })
-      : h('iframe', { class: 'bill-frame', src: file.dataUrl, title: file.name })
-    : empty('The original file was too large to keep with the entries.');
-  openDialog({ title: file.name, wide: true, body });
+// Opens an original bill: an image, or a PDF shown in a frame. It is read from the data folder when it is a file.
+async function showOriginal(store, original) {
+  let url = original.dataUrl || '';
+  if (original.file) url = URL.createObjectURL(await store.files.read(original.file));
+  else if (!url && original.blob) url = URL.createObjectURL(original.blob);
+  const body = url
+    ? original.type.startsWith('image/')
+      ? h('img', { class: 'bill-img', src: url, alt: original.name })
+      : h('iframe', { class: 'bill-frame', src: url, title: original.name })
+    : empty('The original file is not available.');
+  openDialog({ title: original.name, wide: true, body });
 }
 
 function showBill(store, billId) {
   const bill = store.get(COLLECTION).bills.find((b) => b.id === billId);
-  if (bill) showOriginal(bill);
+  if (bill) showOriginal(store, bill);
 }
 
 // The review of a bill: each charge with its net amount, its tax and the total, then the document-level taxes.
@@ -393,8 +397,8 @@ function receiptPanel(store) {
   const taxTotal = round2(receipt.items.reduce((s, x) => s + x.tax, 0) + receipt.taxes.reduce((s, t) => s + t.amount, 0));
   const grandTotal = round2(netTotal + taxTotal);
 
-  const addAll = () => {
-    const billId = receipt.original ? addBill(store, receipt.original) : '';
+  const addAll = async () => {
+    const billId = receipt.original ? await addBill(store, receipt.original) : '';
     addEntries(store, [
       ...receipt.items.map((x) => ({
         date: x.date,
@@ -442,8 +446,8 @@ function receiptPanel(store) {
               store.refresh();
             },
           }, CURRENCIES.map((c) => h('option', { value: c }, c)))),
-        receipt.original?.dataUrl
-          ? h('button', { type: 'button', class: 'btn-small', onclick: () => showOriginal(receipt.original) }, 'View original')
+        receipt.original
+          ? h('button', { type: 'button', class: 'btn-small', onclick: () => showOriginal(store, receipt.original) }, 'View original')
           : null,
         h('button', { type: 'button', class: 'btn-small primary', onclick: addAll }, `Add ${receipt.items.length + receipt.taxes.length} lines`),
         h('button', {
@@ -896,7 +900,8 @@ function draw(root, store) {
   const { entries, categories } = store.get(COLLECTION);
   const projects = store.get('projects').projects;
   const projectById = new Map(projects.map((p) => [p.id, p]));
-  const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, color: p.color }));
+  // Projects show their icon and name, without a pill.
+  const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, plainIcon: projectIcon(p) }));
   const cur = view.currency;
 
   const w = windowFor(view.range, entries);
