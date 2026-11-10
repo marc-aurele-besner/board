@@ -907,7 +907,7 @@ export default {
   title: 'Settings',
   icon: 'settings',
   collection: COLLECTION,
-  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '' }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) } },
+  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '', relay: '' }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) } },
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),
   restore: (p = {}) => {
