@@ -285,6 +285,12 @@ button.danger { color: var(--danger); }
 .todo-title-cell .todo-title { white-space: normal; }
 .todo-desc { padding: 4px 4px 12px 40px; }
 .todo-desc .editable { display: block; min-height: 1.5em; color: var(--text); }
+.cat-list { display: flex; flex-direction: column; gap: 6px; }
+.cat-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.cat-name { font-weight: 600; min-width: 120px; }
+.cat-scope select { width: auto; min-width: 160px; }
+.cat-scope { flex-direction: row; align-items: center; }
+.todo-table { overflow-x: auto; }
 .todo-desc .editable.is-placeholder { color: var(--muted); }
 .todo-row .chip-pick { width: 100%; justify-content: flex-start; }
 .todo-item.done .todo-text { text-decoration: line-through; color: var(--muted); }
