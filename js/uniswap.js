@@ -2,19 +2,41 @@
 // never keys. Token prices come from CoinGecko's public price endpoint.
 // Uniswap v4 is not read yet: its position manager is a plain ERC-721, so positions cannot be listed with a call.
 
+// Chain logos from Trust Wallet's asset repository. Unichain and Robinhood Chain are not in it; both pay gas in ETH,
+// so they use ETH's logo.
+const trustLogo = (folder) => `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${folder}/info/logo.png`;
+const ETH_LOGO = trustLogo('ethereum');
+
 // The chains the LP tab reads. Each address is Uniswap's own v3 deployment on that chain, checked on-chain.
 // The same address is not used on every chain, so every chain carries its own.
 export const CHAINS = [
-  { id: 1, name: 'Ethereum', rpc: 'https://ethereum.publicnode.com', coingecko: 'ethereum', app: 'ethereum', factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88' },
-  { id: 8453, name: 'Base', rpc: 'https://base.publicnode.com', coingecko: 'base', app: 'base', factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD', positions: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1' },
-  { id: 42161, name: 'Arbitrum One', rpc: 'https://arbitrum-one-rpc.publicnode.com', coingecko: 'arbitrum-one', app: 'arbitrum', factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88' },
-  { id: 10, name: 'Optimism', rpc: 'https://optimism-rpc.publicnode.com', coingecko: 'optimistic-ethereum', app: 'optimism', factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88' },
-  { id: 137, name: 'Polygon', rpc: 'https://polygon-bor-rpc.publicnode.com', coingecko: 'polygon-pos', app: 'polygon', factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88' },
-  { id: 56, name: 'BNB Chain', rpc: 'https://bsc-rpc.publicnode.com', coingecko: 'binance-smart-chain', app: 'bnb', factory: '0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7', positions: '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613' },
-  { id: 43114, name: 'Avalanche', rpc: 'https://avalanche-c-chain-rpc.publicnode.com', coingecko: 'avalanche', app: 'avalanche', factory: '0x740b1c1de25031C31FF4fC9A62f554A55cdC1baD', positions: '0x655C406EBFa14EE2006250925e54ec43AD184f8B' },
-  { id: 130, name: 'Unichain', rpc: 'https://unichain-rpc.publicnode.com', coingecko: 'unichain', app: 'unichain', factory: '0x1f98400000000000000000000000000000000003', positions: '0x943e6e07a7e8e791dafc44083e54041d743c46e9' },
-  { id: 4663, name: 'Robinhood Chain', rpc: 'https://rpc.mainnet.chain.robinhood.com', coingecko: 'robinhood', app: null, factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa', positions: '0x73991a25c818bf1f1128deaab1492d45638de0d3' },
+  { id: 1, name: 'Ethereum', rpc: 'https://ethereum.publicnode.com', coingecko: 'ethereum', app: 'ethereum', logo: ETH_LOGO, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88' },
+  { id: 8453, name: 'Base', rpc: 'https://base.publicnode.com', coingecko: 'base', app: 'base', logo: trustLogo('base'), factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD', positions: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1' },
+  { id: 42161, name: 'Arbitrum One', rpc: 'https://arbitrum-one-rpc.publicnode.com', coingecko: 'arbitrum-one', app: 'arbitrum', logo: trustLogo('arbitrum'), factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88' },
+  { id: 10, name: 'Optimism', rpc: 'https://optimism-rpc.publicnode.com', coingecko: 'optimistic-ethereum', app: 'optimism', logo: trustLogo('optimism'), factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88' },
+  { id: 137, name: 'Polygon', rpc: 'https://polygon-bor-rpc.publicnode.com', coingecko: 'polygon-pos', app: 'polygon', logo: trustLogo('polygon'), factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88' },
+  { id: 56, name: 'BNB Chain', rpc: 'https://bsc-rpc.publicnode.com', coingecko: 'binance-smart-chain', app: 'bnb', logo: trustLogo('smartchain'), factory: '0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7', positions: '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613' },
+  { id: 43114, name: 'Avalanche', rpc: 'https://avalanche-c-chain-rpc.publicnode.com', coingecko: 'avalanche', app: 'avalanche', logo: trustLogo('avalanchec'), factory: '0x740b1c1de25031C31FF4fC9A62f554A55cdC1baD', positions: '0x655C406EBFa14EE2006250925e54ec43AD184f8B' },
+  { id: 130, name: 'Unichain', rpc: 'https://unichain-rpc.publicnode.com', coingecko: 'unichain', app: 'unichain', logo: ETH_LOGO, factory: '0x1f98400000000000000000000000000000000003', positions: '0x943e6e07a7e8e791dafc44083e54041d743c46e9' },
+  { id: 4663, name: 'Robinhood Chain', rpc: 'https://rpc.mainnet.chain.robinhood.com', coingecko: 'robinhood', app: null, logo: ETH_LOGO, factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa', positions: '0x73991a25c818bf1f1128deaab1492d45638de0d3' },
 ];
+
+// Token logos from the Uniswap token list, keyed "chainId:address" in lowercase. Fetched once; a token the list
+// does not carry gets a monogram instead.
+let logos = null;
+export function tokenLogos() {
+  logos ??= fetch('https://tokens.uniswap.org')
+    .then((res) => {
+      if (!res.ok) throw new Error(String(res.status));
+      return res.json();
+    })
+    .then((list) => new Map((list.tokens ?? []).filter((t) => t.logoURI).map((t) => [`${t.chainId}:${t.address.toLowerCase()}`, t.logoURI])))
+    .catch(() => {
+      logos = null; // try again next time the tab is opened
+      return new Map();
+    });
+  return logos;
+}
 
 const SEL = {
   name: '0x06fdde03',
