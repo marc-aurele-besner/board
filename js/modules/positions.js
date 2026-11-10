@@ -1,6 +1,6 @@
 import { h, icon, money, empty, notice } from '../ui.js';
 import { setupBanner } from '../integrations.js';
-import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, DEFAULT_NODE } from '../uniswap.js';
+import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings } from '../uniswap.js';
 
 const STALE_MS = 10 * 60 * 1000;
 const MAX_TICK = 887272; // the widest possible range: a "full range" position
@@ -9,14 +9,16 @@ const MAX_TICK = 887272; // the widest possible range: a "full range" position
 const view = { filter: 'all' };
 // Loaded positions and the state of the last load.
 const state = { status: 'idle', rows: [], error: '', warning: '', at: 0 };
-const tokenInfo = new Map(); // token address -> { symbol, decimals }
+const tokenInfo = new Map(); // "chainId:token address" -> { symbol, decimals }
 let loading = false;
 
-// Builds one row from a position, its pool's current state and the token prices.
-function buildRow(p, pool, prices) {
+const tokenKey = (chain, address) => `${chain.id}:${address}`;
+
+// Builds one row from a position, its pool's current state and the token prices on its chain.
+function buildRow(p, pool, prices, chain) {
   if (!pool) return null;
-  const m0 = tokenInfo.get(p.token0) ?? { symbol: '?', decimals: 18 };
-  const m1 = tokenInfo.get(p.token1) ?? { symbol: '?', decimals: 18 };
+  const m0 = tokenInfo.get(tokenKey(chain, p.token0)) ?? { symbol: '?', decimals: 18 };
+  const m1 = tokenInfo.get(tokenKey(chain, p.token1)) ?? { symbol: '?', decimals: 18 };
   const raw = positionAmounts(p, pool.sqrtPrice);
   const a0 = raw.a0 / 10 ** m0.decimals;
   const a1 = raw.a1 / 10 ** m1.decimals;
@@ -26,6 +28,7 @@ function buildRow(p, pool, prices) {
   const value = priced ? a0 * p0 + a1 * p1 : null;
   const fees = priced ? (Number(p.owed0) / 10 ** m0.decimals) * p0 + (Number(p.owed1) / 10 ** m1.decimals) * p1 : null;
   return {
+    chain: chain.name,
     tokenId: p.tokenId,
     owner: p.label,
     pair: `${m0.symbol} / ${m1.symbol}`,
@@ -40,11 +43,40 @@ function buildRow(p, pool, prices) {
     value,
     fees,
     share0: value ? (a0 * p0) / value : null,
-    url: `https://app.uniswap.org/positions/v3/ethereum/${p.tokenId}`,
+    url: chain.app ? `https://app.uniswap.org/positions/v3/${chain.app}/${p.tokenId}` : null,
   };
 }
 
-// Reads every wallet's positions, their pools and the token prices.
+// Reads one chain: every wallet's positions there, their pools and the token prices.
+async function readChain(chain, node, wallets) {
+  const perWallet = await Promise.all(wallets.map(async (w) => (await readPositions(chain, node, w.address)).map((p) => ({ ...p, label: w.label || w.address }))));
+  const positions = perWallet.flat();
+
+  const tokens = [...new Set(positions.flatMap((p) => [p.token0, p.token1]))];
+  await Promise.all(tokens.filter((t) => !tokenInfo.has(tokenKey(chain, t))).map(async (t) => tokenInfo.set(tokenKey(chain, t), await tokenMeta(node, t))));
+
+  const pools = new Map();
+  const poolKeys = [...new Set(positions.map((p) => `${p.token0}|${p.token1}|${p.fee}`))];
+  await Promise.all(poolKeys.map(async (key) => {
+    const [token0, token1, fee] = key.split('|');
+    pools.set(key, await poolState(chain, node, { token0, token1, fee: Number(fee) }).catch(() => null));
+  }));
+
+  let prices = {};
+  let warning = '';
+  try {
+    prices = await usdPrices(chain, tokens);
+  } catch (err) {
+    warning = `${chain.name} token prices are unavailable (${err.message}), so values are not shown.`;
+  }
+
+  const rows = positions
+    .map((p) => buildRow(p, pools.get(`${p.token0}|${p.token1}|${p.fee}`), prices, chain))
+    .filter(Boolean);
+  return { rows, warning };
+}
+
+// Reads every enabled chain in parallel. A chain that fails is reported and does not stop the others.
 async function load(store) {
   if (loading) return;
   loading = true;
@@ -53,32 +85,14 @@ async function load(store) {
   store.refresh();
   try {
     const cfg = store.get('settings').uniswap ?? {};
-    const node = cfg.node || DEFAULT_NODE;
     const wallets = (cfg.wallets ?? []).filter((w) => isAddress(w.address));
-    const perWallet = await Promise.all(wallets.map(async (w) => (await readPositions(node, w.address)).map((p) => ({ ...p, label: w.label || w.address }))));
-    const positions = perWallet.flat();
+    const chains = CHAINS.map((chain) => ({ chain, ...chainSettings(cfg, chain) })).filter((c) => c.enabled);
+    const results = await Promise.all(chains.map(({ chain, node }) => readChain(chain, node, wallets)
+      .catch((err) => ({ rows: [], warning: `${chain.name} could not be read: ${err.message}` }))));
 
-    const tokens = [...new Set(positions.flatMap((p) => [p.token0, p.token1]))];
-    await Promise.all(tokens.filter((t) => !tokenInfo.has(t)).map(async (t) => tokenInfo.set(t, await tokenMeta(node, t))));
-
-    const pools = new Map();
-    const poolKeys = [...new Set(positions.map((p) => `${p.token0}|${p.token1}|${p.fee}`))];
-    await Promise.all(poolKeys.map(async (key) => {
-      const [token0, token1, fee] = key.split('|');
-      pools.set(key, await poolState(node, { token0, token1, fee: Number(fee) }).catch(() => null));
-    }));
-
-    let prices = {};
-    state.warning = '';
-    try {
-      prices = await usdPrices(tokens);
-    } catch (err) {
-      state.warning = `Token prices are unavailable (${err.message}), so values are not shown.`;
-    }
-
-    state.rows = positions
-      .map((p) => buildRow(p, pools.get(`${p.token0}|${p.token1}|${p.fee}`), prices))
-      .filter(Boolean)
+    state.warning = results.map((r) => r.warning).filter(Boolean).join(' ');
+    state.rows = results
+      .flatMap((r) => r.rows)
       .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
     state.status = 'ok';
     state.at = Date.now();
@@ -124,13 +138,14 @@ function draw(root, store) {
   const wallets = (cfg.wallets ?? []).filter((w) => isAddress(w.address));
   if (!wallets.length) {
     return root.replaceChildren(h('div', { class: 'stack-lg' },
-      h('h2', null, 'LP positions'),
+      h('h2', null, 'Liquidity Pools'),
       setupBanner('uniswap', 'Add a wallet address in Settings to see its Uniswap positions.')));
   }
   if (state.status === 'idle' || (state.status === 'ok' && Date.now() - state.at > STALE_MS)) {
     setTimeout(() => load(store), 0);
   }
 
+  const chainCount = CHAINS.filter((chain) => chainSettings(cfg, chain).enabled).length;
   const rows = state.rows;
   const inRange = rows.filter((r) => r.inRange).length;
   const shown = view.filter === 'in' ? rows.filter((r) => r.inRange) : view.filter === 'out' ? rows.filter((r) => !r.inRange) : rows;
@@ -148,12 +163,14 @@ function draw(root, store) {
   root.replaceChildren(h('div', { class: 'stack-lg lp' },
     h('div', { class: 'row between lp-head' },
       h('div', null,
-        h('h2', null, 'LP positions'),
-        h('p', { class: 'muted small' }, 'Your Uniswap v3 positions on Ethereum, read from the chain. Read-only.')),
-      h('button', { type: 'button', class: 'btn-small', disabled: state.status === 'loading', onclick: () => load(store) }, icon('refresh'), state.status === 'loading' ? 'Reading…' : 'Refresh')),
+        h('h2', null, 'Liquidity Pools'),
+        h('p', { class: 'muted small' }, `Your Uniswap v3 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`)),
+      h('button', { type: 'button', class: 'btn-small', disabled: state.status === 'loading' || chainCount === 0, onclick: () => load(store) }, icon('refresh'), state.status === 'loading' ? 'Reading…' : 'Refresh')),
 
+    notice({ tone: 'info', text: 'Uniswap v4 positions are not read yet. Only v3 positions appear here.' }),
     state.warning ? notice({ tone: 'info', text: state.warning }) : null,
     state.status === 'error' ? notice({ text: `The positions could not be read: ${state.error}` }) : null,
+    chainCount === 0 ? notice({ tone: 'info', text: 'No chains are selected. Pick the chains to read in Settings.' }) : null,
 
     h('div', { class: 'lp-stats' },
       stat('Total liquidity', usdOrDash(rows.some((r) => r.value !== null) ? totalValue : null)),
@@ -179,19 +196,21 @@ function draw(root, store) {
               h('tr', null,
                 h('td', null,
                   h('strong', null, r.pair),
-                  h('div', { class: 'muted small' }, `v3 · ${r.feePct}% · #${r.tokenId}`),
+                  h('div', { class: 'muted small' }, `${r.chain} · v3 · ${r.feePct}% · #${r.tokenId}`),
                   h('div', { class: 'muted small' }, r.owner)),
                 h('td', null, rangeBar(r)),
                 h('td', null, distribution(r)),
                 h('td', { class: 'num' }, usdOrDash(r.value)),
                 h('td', { class: 'num' }, usdOrDash(r.fees)),
-                h('td', null, h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn', title: 'Open on Uniswap', 'aria-label': `Open position ${r.tokenId} on Uniswap` }, icon('link'))))))))
+                h('td', null, r.url
+                  ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn', title: 'Open on Uniswap', 'aria-label': `Open position ${r.tokenId} on Uniswap` }, icon('link'))
+                  : null))))))
       : empty(state.status === 'loading' ? 'Reading your positions…' : 'No open positions for these wallets.')));
 }
 
 export default {
   id: 'positions',
-  title: 'LP positions',
+  title: 'Liquidity Pools',
   icon: 'wallet',
   collection: null,
   defaults: {},

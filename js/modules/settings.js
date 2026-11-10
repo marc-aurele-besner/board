@@ -4,7 +4,7 @@ import { configure, checkGithubToken } from '../github.js';
 import { connect, disconnect, isConnected } from '../google.js';
 import { editText } from '../inline.js';
 import { modelChip } from '../model-picker.js';
-import { isAddress, DEFAULT_NODE } from '../uniswap.js';
+import { isAddress, CHAINS, chainSettings, savedNode } from '../uniswap.js';
 
 const COLLECTION = 'settings';
 const OPENROUTER_CHECK = 'https://openrouter.ai/api/v1/auth/key';
@@ -471,13 +471,13 @@ export function applyAppearance() {
 
 const uniswapView = { message: '', ok: null };
 
-// Public wallet addresses whose Uniswap v3 positions the LP tab reads, and the node to read them from.
+// Public wallet addresses whose Uniswap v3 positions the LP tab reads, and the chains and nodes to read them from.
 function uniswapCard(store) {
-  const cfg = store.get(COLLECTION).uniswap ?? { wallets: [], node: '' };
+  const cfg = store.get(COLLECTION).uniswap ?? { wallets: [], chains: {} };
   const wallets = cfg.wallets ?? [];
   const save = (patch) => {
     store.update(COLLECTION, (d) => {
-      d.uniswap = { wallets: [], node: '', ...d.uniswap, ...patch };
+      d.uniswap = { wallets: [], chains: {}, ...d.uniswap, ...patch };
     });
     store.refresh();
   };
@@ -499,12 +499,25 @@ function uniswapCard(store) {
     }
     store.refresh();
   };
-  const saveNode = (e) => {
+  const saveChains = (e) => {
     e.preventDefault();
-    const node = String(new FormData(e.currentTarget).get('node') ?? '').trim();
-    save({ node });
-    uniswapView.ok = true;
-    uniswapView.message = node ? 'Node saved.' : 'Using the default public node.';
+    const form = new FormData(e.currentTarget);
+    const chains = {};
+    const bad = [];
+    for (const chain of CHAINS) {
+      const node = String(form.get(`node-${chain.id}`) ?? '').trim();
+      if (node && !/^https?:\/\//i.test(node)) bad.push(chain.name);
+      chains[chain.id] = { enabled: form.get(`on-${chain.id}`) === 'on', node };
+    }
+    if (bad.length) {
+      uniswapView.ok = false;
+      uniswapView.message = `Node addresses start with https://. Check: ${bad.join(', ')}.`;
+    } else {
+      // node: '' drops the Ethereum-only field kept from before the chains list.
+      save({ chains, node: '' });
+      uniswapView.ok = true;
+      uniswapView.message = 'Chains saved.';
+    }
     store.refresh();
   };
 
@@ -520,10 +533,17 @@ function uniswapCard(store) {
       h('input', { name: 'label', placeholder: 'Label (optional)', 'aria-label': 'Wallet label' }),
       h('input', { name: 'address', placeholder: '0x…', spellcheck: false, 'aria-label': 'Wallet address' }),
       h('button', { type: 'submit', class: 'btn-small' }, 'Add wallet')),
-    h('form', { class: 'row', onsubmit: saveNode },
-      h('input', { name: 'node', value: cfg.node ?? '', placeholder: DEFAULT_NODE, spellcheck: false, 'aria-label': 'Ethereum node URL' }),
-      h('button', { type: 'submit', class: 'btn-small' }, 'Save node')),
-    h('p', { class: 'muted small' }, 'Node: the Ethereum JSON-RPC address the board reads from. Leave it empty to use the default public node.'),
+    h('form', { class: 'stack', onsubmit: saveChains },
+      h('p', { class: 'muted small' }, 'Chains: the networks the LP tab reads. A node is the JSON-RPC address to read from. Leave it empty to use the public node shown as the placeholder.'),
+      CHAINS.map((chain) => {
+        const s = chainSettings(cfg, chain);
+        return h('div', { class: 'row chain-row' },
+          h('label', { class: 'row chain-name' },
+            h('input', { type: 'checkbox', name: `on-${chain.id}`, checked: s.enabled }),
+            h('span', null, chain.name)),
+          h('input', { name: `node-${chain.id}`, value: savedNode(cfg, chain), placeholder: chain.rpc, spellcheck: false, 'aria-label': `${chain.name} node URL` }));
+      }),
+      h('button', { type: 'submit', class: 'btn-small' }, 'Save chains')),
     uniswapView.message ? notice({ tone: uniswapView.ok ? 'info' : 'error', text: uniswapView.message }) : null);
 }
 
@@ -791,7 +811,7 @@ export default {
   icon: 'settings',
   hidden: true, // opened from the gear icon in the top bar
   collection: COLLECTION,
-  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], node: '' }, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) } },
+  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) } },
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),
   restore: (p = {}) => {

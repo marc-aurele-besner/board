@@ -1,8 +1,21 @@
-// Uniswap v3 liquidity positions, read straight from an Ethereum node. Read-only: only public addresses are used,
+// Uniswap v3 liquidity positions, read straight from each chain's node. Read-only: only public addresses are used,
 // never keys. Token prices come from CoinGecko's public price endpoint.
-const DEFAULT_RPC = 'https://ethereum.publicnode.com';
-const POSITION_MANAGER = '0xC36442b4a4522E871399CD717aBDD847Ab11FE88';
-const FACTORY = '0x1F98431c8aD98523631AE4a59f267346ea31F984';
+// Uniswap v4 is not read yet: its position manager is a plain ERC-721, so positions cannot be listed with a call.
+
+// The chains the LP tab reads. Each address is Uniswap's own v3 deployment on that chain, checked on-chain.
+// The same address is not used on every chain, so every chain carries its own.
+export const CHAINS = [
+  { id: 1, name: 'Ethereum', rpc: 'https://ethereum.publicnode.com', coingecko: 'ethereum', app: 'ethereum', factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88' },
+  { id: 8453, name: 'Base', rpc: 'https://base.publicnode.com', coingecko: 'base', app: 'base', factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD', positions: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1' },
+  { id: 42161, name: 'Arbitrum One', rpc: 'https://arbitrum-one-rpc.publicnode.com', coingecko: 'arbitrum-one', app: 'arbitrum', factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88' },
+  { id: 10, name: 'Optimism', rpc: 'https://optimism-rpc.publicnode.com', coingecko: 'optimistic-ethereum', app: 'optimism', factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88' },
+  { id: 137, name: 'Polygon', rpc: 'https://polygon-bor-rpc.publicnode.com', coingecko: 'polygon-pos', app: 'polygon', factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88' },
+  { id: 56, name: 'BNB Chain', rpc: 'https://bsc-rpc.publicnode.com', coingecko: 'binance-smart-chain', app: 'bnb', factory: '0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7', positions: '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613' },
+  { id: 43114, name: 'Avalanche', rpc: 'https://avalanche-c-chain-rpc.publicnode.com', coingecko: 'avalanche', app: 'avalanche', factory: '0x740b1c1de25031C31FF4fC9A62f554A55cdC1baD', positions: '0x655C406EBFa14EE2006250925e54ec43AD184f8B' },
+  { id: 130, name: 'Unichain', rpc: 'https://unichain-rpc.publicnode.com', coingecko: 'unichain', app: 'unichain', factory: '0x1f98400000000000000000000000000000000003', positions: '0x943e6e07a7e8e791dafc44083e54041d743c46e9' },
+  { id: 4663, name: 'Robinhood Chain', rpc: 'https://rpc.mainnet.chain.robinhood.com', coingecko: 'robinhood', app: null, factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa', positions: '0x73991a25c818bf1f1128deaab1492d45638de0d3' },
+];
+
 const SEL = {
   name: '0x06fdde03',
   balanceOf: '0x70a08231',
@@ -15,8 +28,6 @@ const SEL = {
 };
 const MAX_POSITIONS = 40;
 const Q96 = 2 ** 96;
-
-export const DEFAULT_NODE = DEFAULT_RPC;
 
 const pad = (hex) => hex.replace(/^0x/, '').toLowerCase().padStart(64, '0');
 const words = (hex) => {
@@ -43,16 +54,27 @@ const shortAddress = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
 export const isAddress = (s) => /^0x[0-9a-fA-F]{40}$/.test(String(s ?? '').trim());
 
-// One read-only call to an Ethereum node.
+// The node a chain is read from as saved in Settings, or '' when the default public node is used.
+// Ethereum's node was saved before the chains list existed, so it falls back to that field.
+export function savedNode(cfg, chain) {
+  return cfg?.chains?.[chain.id]?.node || (chain.id === 1 ? cfg?.node : '') || '';
+}
+
+// Whether a chain is read, and the node it is read from.
+export function chainSettings(cfg, chain) {
+  return { enabled: cfg?.chains?.[chain.id]?.enabled !== false, node: savedNode(cfg, chain) || chain.rpc };
+}
+
+// One read-only call to a chain's node.
 export async function rpcCall(node, to, data) {
-  const res = await fetch(node || DEFAULT_RPC, {
+  const res = await fetch(node, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to, data }, 'latest'] }),
   });
-  if (!res.ok) throw new Error(`The Ethereum node answered ${res.status}.`);
+  if (!res.ok) throw new Error(`The node answered ${res.status}.`);
   const json = await res.json();
-  if (json.error) throw new Error(`The Ethereum node refused the call: ${json.error.message ?? 'error'}.`);
+  if (json.error) throw new Error(`The node refused the call: ${json.error.message ?? 'error'}.`);
   return json.result ?? '0x';
 }
 
@@ -66,22 +88,18 @@ function decodeString(hex) {
   return ascii(w[0] ?? '');
 }
 
-// The node's name for the position manager: a quick check that the node and the contract are reachable.
-export async function checkNode(node) {
-  return decodeString(await rpcCall(node, POSITION_MANAGER, SEL.name));
-}
-
-// Every position with liquidity or unclaimed fees that a public address owns (up to MAX_POSITIONS).
-export async function readPositions(node, owner) {
+// Every position with liquidity or unclaimed fees that a public address owns on a chain (up to MAX_POSITIONS).
+export async function readPositions(chain, node, owner) {
   const ownerWord = pad(owner);
-  const count = Number(big(words(await rpcCall(node, POSITION_MANAGER, SEL.balanceOf + ownerWord))[0]));
+  const count = Number(big(words(await rpcCall(node, chain.positions, SEL.balanceOf + ownerWord))[0]));
   const indexes = Array.from({ length: Math.min(count, MAX_POSITIONS) }, (_, i) => i);
-  const ids = await Promise.all(indexes.map(async (i) => big(words(await rpcCall(node, POSITION_MANAGER, SEL.tokenOfOwnerByIndex + ownerWord + pad(i.toString(16))))[0])));
-  const raw = await Promise.all(ids.map((id) => rpcCall(node, POSITION_MANAGER, SEL.positions + pad(id.toString(16)))));
+  const ids = await Promise.all(indexes.map(async (i) => big(words(await rpcCall(node, chain.positions, SEL.tokenOfOwnerByIndex + ownerWord + pad(i.toString(16))))[0])));
+  const raw = await Promise.all(ids.map((id) => rpcCall(node, chain.positions, SEL.positions + pad(id.toString(16)))));
   return raw
     .map((hex, i) => {
       const w = words(hex);
       return {
+        chainId: chain.id,
         tokenId: ids[i].toString(),
         owner,
         token0: addressOf(w[2]),
@@ -98,8 +116,8 @@ export async function readPositions(node, owner) {
 }
 
 // The pool a position is in: its current price (sqrt, as a float) and tick. null when the pool does not exist.
-export async function poolState(node, p) {
-  const pool = addressOf(words(await rpcCall(node, FACTORY, SEL.getPool + pad(p.token0) + pad(p.token1) + pad(p.fee.toString(16))))[0]);
+export async function poolState(chain, node, p) {
+  const pool = addressOf(words(await rpcCall(node, chain.factory, SEL.getPool + pad(p.token0) + pad(p.token1) + pad(p.fee.toString(16))))[0]);
   if (/^0x0+$/.test(pool)) return null;
   const s = words(await rpcCall(node, pool, SEL.slot0));
   return { pool, sqrtPrice: Number(big(s[0])) / Q96, tick: Number(signed(s[1])) };
@@ -115,11 +133,12 @@ export async function tokenMeta(node, address) {
   }
 }
 
-// USD price of each token address, from CoinGecko. Tokens it does not know are left out.
-export async function usdPrices(addresses) {
+// USD price of each token address on a chain, keyed by lowercase address, from CoinGecko.
+// Tokens it does not know are left out.
+export async function usdPrices(chain, addresses) {
   const list = [...new Set(addresses.map((a) => a.toLowerCase()))];
   if (!list.length) return {};
-  const res = await fetch(`https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses=${list.join(',')}&vs_currencies=usd`);
+  const res = await fetch(`https://api.coingecko.com/api/v3/simple/token_price/${chain.coingecko}?contract_addresses=${list.join(',')}&vs_currencies=usd`);
   if (!res.ok) throw new Error(`The price service answered ${res.status}.`);
   const data = await res.json();
   const out = {};
