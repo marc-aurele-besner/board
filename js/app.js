@@ -1,0 +1,108 @@
+// Shell: folder connection, hash router, and top navigation.
+import { fsSupported, pickFolder, loadHandle, hasPermission } from './storage.js';
+import { createStore } from './store.js';
+import { h } from './ui.js';
+import { modules } from './modules/index.js';
+
+const app = document.getElementById('app');
+const STATUS_LABELS = { saved: 'Saved', saving: 'Saving…', error: 'Save failed' };
+
+let store = null;
+let pendingHandle = null; // remembered folder that still needs permission
+let connectError = '';
+
+const collectionDefaults = () => Object.fromEntries(modules.map((m) => [m.collection, m.defaults]));
+const currentModule = () => modules.find((m) => m.id === location.hash.replace(/^#\//, '')) ?? modules[0];
+
+function render() {
+  if (!store) return renderConnect();
+  const mod = currentModule();
+  const main = h('main', { class: 'view' });
+  mod.render(main, store);
+  app.replaceChildren(
+    h('header', { class: 'topbar' },
+      h('div', { class: 'brand' }, 'Board'),
+      h('nav', { class: 'tabs' },
+        modules.map((m) => h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab' }, `${m.icon} ${m.title}`))),
+      h('span', { id: 'save-status', class: `status ${store.status}` }, STATUS_LABELS[store.status])),
+    main,
+  );
+  main.querySelector('[data-autofocus]')?.focus();
+}
+
+function updateStatus(status) {
+  const el = document.getElementById('save-status');
+  if (!el) return;
+  el.textContent = STATUS_LABELS[status];
+  el.className = `status ${status}`;
+}
+
+function renderConnect() {
+  if (!fsSupported()) {
+    app.replaceChildren(h('section', { class: 'card connect' },
+      h('h1', null, 'Board'),
+      h('p', { class: 'error' }, 'This app needs the File System Access API. Open it in Chrome or Edge.')));
+    return;
+  }
+  const actions = [];
+  if (pendingHandle) {
+    actions.push(h('button', { class: 'primary', onclick: reconnect }, `Reconnect “${pendingHandle.name}”`));
+    actions.push(h('button', { onclick: chooseFolder }, 'Pick another folder'));
+  } else {
+    actions.push(h('button', { class: 'primary', onclick: chooseFolder }, 'Choose data folder'));
+  }
+  app.replaceChildren(h('section', { class: 'card connect' },
+    h('h1', null, 'Board'),
+    h('p', null, 'Your data lives as plain JSON files in a folder you choose. Pick a folder outside this repo.'),
+    connectError ? h('p', { class: 'error' }, connectError) : null,
+    h('div', { class: 'actions' }, actions)));
+}
+
+async function open(handle) {
+  const next = createStore(handle, collectionDefaults());
+  try {
+    await next.load();
+  } catch (err) {
+    connectError = `Could not read data: ${err.message}`;
+    return renderConnect();
+  }
+  store = next;
+  store.subscribe(render);
+  store.onStatus(updateStatus);
+  connectError = '';
+  render();
+}
+
+async function chooseFolder() {
+  try {
+    await open(await pickFolder());
+  } catch (err) {
+    if (err.name !== 'AbortError') connectError = `Could not open folder: ${err.message}`;
+    renderConnect();
+  }
+}
+
+async function reconnect() {
+  try {
+    if (await hasPermission(pendingHandle, true)) return open(pendingHandle);
+    connectError = 'Permission was not granted.';
+  } catch (err) {
+    connectError = `Could not reconnect: ${err.message}`;
+  }
+  renderConnect();
+}
+
+async function boot() {
+  window.addEventListener('hashchange', () => store && render());
+  window.addEventListener('beforeunload', () => store?.flush());
+  if (!fsSupported()) return renderConnect();
+  try {
+    pendingHandle = await loadHandle();
+  } catch {
+    pendingHandle = null;
+  }
+  if (pendingHandle && (await hasPermission(pendingHandle))) return open(pendingHandle);
+  renderConnect();
+}
+
+boot();
