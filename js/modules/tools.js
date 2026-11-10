@@ -7,9 +7,9 @@ import { makeTask } from '../capture.js';
 import { toast } from '../toast.js';
 
 const COLLECTION = 'tools';
-const TABS = [['health', 'Website health', 'globe'], ['ssl', 'SSL and domains', 'shield'], ['dns', 'DNS and email', 'mail'], ['meta', 'Metadata preview', 'link']];
+const TABS = [['health', 'Website health', 'globe'], ['ssl', 'SSL and domains', 'shield'], ['dns', 'DNS and email', 'mail'], ['crawl', 'Crawl files', 'file'], ['meta', 'Metadata preview', 'link']];
 // What "Check all now" looks up on each tab.
-const TAB_PARTS = { health: ['health'], ssl: ['ssl', 'domain'], dns: ['dns'] };
+const TAB_PARTS = { health: ['health'], ssl: ['ssl', 'domain'], dns: ['dns'], crawl: ['crawl'] };
 const EVERY = [[15, '15 minutes'], [60, 'hour'], [360, '6 hours'], [1440, 'day']];
 const STATUS = { up: ['Up', 'done'], slow: ['Slow', 'medium'], down: ['Down', 'high'] };
 
@@ -185,6 +185,71 @@ function dnsTab(store, sites) {
     h('p', { class: 'muted small' }, 'Records come from Cloudflare’s public DNS resolver (DNS over HTTPS); only the domain names are sent. DKIM keys sit under a name the mail service picks, so only common selectors are tried: “None found” does not mean the domain signs nothing.'));
 }
 
+// --- Crawl files ---
+
+// What each file is for, and what is worth knowing about it once found.
+const CRAWL_FILES = [
+  ['robots', 'robots.txt', 'Tells crawlers what they may read.', (f) => [
+    f.blocksSearch ? pillOf('Blocks Google or Bing', 'high') : f.blocksAll ? pillOf('Blocks unnamed crawlers', 'medium') : pillOf('Search engines allowed', 'done'),
+    f.aiBlocked?.length ? `AI crawlers blocked: ${f.aiBlocked.join(', ')}` : 'No AI crawler blocked by name',
+    f.sitemaps?.length ? `Points to ${f.sitemaps.length} sitemap${f.sitemaps.length === 1 ? '' : 's'}` : 'Names no sitemap',
+  ]],
+  ['sitemap', 'Sitemap', 'Lists the pages search engines should find.', (f) => [
+    f.indexes ? `Index of ${f.indexes} sitemap${f.indexes === 1 ? '' : 's'}` : `${f.urls} page${f.urls === 1 ? '' : 's'}`,
+    f.lastmod ? `Last changed ${f.lastmod}` : 'No change dates',
+    h('a', { href: f.url, target: '_blank', rel: 'noopener', class: 'small' }, f.url),
+  ]],
+  ['llms', 'llms.txt', 'A short guide to the site for AI assistants.', (f) => [f.title ? `Titled “${f.title}”` : 'No title line']],
+  ['security', 'security.txt', 'Says where to report a security problem.', (f) => [
+    f.contact?.length ? `Contact: ${f.contact.join(', ')}` : 'No contact',
+    !f.expires ? 'No expiry date' : daysUntil(f.expires) < 0 ? pillOf(`Expired on ${f.expires}`, 'high') : `Valid until ${f.expires}`,
+  ]],
+];
+
+function crawlTab(store, sites) {
+  const p = pickedSite(sites);
+  const c = siteData(store, p.id).crawl;
+  const host = hostOf(p.website);
+  const busy = view.busy.has(p.id) || view.busy.has('all');
+  const read = h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => check(store, p, ['crawl']) }, icon('refresh'), busy ? 'Reading…' : c ? 'Read again' : 'Read the files');
+  if (!c?.robots) {
+    return h('div', { class: 'stack-lg' }, siteChips(store, sites, p),
+      c?.error ? notice({ text: c.error }) : null,
+      h('div', { class: 'card stack' }, h('p', { class: 'muted' }, `Read the files on ${host} that crawlers and AI assistants look for.`), h('div', null, read)));
+  }
+  const missing = CRAWL_FILES.filter(([k]) => !c[k].found && !c[k].unread).map(([, name]) => name);
+  const present = CRAWL_FILES.filter(([k]) => c[k].found).length;
+  return h('div', { class: 'stack-lg' }, siteChips(store, sites, p),
+    c.robots.blocksSearch
+      ? notice({ text: `robots.txt on ${host} blocks search engines from the whole site, so it drops out of search results.`, actions: [taskCell(store, p, 'crawl', `Let search engines crawl ${host}`)] })
+      : null,
+    h('section', { class: 'card stack' },
+      h('div', { class: 'row between' }, h('h3', null, `Files found on ${host}`), read),
+      h('div', { class: 'meter' }, h('span', { style: { width: `${(present / CRAWL_FILES.length) * 100}%` } })),
+      h('p', { class: 'muted small' }, `${present} of ${CRAWL_FILES.length} files present · read ${timeOf(c.at)}${c.error ? ` · last try failed: ${c.error}` : ''}`),
+      missing.length
+        ? h('div', null, h('button', {
+            type: 'button',
+            class: 'btn-small',
+            onclick: () => {
+              store.update('todos', (d) => d.items.push(makeTask({ text: `Add the missing crawl files on ${host}`, description: `Missing: ${missing.join(', ')}`, projectId: p.id, priority: 'low' })));
+              toast(`Task added to ${p.name}`);
+            },
+          }, 'Create a task for the missing files'))
+        : null),
+    h('div', { class: 'crawl-grid' }, CRAWL_FILES.map(([key, name, why, facts]) => {
+      const f = c[key];
+      return h('article', { class: 'card stack' },
+        h('div', { class: 'row' }, h('span', { class: f.found ? 'tick ok' : 'tick miss' }, icon(f.found ? 'check' : 'x')), h('strong', null, name)),
+        h('p', { class: 'muted small' }, why),
+        f.found
+          ? h('ul', { class: 'crawl-facts' }, facts(f).map((x) => h('li', null, x)))
+          : h('p', { class: 'small' }, f.unread ? `Could not be read: ${f.unread}` : f.note ?? (f.status ? `Not found (the site answered ${f.status}).` : 'Not found.')),
+        f.found ? h('details', null, h('summary', { class: 'muted small' }, 'Show the file'), h('pre', { class: 'readme' }, f.raw)) : null);
+    })),
+    h('p', { class: 'muted small' }, 'The files are read through r.jina.ai, the page reader also used for share tags; only their addresses are sent. Long files are shown in part.'));
+}
+
 // --- Metadata preview ---
 
 // How a shared link looks on one network. The picture is the site's own og:image, loaded from the site.
@@ -206,11 +271,10 @@ function shareCard(kind, p, m) {
   return h('div', { class: 'share imsg' }, image(), h('div', { class: 'share-text' }, h('strong', null, title), h('span', { class: 'muted small' }, host)));
 }
 
-function metaTab(store, sites) {
-  const p = sites.find((x) => x.id === view.project) ?? sites[0];
-  const m = siteData(store, p.id).meta;
-  const busy = view.busy.has(p.id);
-  const chips = h('div', { class: 'chips' }, sites.map((x) =>
+// The tabs that show one site at a time pick it with a row of chips.
+const pickedSite = (sites) => sites.find((x) => x.id === view.project) ?? sites[0];
+const siteChips = (store, sites, p) =>
+  h('div', { class: 'chips' }, sites.map((x) =>
     h('button', {
       type: 'button',
       class: x.id === p.id ? 'chip active' : 'chip',
@@ -219,6 +283,12 @@ function metaTab(store, sites) {
         store.refresh();
       },
     }, x.name)));
+
+function metaTab(store, sites) {
+  const p = pickedSite(sites);
+  const m = siteData(store, p.id).meta;
+  const busy = view.busy.has(p.id);
+  const chips = siteChips(store, sites, p);
   const read = h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => check(store, p, ['meta']) }, icon('refresh'), busy ? 'Reading…' : m ? 'Read again' : 'Read the page');
   if (!m || (m.error && !m.title && !m.ogTitle)) {
     return h('div', { class: 'stack-lg' }, chips,
@@ -261,7 +331,7 @@ function draw(root, store) {
   const all = view.busy.has('all');
   const body = !sites.length
     ? h('div', { class: 'card stack' }, empty('No project has a website yet. Add one on a project page and it appears here.'), h('div', null, h('a', { href: '#/projects', class: 'btn-link' }, 'Open Projects')))
-    : view.tab === 'ssl' ? sslTab(store, sites) : view.tab === 'dns' ? dnsTab(store, sites) : view.tab === 'meta' ? metaTab(store, sites) : healthTab(store, sites);
+    : view.tab === 'ssl' ? sslTab(store, sites) : view.tab === 'dns' ? dnsTab(store, sites) : view.tab === 'crawl' ? crawlTab(store, sites) : view.tab === 'meta' ? metaTab(store, sites) : healthTab(store, sites);
 
   root.replaceChildren(
     h('div', { class: 'stack-lg tools' },
@@ -312,7 +382,7 @@ export default {
   collection: COLLECTION,
   defaults: TOOLS_DEFAULTS,
   render: draw,
-  serialize: () => ({ tab: view.tab === 'health' ? '' : view.tab, project: view.tab === 'meta' ? view.project : '' }),
+  serialize: () => ({ tab: view.tab === 'health' ? '' : view.tab, project: view.tab === 'meta' || view.tab === 'crawl' ? view.project : '' }),
   restore: (p = {}) => {
     view.tab = TABS.some(([k]) => k === p.tab) ? p.tab : 'health';
     view.project = p.project || '';

@@ -6,7 +6,7 @@
 //   - rdap.org: the registries' own lookup protocol, for the domain's expiry and registrar.
 //   - api.certspotter.com, then crt.sh: the public certificate transparency logs, for the newest certificate
 //     issued for the host. The second is asked only when the first does not answer.
-//   - r.jina.ai: the page reader already used for recipes, for the home page's HTML.
+//   - r.jina.ai: the page reader already used for recipes, for the home page's HTML and the crawl files.
 //   - cloudflare-dns.com: DNS over HTTPS, for the records that say who may send mail and issue certificates.
 
 const TIMEOUT_MS = 12000;
@@ -159,6 +159,91 @@ export async function checkDns(host) {
     // An empty key ("p=") is a revoked selector, often a wildcard answering for every name.
     dkim: DKIM_SELECTORS.filter((_, i) => dkim[i].some((t) => /\bp=[A-Za-z0-9+/]/.test(t))),
   };
+}
+
+// --- Crawl files ---
+
+const RAW_KEEP = 4000; // characters of each file kept, enough to read it without bloating tools.json
+// Crawlers that train or answer with AI, reported when robots.txt names them in a group that blocks the site.
+const AI_BOTS = ['GPTBot', 'ClaudeBot', 'Google-Extended', 'PerplexityBot', 'CCBot'];
+
+// A file read through the page reader. Its JSON answer carries the site's own status, which the plain answer hides.
+async function readFile(url) {
+  const res = await timed(`${READER}${url}`, { headers: { accept: 'application/json', 'X-Return-Format': 'text' } });
+  if (!res.ok) throw new Error(`The page reader answered ${res.status}.`);
+  const { data = {} } = await res.json();
+  return { status: data.httpStatus ?? 200, text: String(data.text ?? '').trim() };
+}
+
+// Many sites answer every address with their home page, so a file counts as found only if it looks like one.
+// A file the reader could not fetch is marked unread rather than missing.
+async function readKind(url, looksRight) {
+  let answer;
+  try {
+    answer = await readFile(url);
+  } catch (err) {
+    return { url, found: false, unread: err.name === 'AbortError' ? 'The reader took too long.' : err.message };
+  }
+  const { status, text } = answer;
+  if (status >= 400) return { url, found: false, status };
+  if (!looksRight(text)) return { url, found: false, status, note: 'The site answered with a page, not this file.' };
+  return { url, found: true, status, text, raw: text.slice(0, RAW_KEEP) };
+}
+
+// Groups of user agents and their rules. An agent follows its own group, or the "*" group if it has none.
+function parseRobots(text) {
+  const groups = [];
+  const sitemaps = [];
+  let group = null;
+  let agentLine = false;
+  for (const line of text.split('\n')) {
+    const m = line.replace(/#.*/, '').match(/^\s*([A-Za-z-]+)\s*:\s*(.*?)\s*$/);
+    if (!m) continue;
+    const key = m[1].toLowerCase();
+    const value = m[2];
+    if (key === 'user-agent') {
+      if (!agentLine) groups.push((group = { agents: [], allow: [], disallow: [] }));
+      group.agents.push(value.toLowerCase());
+      agentLine = true;
+    } else {
+      agentLine = false;
+      if (key === 'sitemap' && value) sitemaps.push(value);
+      else if (group && (key === 'allow' || key === 'disallow') && value) group[key].push(value);
+    }
+  }
+  const groupOf = (agent) => groups.find((g) => g.agents.includes(agent.toLowerCase())) ?? groups.find((g) => g.agents.includes('*'));
+  const blocks = (g) => Boolean(g && g.disallow.includes('/') && !g.allow.includes('/'));
+  return {
+    sitemaps,
+    blocksSearch: blocks(groupOf('googlebot')) || blocks(groupOf('bingbot')),
+    blocksAll: blocks(groupOf('*')),
+    aiBlocked: AI_BOTS.filter((bot) => blocks(groups.find((g) => g.agents.includes(bot.toLowerCase())))),
+  };
+}
+
+export async function readCrawlFiles(website) {
+  const origin = new URL(website).origin;
+  const [robots, llms, security] = await Promise.all([
+    readKind(`${origin}/robots.txt`, (t) => /^\s*(user-agent|sitemap|disallow|allow)\s*:/im.test(t)),
+    readKind(`${origin}/llms.txt`, (t) => /^#\s+\S/.test(t)),
+    readKind(`${origin}/.well-known/security.txt`, (t) => /^\s*contact\s*:/im.test(t)),
+  ]);
+  const rules = robots.found ? parseRobots(robots.raw) : { sitemaps: [], blocksSearch: false, blocksAll: false, aiBlocked: [] };
+  const sitemap = await readKind(rules.sitemaps[0] ?? `${origin}/sitemap.xml`, (t) => /<(urlset|sitemapindex)\b/.test(t));
+  // Nothing read at all is a failed lookup, so the last good answer is kept.
+  if ([robots, llms, security, sitemap].every((f) => f.unread)) throw new Error(robots.unread);
+  if (sitemap.found) {
+    // Counted on the whole file, not on the part kept.
+    const lastmods = [...sitemap.text.matchAll(/<lastmod>\s*([^<\s]+)/g)].map((m) => m[1]).sort();
+    Object.assign(sitemap, { urls: (sitemap.text.match(/<url\b/g) ?? []).length, indexes: (sitemap.text.match(/<sitemap\b/g) ?? []).length, lastmod: lastmods.at(-1)?.slice(0, 10) ?? '' });
+  }
+  for (const file of [robots, sitemap, llms, security]) delete file.text;
+  if (llms.found) llms.title = llms.raw.match(/^#\s+(.+)/)?.[1]?.trim() ?? '';
+  if (security.found) {
+    security.contact = [...security.raw.matchAll(/^\s*contact\s*:\s*(\S+)/gim)].map((m) => m[1]);
+    security.expires = security.raw.match(/^\s*expires\s*:\s*(\S+)/im)?.[1]?.slice(0, 10) ?? '';
+  }
+  return { robots: { ...robots, ...rules }, sitemap, llms, security };
 }
 
 export const daysUntil = (isoDate) => Math.round((Date.parse(`${isoDate}T00:00:00`) - new Date().setHours(0, 0, 0, 0)) / 86400000);

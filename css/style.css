@@ -1190,6 +1190,11 @@ label.check { cursor: pointer; }
 .tool-table td { vertical-align: middle; }
 .tool-table tr:has(+ .dns-raw) td { border-bottom: 0; padding-bottom: 0; }
 .dns-raw td { padding-top: 2px; }
+.crawl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--gap); align-items: start; }
+.crawl-grid article { min-width: 0; }
+.crawl-facts { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 0.9rem; }
+.crawl-facts a { overflow-wrap: anywhere; }
+.crawl-grid summary { cursor: pointer; }
 .dns-raw summary { cursor: pointer; }
 .dns-records { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 8px 0 4px; }
 .dns-records dt { font-weight: 600; font-size: 0.85rem; }
