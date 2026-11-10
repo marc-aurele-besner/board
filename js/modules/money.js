@@ -5,22 +5,34 @@ import { readPdf } from '../pdf-reader.js';
 
 const COLLECTION = 'finance';
 const TYPES = [['expense', 'Expense'], ['income', 'Income']];
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // View state: the month being shown (YYYY-MM).
 const view = { month: monthKey(todayISO()) };
-// Bill reading: a file is read, the proposed entries are reviewed, then added.
-const receipt = { status: 'idle', items: [], error: '', fileName: '' };
+// A bill is read into charges (the line items) and a bill total. Only the charges become entries.
+const receipt = { status: 'idle', items: [], total: null, vendor: '', error: '', fileName: '' };
 // Monthly spending review (task 6).
 const spend = { month: '', status: 'idle', text: '' };
 
 const round2 = (n) => Math.round(n * 100) / 100;
 const formValues = (form) => Object.fromEntries(new FormData(form));
 
+// Adds entries. Each may carry a project, and `source` names the bill it came from.
 function addEntries(store, list) {
   store.update(COLLECTION, (d) => {
     for (const e of list) {
       const category = e.category || 'Uncategorized';
-      d.entries.push({ id: uid(), date: e.date, type: e.type, amount: e.amount, category, note: e.note || '', created: now() });
+      d.entries.push({
+        id: uid(),
+        date: e.date,
+        type: e.type ?? 'expense',
+        amount: e.amount,
+        category,
+        note: e.note || '',
+        projectId: e.projectId ?? null,
+        source: e.source || '',
+        created: now(),
+      });
       if (!d.categories.some((c) => c.toLowerCase() === category.toLowerCase())) d.categories.push(category);
     }
   });
@@ -50,15 +62,7 @@ function removeEntry(store, id) {
   });
 }
 
-// --- Bills and screenshots (task 7) ---
-
-const receiptPrompt = (categories) => [
-  'You read bills, receipts and bank screenshots.',
-  'Reply with JSON only: an array of objects {"date":"YYYY-MM-DD","type":"expense" or "income","amount":number,"category":string,"note":string}.',
-  'One object per line item, or one for the total when there are no lines. Amounts are positive numbers.',
-  `Use the date printed on the document, or ${todayISO()} if there is none.`,
-  `Prefer these categories when they fit: ${categories.join(', ') || 'none yet'}. Otherwise suggest a short new one.`,
-].join(' ');
+// --- Bills and screenshots ---
 
 // The message parts for a dropped file. A PDF with a text layer is sent as text (any model can read it);
 // a scanned PDF or an image is sent as images (needs a model that reads images).
@@ -66,12 +70,12 @@ async function documentContent(file) {
   const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
   if (isPdf) {
     const pdf = await readPdf(file);
-    const note = pdf.truncated ? ` Only the first ${pdf.images.length || 'few'} pages were read; the document has ${pdf.pages}.` : '';
+    const note = pdf.truncated ? ` Only the first ${pdf.images.length} pages are included; the document has ${pdf.pages}.` : '';
     if (pdf.text) {
-      return [{ type: 'text', text: `Text from a PDF bill or statement.${note}\n\n${pdf.text.slice(0, 30000)}` }];
+      return [{ type: 'text', text: `Text from a PDF bill or invoice (all ${pdf.pages} pages).\n\n${pdf.text.slice(0, 60000)}` }];
     }
     return [
-      { type: 'text', text: `Scanned pages from a PDF bill or statement.${note}` },
+      { type: 'text', text: `Scanned pages from a PDF bill or invoice.${note}` },
       ...pdf.images.map((url) => ({ type: 'image_url', image_url: { url } })),
     ];
   }
@@ -90,11 +94,23 @@ const readAsDataUrl = (file) =>
     reader.readAsDataURL(file);
   });
 
+const receiptPrompt = (categories) => [
+  'You read bills, invoices and receipts. Reply with JSON only, in this shape:',
+  '{"vendor": string, "date": "YYYY-MM-DD", "currency": string, "items": [{"date": "YYYY-MM-DD", "description": string, "amount": number, "category": string}], "total": number}.',
+  'Rules:',
+  '- items: one object per charge line on the document, across every page. Amounts are positive numbers.',
+  '- Do NOT list subtotals, tax, totals, balances, credits or payments as items. Put the amount due on the document in "total".',
+  '- If a line has no date of its own, use the document date.',
+  `- category: pick from ${categories.join(', ') || 'none yet'} when one fits, otherwise a short new name.`,
+  '- Do not summarize or group lines. Every charge line gets its own item.',
+].join('\n');
+
 async function readReceipt(store, file, categories) {
   receipt.status = 'loading';
   receipt.error = '';
   receipt.fileName = file.name;
   receipt.items = [];
+  receipt.total = null;
   store.refresh();
   try {
     const content = await documentContent(file);
@@ -103,23 +119,42 @@ async function readReceipt(store, file, categories) {
       { role: 'user', content },
     ]);
     const parsed = parseJson(reply);
-    const list = Array.isArray(parsed) ? parsed : parsed.entries ?? [parsed];
-    receipt.items = list
+    const doc = Array.isArray(parsed) ? { items: parsed } : parsed;
+    const documentDate = DATE.test(doc.date) ? doc.date : todayISO();
+    receipt.vendor = String(doc.vendor ?? '').trim();
+    receipt.total = Number.isFinite(Number(doc.total)) ? round2(Math.abs(Number(doc.total))) : null;
+    receipt.items = (doc.items ?? [])
       .map((x) => ({
-        date: /^\d{4}-\d{2}-\d{2}$/.test(x.date) ? x.date : todayISO(),
-        type: x.type === 'income' ? 'income' : 'expense',
+        key: uid(),
+        date: DATE.test(x.date) ? x.date : documentDate,
+        note: String(x.description ?? '').trim(),
         amount: round2(Math.abs(Number(x.amount))),
         category: String(x.category ?? '').trim() || 'Uncategorized',
-        note: String(x.note ?? '').trim(),
+        projectId: null,
       }))
       .filter((x) => x.amount > 0);
     receipt.status = receipt.items.length ? 'ok' : 'error';
-    if (!receipt.items.length) receipt.error = 'No amounts found in that file.';
+    if (!receipt.items.length) receipt.error = 'No charges were found in that file.';
   } catch (err) {
     receipt.status = 'error';
     receipt.error = err.message;
   }
   store.refresh();
+}
+
+// The check at the top of the review: do the charges add up to the bill total?
+function totalCheck(itemsTotal) {
+  if (receipt.total === null) {
+    return notice({ tone: 'info', text: `Charges add up to ${money(itemsTotal)}. The bill total could not be read, so there is nothing to check against.` });
+  }
+  const diff = round2(itemsTotal - receipt.total);
+  if (Math.abs(diff) < 0.01) {
+    return notice({ tone: 'ok', text: `Charges add up to the bill total of ${money(receipt.total)}.` });
+  }
+  return notice({
+    tone: 'error',
+    text: `The charges add up to ${money(itemsTotal)}, but the bill total is ${money(receipt.total)} (a difference of ${money(diff)}). Check for missing or extra charges before adding.`,
+  });
 }
 
 function receiptPanel(store) {
@@ -131,76 +166,108 @@ function receiptPanel(store) {
       actions: [h('button', { type: 'button', class: 'btn-small', onclick: () => { receipt.status = 'idle'; store.refresh(); } }, 'Dismiss')],
     });
   }
-  const first = receipt.items[0];
-  return h('div', { class: 'panel-mini' },
+
+  const projects = store.get('projects').projects;
+  const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, color: p.color }));
+  const itemsTotal = round2(receipt.items.reduce((s, x) => s + x.amount, 0));
+  const source = receipt.vendor || receipt.fileName;
+  const dismiss = () => {
+    receipt.status = 'idle';
+    store.refresh();
+  };
+
+  return h('div', { class: 'panel-mini receipt' },
     h('div', { class: 'row between' },
-      h('strong', null, `${receipt.items.length} proposed from ${receipt.fileName}. Check them, then add.`),
+      h('div', null,
+        h('strong', null, `${receipt.items.length} charges from ${source}`),
+        h('div', { class: 'muted small' }, 'Each charge can go to its own project and category. The bill total is only for checking.')),
       h('div', { class: 'row' },
         h('button', {
           type: 'button',
           class: 'btn-small primary',
           onclick: () => {
-            addEntries(store, receipt.items);
-            view.month = monthKey(first.date);
+            addEntries(store, receipt.items.map((x) => ({
+              date: x.date,
+              type: 'expense',
+              amount: x.amount,
+              category: x.category,
+              note: x.note,
+              projectId: x.projectId,
+              source,
+            })));
+            view.month = monthKey(receipt.items[0].date);
             receipt.status = 'idle';
             receipt.items = [];
             store.refresh();
           },
-        }, 'Add all'),
-        h('button', { type: 'button', class: 'btn-small', onclick: () => { receipt.status = 'idle'; store.refresh(); } }, 'Dismiss'))),
+        }, `Add ${receipt.items.length} charges`),
+        h('button', { type: 'button', class: 'btn-small', onclick: dismiss }, 'Dismiss'))),
+
+    totalCheck(itemsTotal),
+
     h('ul', { class: 'review-list' },
-      receipt.items.map((x, i) => h('li', { class: 'review-row' },
-        h('span', { class: 'muted small' }, editText({
-          value: x.date,
-          onSave: (v) => {
-            if (/^\d{4}-\d{2}-\d{2}$/.test(v)) x.date = v;
-            store.refresh();
-          },
-        })),
-        pickChip({
-          value: x.type,
-          options: TYPES.map(([v, l]) => ({ value: v, label: l, tone: v === 'income' ? 'done' : 'high' })),
-          onPick: (v) => {
-            x.type = v;
-            store.refresh();
-          },
-        }),
-        editText({
-          value: String(x.amount),
-          onSave: (v) => {
-            const n = round2(Number(v));
-            if (n > 0) x.amount = n;
-            store.refresh();
-          },
-        }),
-        editText({
-          value: x.category,
-          placeholder: 'Category',
-          onSave: (v) => {
-            x.category = v;
-            store.refresh();
-          },
-        }),
-        editText({
-          value: x.note,
-          placeholder: 'Note',
-          allowEmpty: true,
-          onSave: (v) => {
-            x.note = v;
-            store.refresh();
-          },
-        }),
-        h('button', {
-          type: 'button',
-          class: 'icon-btn',
-          title: 'Remove this line',
-          'aria-label': 'Remove this line',
-          onclick: () => {
-            receipt.items.splice(i, 1);
-            store.refresh();
-          },
-        }, icon('x')))),
-    ));
+      h('li', { class: 'review-row review-head muted small' },
+        h('span', null, 'Date'), h('span', null, 'Charge'), h('span', { class: 'num' }, 'Amount'),
+        h('span', null, 'Project'), h('span', null, 'Category'), h('span', null)),
+      receipt.items.map((x, i) =>
+        h('li', { class: 'review-row' },
+          editText({
+            value: x.date,
+            onSave: (v) => {
+              if (DATE.test(v)) x.date = v;
+              store.refresh();
+            },
+          }),
+          editText({
+            value: x.note,
+            placeholder: 'Charge description',
+            allowEmpty: true,
+            onSave: (v) => {
+              x.note = v;
+              store.refresh();
+            },
+          }),
+          h('span', { class: 'num' }, editText({
+            value: String(x.amount),
+            onSave: (v) => {
+              const n = round2(Number(v));
+              if (n > 0) x.amount = n;
+              store.refresh();
+            },
+          })),
+          pickChip({
+            value: x.projectId,
+            options: projectOptions,
+            nullable: true,
+            nullLabel: 'No project',
+            onPick: (v) => {
+              x.projectId = v;
+              store.refresh();
+            },
+          }),
+          editText({
+            value: x.category,
+            placeholder: 'Category',
+            onSave: (v) => {
+              x.category = v;
+              store.refresh();
+            },
+          }),
+          h('button', {
+            type: 'button',
+            class: 'icon-btn',
+            title: 'Remove this charge',
+            'aria-label': 'Remove this charge',
+            onclick: () => {
+              receipt.items.splice(i, 1);
+              store.refresh();
+            },
+          }, icon('x')))),
+    ),
+
+    h('div', { class: 'row end muted small' },
+      receipt.total === null ? null : h('span', null, `Bill total ${money(receipt.total)}`),
+      h('span', null, `Charges ${money(itemsTotal)}`)));
 }
 
 function dropZone(store, categories) {
@@ -242,11 +309,11 @@ function dropZone(store, categories) {
       },
     },
       icon('plus'),
-      h('strong', null, 'Drop a bill or screenshot'),
-      h('span', { class: 'muted small' }, 'Images or PDFs. Entries are proposed for you to check before they are added.')));
+      h('strong', null, 'Drop a bill, invoice or screenshot'),
+      h('span', { class: 'muted small' }, 'Images or PDFs. Each charge is proposed for you to assign before it is added.')));
 }
 
-// --- Spending review (task 6) ---
+// --- Spending review ---
 
 async function reviewSpending(store, month, monthEntries) {
   spend.month = month;
@@ -299,6 +366,9 @@ function spendingBlock(store, month, monthEntries) {
 
 function draw(root, store) {
   const { entries, categories } = store.get(COLLECTION);
+  const projects = store.get('projects').projects;
+  const projectById = new Map(projects.map((p) => [p.id, p]));
+  const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, color: p.color }));
   const monthEntries = entries
     .filter((e) => monthKey(e.date) === view.month)
     .sort((a, b) => b.date.localeCompare(a.date) || b.created.localeCompare(a.created));
@@ -383,7 +453,7 @@ function draw(root, store) {
                     value: e.date,
                     className: 'muted date',
                     onSave: (date) => {
-                      if (/^\d{4}-\d{2}-\d{2}$/.test(date)) updateEntry(store, e.id, { date });
+                      if (DATE.test(date)) updateEntry(store, e.id, { date });
                       else store.refresh();
                     },
                   }),
@@ -399,7 +469,15 @@ function draw(root, store) {
                       allowEmpty: true,
                       className: 'muted',
                       onSave: (note) => updateEntry(store, e.id, { note }),
-                    })),
+                    }),
+                    e.source ? h('span', { class: 'muted small' }, `from ${e.source}`) : null),
+                  pickChip({
+                    value: e.projectId ?? null,
+                    options: projectOptions,
+                    nullable: true,
+                    nullLabel: 'No project',
+                    onPick: (projectId) => updateEntry(store, e.id, { projectId }),
+                  }),
                   pickChip({
                     value: e.type,
                     options: TYPES.map(([v, l]) => ({ value: v, label: l, tone: v === 'income' ? 'done' : 'high' })),
