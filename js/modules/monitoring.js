@@ -204,9 +204,9 @@ function aiTab(store, w) {
       h('h3', null, 'Cost over time'),
       entries.length ? barChart(w.items.map((b) => b.label), series) : empty('No AI calls in this period.'),
       entries.length ? legend(series) : null),
-    h('div', { class: 'split' },
-      groupTable('By task', groupCalls(entries, (e) => e.task, (e) => taskName(e.task)), 'Task'),
-      groupTable('By model', groupCalls(entries, (e) => e.model, (e) => e.model), 'Model')),
+    h('div', { class: 'split-2' },
+      groupTable('By model', groupCalls(entries, (e) => e.model, (e) => e.model), 'Model'),
+      groupTable('By task', groupCalls(entries, (e) => e.task, (e) => taskName(e.task)), 'Task')),
     h('section', { class: 'card stack' },
       h('h3', null, 'Recent calls'),
       recent.length
