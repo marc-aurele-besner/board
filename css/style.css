@@ -198,6 +198,19 @@ button.danger { color: var(--danger); }
 }
 .check { cursor: pointer; }
 
+/* Projects */
+.side-link { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px; color: var(--muted); text-decoration: none; border-radius: 8px; }
+.side-link:hover { background: var(--surface-2); color: var(--text); }
+.project-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.project-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.project-item:hover { background: var(--surface-2); }
+.project-item.active { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+.list-scroll { max-height: 60vh; overflow: auto; }
+.links li { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.links a { color: var(--accent); word-break: break-all; }
+input[type="color"] { width: 56px; height: 38px; padding: 3px; cursor: pointer; }
+h2.row { gap: 10px; flex-wrap: nowrap; }
+
 /* Kitchen */
 .segmented { display: flex; background: var(--surface-2); border-radius: 8px; padding: 3px; margin-bottom: 10px; }
 .seg { flex: 1; background: transparent; border: none; min-height: 32px; padding: 4px 6px; font-size: 0.9rem; }

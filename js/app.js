@@ -3,6 +3,7 @@ import { fsSupported, pickFolder, loadHandle, hasPermission } from './storage.js
 import { createStore } from './store.js';
 import { h, icon } from './ui.js';
 import { modules } from './modules/index.js';
+import { migrateLegacyProjects } from './modules/projects.js';
 
 const app = document.getElementById('app');
 const STATUS_LABELS = { saved: 'Saved', saving: 'Saving…', error: 'Save failed' };
@@ -92,6 +93,7 @@ async function open(handle) {
     return renderConnect();
   }
   store = next;
+  migrateLegacyProjects(store);
   store.subscribe(render);
   store.onStatus(updateStatus);
   connectError = '';

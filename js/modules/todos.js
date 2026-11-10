@@ -1,7 +1,7 @@
 import { h, uid, now, icon } from '../ui.js';
+import { makeProject } from './projects.js';
 
 const COLLECTION = 'todos';
-const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
 
 // View state lives here so it survives re-renders. filter: 'all' | 'personal' | <project id>
 const view = { filter: 'all', showDone: false };
@@ -9,6 +9,7 @@ const view = { filter: 'all', showDone: false };
 const isProjectFilter = (f) => f !== 'all' && f !== 'personal';
 const matchesFilter = (item) =>
   view.filter === 'all' || (view.filter === 'personal' ? item.projectId === null : item.projectId === view.filter);
+const projectsOf = (store) => store.get('projects').projects;
 
 // "buy milk #home" files the item under project "home" (created if missing).
 function addItem(store, raw) {
@@ -16,37 +17,18 @@ function addItem(store, raw) {
   const tag = text.match(/(?:^|\s)#([\w-]+)/);
   if (tag) text = text.replace(tag[0], ' ').replace(/\s+/g, ' ').trim();
   if (!text) return;
-  const tagName = tag?.[1];
-  store.update(COLLECTION, (d) => {
-    let projectId = isProjectFilter(view.filter) ? view.filter : null;
-    if (tagName) {
-      let project = d.projects.find((p) => p.name.toLowerCase() === tagName.toLowerCase());
-      if (!project) {
-        project = { id: uid(), name: tagName, color: PALETTE[d.projects.length % PALETTE.length] };
-        d.projects.push(project);
-      }
-      projectId = project.id;
+
+  let projectId = isProjectFilter(view.filter) ? view.filter : null;
+  if (tag) {
+    const projects = projectsOf(store);
+    let project = projects.find((p) => p.name.toLowerCase() === tag[1].toLowerCase());
+    if (!project) {
+      project = makeProject(projects.length, { name: tag[1] });
+      store.update('projects', (d) => d.projects.push(project));
     }
-    d.items.push({ id: uid(), text, done: false, projectId, created: now() });
-  });
-}
-
-function addProject(store, name) {
-  store.update(COLLECTION, (d) => {
-    if (d.projects.some((p) => p.name.toLowerCase() === name.toLowerCase())) return;
-    d.projects.push({ id: uid(), name, color: PALETTE[d.projects.length % PALETTE.length] });
-  });
-}
-
-function deleteProject(store, project) {
-  if (!confirm(`Delete project "${project.name}"? Its todos move to Personal.`)) return;
-  store.update(COLLECTION, (d) => {
-    d.projects = d.projects.filter((p) => p.id !== project.id);
-    d.items.forEach((i) => {
-      if (i.projectId === project.id) i.projectId = null;
-    });
-  });
-  if (view.filter === project.id) view.filter = 'all';
+    projectId = project.id;
+  }
+  store.update(COLLECTION, (d) => d.items.push({ id: uid(), text, done: false, projectId, created: now() }));
 }
 
 const toggleItem = (store, id, done) =>
@@ -61,7 +43,8 @@ const removeItem = (store, id) =>
   });
 
 function draw(root, store) {
-  const { projects, items } = store.get(COLLECTION);
+  const projects = projectsOf(store);
+  const { items } = store.get(COLLECTION);
   if (isProjectFilter(view.filter) && !projects.some((p) => p.id === view.filter)) view.filter = 'all';
 
   const openCount = (pred) => items.filter((i) => !i.done && pred(i)).length;
@@ -93,26 +76,9 @@ function draw(root, store) {
         navItem('all', 'All', openCount(() => true)),
         navItem('personal', 'Personal', openCount((i) => i.projectId === null)),
         h('h2', null, 'Projects'),
-        projects.map((p) =>
-          h('div', { class: 'nav-row' },
-            navItem(p.id, p.name, openCount((i) => i.projectId === p.id), p.color),
-            h('button', {
-              type: 'button',
-              class: 'icon-btn',
-              title: `Delete ${p.name}`,
-              'aria-label': `Delete project ${p.name}`,
-              onclick: () => deleteProject(store, p),
-            }, icon('x')))),
-        h('form', {
-          class: 'stack',
-          onsubmit: (e) => {
-            e.preventDefault();
-            const input = e.currentTarget.querySelector('input[name="name"]');
-            const name = input.value.trim();
-            if (name) addProject(store, name);
-          },
-        },
-          h('input', { name: 'name', placeholder: 'New project', 'aria-label': 'New project name', autocomplete: 'off' }))),
+        [...projects].sort((a, b) => a.name.localeCompare(b.name))
+          .map((p) => navItem(p.id, p.name, openCount((i) => i.projectId === p.id), p.color)),
+        h('a', { href: '#/projects', class: 'side-link' }, icon('folder'), 'Manage projects')),
 
       h('section', { class: 'card main-pane' },
         h('div', { class: 'row between' },
@@ -174,6 +140,6 @@ export default {
   title: 'Todos',
   icon: 'check-square',
   collection: COLLECTION,
-  defaults: { projects: [], items: [] },
+  defaults: { items: [] },
   render: draw,
 };
