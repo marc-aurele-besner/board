@@ -1,9 +1,10 @@
-import { h, icon, money, monthKey, todayISO, statusOf, empty, uid, now, notice } from '../ui.js';
+import { h, icon, money, monthKey, todayISO, statusOf, empty, notice } from '../ui.js';
 import { projectIcon, labelsOf, labelColor } from './projects.js';
 import { repoStats } from '../github.js';
 import { ask } from '../ai.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { connect, isConnected, upcomingEvents } from '../google.js';
+import { makeTask } from '../capture.js';
 
 const PRIORITY_RANK = { high: 0, medium: 1, low: 2, none: 3 };
 const RECIPE_LABEL = { testing: 'Testing', idea: 'Ideas', final: 'Final' };
@@ -87,7 +88,7 @@ function connectCalendar(store, clientId) {
 function eventAsTask(store, e) {
   const description = [timeLabel(e), e.location].filter(Boolean).join(' · ');
   store.update('todos', (d) =>
-    d.items.push({ id: uid(), text: e.title, description, status: 'todo', priority: 'none', category: '', projectId: null, created: now() }));
+    d.items.push(makeTask({ text: e.title, description, due: String(e.start ?? '').slice(0, 10) })));
 }
 
 function calendarBlock(store) {
@@ -231,7 +232,7 @@ function draw(root, store) {
   const open = items.filter((i) => statusOf(i) !== 'done');
   const doing = open.filter((i) => statusOf(i) === 'doing');
   const focus = open
-    .filter((i) => statusOf(i) === 'doing' || i.priority === 'high')
+    .filter((i) => statusOf(i) === 'doing' || i.priority === 'high' || (i.due && i.due <= todayISO()))
     .sort((a, b) => (PRIORITY_RANK[a.priority ?? 'none'] - PRIORITY_RANK[b.priority ?? 'none']) || a.created.localeCompare(b.created))
     .slice(0, 6);
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
@@ -252,6 +253,7 @@ function draw(root, store) {
             ? h('ul', { class: 'board-list' }, focus.map((i) =>
                 h('li', null,
                   h('span', { class: 'grow' }, i.text),
+                  i.due && i.due <= todayISO() ? h('span', { class: i.due < todayISO() ? 'due late' : 'due today' }, i.due < todayISO() ? 'Overdue' : 'Today') : null,
                   statusOf(i) === 'doing' ? h('span', { class: 'pill doing' }, 'In progress') : null,
                   i.priority === 'high' ? h('span', { class: 'pill priority-high' }, 'High') : null)))
             : h('p', { class: 'muted small' }, 'Nothing urgent or in progress. A good time to plan.'),
@@ -276,7 +278,6 @@ export default {
   id: 'home',
   title: 'Home',
   icon: 'home',
-  hidden: true, // reached from the "Board" logo, not from the nav tabs
   collection: null,
   defaults: {},
   render: draw,

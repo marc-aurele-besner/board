@@ -1,12 +1,14 @@
 import { h, icon, money, empty, notice } from '../ui.js';
 import { setupBanner } from '../integrations.js';
+import { poolsChanged } from '../automations.js';
 import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos } from '../uniswap.js';
 
 const STALE_MS = 10 * 60 * 1000;
 const MAX_TICK = 887272; // the widest possible range: a "full range" position
 
 // View state: which rows are shown.
-const view = { filter: 'all', chain: 'all' };
+// layout: 'cards' or 'list'.
+const view = { filter: 'all', chain: 'all', layout: 'cards' };
 // Loaded positions and the state of the last load.
 const state = { status: 'idle', rows: [], error: '', warning: '', at: 0 };
 const tokenInfo = new Map(); // "chainId:token address" -> { symbol, decimals }
@@ -113,6 +115,8 @@ async function load(store) {
       .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
     state.status = 'ok';
     state.at = Date.now();
+    // Tell the automation rules and the notifications which positions left their range.
+    poolsChanged(store, state.rows);
   } catch (err) {
     state.status = 'error';
     state.error = err.message;
@@ -237,6 +241,32 @@ function updatedText() {
   return mins < 1 ? 'Updated just now' : `Updated ${mins} min ago`;
 }
 
+// The same positions as a table, for comparing many at once.
+function poolTable(rows) {
+  return h('div', { class: 'card mon-scroll' },
+    h('table', { class: 'mon-table lp-table' },
+      h('thead', null, h('tr', null,
+        h('th', null, 'Pool'), h('th', null, 'Chain'), h('th', null, 'Price range'), h('th', null, 'Distribution'),
+        h('th', { class: 'num' }, 'Value'), h('th', { class: 'num' }, 'Unclaimed fees'), h('th', null, ''))),
+      h('tbody', null, rows.map((r) =>
+        h('tr', null,
+          h('td', null, h('div', { class: 'row' },
+            h('div', { class: 'pair' }, logo(tokenLogoOf(r, r.addr0), r.sym0, 'token'), logo(tokenLogoOf(r, r.addr1), r.sym1, 'token second')),
+            h('div', null, h('strong', null, r.pair), h('div', { class: 'muted small' }, `${r.owner} · v3 · #${r.tokenId}`)))),
+          h('td', null, h('span', { class: 'chain-chip' }, logo(chainOf(r.chainId)?.logo, r.chain, 'xs'), r.chain), h('div', { class: 'muted small' }, `${r.feePct}% fee`)),
+          h('td', null,
+            h('div', null, r.full ? 'Full range' : `${price(r.min)} → ${price(r.max)} ${r.sym1}`),
+            h('div', { class: 'row' },
+              h('span', { class: r.inRange ? 'status-pill in' : 'status-pill out' }, h('span', { class: 'dot' }), r.inRange ? 'In range' : 'Out of range'),
+              r.full ? null : h('span', { class: 'muted small' }, `now ${price(r.current)}`))),
+          h('td', null, distribution(r)),
+          h('td', { class: 'num' }, usdOrDash(r.value)),
+          h('td', { class: 'num' }, usdOrDash(r.fees)),
+          h('td', null, r.url
+            ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn', title: 'Open on Uniswap', 'aria-label': `Open position ${r.tokenId} on Uniswap` }, icon('link'))
+            : null))))));
+}
+
 function draw(root, store) {
   const cfg = store.get('settings').uniswap ?? {};
   const wallets = (cfg.wallets ?? []).filter((w) => isAddress(w.address));
@@ -305,7 +335,7 @@ function draw(root, store) {
   if (firstRead) {
     body = h('div', { class: 'lp-grid' }, [0, 1, 2].map((i) => skeletonCard(i)));
   } else if (shown.length) {
-    body = h('div', { class: fresh ? 'lp-grid enter' : 'lp-grid' }, shown.map((r, i) => poolCard(r, i)));
+    body = view.layout === 'list' ? poolTable(shown) : h('div', { class: fresh ? 'lp-grid enter' : 'lp-grid' }, shown.map((r, i) => poolCard(r, i)));
   } else {
     const filtered = view.filter !== 'all' || view.chain !== 'all';
     body = h('div', { class: 'lp-empty' },
@@ -340,10 +370,22 @@ function draw(root, store) {
           chainsWithRows.map((c) => chainChip(c.id, c.name, c.logo, all.filter((r) => r.chainId === c.id).length)))
       : null,
 
-    h('div', { class: 'row lp-filters' },
-      chip('all', 'All', byChain.length),
-      chip('in', 'In range', inRange),
-      chip('out', 'Out of range', byChain.length - inRange)),
+    h('div', { class: 'row between' },
+      h('div', { class: 'row lp-filters' },
+        chip('all', 'All', byChain.length),
+        chip('in', 'In range', inRange),
+        chip('out', 'Out of range', byChain.length - inRange)),
+      h('div', { class: 'segmented lp-layout', role: 'group', 'aria-label': 'View' },
+        [['cards', 'Cards', 'cards'], ['list', 'List', 'list']].map(([key, label, iconName]) =>
+          h('button', {
+            type: 'button',
+            class: view.layout === key ? 'seg active' : 'seg',
+            'aria-pressed': String(view.layout === key),
+            onclick: () => {
+              view.layout = key;
+              store.refresh();
+            },
+          }, icon(iconName), label)))),
 
     body));
 
@@ -353,16 +395,19 @@ function draw(root, store) {
 export default {
   id: 'positions',
   title: 'Liquidity Pools',
-  icon: 'wallet',
+  short: 'Pools',
+  icon: 'droplet',
   collection: null,
   defaults: {},
   render: draw,
   serialize: () => ({
     filter: view.filter === 'all' ? '' : view.filter,
     chain: view.chain === 'all' ? '' : String(view.chain),
+    view: view.layout === 'list' ? 'list' : '',
   }),
   restore: (p = {}) => {
     view.filter = ['in', 'out'].includes(p.filter) ? p.filter : 'all';
+    view.layout = p.view === 'list' ? 'list' : 'cards';
     const id = Number(p.chain);
     view.chain = CHAINS.some((c) => c.id === id) ? id : 'all';
   },

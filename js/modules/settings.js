@@ -5,6 +5,7 @@ import { connect, disconnect, isConnected } from '../google.js';
 import { editText, pill } from '../inline.js';
 import { modelChip } from '../model-picker.js';
 import { isAddress, CHAINS, chainSettings, savedNode } from '../uniswap.js';
+import { telegramCard, analyticsCard, searchCard, notificationsCard, automationsCard } from './settings-more.js';
 
 const COLLECTION = 'settings';
 const OPENROUTER_CHECK = 'https://openrouter.ai/api/v1/auth/key';
@@ -40,6 +41,9 @@ const SECTION_GROUPS = [
       ['openrouter', 'OpenRouter', 'key'],
       ['google', 'Google Calendar', 'calendar'],
       ['uniswap', 'Uniswap', 'wallet'],
+      ['telegram', 'Telegram', 'send'],
+      ['analytics', 'Google Analytics', 'activity'],
+      ['search', 'Search consoles', 'search'],
     ],
   },
   {
@@ -49,6 +53,8 @@ const SECTION_GROUPS = [
       ['models', 'Models & tasks', 'cpu'],
       ['categories', 'Categories', 'tag'],
       ['exchange', 'Exchange rates', 'coins'],
+      ['notifications', 'Notifications', 'bell'],
+      ['automations', 'Automations', 'zap'],
     ],
   },
 ];
@@ -845,7 +851,7 @@ function draw(root, store) {
     field: 'key',
     title: 'OpenRouter',
     docs: 'https://openrouter.ai/keys',
-    intro: 'One key for many AI models. It is stored now for future AI features; no feature uses it yet.',
+    intro: 'One key for many AI models. It powers Plan my day, Tidy with AI, recipe import, bill reading, triage and the spending review.',
     steps: [
       ['Sign in at ', link('https://openrouter.ai', 'openrouter.ai'), ', then open ', link('https://openrouter.ai/keys', 'Keys'), '.'],
       'Create a key and give it a name. You can set a credit limit on it.',
@@ -863,6 +869,11 @@ function draw(root, store) {
         : view.section === 'appearance' ? appearanceCard(store)
         : view.section === 'uniswap' ? uniswapCard(store)
         : view.section === 'categories' ? categoriesCard(store)
+        : view.section === 'telegram' ? telegramCard(store)
+        : view.section === 'analytics' ? analyticsCard(store)
+        : view.section === 'search' ? searchCard(store)
+        : view.section === 'notifications' ? notificationsCard(store)
+        : view.section === 'automations' ? automationsCard(store)
         : h('div', { class: 'stack-lg' }, tokenGuide(), github, orgKeysCard(store));
 
   const nav = h('nav', { class: 'settings-nav', 'aria-label': 'Settings sections' },
@@ -893,9 +904,8 @@ export default {
   id: 'settings',
   title: 'Settings',
   icon: 'settings',
-  hidden: true, // opened from the gear icon in the top bar
   collection: COLLECTION,
-  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) } },
+  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '' }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) } },
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),
   restore: (p = {}) => {
