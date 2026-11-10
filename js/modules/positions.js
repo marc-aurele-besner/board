@@ -1,16 +1,19 @@
 import { h, icon, money, empty, notice } from '../ui.js';
 import { setupBanner } from '../integrations.js';
-import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings } from '../uniswap.js';
+import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos } from '../uniswap.js';
 
 const STALE_MS = 10 * 60 * 1000;
 const MAX_TICK = 887272; // the widest possible range: a "full range" position
 
 // View state: which rows are shown.
-const view = { filter: 'all' };
+const view = { filter: 'all', chain: 'all' };
 // Loaded positions and the state of the last load.
 const state = { status: 'idle', rows: [], error: '', warning: '', at: 0 };
 const tokenInfo = new Map(); // "chainId:token address" -> { symbol, decimals }
 let loading = false;
+let logoMap = new Map(); // "chainId:token address" -> logo URL, from the token list
+let logosAsked = false;
+let shownAt = 0; // the load whose cards are already on screen; new loads animate once
 
 const tokenKey = (chain, address) => `${chain.id}:${address}`;
 
@@ -27,17 +30,31 @@ function buildRow(p, pool, prices, chain) {
   const priced = p0 !== null && p1 !== null;
   const value = priced ? a0 * p0 + a1 * p1 : null;
   const fees = priced ? (Number(p.owed0) / 10 ** m0.decimals) * p0 + (Number(p.owed1) / 10 ** m1.decimals) * p1 : null;
+  const full = p.tickLower <= -MAX_TICK && p.tickUpper >= MAX_TICK;
+  const min = p.tickLower <= -MAX_TICK ? 0 : priceAtTick(p.tickLower, m0.decimals, m1.decimals);
+  const max = p.tickUpper >= MAX_TICK ? Infinity : priceAtTick(p.tickUpper, m0.decimals, m1.decimals);
+  const current = priceAtTick(pool.tick, m0.decimals, m1.decimals);
+  // Where the current price sits in the range, on a log scale (prices move in ratios), clamped to the track.
+  const marker = full || !(min > 0) || !Number.isFinite(max) || !(current > 0)
+    ? null
+    : Math.min(100, Math.max(0, ((Math.log(current) - Math.log(min)) / (Math.log(max) - Math.log(min))) * 100));
   return {
     chain: chain.name,
+    chainId: chain.id,
     tokenId: p.tokenId,
     owner: p.label,
+    addr0: p.token0,
+    addr1: p.token1,
     pair: `${m0.symbol} / ${m1.symbol}`,
     sym0: m0.symbol,
     sym1: m1.symbol,
     feePct: p.fee / 10000,
     inRange: pool.tick >= p.tickLower && pool.tick < p.tickUpper,
-    min: p.tickLower <= -MAX_TICK ? 0 : priceAtTick(p.tickLower, m0.decimals, m1.decimals),
-    max: p.tickUpper >= MAX_TICK ? Infinity : priceAtTick(p.tickUpper, m0.decimals, m1.decimals),
+    full,
+    min,
+    max,
+    current,
+    marker,
     a0,
     a1,
     value,
@@ -105,32 +122,119 @@ async function load(store) {
   }
 }
 
+// Token logos arrive once, from the token list. The page redraws when they do.
+function askLogos(store) {
+  if (logosAsked) return;
+  logosAsked = true;
+  tokenLogos().then((map) => {
+    logoMap = map;
+    store.refresh();
+  });
+}
+
 const amount = (n) => (n >= 1000 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toFixed(2) : n.toPrecision(4));
 const price = (n) => (n === Infinity ? '∞' : n === 0 ? '0' : amount(n));
 const usdOrDash = (n) => (n === null ? '—' : money(n, 'USD'));
 
-function stat(label, value) {
-  return h('div', { class: 'card lp-stat' },h('span', { class: 'muted' }, label), h('strong', null, value));
+// A short, stable colour for a symbol, so a missing logo still looks like it belongs to its token.
+function hueOf(text) {
+  let hash = 0;
+  for (const c of String(text)) hash = (hash * 31 + c.charCodeAt(0)) % 360;
+  return hash;
 }
 
-// The price range with a marker for the current price, as in Uniswap's own list.
-function rangeBar(row) {
-  const lo = row.min;
-  const hi = row.max;
-  return h('div', { class: 'range-cell' },
-    h('div', { class: 'range-text' }, `${price(lo)} → ${price(hi)} ${row.sym1}`),
-    h('div', { class: row.inRange ? 'range-status in' : 'range-status out' }, row.inRange ? 'In range' : 'Out of range'));
+// A logo image, or a monogram when there is no image or it fails to load.
+function logo(src, label, cls = '') {
+  const monogram = () => h('span', { class: 'mono', style: { '--hue': hueOf(label) }, 'aria-hidden': 'true' }, String(label).slice(0, 2).toUpperCase());
+  if (!src) return h('span', { class: `logo ${cls}`, title: label }, monogram());
+  return h('span', { class: `logo ${cls}`, title: label },
+    h('img', { src, alt: '', loading: 'lazy', onerror: (e) => e.currentTarget.replaceWith(monogram()) }));
+}
+
+const tokenLogoOf = (row, address) => logoMap.get(`${row.chainId}:${address.toLowerCase()}`) ?? null;
+const chainOf = (chainId) => CHAINS.find((c) => c.id === chainId);
+
+// The price range as a track: the band is the position's range and the dot is the current price.
+function rangeView(r) {
+  return h('div', { class: 'range' },
+    h('div', { class: r.full ? 'range-track full' : 'range-track' },
+      h('span', { class: 'range-band' }),
+      r.full ? null : h('span', { class: `range-marker ${r.inRange ? 'in' : 'out'}`, style: { left: `${r.marker}%` } })),
+    h('div', { class: 'range-foot' },
+      h('span', null, r.full ? 'Full range' : `${price(r.min)} ${r.sym1}`),
+      h('span', { class: 'now' }, r.full ? '' : `now ${price(r.current)}`),
+      h('span', null, r.full ? '' : `${price(r.max)} ${r.sym1}`)));
 }
 
 // The token split as a bar: the share of value in each token.
 function distribution(row) {
-  if (row.share0 === null) return h('span', { class: 'muted small' }, `${amount(row.a0)} ${row.sym0} · ${amount(row.a1)} ${row.sym1}`);
+  if (row.share0 === null) return h('div', { class: 'muted small' }, `${amount(row.a0)} ${row.sym0} · ${amount(row.a1)} ${row.sym1}`);
   const pct0 = Math.round(row.share0 * 100);
-  return h('div', { class: 'dist-cell' },
+  return h('div', { class: 'dist' },
     h('div', { class: 'dist-bar' },
       h('span', { class: 'dist-a', style: { width: `${pct0}%` } }),
       h('span', { class: 'dist-b', style: { width: `${100 - pct0}%` } })),
     h('div', { class: 'muted small' }, `${pct0}% ${row.sym0} · ${100 - pct0}% ${row.sym1}`));
+}
+
+function poolStat(label, value) {
+  return h('div', { class: 'pool-stat' }, h('span', null, label), h('strong', null, value));
+}
+
+// One position as a card: the pair, its chain and fee, the range, the value and the token split.
+function poolCard(r, i) {
+  const chain = chainOf(r.chainId);
+  return h('article', { class: `pool-card ${r.inRange ? 'is-in' : 'is-out'}`, style: { '--i': i } },
+    h('header', { class: 'pool-head' },
+      h('div', { class: 'pair' },
+        logo(tokenLogoOf(r, r.addr0), r.sym0, 'token'),
+        logo(tokenLogoOf(r, r.addr1), r.sym1, 'token second')),
+      h('div', { class: 'pool-title' },
+        h('strong', null, r.pair),
+        h('div', { class: 'pool-meta' },
+          h('span', { class: 'chain-chip' }, logo(chain?.logo, r.chain, 'xs'), r.chain),
+          h('span', { class: 'fee-pill' }, `${r.feePct}%`),
+          h('span', { class: r.inRange ? 'status-pill in' : 'status-pill out' },
+            h('span', { class: 'dot' }),
+            r.inRange ? 'In range' : 'Out of range'))),
+      r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn pool-open', title: 'Open on Uniswap', 'aria-label': `Open position ${r.tokenId} on Uniswap` }, icon('link')) : null),
+    rangeView(r),
+    h('div', { class: 'pool-stats' },
+      poolStat('Value', usdOrDash(r.value)),
+      poolStat('Unclaimed fees', usdOrDash(r.fees))),
+    distribution(r),
+    h('footer', { class: 'pool-foot muted small' },
+      h('span', null, r.owner),
+      h('span', null, `v3 · #${r.tokenId}`)));
+}
+
+// Placeholders shown while the first read is running.
+function skeletonCard(i) {
+  return h('article', { class: 'pool-card ghost', style: { '--i': i }, 'aria-hidden': 'true' },
+    h('div', { class: 'pool-head' },
+      h('span', { class: 'skeleton sk-circle' }),
+      h('div', { class: 'sk-stack' }, h('span', { class: 'skeleton sk-line w60' }), h('span', { class: 'skeleton sk-line w40' }))),
+    h('span', { class: 'skeleton sk-line' }),
+    h('div', { class: 'pool-stats' }, h('span', { class: 'skeleton sk-block' }), h('span', { class: 'skeleton sk-block' })));
+}
+
+// Counts a number up to its value, once per load.
+function countUp(el, to, format) {
+  const start = performance.now();
+  const duration = 900;
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / duration);
+    const eased = 1 - (1 - t) ** 3;
+    el.textContent = format(to * eased);
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+function updatedText() {
+  if (!state.at) return '';
+  const mins = Math.round((Date.now() - state.at) / 60000);
+  return mins < 1 ? 'Updated just now' : `Updated ${mins} min ago`;
 }
 
 function draw(root, store) {
@@ -144,13 +248,38 @@ function draw(root, store) {
   if (state.status === 'idle' || (state.status === 'ok' && Date.now() - state.at > STALE_MS)) {
     setTimeout(() => load(store), 0);
   }
+  askLogos(store);
 
-  const chainCount = CHAINS.filter((chain) => chainSettings(cfg, chain).enabled).length;
-  const rows = state.rows;
-  const inRange = rows.filter((r) => r.inRange).length;
-  const shown = view.filter === 'in' ? rows.filter((r) => r.inRange) : view.filter === 'out' ? rows.filter((r) => !r.inRange) : rows;
-  const totalValue = rows.reduce((s, r) => s + (r.value ?? 0), 0);
-  const totalFees = rows.reduce((s, r) => s + (r.fees ?? 0), 0);
+  const enabled = CHAINS.filter((chain) => chainSettings(cfg, chain).enabled);
+  const chainCount = enabled.length;
+  const all = state.rows;
+  // Chain chips show only chains that have positions, so the row stays short.
+  const chainsWithRows = CHAINS.filter((c) => all.some((r) => r.chainId === c.id));
+  if (view.chain !== 'all' && !chainsWithRows.some((c) => c.id === view.chain)) view.chain = 'all';
+  const byChain = view.chain === 'all' ? all : all.filter((r) => r.chainId === view.chain);
+  const inRange = byChain.filter((r) => r.inRange).length;
+  const shown = view.filter === 'in' ? byChain.filter((r) => r.inRange) : view.filter === 'out' ? byChain.filter((r) => !r.inRange) : byChain;
+  const totalValue = byChain.reduce((s, r) => s + (r.value ?? 0), 0);
+  const totalFees = byChain.reduce((s, r) => s + (r.fees ?? 0), 0);
+  const totalValueKnown = byChain.some((r) => r.value !== null);
+  const totalFeesKnown = byChain.some((r) => r.fees !== null);
+
+  // Count up the totals only when a new read lands, not on every filter click.
+  const fresh = state.status === 'ok' && state.at !== shownAt;
+  if (fresh) shownAt = state.at;
+  const counters = [];
+
+  const valueEl = h('strong', null, '—');
+  const feesEl = h('strong', null, '—');
+  if (totalValueKnown) {
+    if (fresh) counters.push(() => countUp(valueEl, totalValue, (n) => money(n, 'USD')));
+    else valueEl.textContent = usdOrDash(totalValue);
+  }
+  if (totalFeesKnown) {
+    if (fresh) counters.push(() => countUp(feesEl, totalFees, (n) => money(n, 'USD')));
+    else feesEl.textContent = usdOrDash(totalFees);
+  }
+
   const chip = (key, label, count) => h('button', {
     type: 'button',
     class: view.filter === key ? 'lp-chip active' : 'lp-chip',
@@ -158,14 +287,42 @@ function draw(root, store) {
       view.filter = key;
       store.refresh();
     },
-  }, `${label} ${count}`);
+  }, label, h('span', { class: 'chip-count' }, count));
+
+  const chainChip = (key, label, logoSrc, count) => h('button', {
+    type: 'button',
+    class: view.chain === key ? 'lp-chip chain active' : 'lp-chip chain',
+    onclick: () => {
+      view.chain = key;
+      store.refresh();
+    },
+  }, key === 'all' ? null : logo(logoSrc, label, 'xs'), label, h('span', { class: 'chip-count' }, count));
+
+  const reading = state.status === 'loading';
+  const firstRead = reading && all.length === 0;
+
+  let body;
+  if (firstRead) {
+    body = h('div', { class: 'lp-grid' }, [0, 1, 2].map((i) => skeletonCard(i)));
+  } else if (shown.length) {
+    body = h('div', { class: fresh ? 'lp-grid enter' : 'lp-grid' }, shown.map((r, i) => poolCard(r, i)));
+  } else {
+    const filtered = view.filter !== 'all' || view.chain !== 'all';
+    body = h('div', { class: 'lp-empty' },
+      h('span', { class: 'float' }, icon('wallet')),
+      h('p', null, all.length && filtered ? 'No positions match this filter.' : 'No open Uniswap v3 positions for these wallets.'));
+  }
 
   root.replaceChildren(h('div', { class: 'stack-lg lp' },
     h('div', { class: 'row between lp-head' },
       h('div', null,
         h('h2', null, 'Liquidity Pools'),
-        h('p', { class: 'muted small' }, `Your Uniswap v3 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`)),
-      h('button', { type: 'button', class: 'btn-small', disabled: state.status === 'loading' || chainCount === 0, onclick: () => load(store) }, icon('refresh'), state.status === 'loading' ? 'Reading…' : 'Refresh')),
+        h('p', { class: 'muted small' },
+          `Uniswap v3 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`,
+          state.at ? ` ${updatedText()}.` : '')),
+      h('button', { type: 'button', class: 'btn-small', disabled: reading || chainCount === 0, onclick: () => load(store) },
+        h('span', { class: reading ? 'spin-icon' : '' }, icon('refresh')),
+        reading ? 'Reading…' : 'Refresh')),
 
     notice({ tone: 'info', text: 'Uniswap v4 positions are not read yet. Only v3 positions appear here.' }),
     state.warning ? notice({ tone: 'info', text: state.warning }) : null,
@@ -173,39 +330,24 @@ function draw(root, store) {
     chainCount === 0 ? notice({ tone: 'info', text: 'No chains are selected. Pick the chains to read in Settings.' }) : null,
 
     h('div', { class: 'lp-stats' },
-      stat('Total liquidity', usdOrDash(rows.some((r) => r.value !== null) ? totalValue : null)),
-      stat('Unclaimed fees', usdOrDash(rows.some((r) => r.fees !== null) ? totalFees : null)),
-      stat('Positions', `${rows.length} · ${inRange} in range`)),
+      h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Total liquidity'), valueEl),
+      h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Unclaimed fees'), feesEl),
+      h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Positions'), h('strong', null, `${byChain.length} · ${inRange} in range`))),
+
+    chainsWithRows.length > 1
+      ? h('div', { class: 'row lp-filters lp-chains' },
+          chainChip('all', 'All chains', null, all.length),
+          chainsWithRows.map((c) => chainChip(c.id, c.name, c.logo, all.filter((r) => r.chainId === c.id).length)))
+      : null,
 
     h('div', { class: 'row lp-filters' },
-      chip('all', 'All', rows.length),
+      chip('all', 'All', byChain.length),
       chip('in', 'In range', inRange),
-      chip('out', 'Out of range', rows.length - inRange)),
+      chip('out', 'Out of range', byChain.length - inRange)),
 
-    shown.length
-      ? h('div', { class: 'lp-table-wrap' },
-          h('table', { class: 'lp-table' },
-            h('thead', null, h('tr', null,
-              h('th', null, 'Pool'),
-              h('th', null, 'Price range'),
-              h('th', null, 'Distribution'),
-              h('th', { class: 'num' }, 'Value'),
-              h('th', { class: 'num' }, 'Fees'),
-              h('th', null, ''))),
-            h('tbody', null, shown.map((r) =>
-              h('tr', null,
-                h('td', null,
-                  h('strong', null, r.pair),
-                  h('div', { class: 'muted small' }, `${r.chain} · v3 · ${r.feePct}% · #${r.tokenId}`),
-                  h('div', { class: 'muted small' }, r.owner)),
-                h('td', null, rangeBar(r)),
-                h('td', null, distribution(r)),
-                h('td', { class: 'num' }, usdOrDash(r.value)),
-                h('td', { class: 'num' }, usdOrDash(r.fees)),
-                h('td', null, r.url
-                  ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn', title: 'Open on Uniswap', 'aria-label': `Open position ${r.tokenId} on Uniswap` }, icon('link'))
-                  : null))))))
-      : empty(state.status === 'loading' ? 'Reading your positions…' : 'No open positions for these wallets.')));
+    body));
+
+  for (const run of counters) run();
 }
 
 export default {
@@ -215,8 +357,13 @@ export default {
   collection: null,
   defaults: {},
   render: draw,
-  serialize: () => ({ filter: view.filter === 'all' ? '' : view.filter }),
+  serialize: () => ({
+    filter: view.filter === 'all' ? '' : view.filter,
+    chain: view.chain === 'all' ? '' : String(view.chain),
+  }),
   restore: (p = {}) => {
     view.filter = ['in', 'out'].includes(p.filter) ? p.filter : 'all';
+    const id = Number(p.chain);
+    view.chain = CHAINS.some((c) => c.id === id) ? id : 'all';
   },
 };
