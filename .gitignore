@@ -1,0 +1,9 @@
+# Personal data: keep it outside the repo, or ignore it if you pick a folder inside it
+data/
+*.json.bak
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

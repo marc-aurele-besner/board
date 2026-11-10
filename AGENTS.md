@@ -1,0 +1,52 @@
+# AGENTS.md
+
+Guidance for any coding agent working in this repository.
+
+## What this is
+
+A personal command center that runs locally. It is plain HTML, CSS and JavaScript ES modules with no backend, no build step and no runtime dependencies. Data lives as JSON files in a folder the user picks through the File System Access API. Read `README.md` for the user-facing description and the data format.
+
+## Run and verify
+
+- Serve the folder with a static server, for example `python3 -m http.server 8000` or `bunx serve .`, then open `http://localhost:8000` in Chrome or Edge. The File System Access API needs a secure context (`localhost` counts) and does not work in Firefox or Safari.
+- Syntax check every module before committing:
+  `for f in js/*.js js/modules/*.js; do node --experimental-default-type=module --check "$f" || echo "FAIL $f"; done`
+- Test real behavior in the browser when you can. Folder picking needs a user click, so ask the user to drive that step if you cannot.
+
+## Layout
+
+```
+index.html            entry point; inline script applies the saved theme before paint
+css/style.css         design tokens (light and dark) and all styles
+js/app.js             shell: folder connection, router, top nav, theme toggle
+js/storage.js         File System Access API wrapper; remembers the folder in IndexedDB
+js/store.js           in-memory state; debounced, serialized saves; subscriptions
+js/ui.js              h() DOM helper, icon(), ids, dates, money formatting
+js/modules/index.js   registry of sections (the nav is built from this list)
+js/modules/*.js       one file per section (todos, projects, kitchen, money)
+```
+
+## Conventions
+
+- **No framework and no new dependencies.** Build DOM with `h()` from `js/ui.js`. Use `innerHTML` only inside `icon()`, which takes trusted static markup.
+- **Icons, not emoji.** Add a path to `ICON_PATHS` in `js/ui.js` and refer to it by name. Module `icon` fields are icon names.
+- **Module contract.** A section exports `{ id, title, icon, collection, defaults, render(root, store) }`. `render` fills `root`. Add the section to `js/modules/index.js`.
+- **Data changes go through the store.** Call `store.update(collection, mutate)` to save and re-render. Call `store.refresh()` for view-only state such as filters and tabs. Keep view state in a module-level object so it survives re-renders.
+- **Re-rendering replaces the DOM.** Do not re-render on every keystroke in a field the user is typing in, or focus is lost. Update only the affected list, as the kitchen search does.
+- **Cross-section data.** A section may read another section's collection through the store (todos read projects). Write to the other collection with its own `store.update` call.
+- **Theme.** Use the CSS variables in `:root`. Never hard-code colors in components. Dark values appear in two places (the `prefers-color-scheme` block and `:root[data-theme="dark"]`); update both when you change a token.
+- **Phone width.** Keep the 16px side gutter and avoid horizontal scroll. Inputs use 16px font size to prevent iOS zoom.
+- **Comments.** Explain why, not what. Keep them short.
+
+## Data and privacy
+
+- Never commit real data. `data/` is ignored, but the user's data folder is normally outside the repo.
+- Do not put personal details (names, emails, real project names, real financial figures) in code, fixtures, tests, or docs. Use placeholders.
+
+## Git workflow
+
+- Start from the default branch: `git fetch origin`, then `git checkout -b <type>/<short-description> origin/main`. Types: `feat/`, `fix/`, `refactor/`, `docs/`.
+- Make small commits, one logical change each. Explain why in the message, not only what.
+- Commit messages describe only the code change. Do not add `Co-authored-by`, `Signed-off-by`, or attribution lines unless the user asks.
+- Check the commit identity before committing: `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT`. Use the identity already configured. Do not change it.
+- Open PRs against `main`. Do not push to `main` directly.

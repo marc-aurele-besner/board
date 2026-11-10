@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Board</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/style.css">
+  <script>
+    // Apply the saved theme before first paint to avoid a flash of the wrong colors.
+    try {
+      var savedTheme = localStorage.getItem('board:theme');
+      if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+    } catch (e) { /* storage blocked: follow the OS setting */ }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
