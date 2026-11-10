@@ -1,7 +1,7 @@
 import { h, icon, money, empty, notice } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { poolsChanged } from '../automations.js';
-import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos } from '../uniswap.js';
+import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position } from '../uniswap.js';
 
 const STALE_MS = 10 * 60 * 1000;
 const MAX_TICK = 887272; // the widest possible range: a "full range" position
@@ -9,8 +9,8 @@ const MAX_TICK = 887272; // the widest possible range: a "full range" position
 // View state: which rows are shown.
 // layout: 'cards' or 'list'.
 const view = { filter: 'all', chain: 'all', layout: 'cards' };
-// Loaded positions and the state of the last load.
-const state = { status: 'idle', rows: [], error: '', warning: '', at: 0 };
+// Loaded positions and the state of the last load. shallow: chains whose node would not search back to v4's start.
+const state = { status: 'idle', rows: [], error: '', warning: '', at: 0, shallow: [] };
 const tokenInfo = new Map(); // "chainId:token address" -> { symbol, decimals }
 let loading = false;
 let logoMap = new Map(); // "chainId:token address" -> logo URL, from the token list
@@ -41,6 +41,9 @@ function buildRow(p, pool, prices, chain) {
     ? null
     : Math.min(100, Math.max(0, ((Math.log(current) - Math.log(min)) / (Math.log(max) - Math.log(min))) * 100));
   return {
+    version: p.version,
+    // v3 rows keep their old key, so tasks made before v4 still match.
+    ref: p.version === 'v3' ? `${chain.id}:${p.tokenId}` : `${chain.id}:${p.version}:${p.tokenId}`,
     chain: chain.name,
     chainId: chain.id,
     tokenId: p.tokenId,
@@ -62,17 +65,55 @@ function buildRow(p, pool, prices, chain) {
     value,
     fees,
     share0: value ? (a0 * p0) / value : null,
-    url: chain.app ? `https://app.uniswap.org/positions/v3/${chain.app}/${p.tokenId}` : null,
+    url: chain.app ? `https://app.uniswap.org/positions/${p.version}/${chain.app}/${p.tokenId}` : null,
   };
 }
 
-// Reads one chain: every wallet's positions there, their pools and the token prices.
-async function readChain(chain, node, wallets) {
-  const perWallet = await Promise.all(wallets.map(async (w) => (await readPositions(chain, node, w.address)).map((p) => ({ ...p, label: w.label || w.address }))));
-  const positions = perWallet.flat();
+const shortAddress = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+const hasValue = (p) => p.liquidity > 0n || p.owed0 > 0n || p.owed1 > 0n;
 
-  const tokens = [...new Set(positions.flatMap((p) => [p.token0, p.token1]))];
-  await Promise.all(tokens.filter((t) => !tokenInfo.has(tokenKey(chain, t))).map(async (t) => tokenInfo.set(tokenKey(chain, t), await tokenMeta(node, t))));
+// Finds and reads one chain's v4 positions: those the search found for each wallet, and those added by hand.
+// saved is the search state the last load kept for this chain, keyed by lowercase wallet address.
+async function readV4(chain, node, wallets, cfg) {
+  const saved = cfg.v4scan?.[chain.id] ?? {};
+  const scans = {};
+  await Promise.all(wallets.map(async (w) => {
+    const key = w.address.toLowerCase();
+    scans[key] = await scanV4(chain, node, w.address, saved[key]).catch(() => saved[key] ?? null);
+  }));
+  const labels = new Map(wallets.map((w) => [w.address.toLowerCase(), w.label || w.address]));
+  const manual = new Set((cfg.v4ids ?? []).filter((x) => x.chainId === chain.id).map((x) => String(x.tokenId)));
+  const ids = [...new Set([...Object.values(scans).flatMap((s) => s?.ids ?? []), ...manual])];
+  const read = new Map((await Promise.all(ids.map((id) => readV4Position(chain, node, id).catch(() => undefined)))).map((r, i) => [ids[i], r]));
+
+  // A found position that was burned or sent to another address is dropped from the search, so it is not read again.
+  // One that could not be read this time (undefined) is kept.
+  for (const [key, s] of Object.entries(scans)) {
+    if (s) s.ids = s.ids.filter((id) => read.get(id) === undefined || read.get(id)?.position.owner === key);
+  }
+  const items = [...read.values()]
+    .filter((r) => r && hasValue(r.position) && (manual.has(r.position.tokenId) || labels.has(r.position.owner)))
+    .map((r) => ({ ...r, position: { ...r.position, label: labels.get(r.position.owner) ?? shortAddress(r.position.owner) } }));
+  return { items, scans };
+}
+
+// Reads one chain: every wallet's v3 and v4 positions there, their pools and the token prices.
+async function readChain(chain, node, wallets, cfg) {
+  // v3 and v4 are read side by side, so one failing does not hide the other.
+  const [v3Read, v4Read] = await Promise.allSettled([
+    Promise.all(wallets.map(async (w) => (await readPositions(chain, node, w.address)).map((p) => ({ ...p, label: w.label || w.address })))),
+    readV4(chain, node, wallets, cfg),
+  ]);
+  if (v3Read.status === 'rejected' && v4Read.status === 'rejected') throw v3Read.reason;
+  const positions = v3Read.status === 'fulfilled' ? v3Read.value.flat() : [];
+  const v4 = v4Read.status === 'fulfilled' ? v4Read.value : { items: [], scans: null };
+  let warning = [
+    v3Read.status === 'rejected' ? `${chain.name} v3 positions could not be read: ${v3Read.reason.message}` : '',
+    v4Read.status === 'rejected' ? `${chain.name} v4 positions could not be read: ${v4Read.reason.message}` : '',
+  ].filter(Boolean).join(' ');
+
+  const tokens = [...new Set([...positions, ...v4.items.map((x) => x.position)].flatMap((p) => [p.token0, p.token1]))];
+  await Promise.all(tokens.filter((t) => !tokenInfo.has(tokenKey(chain, t))).map(async (t) => tokenInfo.set(tokenKey(chain, t), await tokenMeta(node, t, chain))));
 
   const pools = new Map();
   const poolKeys = [...new Set(positions.map((p) => `${p.token0}|${p.token1}|${p.fee}`))];
@@ -82,17 +123,17 @@ async function readChain(chain, node, wallets) {
   }));
 
   let prices = {};
-  let warning = '';
   try {
     prices = await usdPrices(chain, tokens);
   } catch (err) {
-    warning = `${chain.name} token prices are unavailable (${err.message}), so values are not shown.`;
+    warning = [warning, `${chain.name} token prices are unavailable (${err.message}), so values are not shown.`].filter(Boolean).join(' ');
   }
 
-  const rows = positions
-    .map((p) => buildRow(p, pools.get(`${p.token0}|${p.token1}|${p.fee}`), prices, chain))
-    .filter(Boolean);
-  return { rows, warning };
+  const rows = [
+    ...positions.map((p) => buildRow(p, pools.get(`${p.token0}|${p.token1}|${p.fee}`), prices, chain)),
+    ...v4.items.map((x) => buildRow(x.position, x.pool, prices, chain)),
+  ].filter(Boolean);
+  return { rows, warning, scans: v4.scans };
 }
 
 // Reads every enabled chain in parallel. A chain that fails is reported and does not stop the others.
@@ -106,8 +147,22 @@ async function load(store) {
     const cfg = store.get('settings').uniswap ?? {};
     const wallets = (cfg.wallets ?? []).filter((w) => isAddress(w.address));
     const chains = CHAINS.map((chain) => ({ chain, ...chainSettings(cfg, chain) })).filter((c) => c.enabled);
-    const results = await Promise.all(chains.map(({ chain, node }) => readChain(chain, node, wallets)
+    const results = await Promise.all(chains.map(({ chain, node }) => readChain(chain, node, wallets, cfg)
       .catch((err) => ({ rows: [], warning: `${chain.name} could not be read: ${err.message}` }))));
+
+    // Keep how far each v4 search got, so the next load goes on from there.
+    const scans = {};
+    chains.forEach(({ chain }, i) => {
+      if (results[i].scans) scans[chain.id] = results[i].scans;
+    });
+    state.shallow = chains
+      .filter(({ chain }) => Object.values(scans[chain.id] ?? {}).some((s) => s?.done && s.from > chain.v4.start))
+      .map(({ chain }) => chain.name);
+    if (Object.keys(scans).length) {
+      store.update('settings', (d) => {
+        d.uniswap = { ...d.uniswap, v4scan: { ...d.uniswap?.v4scan, ...scans } };
+      });
+    }
 
     state.warning = results.map((r) => r.warning).filter(Boolean).join(' ');
     state.rows = results
@@ -209,7 +264,7 @@ function poolCard(r, i) {
     distribution(r),
     h('footer', { class: 'pool-foot muted small' },
       h('span', null, r.owner),
-      h('span', null, `v3 · #${r.tokenId}`)));
+      h('span', null, `${r.version} · #${r.tokenId}`)));
 }
 
 // Placeholders shown while the first read is running.
@@ -252,7 +307,7 @@ function poolTable(rows) {
         h('tr', null,
           h('td', null, h('div', { class: 'row' },
             h('div', { class: 'pair' }, logo(tokenLogoOf(r, r.addr0), r.sym0, 'token'), logo(tokenLogoOf(r, r.addr1), r.sym1, 'token second')),
-            h('div', null, h('strong', null, r.pair), h('div', { class: 'muted small' }, `${r.owner} · v3 · #${r.tokenId}`)))),
+            h('div', null, h('strong', null, r.pair), h('div', { class: 'muted small' }, `${r.owner} · ${r.version} · #${r.tokenId}`)))),
           h('td', null, h('span', { class: 'chain-chip' }, logo(chainOf(r.chainId)?.logo, r.chain, 'xs'), r.chain), h('div', { class: 'muted small' }, `${r.feePct}% fee`)),
           h('td', null,
             h('div', null, r.full ? 'Full range' : `${price(r.min)} → ${price(r.max)} ${r.sym1}`),
@@ -340,7 +395,7 @@ function draw(root, store) {
     const filtered = view.filter !== 'all' || view.chain !== 'all';
     body = h('div', { class: 'lp-empty' },
       h('span', { class: 'float' }, icon('wallet')),
-      h('p', null, all.length && filtered ? 'No positions match this filter.' : 'No open Uniswap v3 positions for these wallets.'));
+      h('p', null, all.length && filtered ? 'No positions match this filter.' : 'No open Uniswap positions for these wallets.'));
   }
 
   root.replaceChildren(h('div', { class: 'stack-lg lp' },
@@ -348,13 +403,15 @@ function draw(root, store) {
       h('div', null,
         h('h2', null, 'Liquidity Pools'),
         h('p', { class: 'muted small' },
-          `Uniswap v3 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`,
+          `Uniswap v3 and v4 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`,
           state.at ? ` ${updatedText()}.` : '')),
       h('button', { type: 'button', class: 'btn-small', disabled: reading || chainCount === 0, onclick: () => load(store) },
         h('span', { class: reading ? 'spin-icon' : '' }, icon('refresh')),
         reading ? 'Reading…' : 'Refresh')),
 
-    notice({ tone: 'info', text: 'Uniswap v4 positions are not read yet. Only v3 positions appear here.' }),
+    state.shallow.length
+      ? notice({ tone: 'info', text: `The node for ${state.shallow.join(', ')} keeps only recent history, so older v4 positions there are not found. Add them by link in Settings, or set a node that keeps full history.` })
+      : null,
     state.warning ? notice({ tone: 'info', text: state.warning }) : null,
     state.status === 'error' ? notice({ text: `The positions could not be read: ${state.error}` }) : null,
     chainCount === 0 ? notice({ tone: 'info', text: 'No chains are selected. Pick the chains to read in Settings.' }) : null,
