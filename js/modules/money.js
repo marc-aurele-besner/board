@@ -29,7 +29,8 @@ const GROUPS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month'], ['year', '
 const KINDS = [['all', 'All'], ['fixed', 'Fixed'], ['flex', 'Flex']];
 
 // View state: the currency totals are shown in, the period, and how it is grouped in the chart.
-const view = { currency: DEFAULT_CURRENCY, range: 'month', group: 'day', kind: 'all' };
+// range: a RANGES key, or one month as 'YYYY-MM' (reached with the month stepper). query: the search in the entries list.
+const view = { currency: DEFAULT_CURRENCY, range: 'month', group: 'day', kind: 'all', query: '' };
 // A bill is read into charges (the line items), a currency and a bill total. Only the charges become entries.
 // taxes: tax lines printed on the document as totals (GST, QST, ...), not attached to one charge.
 // original: the bill file itself, kept with the entries so it can be opened later.
@@ -61,10 +62,30 @@ const entryCurrency = (e) => e.currency ?? DEFAULT_CURRENCY;
 // An entry's amount in the shown currency, at the rate of the entry's own day. null when that rate is not known yet.
 const shownAmount = (e) => convert(e.amount, entryCurrency(e), view.currency, knownRate(e.date));
 
+const monthKeyOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+const isMonthKey = (range) => /^\d{4}-\d{2}$/.test(range);
+// The month a range covers, when it covers exactly one: this month, last month, or a picked month. Otherwise null.
+function shownMonth(range) {
+  const today = new Date();
+  if (range === 'month') return monthKeyOf(today);
+  if (range === 'lastmonth') return monthKeyOf(new Date(today.getFullYear(), today.getMonth() - 1, 1));
+  return isMonthKey(range) ? range : null;
+}
+// The range one month before or after the shown one. The current month is always the 'month' range.
+function stepMonth(range, delta) {
+  const [y, m] = (shownMonth(range) ?? monthKeyOf(new Date())).split('-').map(Number);
+  const next = monthKeyOf(new Date(y, m - 1 + delta, 1));
+  return next === monthKeyOf(new Date()) ? 'month' : next;
+}
+
 // The period as dates: from (inclusive) to (exclusive).
 function windowFor(range, entries) {
   const today = startOfDay(new Date());
   const tomorrow = addDays(today, 1);
+  if (isMonthKey(range)) {
+    const [y, m] = range.split('-').map(Number);
+    return { from: new Date(y, m - 1, 1), to: new Date(y, m, 1) };
+  }
   if (range === 'today') return { from: today, to: tomorrow };
   if (range === 'yesterday') return { from: addDays(today, -1), to: today };
   if (range === 'month') return { from: new Date(today.getFullYear(), today.getMonth(), 1), to: new Date(today.getFullYear(), today.getMonth() + 1, 1) };
@@ -830,30 +851,50 @@ function billGroup(store, items, projectOptions, cur) {
 }
 
 function entriesSection(store, inPeriod, projectOptions, cur) {
-  const rows = [];
-  const groups = new Map();
-  for (const e of inPeriod) {
-    if (!e.billId) {
-      rows.push({ single: e });
-      continue;
+  const list = h('div');
+  const count = h('span', { class: 'muted small' });
+  // Only the list refills while typing, so the search box keeps focus. The totals above stay those of the period.
+  const fill = () => {
+    const q = view.query.trim().toLowerCase();
+    const shown = q ? inPeriod.filter((e) => `${e.note ?? ''} ${e.category ?? ''} ${e.source ?? ''}`.toLowerCase().includes(q)) : inPeriod;
+    const rows = [];
+    const groups = new Map();
+    for (const e of shown) {
+      if (!e.billId) {
+        rows.push({ single: e });
+        continue;
+      }
+      if (!groups.has(e.billId)) {
+        const group = { items: [] };
+        groups.set(e.billId, group);
+        rows.push(group);
+      }
+      groups.get(e.billId).items.push(e);
     }
-    if (!groups.has(e.billId)) {
-      const group = { items: [] };
-      groups.set(e.billId, group);
-      rows.push(group);
-    }
-    groups.get(e.billId).items.push(e);
-  }
-  return h('section', { class: 'card stack' },
-    h('div', { class: 'row between' },
-      h('h3', null, 'Entries'),
-      h('span', { class: 'muted small' }, `${inPeriod.length} line${inPeriod.length === 1 ? '' : 's'}`)),
-    rows.length
+    count.textContent = `${shown.length} line${shown.length === 1 ? '' : 's'}`;
+    list.replaceChildren(rows.length
       ? h('ul', { class: 'entries' },
           rows.map((r) => (r.single
             ? entryRow(store, r.single, projectOptions, cur)
             : billGroup(store, r.items, projectOptions, cur))))
-      : empty('No entries in this period.'));
+      : empty(q ? 'No entries match.' : 'No entries in this period.'));
+  };
+  fill();
+  return h('section', { class: 'card stack' },
+    h('div', { class: 'row between' },
+      h('h3', null, 'Entries'),
+      count),
+    h('input', {
+      type: 'search',
+      placeholder: 'Search entries by note, category or vendor',
+      'aria-label': 'Search entries',
+      value: view.query,
+      oninput: (e) => {
+        view.query = e.target.value;
+        fill();
+      },
+    }),
+    list);
 }
 
 // Labels for the whole bill, set as soon as it is read: vendor, project and category. Each applies to every charge.
@@ -1099,6 +1140,40 @@ const bar = (label, amount, total, cur, color) =>
     h('div', { class: 'row between' }, h('span', null, label), h('span', null, `${money(amount, cur)} · ${total ? Math.round((amount / total) * 100) : 0}%`)),
     h('div', { class: 'bar-track' }, h('div', { class: 'bar-fill', style: color ? { width: `${total ? (amount / total) * 100 : 0}%`, background: color } : { width: `${total ? (amount / total) * 100 : 0}%` } })));
 
+// A monthly budget is saved with the currency it was typed in. An empty or zero value removes it.
+function setBudget(store, category, text, currency) {
+  const amount = round2(Number(text));
+  store.update(COLLECTION, (d) => {
+    d.budgets = { ...(d.budgets ?? {}) };
+    if (amount > 0) d.budgets[category] = { amount, currency };
+    else delete d.budgets[category];
+  });
+}
+
+// A category's spending. When the period is one month, it is measured against the category's budget, which is edited here.
+function categoryBar(store, name, amount, total, cur, color, monthly) {
+  const saved = (store.get(COLLECTION).budgets ?? {})[name];
+  const budget = monthly && saved ? convert(saved.amount, saved.currency, cur, knownRate(todayISO())) : null;
+  const over = budget !== null && amount > budget;
+  const share = `${money(amount, cur)} · ${total ? Math.round((amount / total) * 100) : 0}%`;
+  const width = `${Math.min(100, budget ? (amount / budget) * 100 : total ? (amount / total) * 100 : 0)}%`;
+  return h('li', null,
+    h('div', { class: 'row between' },
+      h('span', null, name),
+      h('span', null, share, budget !== null ? h('span', { class: over ? 'expense' : 'muted' }, ` · ${Math.round((amount / budget) * 100)}% of ${money(budget, cur)}`) : null)),
+    h('div', { class: 'bar-track' }, h('div', { class: 'bar-fill', style: { width, ...(over ? { background: 'var(--danger)' } : color ? { background: color } : {}) } })),
+    monthly
+      ? h('div', { class: 'row budget-line muted small' }, 'Monthly budget',
+          editText({
+            value: saved ? String(saved.amount) : '',
+            placeholder: 'set one',
+            allowEmpty: true,
+            onSave: (v) => setBudget(store, name, v, cur),
+          }),
+          saved ? saved.currency : null)
+      : null);
+}
+
 function draw(root, store) {
   const { entries, categories, categoryColors = {} } = store.get(COLLECTION);
   const projects = store.get('projects').projects;
@@ -1161,7 +1236,13 @@ function draw(root, store) {
     { name: 'Income', color: 'var(--income)', values: keys.map((k) => round2(incomeByBucket.get(k) ?? 0)) },
     { name: 'Expenses', color: 'var(--expense)', values: keys.map((k) => round2(expenseByBucket.get(k) ?? 0)) },
   ];
-  const rangeLabel = RANGES.find(([k]) => k === view.range)?.[1] ?? '';
+  const month = shownMonth(view.range);
+  const monthName = month ? parseYmd(`${month}-01`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : '';
+  const rangeLabel = RANGES.find(([k]) => k === view.range)?.[1] ?? monthName;
+  const stepTo = (delta) => () => {
+    view.range = stepMonth(view.range, delta);
+    store.refresh();
+  };
 
   root.replaceChildren(
     h('div', { class: 'money stack-lg' },
@@ -1185,6 +1266,10 @@ function draw(root, store) {
       receiptPanel(store),
 
       h('div', { class: 'money-controls' },
+        h('div', { class: 'month-step', role: 'group', 'aria-label': 'Month' },
+          h('button', { type: 'button', class: 'icon-btn', title: 'Previous month', 'aria-label': 'Previous month', onclick: stepTo(-1) }, icon('chevron-left')),
+          h('strong', null, monthName || rangeLabel),
+          h('button', { type: 'button', class: 'icon-btn', title: 'Next month', 'aria-label': 'Next month', disabled: !month || month >= monthKeyOf(new Date()), onclick: stepTo(1) }, icon('chevron-right'))),
         h('div', { class: 'period', role: 'group', 'aria-label': 'Period' },
           RANGES.map(([k, l]) =>
             h('button', {
@@ -1246,7 +1331,7 @@ function draw(root, store) {
             h('section', { class: 'card stack' },
               h('h3', null, 'Expenses by category'),
               categoryRows.length
-                ? h('ul', { class: 'bars' }, categoryRows.map(([name, v]) => bar(name, v, expense, cur, categoryColors[name])))
+                ? h('ul', { class: 'bars' }, categoryRows.map(([name, v]) => categoryBar(store, name, v, expense, cur, categoryColors[name], Boolean(month))))
                 : empty('No expenses in this period.')),
             h('section', { class: 'card stack' },
               h('h3', null, 'Expenses by project'),
@@ -1297,12 +1382,12 @@ export default {
   title: 'Money',
   icon: 'wallet',
   collection: COLLECTION,
-  defaults: { entries: [], categories: [], bills: [], categoryColors: {}, recurring: [] },
+  defaults: { entries: [], categories: [], bills: [], categoryColors: {}, recurring: [], budgets: {} },
   render: draw,
   serialize: () => ({ cur: view.currency, range: view.range === 'month' ? '' : view.range, group: view.group === 'day' ? '' : view.group, kind: view.kind === 'all' ? '' : view.kind }),
   restore: (p = {}) => {
     view.currency = CURRENCIES.includes(p.cur) ? p.cur : DEFAULT_CURRENCY;
-    view.range = RANGES.some(([k]) => k === p.range) ? p.range : 'month';
+    view.range = RANGES.some(([k]) => k === p.range) || isMonthKey(p.range ?? '') ? p.range : 'month';
     view.group = GROUPS.some(([k]) => k === p.group) ? p.group : 'day';
     view.kind = KINDS.some(([k]) => k === p.kind) ? p.kind : 'all';
   },
