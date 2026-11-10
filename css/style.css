@@ -195,7 +195,10 @@ button.danger { color: var(--danger); }
 .todo-item.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
 .grip { display: inline-flex; color: var(--muted); cursor: grab; touch-action: none; padding: 0 2px; }
 .grip .icon { width: 16px; height: 16px; }
-.desc-btn.has-desc { color: var(--accent); }
+.desc-indicator { display: inline-flex; color: var(--accent); flex: none; }
+.desc-indicator .icon { width: 16px; height: 16px; }
+.chevron .icon { transition: transform 0.15s ease; }
+.chevron.open .icon { transform: rotate(180deg); }
 .todo-desc { display: flex; flex-direction: column; gap: 8px; padding: 8px 0 4px 40px; }
 .badge {
   font-size: 0.8rem;

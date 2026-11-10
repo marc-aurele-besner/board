@@ -147,14 +147,17 @@ function todoItem(store, item, projectLabel) {
       }),
       h('span', { class: 'grow todo-text' }, item.text),
       projectLabel ? h('span', { class: 'badge' }, projectLabel) : null,
+      hasDescription
+        ? h('span', { class: 'desc-indicator', title: 'Has a description', 'aria-label': 'Has a description' }, icon('align-left'))
+        : null,
       h('button', {
         type: 'button',
-        class: hasDescription ? 'icon-btn desc-btn has-desc' : 'icon-btn desc-btn',
-        title: hasDescription ? 'Show description' : 'Add description',
-        'aria-label': hasDescription ? 'Show description' : 'Add description',
+        class: expanded ? 'icon-btn chevron open' : 'icon-btn chevron',
+        title: expanded ? 'Close details' : 'Open to write a description',
+        'aria-label': expanded ? 'Close details' : 'Open details',
         'aria-expanded': String(expanded),
         onclick: () => toggleExpanded(store, item.id),
-      }, icon('align-left')),
+      }, icon('chevron-down')),
       h('button', {
         type: 'button',
         class: 'icon-btn',
