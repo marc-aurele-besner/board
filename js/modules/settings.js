@@ -1,4 +1,4 @@
-import { h, icon, empty, notice, todayISO, copyable } from '../ui.js';
+import { h, icon, refreshIcon, empty, notice, todayISO, copyable } from '../ui.js';
 import { fetchDayRate, manualRate, setManualRate, clearCachedRates } from '../fx.js';
 import { configure, checkGithubToken } from '../github.js';
 import { connect, disconnect, isConnected } from '../google.js';
@@ -227,7 +227,12 @@ function modelsPanel(store) {
       h('div', null,
         h('h2', null, 'Models & tasks'),
         h('p', { class: 'muted' }, 'Pin a model to each task. A task without its own pin uses the default model.')),
-      h('button', { type: 'button', onclick: () => { view.catalog = { status: 'idle' }; loadCatalog(store); } }, icon('refresh'), 'Refresh models')),
+      h('button', {
+        type: 'button',
+        disabled: cat.status === 'loading',
+        'aria-busy': cat.status === 'loading' ? 'true' : null,
+        onclick: () => { view.catalog = { status: 'idle' }; loadCatalog(store); },
+      }, refreshIcon(cat.status === 'loading'), cat.status === 'loading' ? 'Refreshing…' : 'Refresh models')),
 
     catalogLine,
 
