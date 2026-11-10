@@ -1,5 +1,5 @@
 // Monitoring tabs for the project websites: visitors (Google Analytics) and search (Google Search Console, Bing).
-import { h, empty, notice, progress } from '../ui.js';
+import { h, empty, notice, progress, icon } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { isConnected } from '../google.js';
 import { analyticsReport, searchReport, bingReport } from '../webstats.js';
@@ -96,12 +96,56 @@ function mergeSearchRows(lists, n = 10) {
     .map(([name, v]) => [name, v.clicks, v.imps, v.imps ? v.clicks / v.imps : 0, v.imps ? v.pos / v.imps : 0]);
 }
 
+// Sort choice per table, kept across re-renders. No entry means the order the rows came in.
+const sorts = new Map();
+
+const compare = (a, b) => {
+  // Missing values sink to the bottom in both directions.
+  if (a === null || a === undefined) return b === null || b === undefined ? 0 : 1;
+  if (b === null || b === undefined) return -1;
+  return typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b));
+};
+
+// A table whose headers sort it. Columns: { label, num, value(row), format(value, row), clip }.
+// A click re-sorts only the body, so the page keeps its scroll and nothing reloads.
+export function sortTable(key, columns, rows) {
+  const tbody = h('tbody');
+  const ths = columns.map((c, i) => h('th', { class: c.num ? 'num' : null },
+    h('button', { type: 'button', class: 'mon-sort', onclick: () => pick(i) }, c.label, h('span', { class: 'sort-mark' }))));
+  const draw = () => {
+    const s = sorts.get(key);
+    const list = s ? [...rows].sort((a, b) => {
+      const va = columns[s.col].value(a);
+      const vb = columns[s.col].value(b);
+      if (va === null || va === undefined || vb === null || vb === undefined) return compare(va, vb);
+      return s.dir * compare(va, vb);
+    }) : rows;
+    ths.forEach((th, i) => {
+      const on = s?.col === i;
+      if (on) th.setAttribute('aria-sort', s.dir > 0 ? 'ascending' : 'descending');
+      else th.removeAttribute('aria-sort');
+      th.querySelector('.sort-mark').replaceChildren(icon(on && s.dir > 0 ? 'chevron-up' : 'chevron-down'));
+    });
+    tbody.replaceChildren(...list.map((r) => h('tr', null, columns.map((c) => {
+      const v = c.value(r);
+      return h('td', { class: c.num ? 'num' : c.clip ? 'cell-clip' : null }, c.format ? c.format(v, r) : String(v ?? '—'));
+    }))));
+  };
+  // Numbers start high to low, text A to Z; a second click flips it.
+  const pick = (i) => {
+    const s = sorts.get(key);
+    sorts.set(key, { col: i, dir: s?.col === i ? -s.dir : columns[i].num ? -1 : 1 });
+    draw();
+  };
+  draw();
+  return h('div', { class: 'mon-scroll' }, h('table', { class: 'mon-table' }, h('thead', null, h('tr', null, ths)), tbody));
+}
+
 function table(head, rows, format) {
   if (!rows.length) return empty('Nothing in this period.');
-  return h('div', { class: 'mon-scroll' },
-    h('table', { class: 'mon-table' },
-      h('thead', null, h('tr', null, head.map((t, i) => h('th', { class: i ? 'num' : null }, t)))),
-      h('tbody', null, rows.map((r) => h('tr', null, r.map((c, i) => h('td', { class: i ? 'num' : 'cell-clip' }, format?.[i] ? format[i](c) : String(c))))))));
+  return sortTable(head.join('|'), head.map((label, i) => ({
+    label, num: i > 0, clip: i === 0, value: (r) => r[i], format: format?.[i] ? (v) => format[i](v) : null,
+  })), rows);
 }
 
 const refreshButton = (store, keys) =>
