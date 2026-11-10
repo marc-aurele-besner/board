@@ -99,6 +99,8 @@ export function createStore(dir, collections) {
       return () => statusListeners.delete(fn);
     },
     flush,
+    // The name of the connected data folder, for Settings.
+    folderName: dir.name,
     get status() {
       return status;
     },
