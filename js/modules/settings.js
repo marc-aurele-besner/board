@@ -1,4 +1,4 @@
-import { h, icon, empty, notice, todayISO } from '../ui.js';
+import { h, icon, empty, notice, todayISO, copyable } from '../ui.js';
 import { fetchDayRate, manualRate, setManualRate, clearCachedRates } from '../fx.js';
 import { configure, checkGithubToken } from '../github.js';
 import { connect, disconnect, isConnected } from '../google.js';
@@ -431,7 +431,7 @@ function googleCard(store) {
           ['APIs & Services → Library: enable ', link('https://console.cloud.google.com/apis/library/calendar-json.googleapis.com', 'Google Calendar API'), '.'],
           ['APIs & Services → OAuth consent screen: choose External, and add your own Google account as a test user.'],
           ['APIs & Services → Credentials → Create credentials → OAuth client ID → Web application.'],
-          ['Under Authorized JavaScript origins, add the exact address you open the board at, such as http://localhost:8000.'],
+          ['Under Authorized JavaScript origins, add the address you open the board at: ', copyable(location.origin), '.'],
           ['Copy the Client ID (it ends in .apps.googleusercontent.com) and paste it here.'],
         ].map((s) => h('li', null, h('span', { class: 'step-text' }, s))))),
 
@@ -569,7 +569,7 @@ function uniswapCard(store) {
     h('p', { class: 'muted small' }, 'Add the public address of each wallet that holds Uniswap v3 positions. The board only reads them. It never asks for a key and never signs anything.'),
     wallets.length
       ? h('ul', { class: 'stack' }, wallets.map((w, i) => h('li', { class: 'row between' },
-        h('span', null, w.label ? `${w.label} · ` : '', h('code', null, w.address)),
+        h('span', null, w.label ? `${w.label} · ` : '', copyable(w.address)),
         h('button', { type: 'button', class: 'btn-small', onclick: () => save({ wallets: wallets.filter((_, j) => j !== i) }) }, 'Remove'))))
       : h('p', { class: 'muted small' }, 'No wallets yet.'),
     h('form', { class: 'row', onsubmit: addWallet },
