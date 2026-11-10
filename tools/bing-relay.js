@@ -3,7 +3,7 @@
 // It forwards GET requests to Bing's JSON API only, and answers only pages served from this machine.
 import { createServer } from 'node:http';
 
-const PORT = Number(process.env.PORT) || 8787;
+const PORT = Number(process.env.PORT) || 8417;
 const BING = 'https://ssl.bing.com';
 const PATH = '/webmaster/api.svc/json/';
 const LOCAL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
@@ -32,4 +32,9 @@ createServer(async (req, res) => {
   } catch (err) {
     res.writeHead(502, cors).end(`Could not reach Bing: ${err.message}`);
   }
-}).listen(PORT, '127.0.0.1', () => console.log(`Bing relay on http://localhost:${PORT}`));
+})
+  .on('error', (err) => {
+    console.error(err.code === 'EADDRINUSE' ? `Port ${PORT} is in use. Pick another with PORT=<port> and set the same address in Settings.` : err.message);
+    process.exit(1);
+  })
+  .listen(PORT, '127.0.0.1', () => console.log(`Bing relay on http://127.0.0.1:${PORT}`));
