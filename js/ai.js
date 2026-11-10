@@ -1,5 +1,22 @@
 // One place that talks to OpenRouter. Each feature names its task; the model comes from Settings.
 import { modelForTask } from './modules/settings.js';
+import { uid, now } from './ui.js';
+
+// Every call is logged for the Monitoring tab: which task, which model, token counts, and cost if OpenRouter reports it.
+function recordUsage(store, task, model, usage) {
+  if (!usage) return;
+  store.update('usage', (d) => {
+    d.entries.push({
+      id: uid(),
+      at: now(),
+      task,
+      model,
+      promptTokens: Number(usage.prompt_tokens) || 0,
+      completionTokens: Number(usage.completion_tokens) || 0,
+      cost: Number.isFinite(Number(usage.cost)) ? Number(usage.cost) : null,
+    });
+  });
+}
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -13,10 +30,12 @@ export async function ask(store, taskId, messages) {
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Title': 'Board' },
-    body: JSON.stringify({ model, messages }),
+    // usage.include asks OpenRouter to return the cost of this call with the token counts.
+    body: JSON.stringify({ model, messages, usage: { include: true } }),
   });
   if (!res.ok) throw new Error(`OpenRouter error ${res.status}. ${(await res.text()).slice(0, 160)}`);
   const data = await res.json();
+  recordUsage(store, taskId, model, data.usage);
   const text = data.choices?.[0]?.message?.content;
   if (!text) throw new Error('The model returned no text.');
   return text;
