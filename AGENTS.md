@@ -50,3 +50,8 @@ js/modules/*.js       one file per section (todos, projects, kitchen, money)
 - Commit messages describe only the code change. Do not add `Co-authored-by`, `Signed-off-by`, or attribution lines unless the user asks.
 - Check the commit identity before committing: `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT`. Use the identity already configured. Do not change it.
 - Open PRs against `main`. Do not push to `main` directly.
+- Commit regularly, in small steps. The commits should tell a story: each one is a step the next one builds on, so reading the log explains how the change came together.
+- Keep commit subjects short (about 60 characters) and say what changed. Add a body only when the why is not obvious. No padding, and do not restate the diff.
+- Keep PR titles short. The description lists what changed and how it was checked, in a few lines.
+- Merge a PR as soon as it is ready: the strict syntax check passes, the change is complete, and nothing is left open for the user. Do not leave ready PRs open.
+- Run the strict syntax check before every commit, and stop if it fails: `for f in js/*.js js/modules/*.js; do node --experimental-default-type=module --check "$f" || { echo "FAIL $f"; exit 1; }; done`
