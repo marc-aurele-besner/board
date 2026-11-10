@@ -5,6 +5,10 @@ import { readPdf } from '../pdf-reader.js';
 import { knownRate, fetchDayRate, fetchRateRange, manualRate, setManualRate, convert } from '../fx.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { barChart, legend } from '../chart.js';
+import { openDialog } from '../modal.js';
+
+// Bills larger than this are read, but their original file is not kept with the entries.
+const BILL_LIMIT = 1.5 * 1024 * 1024;
 
 const COLLECTION = 'finance';
 const TYPES = [['expense', 'Expense'], ['income', 'Income']];
@@ -26,7 +30,9 @@ const GROUPS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month'], ['year', '
 // View state: the currency totals are shown in, the period, and how it is grouped in the chart.
 const view = { currency: DEFAULT_CURRENCY, range: 'month', group: 'day' };
 // A bill is read into charges (the line items), a currency and a bill total. Only the charges become entries.
-const receipt = { status: 'idle', items: [], total: null, currency: DEFAULT_CURRENCY, vendor: '', error: '', fileName: '', stage: '' };
+// taxes: tax lines printed on the document as totals (GST, QST, ...), not attached to one charge.
+// original: the bill file itself, kept with the entries so it can be opened later.
+const receipt = { status: 'idle', items: [], taxes: [], total: null, date: '', currency: DEFAULT_CURRENCY, vendor: '', error: '', fileName: '', stage: '', original: null };
 // Spending review (task 6): the text for the period it was asked for.
 const spend = { range: '', status: 'idle', text: '' };
 // Rates: days asked for, days still loading, and days that failed with the reason.
@@ -105,6 +111,8 @@ function addEntries(store, list) {
         date: e.date,
         type: e.type ?? 'expense',
         amount: round2(e.amount),
+        tax: round2(e.tax || 0),
+        billId: e.billId ?? '',
         currency: CURRENCIES.includes(e.currency) ? e.currency : DEFAULT_CURRENCY,
         category,
         note: e.note || '',
@@ -124,6 +132,7 @@ function addEntry(store, v) {
     date: v.date || todayISO(),
     type: v.type === 'income' ? 'income' : 'expense',
     amount,
+    tax: Number(v.tax) || 0,
     currency: v.currency,
     category: v.category.trim(),
     note: v.note.trim(),
@@ -239,10 +248,12 @@ const readAsDataUrl = (file) =>
 
 const receiptPrompt = (categories) => [
   'You read bills, invoices and receipts. Reply with JSON only, in this shape:',
-  '{"vendor": string, "date": "YYYY-MM-DD", "currency": "USD" or "CAD" or the ISO code on the document, "items": [{"date": "YYYY-MM-DD", "description": string, "amount": number, "category": string}], "total": number}.',
+  '{"vendor": string, "date": "YYYY-MM-DD", "currency": "USD" or "CAD" or the ISO code on the document, "items": [{"date": "YYYY-MM-DD", "description": string, "amount": number, "tax": number, "category": string}], "taxes": [{"name": string, "amount": number}], "total": number}.',
   'Rules:',
   '- items: one object per charge line on the document, across every page. Amounts are positive numbers with cents, like 19.99.',
-  '- Do NOT list subtotals, tax, totals, balances, credits or payments as items. Put the amount due on the document in "total".',
+  '- "amount" is the price before tax. "tax" is the tax printed on that same line (0 if none).',
+  '- Taxes printed only as document totals (for example GST and QST lines under the subtotal) go in "taxes", with their name and amount.',
+  '- Do NOT list subtotals, totals, balances, credits or payments as items. Put the amount due on the document in "total".',
   '- If a line has no date of its own, use the document date.',
   `- category: pick from ${categories.join(', ') || 'none yet'} when one fits, otherwise a short new name.`,
   '- Do not summarize or group lines. Every charge line gets its own item.',
@@ -261,6 +272,7 @@ async function readReceipt(store, file, categories) {
   };
   say('Reading the file…');
   try {
+    receipt.original = { name: file.name, type: file.type, dataUrl: file.size <= BILL_LIMIT ? await readAsDataUrl(file) : '' };
     const content = await documentContent(file, say);
     say('Asking the model to read the charges…');
     const reply = await ask(store, 'task-receipt', [
@@ -275,12 +287,17 @@ async function readReceipt(store, file, categories) {
     receipt.currency = CURRENCIES.includes(docCurrency) ? docCurrency : view.currency;
     receipt.vendor = String(doc.vendor ?? '').trim();
     receipt.total = Number.isFinite(Number(doc.total)) ? round2(Math.abs(Number(doc.total))) : null;
+    receipt.date = documentDate;
+    receipt.taxes = (doc.taxes ?? [])
+      .map((t) => ({ key: uid(), note: String(t.name ?? 'Tax').trim() || 'Tax', amount: round2(Math.abs(Number(t.amount))) }))
+      .filter((t) => t.amount > 0);
     receipt.items = (doc.items ?? [])
       .map((x) => ({
         key: uid(),
         date: DATE.test(x.date) ? x.date : documentDate,
         note: String(x.description ?? '').trim(),
         amount: round2(Math.abs(Number(x.amount))),
+        tax: round2(Math.abs(Number(x.tax) || 0)),
         category: String(x.category ?? '').trim() || 'Uncategorized',
         projectId: null,
       }))
@@ -310,6 +327,31 @@ function totalCheck(itemsTotal) {
   });
 }
 
+// The original bill is kept with its entries, so it can be opened from the list later.
+function addBill(store, original) {
+  const id = uid();
+  store.update(COLLECTION, (d) => {
+    d.bills.push({ id, name: original.name, type: original.type, dataUrl: original.dataUrl, created: now() });
+  });
+  return id;
+}
+
+// Opens an original bill: an image, or a PDF shown in a frame.
+function showOriginal(file) {
+  const body = file.dataUrl
+    ? file.type.startsWith('image/')
+      ? h('img', { class: 'bill-img', src: file.dataUrl, alt: file.name })
+      : h('iframe', { class: 'bill-frame', src: file.dataUrl, title: file.name })
+    : empty('The original file was too large to keep with the entries.');
+  openDialog({ title: file.name, wide: true, body });
+}
+
+function showBill(store, billId) {
+  const bill = store.get(COLLECTION).bills.find((b) => b.id === billId);
+  if (bill) showOriginal(bill);
+}
+
+// The review of a bill: each charge with its net amount, its tax and the total, then the document-level taxes.
 function receiptPanel(store) {
   if (receipt.status === 'idle') return null;
   if (receipt.status === 'loading') {
@@ -326,15 +368,51 @@ function receiptPanel(store) {
 
   const projects = store.get('projects').projects;
   const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, color: p.color }));
-  const itemsTotal = round2(receipt.items.reduce((s, x) => s + x.amount, 0));
-  const source = receipt.vendor || receipt.fileName;
   const cur = receipt.currency;
+  const source = receipt.vendor || receipt.fileName;
+  const netTotal = round2(receipt.items.reduce((s, x) => s + x.amount, 0));
+  const taxTotal = round2(receipt.items.reduce((s, x) => s + x.tax, 0) + receipt.taxes.reduce((s, t) => s + t.amount, 0));
+  const grandTotal = round2(netTotal + taxTotal);
+
+  const addAll = () => {
+    const billId = receipt.original ? addBill(store, receipt.original) : '';
+    addEntries(store, [
+      ...receipt.items.map((x) => ({
+        date: x.date,
+        type: 'expense',
+        amount: round2(x.amount + x.tax),
+        tax: x.tax,
+        currency: cur,
+        category: x.category,
+        note: x.note,
+        projectId: x.projectId,
+        source,
+        billId,
+      })),
+      ...receipt.taxes.map((t) => ({
+        date: receipt.date,
+        type: 'expense',
+        amount: t.amount,
+        tax: t.amount,
+        currency: cur,
+        category: 'Taxes',
+        note: t.note,
+        projectId: null,
+        source,
+        billId,
+      })),
+    ]);
+    receipt.status = 'idle';
+    receipt.items = [];
+    receipt.taxes = [];
+    store.refresh();
+  };
 
   return h('section', { class: 'card stack receipt' },
     h('div', { class: 'row between' },
       h('div', null,
-        h('strong', null, `${receipt.items.length} charges from ${source}`),
-        h('div', { class: 'muted small' }, 'Each charge can go to its own project and category. The bill total is only for checking.')),
+        h('strong', null, `${receipt.items.length + receipt.taxes.length} lines from ${source}`),
+        h('div', { class: 'muted small' }, 'Each line can go to its own project and category. Taxes are kept as their own amounts.')),
       h('div', { class: 'row' },
         h('label', { class: 'inline' }, 'Currency',
           h('select', {
@@ -345,25 +423,10 @@ function receiptPanel(store) {
               store.refresh();
             },
           }, CURRENCIES.map((c) => h('option', { value: c }, c)))),
-        h('button', {
-          type: 'button',
-          class: 'btn-small primary',
-          onclick: () => {
-            addEntries(store, receipt.items.map((x) => ({
-              date: x.date,
-              type: 'expense',
-              amount: x.amount,
-              currency: cur,
-              category: x.category,
-              note: x.note,
-              projectId: x.projectId,
-              source,
-            })));
-            receipt.status = 'idle';
-            receipt.items = [];
-            store.refresh();
-          },
-        }, `Add ${receipt.items.length} charges`),
+        receipt.original?.dataUrl
+          ? h('button', { type: 'button', class: 'btn-small', onclick: () => showOriginal(receipt.original) }, 'View original')
+          : null,
+        h('button', { type: 'button', class: 'btn-small primary', onclick: addAll }, `Add ${receipt.items.length + receipt.taxes.length} lines`),
         h('button', {
           type: 'button',
           class: 'btn-small',
@@ -373,11 +436,12 @@ function receiptPanel(store) {
           },
         }, 'Dismiss'))),
 
-    totalCheck(itemsTotal),
+    totalCheck(grandTotal),
 
     h('ul', { class: 'review-list' },
       h('li', { class: 'review-row review-head muted small' },
-        h('span', null, 'Date'), h('span', null, 'Charge'), h('span', { class: 'num' }, `Amount (${cur})`),
+        h('span', null, 'Date'), h('span', null, 'Charge'), h('span', { class: 'num' }, `Net (${cur})`),
+        h('span', { class: 'num' }, 'Tax'), h('span', { class: 'num' }, 'Total'),
         h('span', null, 'Project'), h('span', null, 'Category'), h('span', null)),
       receipt.items.map((x, i) =>
         h('li', { class: 'review-row' },
@@ -401,10 +465,20 @@ function receiptPanel(store) {
             value: x.amount.toFixed(2),
             onSave: (v) => {
               const n = round2(Number(v));
-              if (n > 0) x.amount = n;
+              if (n >= 0) x.amount = n;
               store.refresh();
             },
           })),
+          h('span', { class: 'num' }, editText({
+            value: x.tax.toFixed(2),
+            placeholder: '0.00',
+            onSave: (v) => {
+              const n = round2(Number(v));
+              if (n >= 0) x.tax = n;
+              store.refresh();
+            },
+          })),
+          h('span', { class: 'num total' }, money(round2(x.amount + x.tax), cur)),
           pickChip({
             value: x.projectId,
             options: projectOptions,
@@ -426,18 +500,53 @@ function receiptPanel(store) {
           h('button', {
             type: 'button',
             class: 'icon-btn',
-            title: 'Remove this charge',
-            'aria-label': 'Remove this charge',
+            title: 'Remove this line',
+            'aria-label': 'Remove this line',
             onclick: () => {
               receipt.items.splice(i, 1);
               store.refresh();
             },
           }, icon('x')))),
+      receipt.taxes.map((t, i) =>
+        h('li', { class: 'review-row review-tax' },
+          h('span', { class: 'muted small' }, receipt.date),
+          editText({
+            value: t.note,
+            placeholder: 'Tax name',
+            onSave: (v) => {
+              t.note = v;
+              store.refresh();
+            },
+          }),
+          h('span'),
+          h('span', { class: 'num' }, editText({
+            value: t.amount.toFixed(2),
+            onSave: (v) => {
+              const n = round2(Number(v));
+              if (n > 0) t.amount = n;
+              store.refresh();
+            },
+          })),
+          h('span', { class: 'num total' }, money(t.amount, cur)),
+          h('span', { class: 'muted small' }, 'No project'),
+          h('span', { class: 'muted small' }, 'Taxes'),
+          h('button', {
+            type: 'button',
+            class: 'icon-btn',
+            title: 'Remove this tax',
+            'aria-label': 'Remove this tax',
+            onclick: () => {
+              receipt.taxes.splice(i, 1);
+              store.refresh();
+            },
+          }, icon('x')))),
     ),
 
-    h('div', { class: 'row end muted small' },
+    h('div', { class: 'row end muted small receipt-sums' },
       receipt.total === null ? null : h('span', null, `Bill total ${money(receipt.total, cur)}`),
-      h('span', null, `Charges ${money(itemsTotal, cur)}`)));
+      h('span', null, `Net ${money(netTotal, cur)}`),
+      h('span', null, `Tax ${money(taxTotal, cur)}`),
+      h('span', { class: 'strong' }, `Total ${money(grandTotal, cur)}`)));
 }
 
 function dropZone(store, categories) {
@@ -706,7 +815,8 @@ function draw(root, store) {
                           className: 'muted',
                           onSave: (note) => updateEntry(store, e.id, { note }),
                         }),
-                        e.source ? h('span', { class: 'muted small' }, `from ${e.source}`) : null),
+                        e.source ? h('span', { class: 'muted small' }, `from ${e.source}${e.tax ? ` · tax ${money(e.tax, entryCurrency(e))}` : ''}`) : null,
+                        e.billId ? h('button', { type: 'button', class: 'btn-link-inline', onclick: () => showBill(store, e.billId) }, 'original bill') : null),
                       pickChip({
                         value: e.projectId ?? null,
                         options: projectOptions,
@@ -767,6 +877,7 @@ function draw(root, store) {
                   h('option', { value: 'expense' }, 'Expense'),
                   h('option', { value: 'income' }, 'Income')),
                 h('input', { name: 'amount', type: 'number', step: '0.01', min: '0', placeholder: 'Amount', required: true, inputmode: 'decimal', 'aria-label': 'Amount' }),
+                h('input', { name: 'tax', type: 'number', step: '0.01', min: '0', placeholder: 'Tax (in amount)', inputmode: 'decimal', 'aria-label': 'Tax included in the amount' }),
                 h('select', { name: 'currency', value: cur, 'aria-label': 'Currency' },
                   CURRENCIES.map((c) => h('option', { value: c }, c)))),
               h('div', { class: 'row' },
@@ -786,7 +897,7 @@ export default {
   title: 'Money',
   icon: 'wallet',
   collection: COLLECTION,
-  defaults: { entries: [], categories: [] },
+  defaults: { entries: [], categories: [], bills: [] },
   render: draw,
   serialize: () => ({ cur: view.currency, range: view.range === 'month' ? '' : view.range, group: view.group === 'day' ? '' : view.group }),
   restore: (p = {}) => {
