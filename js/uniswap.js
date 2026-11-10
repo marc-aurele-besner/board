@@ -1,5 +1,5 @@
 // Uniswap v3 and v4 liquidity positions, read straight from each chain's node. Read-only: only public addresses are used,
-// never keys. Token prices come from CoinGecko's public price endpoint.
+// never keys. Token prices come from DefiLlama's public price endpoint.
 import { keccak256 } from './keccak.js';
 
 // Chain logos from Trust Wallet's asset repository. Unichain and Robinhood Chain are not in it; both pay gas in ETH,
@@ -13,23 +13,23 @@ const ETH_LOGO = trustLogo('ethereum');
 // v4.span is the widest block range the default node accepts in one log search.
 const ETH = { symbol: 'ETH', coingecko: 'ethereum', logo: ETH_LOGO };
 export const CHAINS = [
-  { id: 1, name: 'Ethereum', rpc: 'https://ethereum.publicnode.com', coingecko: 'ethereum', app: 'ethereum', logo: ETH_LOGO, native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  { id: 1, name: 'Ethereum', rpc: 'https://ethereum.publicnode.com', prices: 'ethereum', app: 'ethereum', logo: ETH_LOGO, native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
     v4: { positions: '0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e', stateView: '0x7ffe42c4a5deea5b0fec41c94c136cf115597227', start: 21689089, span: 10000 } },
-  { id: 8453, name: 'Base', rpc: 'https://base.publicnode.com', coingecko: 'base', app: 'base', logo: trustLogo('base'), native: ETH, factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD', positions: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
+  { id: 8453, name: 'Base', rpc: 'https://base.publicnode.com', prices: 'base', app: 'base', logo: trustLogo('base'), native: ETH, factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD', positions: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
     v4: { positions: '0x7c5f5a4bbd8fd63184577525326123b519429bdc', stateView: '0xa3c0c9b65bad0b08107aa264b0f3db444b867a71', start: 25350993, span: 50000 } },
-  { id: 42161, name: 'Arbitrum One', rpc: 'https://arbitrum-one-rpc.publicnode.com', coingecko: 'arbitrum-one', app: 'arbitrum', logo: trustLogo('arbitrum'), native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  { id: 42161, name: 'Arbitrum One', rpc: 'https://arbitrum-one-rpc.publicnode.com', prices: 'arbitrum', app: 'arbitrum', logo: trustLogo('arbitrum'), native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
     v4: { positions: '0xd88f38f930b7952f2db2432cb002e7abbf3dd869', stateView: '0x76fd297e2d437cd7f76d50f01afe6160f86e9990', start: 298179155, span: 10000 } },
-  { id: 10, name: 'Optimism', rpc: 'https://optimism-rpc.publicnode.com', coingecko: 'optimistic-ethereum', app: 'optimism', logo: trustLogo('optimism'), native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  { id: 10, name: 'Optimism', rpc: 'https://optimism-rpc.publicnode.com', prices: 'optimism', app: 'optimism', logo: trustLogo('optimism'), native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
     v4: { positions: '0x3c3ea4b57a46241e54610e5f022e5c45859a1017', stateView: '0xc18a3169788f4f75a170290584eca6395c75ecdb', start: 130947681, span: 10000 } },
-  { id: 137, name: 'Polygon', rpc: 'https://polygon-bor-rpc.publicnode.com', coingecko: 'polygon-pos', app: 'polygon', logo: trustLogo('polygon'), native: { symbol: 'POL', coingecko: 'polygon-ecosystem-token', logo: trustLogo('polygon') }, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  { id: 137, name: 'Polygon', rpc: 'https://polygon-bor-rpc.publicnode.com', prices: 'polygon', app: 'polygon', logo: trustLogo('polygon'), native: { symbol: 'POL', coingecko: 'polygon-ecosystem-token', logo: trustLogo('polygon') }, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
     v4: { positions: '0x1ec2ebf4f37e7363fdfe3551602425af0b3ceef9', stateView: '0x5ea1bd7974c8a611cbab0bdcafcb1d9cc9b3ba5a', start: 66980394, span: 10000 } },
-  { id: 56, name: 'BNB Chain', rpc: 'https://bsc-rpc.publicnode.com', coingecko: 'binance-smart-chain', app: 'bnb', logo: trustLogo('smartchain'), native: { symbol: 'BNB', coingecko: 'binancecoin', logo: trustLogo('smartchain') }, factory: '0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7', positions: '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613',
+  { id: 56, name: 'BNB Chain', rpc: 'https://bsc-rpc.publicnode.com', prices: 'bsc', app: 'bnb', logo: trustLogo('smartchain'), native: { symbol: 'BNB', coingecko: 'binancecoin', logo: trustLogo('smartchain') }, factory: '0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7', positions: '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613',
     v4: { positions: '0x7a4a5c919ae2541aed11041a1aeee68f1287f95b', stateView: '0xd13dd3d6e93f276fafc9db9e6bb47c1180aee0c4', start: 45996818, span: 50000 } },
-  { id: 43114, name: 'Avalanche', rpc: 'https://avalanche-c-chain-rpc.publicnode.com', coingecko: 'avalanche', app: 'avalanche', logo: trustLogo('avalanchec'), native: { symbol: 'AVAX', coingecko: 'avalanche-2', logo: trustLogo('avalanchec') }, factory: '0x740b1c1de25031C31FF4fC9A62f554A55cdC1baD', positions: '0x655C406EBFa14EE2006250925e54ec43AD184f8B',
+  { id: 43114, name: 'Avalanche', rpc: 'https://avalanche-c-chain-rpc.publicnode.com', prices: 'avax', app: 'avalanche', logo: trustLogo('avalanchec'), native: { symbol: 'AVAX', coingecko: 'avalanche-2', logo: trustLogo('avalanchec') }, factory: '0x740b1c1de25031C31FF4fC9A62f554A55cdC1baD', positions: '0x655C406EBFa14EE2006250925e54ec43AD184f8B',
     v4: { positions: '0xb74b1f14d2754acfcbbe1a221023a5cf50ab8acd', stateView: '0xc3c9e198c735a4b97e3e683f391ccbdd60b69286', start: 56203165, span: 50000 } },
-  { id: 130, name: 'Unichain', rpc: 'https://unichain-rpc.publicnode.com', coingecko: 'unichain', app: 'unichain', logo: ETH_LOGO, native: ETH, factory: '0x1f98400000000000000000000000000000000003', positions: '0x943e6e07a7e8e791dafc44083e54041d743c46e9',
+  { id: 130, name: 'Unichain', rpc: 'https://unichain-rpc.publicnode.com', prices: 'unichain', app: 'unichain', logo: ETH_LOGO, native: ETH, factory: '0x1f98400000000000000000000000000000000003', positions: '0x943e6e07a7e8e791dafc44083e54041d743c46e9',
     v4: { positions: '0x4529a01c7a0410167c5740c487a8de60232617bf', stateView: '0x86e8631a016f9068c3f085faf484ee3f5fdee8f2', start: 6819679, span: 10000 } },
-  { id: 4663, name: 'Robinhood Chain', rpc: 'https://rpc.mainnet.chain.robinhood.com', coingecko: 'robinhood', app: null, logo: ETH_LOGO, native: ETH, factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa', positions: '0x73991a25c818bf1f1128deaab1492d45638de0d3',
+  { id: 4663, name: 'Robinhood Chain', rpc: 'https://rpc.mainnet.chain.robinhood.com', prices: 'robinhood', app: null, logo: ETH_LOGO, native: ETH, factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa', positions: '0x73991a25c818bf1f1128deaab1492d45638de0d3',
     v4: { positions: '0x58daec3116aae6d93017baaea7749052e8a04fa7', stateView: '0xf3334192d15450cdd385c8b70e03f9a6bd9e673b', start: 9506, span: 10000000 } },
 ];
 
@@ -188,25 +188,20 @@ export async function tokenMeta(node, address, chain) {
   }
 }
 
-// USD price of each token address on a chain, keyed by lowercase address, from CoinGecko.
-// Tokens it does not know are left out.
-// The native coin is priced by its coin id, since it has no contract address.
+// USD price of each token address on a chain, keyed by lowercase address, from DefiLlama: one request for all of
+// them, where CoinGecko's free tier now takes one address per request. Tokens it does not know are left out.
+// The native coin has no contract, so it is asked for by its CoinGecko id.
 export async function usdPrices(chain, addresses) {
-  const all = [...new Set(addresses.map((a) => a.toLowerCase()))];
-  const list = all.filter((a) => !isNative(a));
+  const list = [...new Set(addresses.map((a) => a.toLowerCase()))];
+  if (!list.length) return {};
+  const keyOf = (a) => (isNative(a) ? `coingecko:${chain.native.coingecko}` : `${chain.prices}:${a}`);
+  const res = await fetch(`https://coins.llama.fi/prices/current/${list.map(keyOf).join(',')}`);
+  if (!res.ok) throw new Error(`The price service answered ${res.status}.`);
+  const coins = (await res.json()).coins ?? {};
   const out = {};
-  if (list.length) {
-    const res = await fetch(`https://api.coingecko.com/api/v3/simple/token_price/${chain.coingecko}?contract_addresses=${list.join(',')}&vs_currencies=usd`);
-    if (!res.ok) throw new Error(`The price service answered ${res.status}.`);
-    for (const [address, value] of Object.entries(await res.json())) {
-      if (value?.usd) out[address.toLowerCase()] = value.usd;
-    }
-  }
-  if (all.length > list.length) {
-    const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${chain.native.coingecko}&vs_currencies=usd`);
-    if (!res.ok) throw new Error(`The price service answered ${res.status}.`);
-    const usd = (await res.json())[chain.native.coingecko]?.usd;
-    if (usd) out[NATIVE] = usd;
+  for (const a of list) {
+    const usd = coins[keyOf(a)]?.price;
+    if (usd) out[a] = usd;
   }
   return out;
 }
