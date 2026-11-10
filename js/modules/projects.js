@@ -1,15 +1,24 @@
 import { h, uid, now, icon, empty, statusOf } from '../ui.js';
+import { repoStats, refreshRepo } from '../github.js';
 
 const COLLECTION = 'projects';
 const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
 const SLUG = /^[\w.-]+$/;
+const DEFAULT_CATEGORIES = [
+  { id: 'cat-personal', name: 'Personal' },
+  { id: 'cat-web', name: 'Web' },
+  { id: 'cat-crypto', name: 'Crypto' },
+];
 
-// View state. mode: 'view' | 'edit' | 'new'. draft keeps typed values when validation fails.
-const view = { selectedId: null, mode: 'view', error: '', draft: null };
+// View state. mode: 'view' | 'edit' | 'new' | 'categories'. draft keeps typed values when validation fails.
+// category filter: 'all' | 'none' | <category id>.
+let liveStore = null;
+const view = { selectedId: null, mode: 'view', error: '', draft: null, query: '', category: 'all' };
 
 const splitLines = (text) => text.split('\n').map((s) => s.trim()).filter(Boolean);
 const formValues = (form) => Object.fromEntries(new FormData(form));
 const sameName = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
+const categoryById = (categories, id) => categories.find((c) => c.id === id) ?? null;
 
 const GITHUB_PREFIX = /^(?:https?:\/\/)?(?:www\.)?github\.com\//i;
 const cleanPath = (text) => text.trim().replace(GITHUB_PREFIX, '').replace(/^\/+|\/+$/g, '');
@@ -49,10 +58,22 @@ export function makeProject(existingCount, fields = {}) {
     color: PALETTE[existingCount % PALETTE.length],
     description: '',
     website: '',
+    categoryId: null,
     github: { org: '', repos: [] },
     created: now(),
     ...fields,
   };
+}
+
+// Creates a project unless one with the same name exists. Returns { project, created }.
+// The caller sets any view state it needs, then calls store.refresh().
+export function createProject(store, name, fields = {}) {
+  const { projects } = store.get(COLLECTION);
+  const existing = projects.find((p) => sameName(p.name, name));
+  if (existing) return { project: existing, created: false };
+  const project = makeProject(projects.length, { name, ...fields });
+  store.update(COLLECTION, (d) => d.projects.push(project));
+  return { project, created: true };
 }
 
 // The site's own /favicon.ico. Browsers show cross-origin images without CORS, so this
@@ -85,22 +106,34 @@ export function migrateLegacyProjects(store) {
   });
 }
 
-function quickCreate(store, name) {
-  const { projects } = store.get(COLLECTION);
-  const existing = projects.find((p) => sameName(p.name, name));
-  if (existing) {
-    view.selectedId = existing.id;
-    view.error = `"${existing.name}" already exists.`;
-    view.mode = 'view';
-    return store.refresh();
+// --- GitHub totals, read from the cache in github.js ---
+
+const onRepoChange = () => {
+  if (liveStore && view.mode === 'view') liveStore.refresh();
+};
+
+// Sums issues and PRs over a project's repos. `state` is 'ok', 'pending' or 'none'.
+function githubTotals(p) {
+  const totals = { issues: 0, prs: 0, pending: 0, failed: 0, repos: p.github.repos.length };
+  for (const r of p.github.repos) {
+    const s = repoStats(r, onRepoChange);
+    if (s.status === 'ok') {
+      totals.issues += s.issues;
+      totals.prs += s.prs;
+    } else if (s.status === 'loading') totals.pending += 1;
+    else totals.failed += 1;
   }
-  const project = makeProject(projects.length, { name });
-  view.selectedId = project.id;
-  view.mode = 'view';
-  view.error = '';
-  view.draft = null;
-  store.update(COLLECTION, (d) => d.projects.push(project));
+  return totals;
 }
+
+function githubLine(p) {
+  if (!p.github.repos.length) return p.github.org || 'No GitHub';
+  const t = githubTotals(p);
+  if (t.pending) return `${p.github.repos.length} repo${p.github.repos.length > 1 ? 's' : ''} · loading…`;
+  return `${t.issues} issues · ${t.prs} PRs`;
+}
+
+// --- Actions ---
 
 function saveForm(store, v) {
   const fail = (error) => {
@@ -128,20 +161,35 @@ function saveForm(store, v) {
     if (!repos.includes(repo)) repos.push(repo);
   }
 
-  const fields = { name, description: v.description.trim(), color: v.color || PALETTE[0], website, github: { org, repos } };
+  const fields = {
+    name,
+    description: v.description.trim(),
+    color: v.color || PALETTE[0],
+    website,
+    categoryId: v.categoryId || null,
+    github: { org, repos },
+  };
   if (editingId) {
     store.update(COLLECTION, (d) => {
       const p = d.projects.find((x) => x.id === editingId);
       if (p) Object.assign(p, fields);
     });
   } else {
-    const project = makeProject(projects.length, fields);
+    const { project } = createProject(store, name, fields);
     view.selectedId = project.id;
-    store.update(COLLECTION, (d) => d.projects.push(project));
   }
   view.mode = 'view';
   view.error = '';
   view.draft = null;
+  store.refresh();
+}
+
+function quickCreate(store, name) {
+  const { project, created } = createProject(store, name);
+  view.selectedId = project.id;
+  view.mode = 'view';
+  view.draft = null;
+  view.error = created ? '' : `"${project.name}" already exists.`;
   store.refresh();
 }
 
@@ -159,6 +207,50 @@ function deleteProject(store, project) {
   view.mode = 'view';
 }
 
+// Category management. Deleting a category clears it from its projects and removes
+// the todo categories that were scoped to it.
+function addCategory(store, name) {
+  const { categories } = store.get(COLLECTION);
+  if (categories.some((c) => sameName(c.name, name))) {
+    view.error = `"${name}" already exists.`;
+    return store.refresh();
+  }
+  view.error = '';
+  store.update(COLLECTION, (d) => d.categories.push({ id: uid(), name }));
+}
+
+function renameCategory(store, category, name) {
+  const { categories } = store.get(COLLECTION);
+  if (!name) return;
+  if (categories.some((c) => c.id !== category.id && sameName(c.name, name))) {
+    view.error = `"${name}" already exists.`;
+    return store.refresh();
+  }
+  view.error = '';
+  store.update(COLLECTION, (d) => {
+    const c = d.categories.find((x) => x.id === category.id);
+    if (c) c.name = name;
+  });
+}
+
+function deleteCategory(store, category) {
+  const { projects } = store.get(COLLECTION);
+  const count = projects.filter((p) => p.categoryId === category.id).length;
+  if (!confirm(`Delete category "${category.name}"? ${count} project${count === 1 ? '' : 's'} will become uncategorized.`)) return;
+  store.update(COLLECTION, (d) => {
+    d.categories = d.categories.filter((c) => c.id !== category.id);
+    d.projects.forEach((p) => {
+      if (p.categoryId === category.id) p.categoryId = null;
+    });
+  });
+  const todos = store.get('todos');
+  if (Array.isArray(todos.categories)) {
+    store.update('todos', (t) => {
+      t.categories = t.categories.filter((c) => !(c.scope === 'projectCategory' && c.projectCategoryId === category.id));
+    });
+  }
+}
+
 const select = (store, id) => {
   view.selectedId = id;
   view.mode = 'view';
@@ -167,17 +259,14 @@ const select = (store, id) => {
   store.refresh();
 };
 
-const githubSummary = (p) => {
-  if (p.github.org) return p.github.org;
-  if (p.github.repos.length) return `${p.github.repos.length} repo${p.github.repos.length > 1 ? 's' : ''}`;
-  return 'No GitHub';
-};
+// --- Views ---
 
-function projectList(store, projects, items) {
-  if (!projects.length) return empty('No projects yet. Create one above.');
+function projectList(store, projects, items, categories) {
+  if (!projects.length) return empty('No projects match. Try another filter, or create one above.');
   return h('ul', { class: 'project-list' },
     [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => {
       const open = items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
+      const category = categoryById(categories, p.categoryId);
       return h('li', {
         class: p.id === view.selectedId ? 'project-item active' : 'project-item',
         onclick: () => select(store, p.id),
@@ -185,25 +274,62 @@ function projectList(store, projects, items) {
         projectIcon(p),
         h('div', { class: 'grow' },
           h('strong', null, p.name),
-          h('div', { class: 'muted' }, p.website ? new URL(p.website).host : githubSummary(p))),
+          h('div', { class: 'muted' }, category ? `${category.name} · ${githubLine(p)}` : githubLine(p))),
         h('span', { class: 'count', title: 'Open todos' }, String(open)));
     }));
 }
 
-function projectView(store, p, items) {
+function repoTable(store, p) {
+  return h('table', { class: 'repo-table' },
+    h('thead', null, h('tr', null,
+      h('th', null, 'Repository'), h('th', { class: 'num' }, 'Issues'), h('th', { class: 'num' }, 'PRs'), h('th', null, ''), h('th', null, ''))),
+    h('tbody', null, p.github.repos.map((r) => {
+      const s = repoStats(r, onRepoChange);
+      const ok = s.status === 'ok';
+      return h('tr', null,
+        h('td', null, h('a', { href: `https://github.com/${r}`, target: '_blank', rel: 'noopener' }, r)),
+        h('td', { class: 'num' }, ok ? String(s.issues) : '—'),
+        h('td', { class: 'num' }, ok ? String(s.prs) : '—'),
+        h('td', { class: 'muted' }, s.status === 'loading' ? 'Loading…' : s.status === 'error' ? s.error : ''),
+        h('td', null, h('button', {
+          type: 'button',
+          class: 'icon-btn',
+          title: 'Refresh counts',
+          'aria-label': `Refresh ${r}`,
+          onclick: () => {
+            refreshRepo(r, onRepoChange);
+            store.refresh();
+          },
+        }, icon('refresh'))));
+    })));
+}
+
+function projectView(store, p, items, categories) {
   const open = items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
   const done = items.filter((i) => i.projectId === p.id && statusOf(i) === 'done').length;
-  const hasGithub = p.github.org || p.github.repos.length;
+  const category = categoryById(categories, p.categoryId);
+  const t = githubTotals(p);
+  const gh = (n) => (p.github.repos.length === 0 ? '—' : t.pending ? '…' : String(n));
   const link = (href, text, iconName) =>
     h('li', null, icon(iconName), h('a', { href, target: '_blank', rel: 'noopener' }, text));
 
   return h('div', { class: 'stack-lg' },
     h('div', { class: 'row between' },
-      h('h2', { class: 'row' }, projectIcon(p, 'project-icon large'), p.name),
+      h('div', { class: 'stack' },
+        h('h2', { class: 'row' }, projectIcon(p, 'project-icon large'), p.name),
+        h('div', { class: 'row' },
+          category ? h('span', { class: 'pill category' }, category.name) : h('span', { class: 'muted' }, 'No category'))),
       h('div', { class: 'row' },
         h('button', { type: 'button', onclick: () => { view.mode = 'edit'; view.draft = null; view.error = ''; store.refresh(); } },
           icon('pencil'), 'Edit'),
         h('button', { type: 'button', class: 'danger', onclick: () => deleteProject(store, p) }, icon('x'), 'Delete'))),
+
+    h('div', { class: 'stats' },
+      h('div', { class: 'card-inset' }, h('strong', null, String(open)), h('span', { class: 'muted' }, 'open todos')),
+      h('div', { class: 'card-inset' }, h('strong', null, String(done)), h('span', { class: 'muted' }, 'done todos')),
+      h('div', { class: 'card-inset' }, h('strong', null, gh(t.issues)), h('span', { class: 'muted' }, 'open issues')),
+      h('div', { class: 'card-inset' }, h('strong', null, gh(t.prs)), h('span', { class: 'muted' }, 'open PRs'))),
+
     p.description ? h('p', null, p.description) : h('p', { class: 'muted' }, 'No description yet.'),
 
     p.website
@@ -214,18 +340,14 @@ function projectView(store, p, items) {
 
     h('section', { class: 'stack' },
       h('h3', null, 'GitHub'),
-      hasGithub
-        ? h('ul', { class: 'links' },
-            p.github.org ? link(`https://github.com/${p.github.org}`, p.github.org, 'building') : null,
-            p.github.repos.map((r) => link(`https://github.com/${r}`, r, 'repo')))
-        : h('p', { class: 'muted' }, 'Not linked to GitHub. Fine for non-coding projects.')),
-
-    h('section', { class: 'stack' },
-      h('h3', null, 'Todos'),
-      h('p', null, `${open} open · ${done} done`)));
+      p.github.repos.length || p.github.org
+        ? h('div', { class: 'stack' },
+            p.github.org ? h('ul', { class: 'links' }, link(`https://github.com/${p.github.org}`, p.github.org, 'building')) : null,
+            p.github.repos.length ? repoTable(store, p) : null)
+        : h('p', { class: 'muted' }, 'Not linked to GitHub. Fine for non-coding projects.')));
 }
 
-function projectForm(store, project, projectCount) {
+function projectForm(store, project, projectCount, categories) {
   const isNew = !project;
   const draft = view.draft ?? (project
     ? {
@@ -233,10 +355,11 @@ function projectForm(store, project, projectCount) {
         description: project.description,
         color: project.color,
         website: project.website,
+        categoryId: project.categoryId ?? '',
         org: project.github.org,
         repos: project.github.repos.join('\n'),
       }
-    : { name: '', description: '', color: PALETTE[projectCount % PALETTE.length], website: '', org: '', repos: '' });
+    : { name: '', description: '', color: PALETTE[projectCount % PALETTE.length], website: '', categoryId: '', org: '', repos: '' });
 
   return h('form', {
     class: 'stack-lg',
@@ -250,10 +373,15 @@ function projectForm(store, project, projectCount) {
     h('div', { class: 'row' },
       h('label', { class: 'grow' }, 'Name', h('input', { name: 'name', value: draft.name, required: true, autocomplete: 'off', 'data-autofocus': true })),
       h('label', null, 'Color', h('input', { name: 'color', type: 'color', value: draft.color }))),
+    h('div', { class: 'row' },
+      h('label', { class: 'grow' }, 'Category',
+        h('select', { name: 'categoryId', value: draft.categoryId },
+          h('option', { value: '' }, 'No category'),
+          categories.map((c) => h('option', { value: c.id }, c.name)))),
+      h('label', { class: 'grow' }, 'Website (its favicon becomes the project icon)',
+        h('input', { name: 'website', value: draft.website, placeholder: 'example.com', inputmode: 'url', autocomplete: 'off' }))),
     h('label', null, 'Description',
       h('textarea', { name: 'description', rows: 2, placeholder: 'What is this project about?' }, draft.description)),
-    h('label', null, 'Website (its favicon becomes the project icon)',
-      h('input', { name: 'website', value: draft.website, placeholder: 'example.com', inputmode: 'url', autocomplete: 'off' })),
 
     h('div', { class: 'card-inset stack' },
       h('h3', null, 'GitHub (optional)'),
@@ -276,26 +404,106 @@ function projectForm(store, project, projectCount) {
       h('button', { class: 'primary', type: 'submit' }, isNew ? 'Create project' : 'Save changes')));
 }
 
+function categoriesPanel(store, categories, projects) {
+  return h('div', { class: 'stack-lg' },
+    h('div', { class: 'row between' },
+      h('h2', null, 'Categories'),
+      h('button', {
+        type: 'button',
+        onclick: () => {
+          view.mode = 'view';
+          view.error = '';
+          store.refresh();
+        },
+      }, 'Done')),
+    h('p', { class: 'muted' }, 'Categories group projects (Personal, Web, Crypto…). Todo categories can be scoped to one of them in the Todos section.'),
+    view.error ? h('p', { class: 'error', role: 'alert' }, view.error) : null,
+    h('ul', { class: 'stack' },
+      categories.map((c) => {
+        const count = projects.filter((p) => p.categoryId === c.id).length;
+        return h('li', { class: 'row category-row' },
+          h('form', {
+            class: 'row grow',
+            onsubmit: (e) => {
+              e.preventDefault();
+              renameCategory(store, c, formValues(e.currentTarget).name.trim());
+            },
+          },
+            h('input', { name: 'name', value: c.name, 'aria-label': 'Category name', class: 'grow' }),
+            h('button', { type: 'submit' }, 'Save')),
+          h('span', { class: 'muted' }, `${count} project${count === 1 ? '' : 's'}`),
+          h('button', { type: 'button', class: 'danger', onclick: () => deleteCategory(store, c) }, icon('x'), 'Delete'));
+      })),
+    h('form', {
+      class: 'row',
+      onsubmit: (e) => {
+        e.preventDefault();
+        const name = formValues(e.currentTarget).name.trim();
+        if (name) addCategory(store, name);
+      },
+    },
+      h('input', { name: 'name', placeholder: 'New category, e.g. Health', 'aria-label': 'New category', class: 'grow', autocomplete: 'off' }),
+      h('button', { class: 'primary', type: 'submit' }, 'Add')));
+}
+
 function draw(root, store) {
-  const { projects } = store.get(COLLECTION);
+  liveStore = store;
+  const { projects, categories } = store.get(COLLECTION);
   const { items } = store.get('todos');
   if (view.selectedId && !projects.some((p) => p.id === view.selectedId)) {
     view.selectedId = null;
     view.mode = 'view';
   }
+  if (view.category !== 'all' && view.category !== 'none' && !categoryById(categories, view.category)) view.category = 'all';
   const selected = projects.find((p) => p.id === view.selectedId) ?? null;
 
+  // The list is refilled on its own while typing in search, so the search box keeps focus.
+  const listBox = h('div', { class: 'list-scroll' });
+  const fillList = () => {
+    const q = view.query.trim().toLowerCase();
+    const shown = projects.filter((p) =>
+      (view.category === 'all' || (view.category === 'none' ? !p.categoryId : p.categoryId === view.category)) &&
+      (!q || p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q)));
+    listBox.replaceChildren(projectList(store, shown, items, categories));
+  };
+  fillList();
+
+  const chip = (key, text) =>
+    h('button', {
+      type: 'button',
+      class: view.category === key ? 'chip active' : 'chip',
+      onclick: () => {
+        view.category = key;
+        store.refresh();
+      },
+    }, text);
+
   let detail;
-  if (view.mode === 'new') detail = projectForm(store, null, projects.length);
-  else if (selected && view.mode === 'edit') detail = projectForm(store, selected, projects.length);
-  else if (selected) detail = projectView(store, selected, items);
+  if (view.mode === 'categories') detail = categoriesPanel(store, categories, projects);
+  else if (view.mode === 'new') detail = projectForm(store, null, projects.length, categories);
+  else if (selected && view.mode === 'edit') detail = projectForm(store, selected, projects.length, categories);
+  else if (selected) detail = projectView(store, selected, items, categories);
   else detail = empty('Pick a project on the left, or create one.');
 
   root.replaceChildren(
     h('div', { class: 'split' },
       h('section', { class: 'card side-pane' },
+        h('input', {
+          type: 'search',
+          placeholder: 'Search projects',
+          'aria-label': 'Search projects',
+          value: view.query,
+          oninput: (e) => {
+            view.query = e.target.value;
+            fillList();
+          },
+        }),
+        h('div', { class: 'chips' },
+          chip('all', 'All'),
+          chip('none', 'None'),
+          categories.map((c) => chip(c.id, c.name))),
         h('form', {
-          class: 'stack',
+          class: 'stack quick-project',
           onsubmit: (e) => {
             e.preventDefault();
             const input = e.currentTarget.querySelector('input[name="name"]');
@@ -303,7 +511,7 @@ function draw(root, store) {
             if (name) quickCreate(store, name);
           },
         },
-          h('input', { name: 'name', placeholder: 'Quick add: project name, Enter', 'aria-label': 'Quick add project name', autocomplete: 'off', 'data-autofocus': true }),
+          h('input', { name: 'name', placeholder: 'Quick add: project name, Enter', 'aria-label': 'Quick add project name', autocomplete: 'off' }),
           h('div', { class: 'row' },
             h('button', { class: 'primary', type: 'submit' }, 'Add'),
             h('button', {
@@ -313,11 +521,19 @@ function draw(root, store) {
                 view.mode = 'new';
                 view.selectedId = null;
                 view.error = '';
-                view.draft = { name, description: '', color: PALETTE[projects.length % PALETTE.length], website: '', org: '', repos: '' };
+                view.draft = { name, description: '', color: PALETTE[projects.length % PALETTE.length], website: '', categoryId: '', org: '', repos: '' };
                 store.refresh();
               },
-            }, 'Detailed…'))),
-        h('div', { class: 'list-scroll' }, projectList(store, projects, items))),
+            }, 'Detailed…'),
+            h('button', {
+              type: 'button',
+              onclick: () => {
+                view.mode = 'categories';
+                view.error = '';
+                store.refresh();
+              },
+            }, 'Categories'))),
+        listBox),
 
       h('section', { class: 'card main-pane' }, detail)));
 }
@@ -327,6 +543,6 @@ export default {
   title: 'Projects',
   icon: 'folder',
   collection: COLLECTION,
-  defaults: { projects: [] },
+  defaults: { projects: [], categories: DEFAULT_CATEGORIES },
   render: draw,
 };

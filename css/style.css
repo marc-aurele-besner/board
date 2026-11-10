@@ -249,6 +249,19 @@ button.danger { color: var(--danger); }
 input[type="color"] { width: 56px; height: 38px; padding: 3px; cursor: pointer; }
 h2.row { gap: 10px; flex-wrap: nowrap; }
 
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+.chip { min-height: 30px; padding: 4px 10px; border-radius: 999px; font-size: 0.85rem; }
+.chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.quick-project { margin-bottom: 8px; }
+.pill.category { color: var(--accent); border: 1px solid var(--border); background: transparent; }
+.repo-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.repo-table th, .repo-table td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+.repo-table .num { text-align: right; font-variant-numeric: tabular-nums; width: 70px; }
+.repo-table a { color: var(--accent); word-break: break-all; }
+.category-row { align-items: center; }
+.category-row form { min-width: 0; }
+.stats .card-inset { min-width: 110px; }
+
 /* Kitchen */
 .segmented { display: flex; background: var(--surface-2); border-radius: 8px; padding: 3px; margin-bottom: 10px; }
 .seg { flex: 1; background: transparent; border: none; min-height: 32px; padding: 4px 6px; font-size: 0.9rem; }
