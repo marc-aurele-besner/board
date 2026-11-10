@@ -5,7 +5,7 @@ import { connect, disconnect, isConnected } from '../google.js';
 import { editText, pill } from '../inline.js';
 import { modelChip } from '../model-picker.js';
 import { isAddress, CHAINS, chainSettings, savedNode, parseV4Link } from '../uniswap.js';
-import { telegramCard, analyticsCard, searchCard, notificationsCard, automationsCard, dataCard } from './settings-more.js';
+import { telegramCard, analyticsCard, searchCard, resendCard, notificationsCard, automationsCard, dataCard } from './settings-more.js';
 
 const COLLECTION = 'settings';
 const OPENROUTER_CHECK = 'https://openrouter.ai/api/v1/auth/key';
@@ -45,6 +45,7 @@ const SECTION_GROUPS = [
       ['telegram', 'Telegram', 'send'],
       ['analytics', 'Google Analytics', 'activity'],
       ['search', 'Search consoles', 'search'],
+      ['resend', 'Resend', 'mail'],
     ],
   },
   {
@@ -914,6 +915,7 @@ function draw(root, store) {
         : view.section === 'telegram' ? telegramCard(store)
         : view.section === 'analytics' ? analyticsCard(store)
         : view.section === 'search' ? searchCard(store)
+        : view.section === 'resend' ? resendCard(store)
         : view.section === 'notifications' ? notificationsCard(store)
         : view.section === 'automations' ? automationsCard(store)
         : view.section === 'data' ? dataCard(store)
@@ -949,7 +951,7 @@ export default {
   icon: 'settings',
   hidden: true, // opened from the gear in the top bar
   collection: COLLECTION,
-  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '', relay: '' }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) } },
+  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '', relay: '' }, resend: { relay: '', keys: {} }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) } },
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),
   restore: (p = {}) => {

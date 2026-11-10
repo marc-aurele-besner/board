@@ -10,6 +10,7 @@ const SECTIONS = {
   telegram: ['telegram', 'Telegram'],
   analytics: ['analytics', 'Google Analytics'],
   search: ['search', 'Search consoles'],
+  resend: ['resend', 'Resend'],
 };
 
 export const settingsHref = (key) => `#/settings?section=${SECTIONS[key][0]}`;
