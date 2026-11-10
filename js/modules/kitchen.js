@@ -239,7 +239,7 @@ function draw(root, store) {
 export default {
   id: 'kitchen',
   title: 'Kitchen',
-  icon: '🍳',
+  icon: 'chef-hat',
   collection: COLLECTION,
   defaults: { recipes: [] },
   render: draw,

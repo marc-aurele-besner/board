@@ -151,6 +151,10 @@ button.primary { background: var(--accent); color: var(--accent-text); border-co
 button.danger { color: var(--danger); }
 .icon-btn { background: transparent; border: none; min-height: 32px; min-width: 32px; padding: 0 6px; color: var(--muted); font-size: 1.1rem; }
 .icon-btn:hover { color: var(--danger); }
+.icon { display: inline-flex; width: 1.1em; height: 1.1em; flex: none; vertical-align: -0.2em; }
+.icon svg { width: 100%; height: 100%; }
+.icon-btn .icon { width: 1.05em; height: 1.05em; }
+.tab { display: inline-flex; align-items: center; gap: 6px; }
 
 /* Todos */
 .quick { display: flex; gap: 8px; margin-bottom: 12px; }

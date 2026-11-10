@@ -1,4 +1,4 @@
-import { h, uid, now, todayISO, monthKey, money, empty } from '../ui.js';
+import { h, uid, now, todayISO, monthKey, money, empty, icon } from '../ui.js';
 
 const COLLECTION = 'finance';
 
@@ -121,14 +121,14 @@ function draw(root, store) {
                     title: 'Delete',
                     'aria-label': `Delete entry ${e.category} ${money(e.amount)}`,
                     onclick: () => removeEntry(store, e.id),
-                  }, '×'))))
+                  }, icon('x')))))
           : empty('No entries for this month.'))));
 }
 
 export default {
   id: 'money',
   title: 'Money',
-  icon: '💶',
+  icon: 'wallet',
   collection: COLLECTION,
   defaults: { entries: [], categories: [] },
   render: draw,

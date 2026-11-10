@@ -1,4 +1,4 @@
-import { h, uid, now } from '../ui.js';
+import { h, uid, now, icon } from '../ui.js';
 
 const COLLECTION = 'todos';
 const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
@@ -102,7 +102,7 @@ function draw(root, store) {
               title: `Delete ${p.name}`,
               'aria-label': `Delete project ${p.name}`,
               onclick: () => deleteProject(store, p),
-            }, '×'))),
+            }, icon('x')))),
         h('form', {
           class: 'stack',
           onsubmit: (e) => {
@@ -165,14 +165,14 @@ function draw(root, store) {
                     title: 'Delete',
                     'aria-label': `Delete "${item.text}"`,
                     onclick: () => removeItem(store, item.id),
-                  }, '×'))))
+                  }, icon('x')))))
           : h('p', { class: 'empty' }, 'Nothing here yet. Type above and press Enter.'))));
 }
 
 export default {
   id: 'todos',
   title: 'Todos',
-  icon: '✅',
+  icon: 'check-square',
   collection: COLLECTION,
   defaults: { projects: [], items: [] },
   render: draw,

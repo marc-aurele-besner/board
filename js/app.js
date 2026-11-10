@@ -1,7 +1,7 @@
 // Shell: folder connection, hash router, and top navigation.
 import { fsSupported, pickFolder, loadHandle, hasPermission } from './storage.js';
 import { createStore } from './store.js';
-import { h } from './ui.js';
+import { h, icon } from './ui.js';
 import { modules } from './modules/index.js';
 
 const app = document.getElementById('app');
@@ -23,7 +23,7 @@ function render() {
     h('header', { class: 'topbar' },
       h('div', { class: 'brand' }, 'Board'),
       h('nav', { class: 'tabs' },
-        modules.map((m) => h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab' }, `${m.icon} ${m.title}`))),
+        modules.map((m) => h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab' }, icon(m.icon), m.title))),
       h('span', { id: 'save-status', class: `status ${store.status}` }, STATUS_LABELS[store.status])),
     main,
   );
