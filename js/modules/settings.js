@@ -14,7 +14,18 @@ export const DEFAULT_TASKS = [
   { id: 'task-recipe', name: 'Recipe ideas', description: 'Suggest variations and substitutions for a kitchen recipe.' },
   { id: 'task-review', name: 'Issue & PR triage', description: 'Summarize open GitHub issues and PRs and flag stale ones.' },
   { id: 'task-budget', name: 'Spending review', description: 'Explain the month’s expenses and point out unusual categories.' },
+  { id: 'task-receipt', name: 'Read bills & screenshots', description: 'Turn a dropped bill or screenshot into money entries. Needs a model that can read images.' },
 ];
+
+// Adds tasks that were introduced after a user's settings.json was created.
+export function ensureTasks(store) {
+  const have = new Set(store.get(COLLECTION).models.tasks.map((t) => t.id));
+  const missing = DEFAULT_TASKS.filter((t) => !have.has(t.id));
+  if (!missing.length) return;
+  store.update(COLLECTION, (d) => {
+    d.models.tasks.push(...missing.map((t) => ({ ...t, model: '' })));
+  });
+}
 
 const SECTIONS = [
   ['github', 'GitHub'],

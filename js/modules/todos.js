@@ -2,6 +2,7 @@ import { h, uid, now, icon, statusOf, empty } from '../ui.js';
 import { createProject, projectIcon } from './projects.js';
 import { editText, pickChip } from '../inline.js';
 import { repoStats } from '../github.js';
+import { ask, parseJson } from '../ai.js';
 
 const COLLECTION = 'todos';
 const STATUSES = [
@@ -16,10 +17,13 @@ const PRIORITIES = [
   ['high', 'High'],
 ];
 const STATUS_FILTERS = [['open', 'Open'], ['all', 'All'], ...STATUSES];
+const STATUS_ORDER = { todo: 0, doing: 1, done: 2 };
+const PRIORITY_ORDER = { high: 0, medium: 1, low: 2, none: 3 };
+const NO_CATEGORY = '__none';
 
 // View state lives here so it survives re-renders.
 // filter: 'all' | 'personal' | <project id>. status: a STATUS_FILTERS key. category: '' means any.
-// managingCategories shows the category manager; creatingProject shows the "+" form in the sidebar.
+// sort: { key, dir }. colFilter: per-column filters. An empty value means "any".
 const view = {
   filter: 'all',
   status: 'open',
@@ -30,6 +34,9 @@ const view = {
   creatingProject: false,
   catError: '',
   showProject: false,
+  sort: { key: '', dir: 'asc' },
+  colFilter: { text: '', status: '', priority: '', project: '', category: '' },
+  tidy: { status: 'idle', items: [] },
 };
 
 const isProjectFilter = (f) => f !== 'all' && f !== 'personal';
@@ -41,9 +48,19 @@ const matchesStatus = (item) => {
   return view.status === 'all' || s === view.status;
 };
 const matchesCategory = (item) => !view.category || item.category === view.category;
+const matchesColumns = (item) => {
+  const f = view.colFilter;
+  if (f.text && !item.text.toLowerCase().includes(f.text.toLowerCase())) return false;
+  if (f.status && statusOf(item) !== f.status) return false;
+  if (f.priority && (item.priority ?? 'none') !== f.priority) return false;
+  if (f.project && (f.project === 'none' ? item.projectId !== null : item.projectId !== f.project)) return false;
+  if (f.category && (f.category === NO_CATEGORY ? Boolean(item.category) : item.category !== f.category)) return false;
+  return true;
+};
 const projectsOf = (store) => store.get('projects').projects;
 const formValues = (form) => Object.fromEntries(new FormData(form));
 const sameLower = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
+const label = (list, key) => list.find(([k]) => k === key)?.[1] ?? '';
 
 // Todo categories. Each has a scope: 'all' (every project), 'project' (one project),
 // or 'projectCategory' (every project in a project category such as Web).
@@ -189,6 +206,9 @@ function clearDropMarks(el) {
   el.classList.remove('drop-before', 'drop-after');
 }
 
+// Sorting by a column replaces the stored order, so drag-to-reorder is off while a sort is active.
+const reorderEnabled = () => !view.sort.key;
+
 // One todo row. Title, description, and the pickers all edit in place.
 // ctx: { store, projects, projectLabel }
 function todoRow(store, item, ctx) {
@@ -205,6 +225,7 @@ function todoRow(store, item, ctx) {
     class: status === 'done' ? 'todo-item done' : 'todo-item',
     'data-id': item.id,
     ondragstart: (e) => {
+      if (!reorderEnabled()) return e.preventDefault();
       view.dragId = item.id;
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', item.id); // Firefox needs data to start a drag
@@ -216,7 +237,7 @@ function todoRow(store, item, ctx) {
       e.currentTarget.classList.remove('dragging');
     },
     ondragover: (e) => {
-      if (!view.dragId || view.dragId === item.id) return;
+      if (!reorderEnabled() || !view.dragId || view.dragId === item.id) return;
       e.preventDefault();
       const side = dropSide(e);
       e.currentTarget.classList.toggle('drop-before', side === 'before');
@@ -224,7 +245,7 @@ function todoRow(store, item, ctx) {
     },
     ondragleave: (e) => clearDropMarks(e.currentTarget),
     ondrop: (e) => {
-      if (!view.dragId) return;
+      if (!reorderEnabled() || !view.dragId) return;
       e.preventDefault();
       const after = dropSide(e) === 'after';
       clearDropMarks(e.currentTarget);
@@ -235,11 +256,11 @@ function todoRow(store, item, ctx) {
     h('div', { class: 'todo-row' },
       h('span', {
         class: 'grip',
-        title: 'Drag to reorder',
+        title: reorderEnabled() ? 'Drag to reorder' : 'Clear the sort to reorder',
         'aria-label': 'Drag to reorder',
         // Only the grip makes the row draggable, so text stays selectable.
         onpointerdown: (e) => {
-          e.currentTarget.closest('li').draggable = true;
+          if (reorderEnabled()) e.currentTarget.closest('li').draggable = true;
         },
       }, icon('grip')),
       h('input', {
@@ -314,6 +335,169 @@ function todoRow(store, item, ctx) {
       : null);
 }
 
+// --- Sorting and column filters ---
+
+const columnValue = (item, key, projects) => {
+  if (key === 'text') return item.text.toLowerCase();
+  if (key === 'status') return STATUS_ORDER[statusOf(item)];
+  if (key === 'priority') return PRIORITY_ORDER[item.priority ?? 'none'];
+  if (key === 'project') return (projects.find((p) => p.id === item.projectId)?.name ?? 'Personal').toLowerCase();
+  return (item.category || '￿').toLowerCase(); // empty categories sort last
+};
+
+function sortItems(items, projects) {
+  const { key, dir } = view.sort;
+  if (!key) return items;
+  const sign = dir === 'desc' ? -1 : 1;
+  return [...items].sort((a, b) => {
+    const x = columnValue(a, key, projects);
+    const y = columnValue(b, key, projects);
+    const cmp = typeof x === 'number' ? x - y : String(x).localeCompare(String(y));
+    return cmp * sign;
+  });
+}
+
+// Click a column title: ascending, then descending, then back to manual order.
+function cycleSort(store, key) {
+  if (view.sort.key !== key) view.sort = { key, dir: 'asc' };
+  else if (view.sort.dir === 'asc') view.sort = { key, dir: 'desc' };
+  else view.sort = { key: '', dir: 'asc' };
+  store.refresh();
+}
+
+const sortMark = (key) => (view.sort.key !== key ? '' : view.sort.dir === 'asc' ? ' ↑' : ' ↓');
+
+function columnHeader(store, key, text) {
+  return h('button', {
+    type: 'button',
+    class: view.sort.key === key ? 'th-btn sorted' : 'th-btn',
+    title: `Sort by ${text}`,
+    onclick: () => cycleSort(store, key),
+  }, text + sortMark(key));
+}
+
+// Filter row under the headers, one control per column, aligned with the rows.
+function columnFilters(store, projects, categories) {
+  const f = view.colFilter;
+  const set = (key) => (e) => {
+    view.colFilter = { ...view.colFilter, [key]: e.target.value };
+    store.refresh();
+  };
+  const select = (key, options) =>
+    h('select', { value: f[key], 'aria-label': `Filter ${key}`, onchange: set(key) },
+      h('option', { value: '' }, 'Any'),
+      options.map(([v, l]) => h('option', { value: v }, l)));
+  return h('div', { class: 'todo-row todo-filters' },
+    h('span'), h('span'),
+    h('input', {
+      type: 'search',
+      value: f.text,
+      placeholder: 'Filter titles',
+      'aria-label': 'Filter titles',
+      onchange: set('text'),
+    }),
+    select('status', STATUSES),
+    select('priority', PRIORITIES),
+    select('project', [['none', 'Personal'], ...projects.map((p) => [p.id, p.name])]),
+    select('category', [[NO_CATEGORY, 'No category'], ...categories.map((c) => [c, c])]),
+    h('span', null, Object.values(f).some(Boolean) || view.sort.key
+      ? h('button', {
+          type: 'button',
+          class: 'btn-small',
+          onclick: () => {
+            view.colFilter = { text: '', status: '', priority: '', project: '', category: '' };
+            view.sort = { key: '', dir: 'asc' };
+            store.refresh();
+          },
+        }, 'Reset')
+      : null));
+}
+
+// --- AI: tidy todo titles (task 3) ---
+
+const TIDY_PROMPT = [
+  'You clean up a personal todo list.',
+  'Reply with JSON only: an array of objects {"id","title","category","priority"}.',
+  'title: a short, clear action sentence in the same language as the original.',
+  'category: one short word, or an empty string if none fits.',
+  'priority: one of "none", "low", "medium", "high".',
+  'Keep every id exactly as given. Include only items you would change.',
+].join(' ');
+
+async function runTidy(store) {
+  const open = store.get(COLLECTION).items.filter((i) => statusOf(i) !== 'done').slice(0, 40);
+  if (!open.length) {
+    view.tidy = { status: 'ok', items: [] };
+    return store.refresh();
+  }
+  view.tidy = { status: 'loading', items: [] };
+  store.refresh();
+  try {
+    const reply = await ask(store, 'task-tidy', [
+      { role: 'system', content: TIDY_PROMPT },
+      { role: 'user', content: JSON.stringify(open.map((i) => ({ id: i.id, title: i.text, category: i.category || '', priority: i.priority ?? 'none' }))) },
+    ]);
+    const parsed = parseJson(reply);
+    const list = Array.isArray(parsed) ? parsed : parsed.items ?? [];
+    const known = new Map(open.map((i) => [i.id, i]));
+    const items = list
+      .filter((s) => s && known.has(s.id))
+      .map((s) => {
+        const before = known.get(s.id);
+        const priority = PRIORITIES.some(([k]) => k === s.priority) ? s.priority : before.priority ?? 'none';
+        return { id: s.id, title: String(s.title ?? '').trim() || before.text, category: String(s.category ?? '').trim(), priority };
+      })
+      .filter((s) => s.title !== known.get(s.id).text || s.category !== (known.get(s.id).category || '') || s.priority !== (known.get(s.id).priority ?? 'none'));
+    view.tidy = { status: 'ok', items };
+  } catch (err) {
+    view.tidy = { status: 'error', error: err.message };
+  }
+  store.refresh();
+}
+
+function applyTidy(store, s) {
+  updateItem(store, s.id, { text: s.title, category: s.category, priority: s.priority });
+  view.tidy.items = view.tidy.items.filter((x) => x.id !== s.id);
+  store.refresh();
+}
+
+function tidyPanel(store) {
+  const t = view.tidy;
+  const dismiss = h('button', { type: 'button', class: 'btn-small', onclick: () => { view.tidy = { status: 'idle', items: [] }; store.refresh(); } }, 'Dismiss');
+  if (t.status === 'loading') return h('div', { class: 'panel-mini' }, 'Asking the model…');
+  if (t.status === 'error') return h('div', { class: 'panel-mini error', role: 'alert' }, t.error, ' ', dismiss);
+  if (t.status !== 'ok') return null;
+  if (!t.items.length) return h('div', { class: 'panel-mini' }, 'Nothing to tidy. ', dismiss);
+  const items = store.get(COLLECTION).items;
+  return h('div', { class: 'panel-mini' },
+    h('div', { class: 'row between' },
+      h('strong', null, `${t.items.length} suggestion${t.items.length > 1 ? 's' : ''}`),
+      h('div', { class: 'row' },
+        h('button', {
+          type: 'button',
+          class: 'btn-small primary',
+          onclick: () => {
+            t.items.forEach((s) => updateItem(store, s.id, { text: s.title, category: s.category, priority: s.priority }));
+            view.tidy = { status: 'idle', items: [] };
+            store.refresh();
+          },
+        }, 'Apply all'),
+        dismiss)),
+    h('ul', { class: 'tidy-list' },
+      t.items.map((s) => {
+        const before = items.find((i) => i.id === s.id);
+        return h('li', null,
+          h('span', { class: 'muted' }, before?.text ?? ''),
+          h('span', { class: 'arrow' }, '→'),
+          h('strong', null, s.title),
+          s.category ? h('span', { class: 'tag' }, s.category) : null,
+          s.priority !== 'none' ? h('span', { class: `pill tone-${s.priority}` }, label(PRIORITIES, s.priority)) : null,
+          h('button', { type: 'button', class: 'btn-small', onclick: () => applyTidy(store, s) }, 'Apply'));
+      })));
+}
+
+// --- Project bar and details ---
+
 // Project summary under the title. "Show more" reveals the project's details.
 function projectBar(store, p) {
   if (!p) return null;
@@ -323,9 +507,10 @@ function projectBar(store, p) {
     h('div', { class: 'row between' },
       h('div', { class: 'row' },
         category ? h('span', { class: 'pill tone-plain' }, category.name) : null,
-        h('span', { class: 'muted' }, `${open} open`)),
+        h('span', { class: 'muted small' }, `${open} open`)),
       h('button', {
         type: 'button',
+        class: 'btn-small',
         'aria-expanded': String(view.showProject),
         onclick: () => {
           view.showProject = !view.showProject;
@@ -362,6 +547,8 @@ function projectDetails(store, p, category) {
       : null);
 }
 
+// --- Category manager ---
+
 // Manager card: name and scope of every todo category, edited in place.
 function categoriesManager(store) {
   const projects = projectsOf(store);
@@ -380,17 +567,18 @@ function categoriesManager(store) {
   };
   const cats = todoCategories(store);
 
-  return h('section', { class: 'card manager stack-lg' },
+  return h('section', { class: 'panel-mini stack' },
     h('div', { class: 'row between' },
-      h('h3', null, 'Todo categories'),
+      h('strong', null, 'Todo categories'),
       h('button', {
         type: 'button',
+        class: 'btn-small',
         onclick: () => {
           view.managingCategories = false;
           store.refresh();
         },
       }, 'Done')),
-    h('p', { class: 'muted' }, 'General categories apply to every project. Scope one to a single project, or to all projects in a project category. Click a name or scope to change it.'),
+    h('p', { class: 'muted small' }, 'General categories apply to every project. Scope one to a single project, or to all projects in a project category. Click a name or scope to change it.'),
     view.catError ? h('p', { class: 'error', role: 'alert' }, view.catError) : null,
     cats.length
       ? h('ul', { class: 'cat-list' },
@@ -422,6 +610,8 @@ function categoriesManager(store) {
       h('select', { name: 'scope', 'aria-label': 'Applies to' }, scopeOptions()),
       h('button', { class: 'primary', type: 'submit' }, 'Add')));
 }
+
+// --- Page ---
 
 function draw(root, store) {
   const projects = projectsOf(store);
@@ -466,29 +656,35 @@ function draw(root, store) {
       h('span', { class: 'count' }, String(count)));
   };
 
-  // Stored order is the display order, so the list is not re-sorted here.
-  const visible = items.filter((i) => matchesFilter(i) && matchesStatus(i) && matchesCategory(i));
+  // Filters first, then the sort. Manual order is kept when no sort is active.
+  const visible = sortItems(
+    items.filter((i) => matchesFilter(i) && matchesStatus(i) && matchesCategory(i) && matchesColumns(i)),
+    projects,
+  );
+  const columnsActive = Object.values(view.colFilter).some(Boolean);
 
   root.replaceChildren(
     h('div', { class: 'split' },
       h('aside', { class: 'card side' },
-        h('h2', null, 'Lists'),
-        h('p', { class: 'hint' }, 'Drag a todo onto a list to move it.'),
+        h('div', { class: 'row between' },
+          h('h2', null, 'Lists'),
+          h('span', { class: 'muted small' }, 'drag onto a list to move')),
         navItem('all', 'All', openCount(() => true)),
         navItem('personal', 'Personal', openCount((i) => i.projectId === null)),
         h('div', { class: 'row between' },
           h('h2', null, 'Projects'),
-          h('button', {
-            type: 'button',
-            class: 'icon-btn',
-            title: 'New project',
-            'aria-label': 'New project',
-            onclick: () => {
-              view.creatingProject = !view.creatingProject;
-              store.refresh();
-            },
-          }, icon('plus')),
-          h('a', { href: '#/projects', class: 'icon-btn', title: 'Edit projects', 'aria-label': 'Edit projects' }, icon('pencil'))),
+          h('div', { class: 'row' },
+            h('button', {
+              type: 'button',
+              class: 'icon-btn',
+              title: 'New project',
+              'aria-label': 'New project',
+              onclick: () => {
+                view.creatingProject = !view.creatingProject;
+                store.refresh();
+              },
+            }, icon('plus')),
+            h('a', { href: '#/projects', class: 'icon-btn', title: 'Edit projects', 'aria-label': 'Edit projects' }, icon('pencil')))),
         view.creatingProject
           ? h('form', {
               class: 'stack',
@@ -508,7 +704,7 @@ function draw(root, store) {
           .map((p) => navItem(p.id, p.name, openCount((i) => i.projectId === p.id), projectIcon(p)))),
 
       h('section', { class: 'card main-pane' },
-        h('div', { class: 'row between' },
+        h('div', { class: 'row between head' },
           h('h2', null, currentLabel),
           h('div', { class: 'row' },
             isProjectFilter(view.filter)
@@ -516,19 +712,24 @@ function draw(root, store) {
               : null,
             h('button', {
               type: 'button',
+              class: 'btn-small',
+              disabled: view.tidy.status === 'loading',
+              onclick: () => runTidy(store),
+            }, 'Tidy with AI'),
+            h('button', {
+              type: 'button',
+              class: 'btn-small',
               onclick: () => {
                 view.managingCategories = !view.managingCategories;
                 view.catError = '';
                 store.refresh();
               },
-            }, 'Manage categories'))),
-        isProjectFilter(view.filter)
-          ? projectBar(store, projects.find((p) => p.id === view.filter))
-          : null,
-        view.managingCategories ? categoriesManager(store) : null,
+            }, 'Categories'))),
+
+        isProjectFilter(view.filter) ? projectBar(store, projects.find((p) => p.id === view.filter)) : null,
 
         h('div', { class: 'toolbar' },
-          h('label', null, 'Show',
+          h('label', { class: 'inline' }, 'Show',
             h('select', {
               value: view.status,
               'aria-label': 'Filter by status',
@@ -538,7 +739,7 @@ function draw(root, store) {
               },
             }, STATUS_FILTERS.map(([k, l]) => h('option', { value: k }, l)))),
           categories.length
-            ? h('label', null, 'Category',
+            ? h('label', { class: 'inline' }, 'Category',
                 h('select', {
                   value: view.category,
                   'aria-label': 'Filter by category',
@@ -546,9 +747,13 @@ function draw(root, store) {
                     view.category = e.target.value;
                     store.refresh();
                   },
-                }, h('option', { value: '' }, 'All categories'),
+                }, h('option', { value: '' }, 'All'),
                   categories.map((c) => h('option', { value: c }, c))))
-            : null),
+            : null,
+          h('span', { class: 'muted small count-line' }, `${visible.length} shown`)),
+
+        view.managingCategories ? categoriesManager(store) : null,
+        tidyPanel(store),
 
         h('form', {
           class: 'quick',
@@ -560,7 +765,7 @@ function draw(root, store) {
         },
           h('input', {
             name: 'todo',
-            placeholder: 'Add a todo… use #project to file it, paste several lines for a description',
+            placeholder: 'Add a todo… #project to file it, paste several lines for a description',
             'aria-label': 'New todo',
             autocomplete: 'off',
             'data-autofocus': true,
@@ -568,20 +773,25 @@ function draw(root, store) {
           }),
           h('button', { class: 'primary', type: 'submit' }, 'Add')),
 
-        visible.length
-          ? h('div', { class: 'todo-table' },
-              h('div', { class: 'todo-head', 'aria-hidden': 'true' },
-                h('span', null), h('span', null), h('span', null, 'Task'),
-                h('span', null, 'Status'), h('span', null, 'Priority'), h('span', null, 'Project'),
-                h('span', null, 'Category'), h('span', null, '')),
-              h('ul', { class: 'todo-list' },
+        h('div', { class: 'todo-table' },
+          h('div', { class: 'todo-row todo-head' },
+            h('span'), h('span'),
+            columnHeader(store, 'text', 'Task'),
+            columnHeader(store, 'status', 'Status'),
+            columnHeader(store, 'priority', 'Priority'),
+            columnHeader(store, 'project', 'Project'),
+            columnHeader(store, 'category', 'Category'),
+            h('span')),
+          columnFilters(store, projects, categories),
+          visible.length
+            ? h('ul', { class: 'todo-list' },
                 visible.map((item) =>
                   todoRow(store, item, {
                     store,
                     projects,
                     projectLabel: view.filter === 'all' ? projectName(item.projectId) : '',
-                  }))))
-          : h('p', { class: 'empty' }, 'Nothing matches these filters.'))));
+                  })))
+            : h('p', { class: 'empty' }, columnsActive || view.sort.key ? 'No todo matches these filters.' : 'Nothing matches these filters.')))));
 }
 
 export default {
@@ -592,11 +802,19 @@ export default {
   defaults: { items: [], categories: [] },
   render: draw,
   // View state kept in the URL, so a refresh returns to the same list.
-  serialize: () => ({ filter: view.filter, status: view.status, category: view.category, more: view.showProject ? '1' : '' }),
+  serialize: () => ({
+    filter: view.filter,
+    status: view.status,
+    category: view.category,
+    more: view.showProject ? '1' : '',
+    sort: view.sort.key ? `${view.sort.key}.${view.sort.dir}` : '',
+  }),
   restore: (p = {}) => {
     view.filter = p.filter || 'all';
     view.status = p.status || 'open';
     view.category = p.category || '';
     view.showProject = p.more === '1';
+    const [key = '', dir = 'asc'] = (p.sort ?? '').split('.');
+    view.sort = { key: ['text', 'status', 'priority', 'project', 'category'].includes(key) ? key : '', dir: dir === 'desc' ? 'desc' : 'asc' };
   },
 };

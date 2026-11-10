@@ -273,13 +273,31 @@ select { width: auto; min-width: 0; }
 .row select { width: auto; }
 
 button {
-  padding: 8px 12px;
+  padding: 5px 10px;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 7px;
   cursor: pointer;
-  min-height: 36px;
+  min-height: 30px;
+  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
+.btn-small { padding: 3px 8px; min-height: 26px; font-size: 0.82rem; }
+.btn-small.primary { padding: 3px 10px; }
+.toolbar label.inline { flex-direction: row; align-items: center; gap: 6px; }
+.toolbar label.inline select { width: auto; min-width: 110px; padding: 4px 8px; }
+.count-line { margin-left: auto; }
+.row.head { margin-bottom: 4px; }
+.th-btn { background: transparent; border: none; padding: 2px 4px; min-height: 0; font-size: 0.8rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; justify-content: flex-start; }
+.th-btn:hover, .th-btn.sorted { color: var(--text); }
+.todo-filters { padding: 4px 4px 6px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+.todo-filters input, .todo-filters select { padding: 3px 6px; font-size: 13px; min-width: 0; }
+.panel-mini { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; font-size: 0.9rem; }
+.tidy-list { display: flex; flex-direction: column; gap: 4px; }
+.tidy-list li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tidy-list .arrow { color: var(--muted); }
 button:hover { filter: brightness(0.97); }
 button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
 button.danger { color: var(--danger); }
@@ -337,7 +355,7 @@ button.danger { color: var(--danger); }
 .todo-title-cell .todo-title { white-space: normal; }
 .todo-desc { padding: 4px 4px 12px 40px; }
 .todo-desc .editable { display: block; min-height: 1.5em; color: var(--text); }
-.project-bar { background: var(--surface-2); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px; }
+.project-bar { background: var(--surface-2); border-radius: var(--radius); padding: 6px 10px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px; }
 .project-details { border-top: 1px solid var(--border); padding-top: 10px; }
 .project-details a, .repo-summary a { color: var(--accent); word-break: break-all; }
 .repo-summary { display: flex; flex-direction: column; gap: 4px; }
