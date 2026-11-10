@@ -634,6 +634,58 @@ function categoriesPanel(store, categories, projects) {
       h('button', { class: 'primary', type: 'submit' }, 'Add')));
 }
 
+const stat = (n, label) => h('div', null, h('strong', null, String(n)), h('span', { class: 'muted small' }, label));
+
+// Shown in the detail pane when no project is selected: an overview across all projects.
+function projectsRecap(store, projects, items, categories) {
+  if (!projects.length) return empty('No projects yet. Create one on the left to get started.');
+  const openOf = (p) => items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
+  const openAll = items.filter((i) => statusOf(i) !== 'done').length;
+  const linked = projects.filter((p) => p.github.repos.length || p.github.org);
+  const totals = linked.map(githubTotals);
+  const issues = totals.reduce((s, t) => s + t.issues, 0);
+  const prs = totals.reduce((s, t) => s + t.prs, 0);
+  const pending = totals.some((t) => t.pending);
+  const labelRows = categories
+    .map((c) => ({ c, n: projects.filter((p) => labelsOf(p).includes(c.id)).length }))
+    .filter((r) => r.n > 0);
+
+  return h('div', { class: 'recap stack-lg' },
+    h('div', null,
+      h('h2', null, 'Projects overview'),
+      h('p', { class: 'muted small' }, 'Pick a project on the left to see its details, issues and tasks.')),
+    h('div', { class: 'stats' },
+      stat(projects.length, 'projects'),
+      stat(openAll, 'open tasks'),
+      stat(linked.length, 'linked to GitHub'),
+      stat(pending ? '…' : issues, 'open issues'),
+      stat(pending ? '…' : prs, 'open PRs')),
+    h('section', { class: 'stack' },
+      h('h3', null, 'Projects'),
+      h('ul', { class: 'recap-list' },
+        projectTree(projects).map(({ project: p, depth }) => {
+          const labels = labelsOf(p).map((id) => categoryById(categories, id)).filter(Boolean);
+          return h('li', {
+            class: 'recap-row',
+            style: { paddingLeft: `${8 + depth * 18}px` },
+            onclick: () => select(store, p.id),
+          },
+            projectIcon(p),
+            h('strong', null, p.name),
+            labels.length ? h('span', { class: 'muted small' }, labels.map((l) => l.name).join(', ')) : null,
+            h('span', { class: 'muted small grow' }, githubLine(p)),
+            h('span', { class: 'count' }, `${openOf(p)} open`));
+        }))),
+    labelRows.length
+      ? h('section', { class: 'stack' },
+          h('h3', null, 'By label'),
+          h('ul', { class: 'recap-list' },
+            labelRows.map(({ c, n }) => h('li', { class: 'recap-row', onclick: () => { view.category = c.id; store.refresh(); } },
+              h('strong', { class: 'grow' }, c.name),
+              h('span', { class: 'muted small' }, `${n} project${n === 1 ? '' : 's'}`)))))
+      : null);
+}
+
 function draw(root, store) {
   liveStore = store;
   const { projects, categories } = store.get(COLLECTION);
@@ -671,7 +723,7 @@ function draw(root, store) {
   else if (view.mode === 'new') detail = projectForm(store, null, projects.length, categories);
   else if (selected && view.mode === 'edit') detail = projectForm(store, selected, projects.length, categories);
   else if (selected) detail = projectView(store, selected, items, categories);
-  else detail = empty('Pick a project on the left, or create one.');
+  else detail = projectsRecap(store, projects, items, categories);
 
   root.replaceChildren(
     h('div', { class: 'split' },
