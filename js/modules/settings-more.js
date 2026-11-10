@@ -59,7 +59,9 @@ export function telegramCard(store) {
         onsubmit: (e) => {
           e.preventDefault();
           const f = new FormData(e.currentTarget);
-          save({ token: String(f.get('token') ?? '').trim(), chatId: String(f.get('chatId') ?? '').trim() });
+          const token = String(f.get('token') ?? '').trim();
+          // update_id counts per bot, so an offset kept from another bot would hide every message.
+          save({ token, chatId: String(f.get('chatId') ?? '').trim(), ...(token !== t.token ? { offset: 0 } : {}) });
           say(store, 'telegram', 'Saved.');
         },
       },
@@ -71,11 +73,15 @@ export function telegramCard(store) {
           h('button', {
             type: 'button',
             class: 'input-addon',
-            disabled: !t.token,
-            onclick: () => tryIt(() => findChat(t.token), (id) => {
-              save({ chatId: id });
-              return 'Found your chat and saved it.';
-            }),
+            // Uses the token in the field, so it works before Save is pressed.
+            onclick: (e) => {
+              const token = String(e.currentTarget.form.elements.token.value ?? '').trim();
+              if (!token) return say(store, 'telegram', 'Paste the bot token first.', false);
+              tryIt(() => findChat(token, () => say(store, 'telegram', 'No message waiting. Send your bot a message now…')), (id) => {
+                save({ token, chatId: id, ...(token !== t.token ? { offset: 0 } : {}) });
+                return 'Found your chat and saved it.';
+              });
+            },
           }, 'Find my chat')),
         toggle(t.confirm !== false, 'Reply in Telegram when a task is created', (on) => save({ confirm: on })),
         h('div', { class: 'svc-actions' },
