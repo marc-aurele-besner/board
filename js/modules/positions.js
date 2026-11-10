@@ -459,7 +459,7 @@ function draw(root, store) {
   const reading = state.status === 'loading';
   const firstRead = reading && all.length === 0;
   const staleText = state.stale.length
-    ? `${state.stale.map((x) => `${x.name} (read ${ago(x.at)})`).join(', ')} could not be read just now. Their positions are the last ones read and may be out of date.`
+    ? `Could not read ${state.stale.map((x) => `${x.name} (last read ${ago(x.at)})`).join(', ')}. Those positions are from the last read and may be out of date.`
     : '';
 
   let body;
