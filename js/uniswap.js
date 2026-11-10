@@ -21,20 +21,21 @@ export const CHAINS = [
   { id: 4663, name: 'Robinhood Chain', rpc: 'https://rpc.mainnet.chain.robinhood.com', coingecko: 'robinhood', app: null, logo: ETH_LOGO, factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa', positions: '0x73991a25c818bf1f1128deaab1492d45638de0d3' },
 ];
 
-// Token logos from the Uniswap token list, keyed "chainId:address" in lowercase. Fetched once; a token the list
-// does not carry gets a monogram instead.
+// Token logos from Uniswap's default token list, one file per chain on GitHub (which allows browser reads),
+// keyed "chainId:address" in lowercase. Fetched once; a token the list does not carry gets a monogram instead.
+const TOKEN_LIST_DIR = 'https://raw.githubusercontent.com/Uniswap/default-token-list/main/src/tokens';
+const TOKEN_LIST_FILE = { 1: 'mainnet', 8453: 'base', 42161: 'arbitrum', 10: 'optimism', 137: 'polygon', 56: 'bnb', 43114: 'avalanche', 130: 'unichain', 4663: 'robinhood' };
 let logos = null;
 export function tokenLogos() {
-  logos ??= fetch('https://tokens.uniswap.org')
-    .then((res) => {
-      if (!res.ok) throw new Error(String(res.status));
-      return res.json();
-    })
-    .then((list) => new Map((list.tokens ?? []).filter((t) => t.logoURI).map((t) => [`${t.chainId}:${t.address.toLowerCase()}`, t.logoURI])))
-    .catch(() => {
-      logos = null; // try again next time the tab is opened
-      return new Map();
-    });
+  logos ??= Promise.allSettled(Object.values(TOKEN_LIST_FILE).map(async (file) => {
+    const res = await fetch(`${TOKEN_LIST_DIR}/${file}.json`);
+    if (!res.ok) throw new Error(String(res.status));
+    return res.json();
+  })).then((results) => new Map(results
+    .filter((r) => r.status === 'fulfilled')
+    .flatMap((r) => r.value)
+    .filter((t) => t.logoURI)
+    .map((t) => [`${t.chainId}:${t.address.toLowerCase()}`, t.logoURI])));
   return logos;
 }
 
