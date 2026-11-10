@@ -360,6 +360,15 @@ body.project-dragging .project-list .root-drop { display: block; }
 .review-row { display: grid; grid-template-columns: 104px minmax(160px, 1fr) 96px 150px 150px 28px; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
 .review-row.review-head { border-bottom: 1px solid var(--border); padding-bottom: 4px; }
 .review-row .num { text-align: right; font-variant-numeric: tabular-nums; }
+.review-row { grid-template-columns: 96px minmax(140px, 1fr) 88px 80px 92px 120px 120px 26px; }
+.review-row .total { font-weight: 600; }
+.review-tax { background: var(--surface-2); border-radius: 6px; padding-left: 6px; padding-right: 6px; }
+.receipt-sums { gap: 14px; flex-wrap: wrap; }
+.receipt-sums .strong { font-weight: 700; color: var(--text); }
+.btn-link-inline { background: none; border: none; padding: 0; min-height: 0; color: var(--accent); font-size: 0.82rem; text-decoration: underline; }
+.btn-link-inline:hover { background: none; }
+.bill-img { display: block; max-width: 100%; height: auto; margin: 0 auto; border-radius: 8px; border: 1px solid var(--border); }
+.bill-frame { width: 100%; height: 70vh; border: 1px solid var(--border); border-radius: 8px; }
 .review-row .icon-btn { min-width: 26px; min-height: 26px; }
 .receipt { gap: 10px; }
 @media (max-width: 720px) {
