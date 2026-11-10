@@ -968,7 +968,7 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .lp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--gap); }
 .pool-card { position: relative; display: flex; flex-direction: column; gap: 14px; padding: 16px; min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; transition: transform 0.25s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.25s ease, border-color 0.2s ease; }
 .pool-card:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); box-shadow: 0 14px 32px rgba(0, 0, 0, 0.1); }
-.lp-grid.enter .pool-card { animation: cardIn 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: calc(var(--i, 0) * 70ms); }
+.pool-card.enter { animation: cardIn 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: calc(var(--i, 0) * 70ms); }
 @keyframes cardIn { from { opacity: 0; transform: translateY(14px) scale(0.98); } to { opacity: 1; transform: none; } }
 
 .pool-head { display: flex; align-items: center; gap: 12px; min-width: 0; }

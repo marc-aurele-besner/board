@@ -11,7 +11,8 @@ const MAX_TICK = 887272; // the widest possible range: a "full range" position
 const view = { filter: 'all', chain: 'all', layout: 'cards' };
 // Loaded positions and the state of the last load. shallow: chains whose node would not search back to v4's start.
 // stale: chains shown from the last good read because this one failed, with when that read was.
-const state = { status: 'idle', rows: [], error: '', warning: '', at: 0, shallow: [], stale: [] };
+// pending: chains still being read in the current load.
+const state = { status: 'idle', rows: [], error: '', warning: '', at: 0, shallow: [], stale: [], pending: [] };
 // pools.json keeps the last good read of each chain and version, the last good prices of each chain, and how far
 // each v4 search got. A read that fails then shows the old rows, marked as possibly out of date.
 const COLLECTION = 'pools';
@@ -19,7 +20,8 @@ const tokenInfo = new Map(); // "chainId:token address" -> { symbol, decimals }
 let loading = false;
 let logoMap = new Map(); // "chainId:token address" -> logo URL, from the token list
 let logosAsked = false;
-let shownAt = 0; // the load whose cards are already on screen; new loads animate once
+const seen = new Set(); // rows already on screen: only new ones animate in
+const shownTotals = { value: 0, fees: 0 }; // the totals on screen, so a change counts from there
 
 const tokenKey = (chain, address) => `${chain.id}:${address}`;
 
@@ -105,56 +107,40 @@ async function readV4(chain, node, wallets, cfg, saved) {
   return { items, scans };
 }
 
-// Reads one chain: every wallet's v3 and v4 positions there, their pools and the token prices.
-// v3 or v4 is null when it could not be read. saved holds this chain's v4 search state and last good prices.
-async function readChain(chain, node, wallets, cfg, saved) {
-  // v3 and v4 are read side by side, so one failing does not hide the other.
-  const [v3Read, v4Read] = await Promise.allSettled([
-    Promise.all(wallets.map(async (w) => (await readPositions(chain, node, w.address)).map((p) => ({ ...p, label: w.label || w.address })))),
-    readV4(chain, node, wallets, cfg, saved.scan),
-  ]);
-  if (v3Read.status === 'rejected' && v4Read.status === 'rejected') throw v3Read.reason;
-  const positions = v3Read.status === 'fulfilled' ? v3Read.value.flat() : [];
-  const v4 = v4Read.status === 'fulfilled' ? v4Read.value : { items: [], scans: null };
-  let warning = [
-    v3Read.status === 'rejected' ? `${chain.name} v3 positions could not be read: ${v3Read.reason.message}` : '',
-    v4Read.status === 'rejected' ? `${chain.name} v4 positions could not be read: ${v4Read.reason.message}` : '',
-  ].filter(Boolean).join(' ');
-
-  const tokens = [...new Set([...positions, ...v4.items.map((x) => x.position)].flatMap((p) => [p.token0, p.token1]))];
-  await Promise.all(tokens.filter((t) => !tokenInfo.has(tokenKey(chain, t))).map(async (t) => tokenInfo.set(tokenKey(chain, t), await tokenMeta(node, t, chain))));
-
+// Every wallet's v3 positions on a chain, each with its pool's current state.
+async function readV3(chain, node, wallets) {
+  const positions = (await Promise.all(wallets.map(async (w) => (await readPositions(chain, node, w.address)).map((p) => ({ ...p, label: w.label || w.address }))))).flat();
   const pools = new Map();
   const poolKeys = [...new Set(positions.map((p) => `${p.token0}|${p.token1}|${p.fee}`))];
   await Promise.all(poolKeys.map(async (key) => {
     const [token0, token1, fee] = key.split('|');
     pools.set(key, await poolState(chain, node, { token0, token1, fee: Number(fee) }).catch(() => null));
   }));
+  return { items: positions.map((p) => ({ position: p, pool: pools.get(`${p.token0}|${p.token1}|${p.fee}`) })) };
+}
 
-  // Prices that fail fall back to the last ones read for this chain.
+// Turns read positions into rows: their tokens' symbols, then USD prices. Prices that fail fall back to the last
+// ones read for this chain (savedPrices).
+async function toRows(chain, node, items, savedPrices) {
+  const tokens = [...new Set(items.flatMap((x) => [x.position.token0, x.position.token1]))];
+  await Promise.all(tokens.filter((t) => !tokenInfo.has(tokenKey(chain, t))).map(async (t) => tokenInfo.set(tokenKey(chain, t), await tokenMeta(node, t, chain))));
   let prices = {};
   let pricesAt = null;
-  let freshPrices = null;
+  let fresh = null;
+  let warning = '';
   try {
     prices = await usdPrices(chain, tokens);
-    freshPrices = prices;
+    fresh = prices;
   } catch (err) {
-    if (saved.prices) {
-      prices = saved.prices.usd;
-      pricesAt = saved.prices.at;
-      warning = [warning, `${chain.name} token prices could not be read (${err.message}), so values use the prices from ${ago(pricesAt)}.`].filter(Boolean).join(' ');
+    if (savedPrices) {
+      prices = savedPrices.usd;
+      pricesAt = savedPrices.at;
+      warning = `${chain.name} token prices could not be read (${err.message}), so values use the prices from ${ago(pricesAt)}.`;
     } else {
-      warning = [warning, `${chain.name} token prices are unavailable (${err.message}), so values are not shown.`].filter(Boolean).join(' ');
+      warning = `${chain.name} token prices are unavailable (${err.message}), so values are not shown.`;
     }
   }
-
-  return {
-    v3: v3Read.status === 'fulfilled' ? positions.map((p) => buildRow(p, pools.get(`${p.token0}|${p.token1}|${p.fee}`), prices, chain, pricesAt)).filter(Boolean) : null,
-    v4: v4Read.status === 'fulfilled' ? v4.items.map((x) => buildRow(x.position, x.pool, prices, chain, pricesAt)).filter(Boolean) : null,
-    warning,
-    scans: v4.scans,
-    prices: freshPrices,
-  };
+  return { rows: items.map((x) => buildRow(x.position, x.pool, prices, chain, pricesAt)).filter(Boolean), prices: fresh, warning };
 }
 
 // How long ago a time was, in words.
@@ -179,57 +165,82 @@ function savedRows(store, cfg, keys) {
 const cacheKeys = (chains) => chains.flatMap((c) => [`${c.id}:v3`, `${c.id}:v4`]);
 const enabledChains = (cfg) => CHAINS.filter((chain) => chainSettings(cfg, chain).enabled);
 
-// Reads every enabled chain in parallel. A chain that fails is reported and does not stop the others.
+// Reads every enabled chain in parallel, and v3 and v4 side by side on each. Each part shows as soon as it is read,
+// replacing what was on screen for it; until then the earlier rows stay. A part that fails shows its last good read.
 async function load(store) {
   if (loading) return;
   loading = true;
   state.status = 'loading';
   state.error = '';
-  store.refresh();
   try {
     const cfg = store.get('settings').uniswap ?? {};
     const wallets = (cfg.wallets ?? []).filter((w) => isAddress(w.address));
     const chains = CHAINS.map((chain) => ({ chain, ...chainSettings(cfg, chain) })).filter((c) => c.enabled);
     const saved = store.get(COLLECTION) ?? {};
-    const results = await Promise.all(chains.map(({ chain, node }) => readChain(chain, node, wallets, cfg, { scan: saved.scan?.[chain.id] ?? {}, prices: saved.prices?.[chain.id] })
-      .catch((err) => ({ v3: null, v4: null, warning: `${chain.name} could not be read: ${err.message}` }))));
 
-    // Fresh rows replace the saved ones. A chain and version that failed shows its last good read instead.
-    const now = Date.now();
-    const rows = [];
-    const cache = {};
-    const prices = {};
-    const scans = {};
+    // What is on screen now, by part ("chainId:version"), for the chains and wallets still chosen.
+    const keep = new Set(savedRows(store, cfg, cacheKeys(chains.map((c) => c.chain))).map((r) => r.ref));
+    const parts = new Map();
+    for (const r of state.rows.filter((x) => keep.has(x.ref))) {
+      const key = `${r.chainId}:${r.version}`;
+      parts.set(key, [...(parts.get(key) ?? []), r]);
+    }
+    const warnings = new Map();
     const stale = new Map();
-    chains.forEach(({ chain }, i) => {
-      const r = results[i];
-      for (const version of ['v3', 'v4']) {
-        const key = `${chain.id}:${version}`;
-        if (r[version]) {
-          rows.push(...r[version]);
-          cache[key] = { at: now, rows: r[version] };
-        } else {
-          const old = savedRows(store, cfg, [key]);
-          rows.push(...old);
-          if (saved.cache?.[key]) stale.set(chain.name, Math.min(stale.get(chain.name) ?? Infinity, saved.cache[key].at));
-        }
+    const shallow = new Set(state.shallow);
+    state.pending = chains.map((c) => c.chain.name);
+    const publish = () => {
+      state.rows = [...parts.values()].flat().sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+      state.warning = [...warnings.values()].filter(Boolean).join(' ');
+      const byChain = new Map();
+      for (const [key, at] of stale) {
+        const name = chainOf(Number(key.split(':')[0]))?.name;
+        byChain.set(name, Math.min(byChain.get(name) ?? Infinity, at));
       }
-      if (r.prices) prices[chain.id] = { at: now, usd: { ...saved.prices?.[chain.id]?.usd, ...r.prices } };
-      // Keep how far each v4 search got, so the next load goes on from there.
-      if (r.scans) scans[chain.id] = r.scans;
-    });
-    state.stale = [...stale].map(([name, at]) => ({ name, at }));
-    state.shallow = chains
-      .filter(({ chain }) => Object.values(scans[chain.id] ?? {}).some((s) => s?.done && s.from > chain.v4.start))
-      .map(({ chain }) => chain.name);
-    store.update(COLLECTION, (d) => {
-      d.cache = { ...d.cache, ...cache };
-      d.prices = { ...d.prices, ...prices };
-      d.scan = { ...d.scan, ...scans };
-    });
+      state.stale = [...byChain].map(([name, at]) => ({ name, at }));
+      state.shallow = [...shallow];
+      store.refresh();
+    };
+    publish();
 
-    state.warning = results.map((r) => r.warning).filter(Boolean).join(' ');
-    state.rows = rows.sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+    await Promise.all(chains.map(async ({ chain, node }) => {
+      const savedPrices = saved.prices?.[chain.id];
+      const part = async (version, read) => {
+        const key = `${chain.id}:${version}`;
+        try {
+          const got = await read();
+          const done = await toRows(chain, node, got.items, savedPrices);
+          parts.set(key, done.rows);
+          warnings.set(key, done.warning);
+          stale.delete(key);
+          if (got.scans) {
+            const short = Object.values(got.scans).some((x) => x?.done && x.from > chain.v4.start);
+            if (short) shallow.add(chain.name);
+            else shallow.delete(chain.name);
+          }
+          // Save as each part lands, so a reload mid-read keeps what was already read.
+          store.update(COLLECTION, (d) => {
+            d.cache = { ...d.cache, [key]: { at: Date.now(), rows: done.rows } };
+            if (done.prices) d.prices = { ...d.prices, [chain.id]: { at: Date.now(), usd: { ...d.prices?.[chain.id]?.usd, ...done.prices } } };
+            // Keep how far each v4 search got, so the next load goes on from there.
+            if (got.scans) d.scan = { ...d.scan, [chain.id]: got.scans };
+          });
+        } catch (err) {
+          parts.set(key, savedRows(store, cfg, [key]));
+          warnings.set(key, `${chain.name} ${version} positions could not be read: ${err.message}`);
+          const at = saved.cache?.[key]?.at;
+          if (at) stale.set(key, at);
+        }
+        publish();
+      };
+      await Promise.all([
+        part('v3', () => readV3(chain, node, wallets)),
+        part('v4', () => readV4(chain, node, wallets, cfg, saved.scan?.[chain.id] ?? {})),
+      ]);
+      state.pending = state.pending.filter((name) => name !== chain.name);
+      publish();
+    }));
+
     state.status = 'ok';
     state.at = Date.now();
     // Tell the automation rules and the notifications which positions left their range. Old rows are left out.
@@ -239,6 +250,7 @@ async function load(store) {
     state.error = err.message;
   } finally {
     loading = false;
+    state.pending = [];
     store.refresh();
   }
 }
@@ -312,7 +324,7 @@ function poolStat(label, value) {
 // One position as a card: the pair, its chain and fee, the range, the value and the token split.
 function poolCard(r, i) {
   const chain = chainOf(r.chainId);
-  return h('article', { class: `pool-card ${r.inRange ? 'is-in' : 'is-out'}`, style: { '--i': i } },
+  return h('article', { class: `pool-card ${r.inRange ? 'is-in' : 'is-out'}${i === null ? '' : ' enter'}`, style: { '--i': i ?? 0 } },
     h('header', { class: 'pool-head' },
       h('div', { class: 'pair' },
         logo(tokenLogoOf(r, r.addr0), r.sym0, 'token'),
@@ -347,14 +359,14 @@ function skeletonCard(i) {
     h('div', { class: 'pool-stats' }, h('span', { class: 'skeleton sk-block' }), h('span', { class: 'skeleton sk-block' })));
 }
 
-// Counts a number up to its value, once per load.
-function countUp(el, to, format) {
+// Counts a number from what was shown to its new value.
+function countUp(el, from, to, format) {
   const start = performance.now();
   const duration = 900;
   const step = (now) => {
     const t = Math.min(1, (now - start) / duration);
     const eased = 1 - (1 - t) ** 3;
-    el.textContent = format(to * eased);
+    el.textContent = format(from + (to - from) * eased);
     if (t < 1) requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
@@ -422,21 +434,19 @@ function draw(root, store) {
   const totalValueKnown = byChain.some((r) => r.value !== null);
   const totalFeesKnown = byChain.some((r) => r.fees !== null);
 
-  // Count up the totals only when a new read lands, not on every filter click.
-  const fresh = state.status === 'ok' && state.at !== shownAt;
-  if (fresh) shownAt = state.at;
+  // Totals count from the old number to the new one when it changes, as each chain lands or a filter changes.
   const counters = [];
-
+  const total = (el, known, value, key) => {
+    if (!known) return;
+    const from = shownTotals[key];
+    shownTotals[key] = value;
+    if (from === value) el.textContent = usdOrDash(value);
+    else counters.push(() => countUp(el, from, value, (n) => money(n, 'USD')));
+  };
   const valueEl = h('strong', null, '—');
   const feesEl = h('strong', null, '—');
-  if (totalValueKnown) {
-    if (fresh) counters.push(() => countUp(valueEl, totalValue, (n) => money(n, 'USD')));
-    else valueEl.textContent = usdOrDash(totalValue);
-  }
-  if (totalFeesKnown) {
-    if (fresh) counters.push(() => countUp(feesEl, totalFees, (n) => money(n, 'USD')));
-    else feesEl.textContent = usdOrDash(totalFees);
-  }
+  total(valueEl, totalValueKnown, totalValue, 'value');
+  total(feesEl, totalFeesKnown, totalFees, 'fees');
 
   const chip = (key, label, count) => h('button', {
     type: 'button',
@@ -466,7 +476,12 @@ function draw(root, store) {
   if (firstRead) {
     body = h('div', { class: 'lp-grid' }, [0, 1, 2].map((i) => skeletonCard(i)));
   } else if (shown.length) {
-    body = view.layout === 'list' ? poolTable(shown) : h('div', { class: fresh ? 'lp-grid enter' : 'lp-grid' }, shown.map((r, i) => poolCard(r, i)));
+    // Rows new to the screen slide in, one after another; the rest stay still.
+    let order = 0;
+    body = view.layout === 'list'
+      ? poolTable(shown)
+      : h('div', { class: 'lp-grid' }, shown.map((r) => poolCard(r, seen.has(r.ref) ? null : order++)));
+    shown.forEach((r) => seen.add(r.ref));
   } else {
     const filtered = view.filter !== 'all' || view.chain !== 'all';
     body = h('div', { class: 'lp-empty' },
@@ -480,7 +495,7 @@ function draw(root, store) {
         h('h2', null, 'Liquidity Pools'),
         h('p', { class: 'muted small' },
           `Uniswap v3 and v4 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`,
-          state.at ? ` ${updatedText()}.` : '')),
+          state.pending.length ? ` Reading ${state.pending.join(', ')}…` : state.at ? ` ${updatedText()}.` : '')),
       h('button', { type: 'button', class: 'btn-small', disabled: reading || chainCount === 0, onclick: () => load(store) },
         refreshIcon(reading),
         reading ? 'Reading…' : 'Refresh')),
