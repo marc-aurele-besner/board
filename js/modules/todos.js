@@ -1,5 +1,5 @@
 import { h, uid, now, icon } from '../ui.js';
-import { makeProject } from './projects.js';
+import { makeProject, projectIcon } from './projects.js';
 
 const COLLECTION = 'todos';
 
@@ -216,7 +216,7 @@ function draw(root, store) {
     view.filter === 'all' ? 'All' : view.filter === 'personal' ? 'Personal' : projectName(view.filter);
 
   // Personal and project lists accept dropped todos; "All" does not, since it has no project.
-  const navItem = (key, label, count, color) => {
+  const navItem = (key, label, count, leading) => {
     const accepts = key !== 'all';
     return h('button', {
       type: 'button',
@@ -239,7 +239,7 @@ function draw(root, store) {
         view.dragId = null;
       },
     },
-      color ? h('span', { class: 'dot', style: { background: color } }) : null,
+      leading ?? null,
       h('span', { class: 'grow' }, label),
       h('span', { class: 'count' }, String(count)));
   };
@@ -256,7 +256,7 @@ function draw(root, store) {
         navItem('personal', 'Personal', openCount((i) => i.projectId === null)),
         h('h2', null, 'Projects'),
         [...projects].sort((a, b) => a.name.localeCompare(b.name))
-          .map((p) => navItem(p.id, p.name, openCount((i) => i.projectId === p.id), p.color)),
+          .map((p) => navItem(p.id, p.name, openCount((i) => i.projectId === p.id), projectIcon(p))),
         h('a', { href: '#/projects', class: 'side-link' }, icon('folder'), 'Manage projects')),
 
       h('section', { class: 'card main-pane' },

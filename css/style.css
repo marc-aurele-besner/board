@@ -222,6 +222,8 @@ button.danger { color: var(--danger); }
 .list-scroll { max-height: 60vh; overflow: auto; }
 .links li { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 .links a { color: var(--accent); word-break: break-all; }
+.project-icon { width: 16px; height: 16px; flex: none; border-radius: 4px; object-fit: contain; }
+.project-icon.large { width: 24px; height: 24px; }
 input[type="color"] { width: 56px; height: 38px; padding: 3px; cursor: pointer; }
 h2.row { gap: 10px; flex-wrap: nowrap; }
 

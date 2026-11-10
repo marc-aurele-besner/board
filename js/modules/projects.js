@@ -27,6 +27,19 @@ export function normalizeRepo(text) {
   return owner && repo && SLUG.test(owner) && SLUG.test(repo) ? `${owner}/${repo}` : null;
 }
 
+// Accepts "example.com", "www.example.com/docs" or a full URL. Returns the origin
+// (https://example.com), '' for empty, or null when it is not an http(s) address.
+export function normalizeWebsite(text) {
+  const raw = text.trim();
+  if (!raw) return '';
+  try {
+    const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
 // Shared by the todos module, so a #tag can create a project on the fly.
 // Every project has the same shape; fields are optional and default to empty.
 export function makeProject(existingCount, fields = {}) {
@@ -35,10 +48,26 @@ export function makeProject(existingCount, fields = {}) {
     name: '',
     color: PALETTE[existingCount % PALETTE.length],
     description: '',
+    website: '',
     github: { org: '', repos: [] },
     created: now(),
     ...fields,
   };
+}
+
+// The site's own /favicon.ico. Browsers show cross-origin images without CORS, so this
+// works without a third-party favicon service. Sites without one fall back to a dot.
+export function projectIcon(p, className = 'project-icon') {
+  const fallback = () => h('span', { class: 'dot', style: { background: p.color } });
+  if (!p.website) return fallback();
+  return h('img', {
+    class: className,
+    src: `${p.website}/favicon.ico`,
+    alt: '',
+    loading: 'lazy',
+    referrerpolicy: 'no-referrer',
+    onerror: (e) => e.currentTarget.replaceWith(fallback()),
+  });
 }
 
 // Projects used to live inside todos.json. Move them into projects.json once.
@@ -86,6 +115,9 @@ function saveForm(store, v) {
   const editingId = view.mode === 'edit' ? view.selectedId : null;
   if (projects.some((p) => p.id !== editingId && sameName(p.name, name))) return fail(`A project named "${name}" already exists.`);
 
+  const website = normalizeWebsite(v.website);
+  if (website === null) return fail('Website must be a valid http or https address, such as example.com.');
+
   const org = normalizeOrg(v.org);
   if (org === null) return fail('GitHub org must be a name or a github.com/<org> URL.');
 
@@ -96,7 +128,7 @@ function saveForm(store, v) {
     if (!repos.includes(repo)) repos.push(repo);
   }
 
-  const fields = { name, description: v.description.trim(), color: v.color || PALETTE[0], github: { org, repos } };
+  const fields = { name, description: v.description.trim(), color: v.color || PALETTE[0], website, github: { org, repos } };
   if (editingId) {
     store.update(COLLECTION, (d) => {
       const p = d.projects.find((x) => x.id === editingId);
@@ -150,10 +182,10 @@ function projectList(store, projects, items) {
         class: p.id === view.selectedId ? 'project-item active' : 'project-item',
         onclick: () => select(store, p.id),
       },
-        h('span', { class: 'dot', style: { background: p.color } }),
+        projectIcon(p),
         h('div', { class: 'grow' },
           h('strong', null, p.name),
-          h('div', { class: 'muted' }, githubSummary(p))),
+          h('div', { class: 'muted' }, p.website ? new URL(p.website).host : githubSummary(p))),
         h('span', { class: 'count', title: 'Open todos' }, String(open)));
     }));
 }
@@ -167,12 +199,18 @@ function projectView(store, p, items) {
 
   return h('div', { class: 'stack-lg' },
     h('div', { class: 'row between' },
-      h('h2', { class: 'row' }, h('span', { class: 'dot', style: { background: p.color } }), p.name),
+      h('h2', { class: 'row' }, projectIcon(p, 'project-icon large'), p.name),
       h('div', { class: 'row' },
         h('button', { type: 'button', onclick: () => { view.mode = 'edit'; view.draft = null; view.error = ''; store.refresh(); } },
           icon('pencil'), 'Edit'),
         h('button', { type: 'button', class: 'danger', onclick: () => deleteProject(store, p) }, icon('x'), 'Delete'))),
     p.description ? h('p', null, p.description) : h('p', { class: 'muted' }, 'No description yet.'),
+
+    p.website
+      ? h('section', { class: 'stack' },
+          h('h3', null, 'Website'),
+          h('ul', { class: 'links' }, link(p.website, p.website, 'globe')))
+      : null,
 
     h('section', { class: 'stack' },
       h('h3', null, 'GitHub'),
@@ -194,10 +232,11 @@ function projectForm(store, project, projectCount) {
         name: project.name,
         description: project.description,
         color: project.color,
+        website: project.website,
         org: project.github.org,
         repos: project.github.repos.join('\n'),
       }
-    : { name: '', description: '', color: PALETTE[projectCount % PALETTE.length], org: '', repos: '' });
+    : { name: '', description: '', color: PALETTE[projectCount % PALETTE.length], website: '', org: '', repos: '' });
 
   return h('form', {
     class: 'stack-lg',
@@ -213,6 +252,8 @@ function projectForm(store, project, projectCount) {
       h('label', null, 'Color', h('input', { name: 'color', type: 'color', value: draft.color }))),
     h('label', null, 'Description',
       h('textarea', { name: 'description', rows: 2, placeholder: 'What is this project about?' }, draft.description)),
+    h('label', null, 'Website (its favicon becomes the project icon)',
+      h('input', { name: 'website', value: draft.website, placeholder: 'example.com', inputmode: 'url', autocomplete: 'off' })),
 
     h('div', { class: 'card-inset stack' },
       h('h3', null, 'GitHub (optional)'),
@@ -272,7 +313,7 @@ function draw(root, store) {
                 view.mode = 'new';
                 view.selectedId = null;
                 view.error = '';
-                view.draft = { name, description: '', color: PALETTE[projects.length % PALETTE.length], org: '', repos: '' };
+                view.draft = { name, description: '', color: PALETTE[projects.length % PALETTE.length], website: '', org: '', repos: '' };
                 store.refresh();
               },
             }, 'Detailed…'))),
