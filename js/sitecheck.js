@@ -176,8 +176,15 @@ async function readFile(url) {
 }
 
 // Many sites answer every address with their home page, so a file counts as found only if it looks like one.
+// A file the reader could not fetch is marked unread rather than missing.
 async function readKind(url, looksRight) {
-  const { status, text } = await readFile(url);
+  let answer;
+  try {
+    answer = await readFile(url);
+  } catch (err) {
+    return { url, found: false, unread: err.name === 'AbortError' ? 'The reader took too long.' : err.message };
+  }
+  const { status, text } = answer;
   if (status >= 400) return { url, found: false, status };
   if (!looksRight(text)) return { url, found: false, status, note: 'The site answered with a page, not this file.' };
   return { url, found: true, status, text, raw: text.slice(0, RAW_KEEP) };
@@ -223,6 +230,8 @@ export async function readCrawlFiles(website) {
   ]);
   const rules = robots.found ? parseRobots(robots.raw) : { sitemaps: [], blocksSearch: false, blocksAll: false, aiBlocked: [] };
   const sitemap = await readKind(rules.sitemaps[0] ?? `${origin}/sitemap.xml`, (t) => /<(urlset|sitemapindex)\b/.test(t));
+  // Nothing read at all is a failed lookup, so the last good answer is kept.
+  if ([robots, llms, security, sitemap].every((f) => f.unread)) throw new Error(robots.unread);
   if (sitemap.found) {
     // Counted on the whole file, not on the part kept.
     const lastmods = [...sitemap.text.matchAll(/<lastmod>\s*([^<\s]+)/g)].map((m) => m[1]).sort();
