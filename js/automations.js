@@ -21,7 +21,7 @@ const RULE_DEFAULTS = { domain: { on: true, days: 30 }, ssl: { on: true, days: 1
 export const ruleOf = (store, key) => ({ ...RULE_DEFAULTS[key], ...(store.get('settings').automations?.[key] ?? {}) });
 
 // What each source is called on a task's "Auto" flag.
-export const AUTO_SOURCES = { domain: 'the domain check', ssl: 'the SSL check', health: 'the website health check', email: 'the DNS check', crawl: 'the crawl files check', recurring: 'a recurring bill', pools: 'Liquidity Pools', telegram: 'a Telegram message' };
+export const AUTO_SOURCES = { domain: 'the domain check', ssl: 'the SSL check', health: 'the website health check', email: 'the DNS check', crawl: 'the crawl files check', recurring: 'a recurring bill', pools: 'Liquidity Pools', telegram: 'a Telegram message', cron: 'a Cron flow' };
 
 // `every`: minutes between automatic checks. `providers`: the status pages followed in Provider status, and `status` their last answer.
 export const TOOLS_DEFAULTS = { sites: {}, every: 60, providers: [], status: {} };

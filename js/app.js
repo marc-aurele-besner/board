@@ -80,6 +80,14 @@ function render() {
           icon('search'), h('span', { class: 'grow' }, 'Search or jump…'), h('kbd', null, isMac ? '⌘K' : 'Ctrl K')),
         h('span', { id: 'save-status', class: `status ${store.status}` }, STATUS_LABELS[store.status]),
         bell(store),
+        // Settings lives here as an icon, not in the section tabs.
+        h('a', {
+          href: '#/settings',
+          class: mod.id === 'settings' ? 'icon-btn settings-link active' : 'icon-btn settings-link',
+          title: 'Settings',
+          'aria-label': 'Settings',
+          'aria-current': mod.id === 'settings' ? 'page' : null,
+        }, icon('settings')),
         h('button', {
           type: 'button',
           class: 'icon-btn theme-toggle',

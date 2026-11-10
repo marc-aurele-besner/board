@@ -16,6 +16,7 @@ export const KINDS = [
   ['status', 'Provider outages and recoveries', 'activity'],
   ['telegram', 'Telegram messages', 'send'],
   ['pools', 'Liquidity Pools out of range', 'droplet'],
+  ['cron', 'Cron flows', 'repeat'],
 ];
 
 // A kind that was never changed shows in the board and is not sent to Telegram.

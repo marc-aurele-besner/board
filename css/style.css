@@ -16,6 +16,7 @@
   --income: #1d7a58;
   --expense: #b5462f;
   --warn: #96630a;
+  --ai: #7a4fb5;
   --info: #4a5fb0;
   --paper: #ffffff;
   --radius: 8px;
@@ -39,6 +40,7 @@
     --income: #62c99e;
     --expense: #f09378;
     --warn: #e6b85c;
+    --ai: #b99af0;
     --info: #a3b4f5;
     --paper: #ffffff;
     color-scheme: dark;
@@ -58,6 +60,7 @@
   --income: #62c99e;
   --expense: #f09378;
   --warn: #e6b85c;
+  --ai: #b99af0;
   --info: #a3b4f5;
   --paper: #ffffff;
   color-scheme: dark;
@@ -1089,6 +1092,8 @@ kbd { font: 0.72rem var(--font); padding: 1px 6px; border-radius: 5px; border: 1
 a { color: var(--accent); }
 .icon-btn:hover { color: var(--text); }
 .bell { position: relative; }
+.settings-link { display: inline-grid; place-items: center; border-radius: 8px; }
+.settings-link.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
 .bell-count { position: absolute; top: 0; right: -2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--danger); color: var(--surface); font: 700 10px/16px var(--font); text-align: center; }
 @media (max-width: 1500px) { .search-btn { width: 150px; } }
 @media (max-width: 1280px) { .tab:not(.active) .tab-label { display: none; } }
@@ -1281,6 +1286,66 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .copy-chip.copied { border-color: var(--income); }
 .copy-chip.copied .copy-mark { color: var(--income); }
 
+/* Cron: flow list beside an editor; the flow is a chain of nodes joined by links */
+.cron-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: var(--gap); align-items: start; }
+.cron-list { display: flex; flex-direction: column; gap: 10px; }
+.cron-flows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.cron-flow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: none; border-radius: 8px; background: none; text-align: left; color: var(--text); font-weight: 400; }
+.cron-flow:hover { background: var(--surface-2); }
+.cron-flow.active { background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
+.cron-flow .grow { display: flex; flex-direction: column; min-width: 0; }
+.cron-flow strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cron-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
+.cron-dot.on { background: var(--income); }
+.cron-dot.bad { background: var(--danger); }
+.cron-dot.running { background: var(--accent); animation: cronPulse 1s ease-in-out infinite; }
+@keyframes cronPulse { 50% { opacity: 0.3; } }
+.cron-name { flex: 1 1 220px; min-width: 0; font-size: 1.1rem; font-weight: 600; }
+.cron-templates { display: grid; gap: 8px; }
+.cron-template { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; text-align: left; font-weight: 400; }
+.cron-template.row { flex-direction: row; align-items: center; gap: 12px; }
+.cron-template .grow { display: flex; flex-direction: column; }
+.cron-fields { align-items: flex-end; }
+.cron-fields label { flex: 1 1 160px; }
+.mono-text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+.flow-canvas { display: flex; align-items: center; flex-wrap: wrap; row-gap: 14px; padding: 18px; border-radius: var(--radius); overflow: hidden;
+  background-color: var(--surface-2); background-image: radial-gradient(color-mix(in srgb, var(--muted) 35%, transparent) 1px, transparent 1px); background-size: 16px 16px; }
+.flow-node { display: flex; align-items: center; gap: 10px; width: 210px; min-height: 64px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); text-align: left; font-weight: 400; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
+.flow-node:hover { border-color: var(--accent); }
+.flow-node.selected { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
+.flow-node.ok { border-left: 3px solid var(--income); }
+.flow-node.bad { border-left: 3px solid var(--danger); }
+.flow-canvas.running .flow-node { animation: cronPulse 1.4s ease-in-out infinite; }
+.flow-node-icon { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; flex: none; color: var(--c, var(--accent)); background: color-mix(in srgb, var(--c, var(--accent)) 15%, var(--surface)); }
+.flow-node-icon .icon { width: 17px; height: 17px; }
+.kind-trigger { --c: var(--warn); }
+.kind-gather { --c: var(--accent); }
+.kind-ai { --c: var(--ai); }
+.kind-task { --c: var(--income); }
+.kind-notify { --c: var(--danger); }
+.flow-node-text { display: flex; flex-direction: column; min-width: 0; }
+.flow-node-kind { font-weight: 600; font-size: 0.9rem; }
+.flow-node-sub { color: var(--muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-link { position: relative; display: grid; place-items: center; width: 46px; height: 64px; flex: none; }
+.flow-link::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 2px; background: var(--border); }
+.flow-link:last-child::before { right: 50%; }
+.flow-add { position: relative; display: grid; place-items: center; width: 24px; height: 24px; min-height: 0; padding: 0; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); color: var(--muted); }
+.flow-add:hover { color: var(--accent); border-color: var(--accent); }
+.flow-add .icon { width: 13px; height: 13px; }
+.cron-output summary, .cron-runs summary { cursor: pointer; }
+.cron-output pre, .cron-run-steps pre { margin: 6px 0 0; padding: 10px; max-height: 260px; overflow: auto; border-radius: 8px; background: var(--surface-2); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; }
+.cron-runs { list-style: none; margin: 0; padding: 0; }
+.cron-runs > li { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.cron-runs > li:last-child { border-bottom: none; }
+.cron-run-steps { margin: 8px 0 0; padding-left: 0; list-style: none; display: grid; gap: 10px; }
+@media (max-width: 900px) { .cron-layout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 720px) {
+  .flow-canvas { flex-direction: column; align-items: stretch; padding: 12px; }
+  .flow-node { width: 100%; }
+  .flow-link { width: 100%; height: 36px; }
+  .flow-link::before { left: 50%; right: auto; top: 0; bottom: 0; width: 2px; height: auto; }
+  .flow-link:last-child::before { bottom: 50%; right: auto; }
+}
 /* Inbox: Resend emails of every project */
 .inbox-pickers select { min-width: 0; max-width: 100%; }
 .inbox-search { width: 100%; font-size: 16px; }
