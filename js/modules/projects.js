@@ -805,6 +805,17 @@ function categoriesPanel(store, categories, projects) {
       categories.map((c) => {
         const count = projects.filter((p) => labelsOf(p).includes(c.id)).length;
         return h('li', { class: 'row category-row' },
+          h('input', {
+            type: 'color',
+            class: 'swatch-input',
+            value: labelColor(c),
+            title: 'Label colour',
+            'aria-label': `Colour of ${c.name}`,
+            onchange: (e) => store.update(COLLECTION, (d) => {
+              const label = d.categories.find((x) => x.id === c.id);
+              if (label) label.color = e.target.value;
+            }),
+          }),
           editText({
             value: c.name,
             placeholder: 'Name',

@@ -531,6 +531,7 @@ function todoRow(store, item, ctx) {
 function boardCard(store, item, projects) {
   const p = projects.find((x) => x.id === item.projectId);
   const priority = item.priority ?? 'none';
+  const expanded = view.expanded.has(item.id);
   return h('article', {
     class: 'kanban-card',
     draggable: 'true',
@@ -558,7 +559,37 @@ function boardCard(store, item, projects) {
         options: STATUSES.map(([v, l]) => ({ value: v, label: l, tone: STATUS_TONE[v] })),
         onPick: (v) => updateItem(store, item.id, { status: v }),
       }),
-      h('button', { type: 'button', class: 'icon-btn', title: 'Delete', 'aria-label': `Delete "${item.text}"`, onclick: () => removeItem(store, item.id) }, icon('x'))));
+      h('div', { class: 'row kanban-actions' },
+        item.description ? h('span', { class: 'desc-indicator', title: 'Has a description', 'aria-label': 'Has a description' }, icon('align-left')) : null,
+        h('button', {
+          type: 'button',
+          class: expanded ? 'icon-btn chevron open' : 'icon-btn chevron',
+          title: expanded ? 'Hide details' : 'Deadline and description',
+          'aria-label': expanded ? 'Hide details' : 'Show deadline and description',
+          'aria-expanded': String(expanded),
+          onclick: () => toggleExpanded(store, item.id),
+        }, icon('chevron-down')),
+        h('button', { type: 'button', class: 'icon-btn', title: 'Delete', 'aria-label': `Delete "${item.text}"`, onclick: () => removeItem(store, item.id) }, icon('x')))),
+    // The same details as a table row, so a card never needs the table to be edited.
+    expanded
+      ? h('div', { class: 'kanban-details' },
+          h('label', { class: 'row small muted' }, 'Deadline',
+            h('input', {
+              type: 'date',
+              class: 'due-input',
+              value: item.due ?? '',
+              'aria-label': `Deadline for "${item.text}"`,
+              onchange: (e) => updateItem(store, item.id, { due: e.target.value }),
+            })),
+          editText({
+            value: item.description,
+            placeholder: 'Add a description…',
+            rich: true,
+            multiline: true,
+            allowEmpty: true,
+            onSave: (description) => updateItem(store, item.id, { description }),
+          }))
+      : null);
 }
 
 function boardView(store, items, projects) {

@@ -64,10 +64,20 @@ export async function searchReport(website, from, to) {
   if (!site) throw new Error('This website is not a verified property in your Search Console account.');
   const query = (dimensions, rowLimit) =>
     googleFetch('search', 'Search Console', `${GSC}/sites/${encodeURIComponent(site)}/searchAnalytics/query`, post({ startDate: from, endDate: to, dimensions, rowLimit }));
-  const [byDay, queries, pages] = await Promise.all([query(['date'], 500), query(['query'], 10), query(['page'], 10)]);
+  // The sitemaps Google holds for the property. A failure here leaves the rest of the report standing.
+  const sitemaps = googleFetch('search', 'Search Console', `${GSC}/sites/${encodeURIComponent(site)}/sitemaps`)
+    .then((res) => (res.sitemap ?? []).map((s) => [
+      s.path,
+      (s.contents ?? []).reduce((sum, c) => sum + num(c.submitted), 0),
+      num(s.errors),
+      num(s.warnings),
+      s.isPending ? 'Waiting to be read' : String(s.lastDownloaded ?? '').slice(0, 10),
+    ]))
+    .catch(() => null);
+  const [byDay, queries, pages, maps] = await Promise.all([query(['date'], 500), query(['query'], 10), query(['page'], 10), sitemaps]);
   const table = (res) => (res.rows ?? []).map((r) => [r.keys[0], r.clicks, r.impressions, r.ctr, r.position]);
   const days = Object.fromEntries((byDay.rows ?? []).map((r) => [r.keys[0], { clicks: r.clicks, impressions: r.impressions, position: r.position }]));
-  return { site, days, queries: table(queries), pages: table(pages) };
+  return { site, days, queries: table(queries), pages: table(pages), sitemaps: maps };
 }
 
 // --- Bing Webmaster Tools ---
