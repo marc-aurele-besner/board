@@ -1,4 +1,4 @@
-import { h, uid, now, icon, empty, statusOf } from '../ui.js';
+import { h, uid, now, icon, empty, statusOf, notice } from '../ui.js';
 import { repoStats, refreshRepo, openItems } from '../github.js';
 import { ask } from '../ai.js';
 
@@ -471,7 +471,7 @@ function triageBlock(store, p) {
   }, 'Triage with AI');
   if (mine.status === 'idle') return h('div', { class: 'row' }, button);
   if (mine.status === 'loading') return h('div', { class: 'stack' }, button, h('p', { class: 'muted small' }, 'Reading issues and PRs…'));
-  if (mine.status === 'error') return h('div', { class: 'stack' }, button, h('p', { class: 'error small', role: 'alert' }, mine.text));
+  if (mine.status === 'error') return h('div', { class: 'stack' }, button, notice({ text: mine.text }));
   return h('div', { class: 'stack' }, button, h('div', { class: 'card-inset' }, h('pre', { class: 'ai-text' }, mine.text)));
 }
 

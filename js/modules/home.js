@@ -1,4 +1,4 @@
-import { h, icon, money, monthKey, todayISO, statusOf, empty, uid, now } from '../ui.js';
+import { h, icon, money, monthKey, todayISO, statusOf, empty, uid, now, notice } from '../ui.js';
 import { connect, isConnected, upcomingEvents } from '../google.js';
 import { projectIcon, labelsOf } from './projects.js';
 import { repoStats } from '../github.js';
@@ -54,7 +54,7 @@ function calendarCard(store) {
   } else if (cal.status === 'loading') {
     body = h('p', { class: 'muted small' }, 'Loading events…');
   } else if (cal.status === 'error') {
-    body = h('div', { class: 'stack' }, h('p', { class: 'error small', role: 'alert' }, cal.error),
+    body = h('div', { class: 'stack' }, notice({ text: cal.error }),
       h('button', { type: 'button', class: 'btn-small', onclick: () => loadCalendar(store) }, 'Try again'));
   } else if (cal.status === 'ok') {
     body = cal.events.length
@@ -110,7 +110,7 @@ function planBlock(store) {
   }, 'Plan my day with AI');
   if (plan.status === 'idle') return button;
   if (plan.status === 'loading') return h('div', { class: 'stack' }, button, h('p', { class: 'muted small' }, 'Planning…'));
-  if (plan.status === 'error') return h('div', { class: 'stack' }, button, h('p', { class: 'error small', role: 'alert' }, plan.text));
+  if (plan.status === 'error') return h('div', { class: 'stack' }, button, notice({ text: plan.text }));
   return h('div', { class: 'stack' }, button, h('pre', { class: 'plan-text' }, plan.text));
 }
 

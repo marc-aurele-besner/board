@@ -1,6 +1,7 @@
-import { h, uid, now, todayISO, monthKey, money, empty, icon } from '../ui.js';
+import { h, uid, now, todayISO, monthKey, money, empty, icon, notice } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { ask, parseJson } from '../ai.js';
+import { readPdf } from '../pdf-reader.js';
 
 const COLLECTION = 'finance';
 const TYPES = [['expense', 'Expense'], ['income', 'Income']];
@@ -59,6 +60,28 @@ const receiptPrompt = (categories) => [
   `Prefer these categories when they fit: ${categories.join(', ') || 'none yet'}. Otherwise suggest a short new one.`,
 ].join(' ');
 
+// The message parts for a dropped file. A PDF with a text layer is sent as text (any model can read it);
+// a scanned PDF or an image is sent as images (needs a model that reads images).
+async function documentContent(file) {
+  const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+  if (isPdf) {
+    const pdf = await readPdf(file);
+    const note = pdf.truncated ? ` Only the first ${pdf.images.length || 'few'} pages were read; the document has ${pdf.pages}.` : '';
+    if (pdf.text) {
+      return [{ type: 'text', text: `Text from a PDF bill or statement.${note}\n\n${pdf.text.slice(0, 30000)}` }];
+    }
+    return [
+      { type: 'text', text: `Scanned pages from a PDF bill or statement.${note}` },
+      ...pdf.images.map((url) => ({ type: 'image_url', image_url: { url } })),
+    ];
+  }
+  if (!file.type.startsWith('image/')) {
+    throw new Error('That file type is not supported. Drop an image (PNG, JPG or WebP) or a PDF.');
+  }
+  const url = await readAsDataUrl(file);
+  return [{ type: 'text', text: 'Here is the bill or screenshot.' }, { type: 'image_url', image_url: { url } }];
+}
+
 const readAsDataUrl = (file) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -74,13 +97,10 @@ async function readReceipt(store, file, categories) {
   receipt.items = [];
   store.refresh();
   try {
-    if (!file.type.startsWith('image/')) {
-      throw new Error('Drop an image or screenshot (PNG, JPG or WebP). For a PDF, take a screenshot of the page.');
-    }
-    const url = await readAsDataUrl(file);
+    const content = await documentContent(file);
     const reply = await ask(store, 'task-receipt', [
       { role: 'system', content: receiptPrompt(categories) },
-      { role: 'user', content: [{ type: 'text', text: 'Here is the bill or screenshot.' }, { type: 'image_url', image_url: { url } }] },
+      { role: 'user', content },
     ]);
     const parsed = parseJson(reply);
     const list = Array.isArray(parsed) ? parsed : parsed.entries ?? [parsed];
@@ -106,8 +126,10 @@ function receiptPanel(store) {
   if (receipt.status === 'idle') return null;
   if (receipt.status === 'loading') return h('div', { class: 'panel-mini' }, `Reading ${receipt.fileName}…`);
   if (receipt.status === 'error') {
-    return h('div', { class: 'panel-mini error', role: 'alert' }, receipt.error, ' ',
-      h('button', { type: 'button', class: 'btn-small', onclick: () => { receipt.status = 'idle'; store.refresh(); } }, 'Dismiss'));
+    return notice({
+      text: receipt.error,
+      actions: [h('button', { type: 'button', class: 'btn-small', onclick: () => { receipt.status = 'idle'; store.refresh(); } }, 'Dismiss')],
+    });
   }
   const first = receipt.items[0];
   return h('div', { class: 'panel-mini' },
@@ -184,7 +206,7 @@ function receiptPanel(store) {
 function dropZone(store, categories) {
   const input = h('input', {
     type: 'file',
-    accept: 'image/*',
+    accept: 'image/*,application/pdf',
     class: 'sr-only',
     'aria-label': 'Choose a bill or screenshot',
     onchange: (e) => {
@@ -221,7 +243,7 @@ function dropZone(store, categories) {
     },
       icon('plus'),
       h('strong', null, 'Drop a bill or screenshot'),
-      h('span', { class: 'muted small' }, 'Entries are proposed for you to check before they are added.')));
+      h('span', { class: 'muted small' }, 'Images or PDFs. Entries are proposed for you to check before they are added.')));
 }
 
 // --- Spending review (task 6) ---
@@ -269,7 +291,7 @@ function spendingBlock(store, month, monthEntries) {
   }, 'Review this month with AI');
   if (spend.month !== month || spend.status === 'idle') return h('div', { class: 'row' }, button);
   if (spend.status === 'loading') return h('div', { class: 'stack' }, button, h('p', { class: 'muted small' }, 'Reviewing the month…'));
-  if (spend.status === 'error') return h('div', { class: 'stack' }, button, h('p', { class: 'error small', role: 'alert' }, spend.text));
+  if (spend.status === 'error') return h('div', { class: 'stack' }, button, notice({ text: spend.text }));
   return h('div', { class: 'stack' }, button, h('div', { class: 'card-inset' }, h('pre', { class: 'ai-text' }, spend.text)));
 }
 

@@ -98,6 +98,18 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
 .label-opt { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); cursor: pointer; font-size: 0.85rem; }
 .label-opt input { width: auto; margin: 0; }
 
+/* Notices: errors and status messages */
+.notice { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); }
+.notice > .icon { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+.notice-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.notice-body p { margin: 0; font-size: 0.92rem; overflow-wrap: anywhere; white-space: pre-line; }
+.notice-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.notice.error { background: color-mix(in srgb, var(--danger) 9%, var(--surface)); border-color: color-mix(in srgb, var(--danger) 38%, transparent); }
+.notice.error > .icon { color: var(--danger); }
+.notice.error .notice-body p { color: var(--text); }
+.notice.ok > .icon { color: var(--income); }
+.notice.info > .icon { color: var(--accent); }
+
 /* AI output */
 .plan-text { white-space: pre-wrap; font-family: inherit; font-size: 0.9rem; margin: 0; background: var(--surface-2); padding: 10px; border-radius: 8px; }
 .ai-text { white-space: pre-wrap; font-family: inherit; font-size: 0.9rem; margin: 0; }

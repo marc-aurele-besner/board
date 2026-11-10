@@ -1,4 +1,4 @@
-import { h, uid, now, todayISO, empty } from '../ui.js';
+import { h, uid, now, todayISO, empty, notice } from '../ui.js';
 import { ask } from '../ai.js';
 
 const COLLECTION = 'recipes';
@@ -57,7 +57,7 @@ async function runIdeas(store, r) {
 function ideasBlock(r) {
   if (ideas.recipeId !== r.id || ideas.status === 'idle') return null;
   if (ideas.status === 'loading') return h('p', { class: 'muted small' }, 'Thinking about variations…');
-  if (ideas.status === 'error') return h('p', { class: 'error small', role: 'alert' }, ideas.text);
+  if (ideas.status === 'error') return notice({ text: ideas.text });
   return h('div', { class: 'card-inset' }, h('pre', { class: 'ai-text' }, ideas.text));
 }
 

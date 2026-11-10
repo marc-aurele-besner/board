@@ -1,4 +1,4 @@
-import { h, uid, now, icon, statusOf, empty } from '../ui.js';
+import { h, uid, now, icon, statusOf, empty, notice } from '../ui.js';
 import { createProject, projectIcon, labelsOf, projectTree } from './projects.js';
 import { editText, pickChip } from '../inline.js';
 import { repoStats } from '../github.js';
@@ -465,7 +465,7 @@ function tidyPanel(store) {
   const t = view.tidy;
   const dismiss = h('button', { type: 'button', class: 'btn-small', onclick: () => { view.tidy = { status: 'idle', items: [] }; store.refresh(); } }, 'Dismiss');
   if (t.status === 'loading') return h('div', { class: 'panel-mini' }, 'Asking the model…');
-  if (t.status === 'error') return h('div', { class: 'panel-mini error', role: 'alert' }, t.error, ' ', dismiss);
+  if (t.status === 'error') return notice({ text: t.error, actions: [dismiss] });
   if (t.status !== 'ok') return null;
   if (!t.items.length) return h('div', { class: 'panel-mini' }, 'Nothing to tidy. ', dismiss);
   const items = store.get(COLLECTION).items;
