@@ -1,6 +1,7 @@
 import { h, uid, now, icon, statusOf, empty } from '../ui.js';
 import { createProject, projectIcon } from './projects.js';
 import { editText, pickChip } from '../inline.js';
+import { repoStats } from '../github.js';
 
 const COLLECTION = 'todos';
 const STATUSES = [
@@ -28,6 +29,7 @@ const view = {
   managingCategories: false,
   creatingProject: false,
   catError: '',
+  showProject: false,
 };
 
 const isProjectFilter = (f) => f !== 'all' && f !== 'personal';
@@ -312,6 +314,54 @@ function todoRow(store, item, ctx) {
       : null);
 }
 
+// Project summary under the title. "Show more" reveals the project's details.
+function projectBar(store, p) {
+  if (!p) return null;
+  const open = store.get(COLLECTION).items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
+  const category = (store.get('projects').categories ?? []).find((c) => c.id === p.categoryId);
+  return h('section', { class: 'project-bar' },
+    h('div', { class: 'row between' },
+      h('div', { class: 'row' },
+        category ? h('span', { class: 'pill tone-plain' }, category.name) : null,
+        h('span', { class: 'muted' }, `${open} open`)),
+      h('button', {
+        type: 'button',
+        'aria-expanded': String(view.showProject),
+        onclick: () => {
+          view.showProject = !view.showProject;
+          store.refresh();
+        },
+      }, view.showProject ? 'Show less' : 'Show more')),
+    view.showProject ? projectDetails(store, p, category) : null);
+}
+
+function projectDetails(store, p, category) {
+  const items = store.get(COLLECTION).items.filter((i) => i.projectId === p.id);
+  const done = items.filter((i) => statusOf(i) === 'done').length;
+  // Repo counts load in the background; the page refreshes when they arrive, but only while on this list.
+  const onLoad = () => {
+    if (location.hash.startsWith('#/todos')) store.refresh();
+  };
+  return h('div', { class: 'project-details stack' },
+    p.description ? h('p', null, p.description) : h('p', { class: 'muted' }, 'No description yet. Use the pencil to add one.'),
+    h('div', { class: 'stats' },
+      h('div', null, h('strong', null, String(items.length - done)), h('span', { class: 'muted' }, 'open')),
+      h('div', null, h('strong', null, String(done)), h('span', { class: 'muted' }, 'done')),
+      category ? h('div', null, h('strong', null, category.name), h('span', { class: 'muted' }, 'category')) : null),
+    p.website ? h('p', null, h('a', { href: p.website, target: '_blank', rel: 'noopener' }, p.website)) : null,
+    p.github.org ? h('p', null, 'GitHub: ', h('a', { href: `https://github.com/${p.github.org}`, target: '_blank', rel: 'noopener' }, p.github.org)) : null,
+    p.github.repos.length
+      ? h('ul', { class: 'repo-summary' },
+          p.github.repos.map((r) => {
+            const s = repoStats(r, onLoad);
+            const text = s.status === 'ok' ? `${s.issues} issues · ${s.prs} PRs` : s.status === 'loading' ? 'loading…' : s.error;
+            return h('li', null,
+              h('a', { href: `https://github.com/${r}`, target: '_blank', rel: 'noopener' }, r),
+              h('span', { class: 'muted' }, text));
+          }))
+      : null);
+}
+
 // Manager card: name and scope of every todo category, edited in place.
 function categoriesManager(store) {
   const projects = projectsOf(store);
@@ -460,14 +510,21 @@ function draw(root, store) {
       h('section', { class: 'card main-pane' },
         h('div', { class: 'row between' },
           h('h2', null, currentLabel),
-          h('button', {
-            type: 'button',
-            onclick: () => {
-              view.managingCategories = !view.managingCategories;
-              view.catError = '';
-              store.refresh();
-            },
-          }, 'Manage categories')),
+          h('div', { class: 'row' },
+            isProjectFilter(view.filter)
+              ? h('a', { href: `#/projects?project=${view.filter}&mode=edit`, class: 'icon-btn', title: 'Edit project', 'aria-label': 'Edit project' }, icon('pencil'))
+              : null,
+            h('button', {
+              type: 'button',
+              onclick: () => {
+                view.managingCategories = !view.managingCategories;
+                view.catError = '';
+                store.refresh();
+              },
+            }, 'Manage categories'))),
+        isProjectFilter(view.filter)
+          ? projectBar(store, projects.find((p) => p.id === view.filter))
+          : null,
         view.managingCategories ? categoriesManager(store) : null,
 
         h('div', { class: 'toolbar' },
@@ -534,4 +591,12 @@ export default {
   collection: COLLECTION,
   defaults: { items: [], categories: [] },
   render: draw,
+  // View state kept in the URL, so a refresh returns to the same list.
+  serialize: () => ({ filter: view.filter, status: view.status, category: view.category, more: view.showProject ? '1' : '' }),
+  restore: (p = {}) => {
+    view.filter = p.filter || 'all';
+    view.status = p.status || 'open';
+    view.category = p.category || '';
+    view.showProject = p.more === '1';
+  },
 };

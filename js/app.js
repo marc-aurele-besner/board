@@ -31,13 +31,28 @@ function toggleTheme() {
 }
 
 const collectionDefaults = () => Object.fromEntries(modules.filter((m) => m.collection).map((m) => [m.collection, m.defaults]));
-const currentModule = () => modules.find((m) => m.id === (location.hash.replace(/^#\//, '') || 'home')) ?? modules[0];
+// The URL is #/<section>?<view params>. The params restore each section's view after a refresh.
+function readRoute() {
+  const [path = '', query = ''] = location.hash.replace(/^#\//, '').split('?');
+  return { id: path || 'home', params: Object.fromEntries(new URLSearchParams(query)) };
+}
+const currentModule = () => modules.find((m) => m.id === readRoute().id) ?? modules[0];
+
+// Writes the section's view into the URL without adding history entries.
+function syncUrl(mod) {
+  const params = mod.serialize?.() ?? {};
+  const kept = Object.entries(params).filter(([, v]) => v !== '' && v !== null && v !== undefined && v !== false);
+  const query = new URLSearchParams(kept).toString();
+  const hash = `#/${mod.id}${query ? `?${query}` : ''}`;
+  if (location.hash !== hash) history.replaceState(null, '', hash);
+}
 
 function render() {
   if (!store) return renderConnect();
   const mod = currentModule();
   const main = h('main', { class: 'view' });
   mod.render(main, store);
+  syncUrl(mod);
   app.replaceChildren(
     h('header', { class: 'topbar' },
       h('a', { href: '#/home', class: 'brand' }, 'Board'),
@@ -100,6 +115,7 @@ async function open(handle) {
   store.subscribe(render);
   store.onStatus(updateStatus);
   connectError = '';
+  currentModule().restore?.(readRoute().params);
   render();
 }
 
@@ -123,7 +139,12 @@ async function reconnect() {
 }
 
 async function boot() {
-  window.addEventListener('hashchange', () => store && render());
+  // A link or the back button changed the route: load that section's view from the URL, then render.
+  window.addEventListener('hashchange', () => {
+    if (!store) return;
+    currentModule().restore?.(readRoute().params);
+    render();
+  });
   window.addEventListener('beforeunload', () => store?.flush());
   if (!fsSupported()) return renderConnect();
   try {

@@ -547,4 +547,18 @@ export default {
   collection: COLLECTION,
   defaults: { projects: [], categories: DEFAULT_CATEGORIES },
   render: draw,
+  serialize: () => ({
+    project: view.selectedId ?? '',
+    mode: view.mode === 'view' ? '' : view.mode,
+    category: view.category === 'all' ? '' : view.category,
+    q: view.query,
+  }),
+  restore: (p = {}) => {
+    view.selectedId = p.project || null;
+    view.mode = ['edit', 'new', 'categories'].includes(p.mode) ? p.mode : 'view';
+    view.category = p.category || 'all';
+    view.query = p.q || '';
+    view.error = '';
+    view.draft = null;
+  },
 };

@@ -243,4 +243,10 @@ export default {
   collection: COLLECTION,
   defaults: { recipes: [] },
   render: draw,
+  serialize: () => ({ tab: view.tab, recipe: view.selectedId ?? '', q: view.query }),
+  restore: (p = {}) => {
+    view.tab = ['idea', 'testing', 'final'].includes(p.tab) ? p.tab : 'testing';
+    view.selectedId = p.recipe || null;
+    view.query = p.q || '';
+  },
 };

@@ -132,4 +132,8 @@ export default {
   collection: COLLECTION,
   defaults: { entries: [], categories: [] },
   render: draw,
+  serialize: () => ({ month: view.month }),
+  restore: (p = {}) => {
+    view.month = /^\d{4}-\d{2}$/.test(p.month ?? '') ? p.month : monthKey(todayISO());
+  },
 };
