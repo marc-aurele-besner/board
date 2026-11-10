@@ -1218,6 +1218,8 @@ label.check { cursor: pointer; }
 .tick .icon { width: 12px; height: 12px; }
 .tick.ok { background: var(--income); }
 .tick.miss { background: var(--danger); }
+button.tick { border: none; padding: 0; cursor: pointer; }
+button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger); outline-offset: 2px; }
 .shares { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 22px; align-items: start; }
 .shares figure { margin: 0; display: flex; flex-direction: column; gap: 6px; }
 .share { position: relative; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); font-size: 0.9rem; }

@@ -1,10 +1,11 @@
 // Tools: checks that run against the website of each project, and the status of the services they rely on.
 import { h, icon, refreshIcon, empty, notice, uid } from '../ui.js';
-import { projectIcon } from './projects.js';
+import { projectIcon, projectTree } from './projects.js';
 import { hostOf, daysUntil, statusPageOf } from '../sitecheck.js';
 import { sitesOf, siteData, checkSite, checkAllSites, runRules, autoTaskFor, ruleOf, emailGaps, checkProviders, TOOLS_DEFAULTS } from '../automations.js';
 import { makeTask } from '../capture.js';
 import { toast } from '../toast.js';
+import { openDialog } from '../modal.js';
 
 const COLLECTION = 'tools';
 const TABS = [['health', 'Website health', 'globe'], ['ssl', 'SSL and domains', 'shield'], ['dns', 'DNS and email', 'mail'], ['crawl', 'Crawl files', 'file'], ['meta', 'Metadata preview', 'link'], ['status', 'Provider status', 'activity']];
@@ -58,6 +59,49 @@ function taskCell(store, p, kind, text, due) {
     ? h('a', { href: '#/todos?filter=auto', class: 'btn-link' }, 'Task open')
     : h('button', { type: 'button', class: 'btn-small', onclick: () => addTask(store, p, kind, text, due) }, 'Create task');
 }
+
+// A task for something a check found missing, filled in for the site's project and editable before it is added.
+function openTaskDialog(store, p, { text, description = '', priority = 'low' }) {
+  const projects = projectTree(store.get('projects').projects).map(({ project }) => project);
+  const dialog = openDialog({
+    title: 'Create a task',
+    body: h('form', {
+      class: 'stack',
+      onsubmit: (e) => {
+        e.preventDefault();
+        const f = new FormData(e.currentTarget);
+        const title = String(f.get('text') ?? '').trim();
+        if (!title) return;
+        const projectId = f.get('project') || null;
+        store.update('todos', (d) => d.items.push(makeTask({
+          text: title,
+          description: String(f.get('description') ?? '').trim(),
+          projectId,
+          priority: String(f.get('priority')),
+          due: String(f.get('due') ?? ''),
+        })));
+        dialog.close();
+        toast(`Task added to ${projects.find((x) => x.id === projectId)?.name ?? 'Personal'}`);
+      },
+    },
+      h('label', null, 'Task', h('input', { name: 'text', value: text, required: true, autocomplete: 'off' })),
+      h('label', null, 'Description', h('textarea', { name: 'description', rows: 3 }, description)),
+      h('div', { class: 'row' },
+        h('label', null, 'Project', h('select', { name: 'project' },
+          h('option', { value: '' }, 'Personal'),
+          projects.map((x) => h('option', { value: x.id, selected: x.id === p.id }, x.name)))),
+        h('label', null, 'Priority', h('select', { name: 'priority' },
+          [['none', 'No priority'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']].map(([v, l]) => h('option', { value: v, selected: v === priority }, l)))),
+        h('label', null, 'Due', h('input', { name: 'due', type: 'date' }))),
+      h('div', { class: 'row end' }, h('button', { class: 'primary', type: 'submit' }, 'Create task'))),
+  });
+}
+
+// A check or a cross. A cross that is given a task opens the task dialog for it.
+const tick = (found, title, task) =>
+  !found && task
+    ? h('button', { type: 'button', class: 'tick miss', title: `${title} · create a task`, 'aria-label': `${title}: create a task`, onclick: task }, icon('x'))
+    : h('span', { class: found ? 'tick ok' : 'tick miss', title }, icon(found ? 'check' : 'x'));
 
 function daysPill(until) {
   const n = daysUntil(until);
@@ -191,6 +235,10 @@ function dnsTab(store, sites) {
 
 // --- Crawl files ---
 
+// What a task for a missing file says.
+const crawlTask = (store, p, name, why) => () =>
+  openTaskDialog(store, p, { text: `Add ${name === 'Sitemap' ? 'a sitemap' : name} to ${hostOf(p.website)}`, description: why });
+
 // What each file is for, and what is worth knowing about it once found.
 const CRAWL_FILES = [
   ['robots', 'robots.txt', 'Tells crawlers what they may read.', (f) => [
@@ -245,7 +293,7 @@ function crawlTab(store, sites) {
     h('div', { class: 'crawl-grid' }, CRAWL_FILES.map(([key, name, why, facts]) => {
       const f = c[key];
       return h('article', { class: 'card stack' },
-        h('div', { class: 'row' }, h('span', { class: f.found ? 'tick ok' : 'tick miss' }, icon(f.found ? 'check' : 'x')), h('strong', null, name)),
+        h('div', { class: 'row' }, tick(f.found, `${name} ${f.found ? 'found' : f.unread ? 'unread' : 'missing'}`, f.unread ? null : crawlTask(store, p, name, why)), h('strong', null, name)),
         h('p', { class: 'muted small' }, why),
         f.found
           ? h('ul', { class: 'crawl-facts' }, facts(f).map((x) => h('li', null, x)))
@@ -312,8 +360,6 @@ const readAll = (store, part, label) =>
 const againButton = (store, p, part, busy) =>
   h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Read again', 'aria-label': `Read ${hostOf(p.website)} again`, onclick: () => check(store, p, [part]) }, refreshIcon(busy));
 
-const tick = (found, title) => h('span', { class: found ? 'tick ok' : 'tick miss', title }, icon(found ? 'check' : 'x'));
-
 function crawlAll(store, sites) {
   return h('div', { class: 'stack-lg' }, siteChips(store, sites, null),
     h('div', { class: 'card mon-scroll' },
@@ -323,12 +369,16 @@ function crawlAll(store, sites) {
           const c = siteData(store, p.id).crawl;
           const busy = view.busy.has(p.id) || view.busy.has('all');
           const cells = c?.robots
-            ? CRAWL_FILES.map(([k, name]) => h('td', null, c[k].unread ? h('span', { class: 'muted small' }, 'Unread') : tick(c[k].found, `${name} ${c[k].found ? 'found' : 'missing'}`),
+            ? CRAWL_FILES.map(([k, name, why]) => h('td', null, c[k].unread ? h('span', { class: 'muted small' }, 'Unread') : tick(c[k].found, `${name} ${c[k].found ? 'found' : 'missing'}`, crawlTask(store, p, name, why)),
                 k === 'robots' && c.robots.blocksSearch ? pillOf('Blocks search', 'high') : null))
             : [h('td', { colspan: CRAWL_FILES.length }, h('span', { class: 'muted small' }, busy ? 'Reading…' : c?.error ?? 'Not read yet'))];
           return h('tr', null, siteCell(store, p), ...cells, h('td', { class: 'muted small' }, c?.at ? timeOf(c.at) : ''), h('td', null, againButton(store, p, 'crawl', busy)));
         })))));
 }
+
+// What a task for a missing share tag says.
+const metaTask = (store, p, tag) => () =>
+  openTaskDialog(store, p, { text: `Add ${tag} to ${hostOf(p.website)}`, description: 'A share tag the metadata preview found missing.' });
 
 function metaAll(store, sites) {
   const TAGS = ['title', 'description', 'ogTitle', 'ogDescription', 'ogImage', 'ogUrl', 'twitterCard', 'twitterImage'];
@@ -347,7 +397,7 @@ function metaAll(store, sites) {
           return h('tr', null, siteCell(store, p),
             h('td', null, pillOf(`${present} of ${TAGS.length}`, present === TAGS.length ? 'done' : present >= TAGS.length / 2 ? 'medium' : 'high')),
             h('td', { class: 'cell-clip' }, m.ogTitle || m.title || h('span', { class: 'muted small' }, 'Missing')),
-            h('td', null, tick(Boolean(m.ogImage), m.ogImage ? 'og:image found' : 'og:image missing')),
+            h('td', null, tick(Boolean(m.ogImage), m.ogImage ? 'og:image found' : 'og:image missing', metaTask(store, p, 'og:image'))),
             h('td', { class: 'muted small' }, timeOf(m.at)),
             again);
         })))),
@@ -377,7 +427,7 @@ function metaTab(store, sites) {
         h('p', { class: 'muted small' }, `${present} of ${tags.length} tags present · read ${timeOf(m.at)}`),
         h('ul', { class: 'tag-rows' }, tags.map(([k, v]) =>
           h('li', null,
-            h('span', { class: v ? 'tick ok' : 'tick miss' }, icon(v ? 'check' : 'x')),
+            tick(Boolean(v), `${k} ${v ? 'found' : 'missing'}`, metaTask(store, p, k)),
             h('code', null, k),
             h('span', { class: v ? 'grow' : 'grow muted' }, v || 'Missing')))),
         missing.length
