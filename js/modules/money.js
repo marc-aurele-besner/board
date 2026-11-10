@@ -462,10 +462,10 @@ function spendingBlock(store, month, monthEntries) {
 // --- Page ---
 
 function draw(root, store) {
+  const { entries, categories } = store.get(COLLECTION);
   // The days on screen need their rates. They are asked for after this render, so the refresh does not run inside it.
   shownDays = entries.filter((e) => monthKey(e.date) === view.month).map((e) => e.date).concat(todayISO());
   setTimeout(() => scheduleRates(store, shownDays), 0);
-  const { entries, categories } = store.get(COLLECTION);
   const projects = store.get('projects').projects;
   const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, color: p.color }));
   const cur = view.currency;
