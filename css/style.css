@@ -459,7 +459,10 @@ textarea.editable-field { resize: vertical; }
 }
 .card-inset { background: var(--surface-2); border-radius: var(--radius); padding: 12px; }
 .main-pane { min-width: 0; }
-.side, .side-pane { position: sticky; top: 72px; }
+/* Left sidebars run the full height of the page, and scroll on their own when they are longer */
+.side, .side-pane { position: sticky; top: 72px; height: calc(100vh - 92px); overflow-y: auto; }
+.side-pane { display: flex; flex-direction: column; gap: 10px; }
+.side-pane .list-scroll { flex: 1; min-height: 0; max-height: none; overflow: auto; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
 .stack-lg { display: flex; flex-direction: column; gap: 16px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -692,7 +695,8 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 @media (max-width: 720px) {
   .view { padding: 16px; }
   .split, .split.kitchen { grid-template-columns: 1fr; }
-  .side, .side-pane { position: static; }
+  .side, .side-pane { position: static; height: auto; overflow: visible; }
+  .side-pane .list-scroll { flex: none; max-height: 50vh; }
   .todo-head { display: none; }
   .settings-shell { grid-template-columns: 1fr; }
   .settings-side { position: static; }
