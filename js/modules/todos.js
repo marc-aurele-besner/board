@@ -1,5 +1,5 @@
 import { h, uid, now, icon, statusOf, empty, notice } from '../ui.js';
-import { createProject, projectIcon, labelsOf, projectTree } from './projects.js';
+import { createProject, projectIcon, labelsOf, projectTree, moveProject } from './projects.js';
 import { editText, pickChip } from '../inline.js';
 import { repoStats } from '../github.js';
 import { ask, parseJson } from '../ai.js';
@@ -211,6 +211,9 @@ function dropSide(e) {
 function clearDropMarks(el) {
   el.classList.remove('drop-before', 'drop-after');
 }
+
+// The project currently being dragged in the sidebar (a task drag uses view.dragId).
+let dragProjectId = null;
 
 // Sorting by a column replaces the stored order, so drag-to-reorder is off while a sort is active.
 const reorderEnabled = () => !view.sort.key;
@@ -711,8 +714,46 @@ function draw(root, store) {
               h('input', { name: 'name', placeholder: 'Project name, Enter', 'aria-label': 'New project name', autocomplete: 'off', 'data-autofocus': true }))
           : null,
         projectTree(projects).map(({ project: p, depth }) =>
-          h('div', { class: 'tree-row', style: { paddingLeft: `${depth * 14}px` } },
-            navItem(p.id, p.name, openCount((i) => i.projectId === p.id), projectIcon(p))))),
+          h('div', {
+            class: 'tree-row',
+            style: { paddingLeft: `${depth * 14}px` },
+            ondragstart: (e) => {
+              dragProjectId = p.id;
+              e.dataTransfer.effectAllowed = 'move';
+              e.dataTransfer.setData('text/plain', p.id); // Firefox needs data to start a drag
+              e.currentTarget.classList.add('dragging');
+            },
+            ondragend: (e) => {
+              dragProjectId = null;
+              e.currentTarget.draggable = false;
+              e.currentTarget.classList.remove('dragging');
+            },
+            ondragover: (e) => {
+              if (!dragProjectId || dragProjectId === p.id) return;
+              e.preventDefault();
+              const side = dropSide(e);
+              e.currentTarget.classList.toggle('drop-before', side === 'before');
+              e.currentTarget.classList.toggle('drop-after', side === 'after');
+            },
+            ondragleave: (e) => e.currentTarget.classList.remove('drop-before', 'drop-after'),
+            ondrop: (e) => {
+              if (!dragProjectId) return;
+              e.preventDefault();
+              e.currentTarget.classList.remove('drop-before', 'drop-after');
+              moveProject(store, dragProjectId, p.id, dropSide(e) === 'after');
+              dragProjectId = null;
+            },
+          },
+            h('span', {
+              class: 'grip project-grip',
+              title: 'Drag to reorder projects',
+              'aria-label': 'Drag to reorder project',
+              // Only the grip makes the row draggable; a task dragged onto the name still files the task.
+              onpointerdown: (e) => {
+                e.currentTarget.closest('.tree-row').draggable = true;
+              },
+            }, icon('grip')),
+            navItem(p.id, p.name, openCount((i) => i.projectId === p.id), projectIcon(p)))),
 
       h('section', { class: 'card main-pane' },
         h('div', { class: 'head-bar' },

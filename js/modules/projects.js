@@ -332,7 +332,7 @@ const select = (store, id) => {
 
 // Stored array order is the display order. Dragging a project moves it in that array.
 let dragId = null;
-function moveProject(store, id, targetId, after) {
+export function moveProject(store, id, targetId, after) {
   if (id === targetId) return;
   store.update(COLLECTION, (d) => {
     const from = d.projects.findIndex((p) => p.id === id);
