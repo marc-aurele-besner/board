@@ -8,6 +8,7 @@ import money from './money.js';
 import positions from './positions.js';
 import monitoring from './monitoring.js';
 import tools from './tools.js';
+import cron from './cron.js';
 import settings from './settings.js';
 
-export const modules = [home, todos, projects, kitchen, money, positions, monitoring, tools, settings];
+export const modules = [home, todos, projects, kitchen, money, positions, monitoring, tools, cron, settings];
