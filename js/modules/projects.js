@@ -263,16 +263,71 @@ const select = (store, id) => {
 
 // --- Views ---
 
+// Stored array order is the display order. Dragging a project moves it in that array.
+let dragId = null;
+function moveProject(store, id, targetId, after) {
+  if (id === targetId) return;
+  store.update(COLLECTION, (d) => {
+    const from = d.projects.findIndex((p) => p.id === id);
+    if (from < 0) return;
+    const [project] = d.projects.splice(from, 1);
+    let to = d.projects.findIndex((p) => p.id === targetId);
+    if (to < 0) to = from;
+    d.projects.splice(after ? to + 1 : to, 0, project);
+  });
+}
+const dropSide = (e) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  return e.clientY > r.top + r.height / 2 ? 'after' : 'before';
+};
+
 function projectList(store, projects, items, categories) {
   if (!projects.length) return empty('No projects match. Try another filter, or create one above.');
   return h('ul', { class: 'project-list' },
-    [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => {
+    projects.map((p) => {
       const open = items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
       const category = categoryById(categories, p.categoryId);
       return h('li', {
         class: p.id === view.selectedId ? 'project-item active' : 'project-item',
+        'data-id': p.id,
         onclick: () => select(store, p.id),
+        ondragstart: (e) => {
+          dragId = p.id;
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', p.id); // Firefox needs data to start a drag
+          e.currentTarget.classList.add('dragging');
+        },
+        ondragend: (e) => {
+          dragId = null;
+          e.currentTarget.draggable = false;
+          e.currentTarget.classList.remove('dragging');
+        },
+        ondragover: (e) => {
+          if (!dragId || dragId === p.id) return;
+          e.preventDefault();
+          const side = dropSide(e);
+          e.currentTarget.classList.toggle('drop-before', side === 'before');
+          e.currentTarget.classList.toggle('drop-after', side === 'after');
+        },
+        ondragleave: (e) => e.currentTarget.classList.remove('drop-before', 'drop-after'),
+        ondrop: (e) => {
+          if (!dragId) return;
+          e.preventDefault();
+          e.currentTarget.classList.remove('drop-before', 'drop-after');
+          moveProject(store, dragId, p.id, dropSide(e) === 'after');
+          dragId = null;
+        },
       },
+        h('span', {
+          class: 'grip',
+          title: 'Drag to reorder',
+          'aria-label': 'Drag to reorder',
+          onclick: (e) => e.stopPropagation(),
+          onpointerdown: (e) => {
+            e.stopPropagation();
+            e.currentTarget.closest('li').draggable = true;
+          },
+        }, icon('grip')),
         projectIcon(p),
         h('div', { class: 'grow' },
           h('strong', null, p.name),

@@ -49,7 +49,6 @@ function draw(root, store) {
   const groups = [...categories.map((c) => ({ id: c.id, name: c.name, projects: projects.filter((p) => p.categoryId === c.id) }))];
   const uncategorized = projects.filter((p) => !categories.some((c) => c.id === p.categoryId));
   if (uncategorized.length) groups.push({ id: null, name: 'Uncategorized', projects: uncategorized });
-  groups.forEach((g) => g.projects.sort((a, b) => a.name.localeCompare(b.name)));
 
   // GitHub totals over every linked repo. Each lookup starts a fetch the first time.
   const repos = [...new Set(projects.flatMap((p) => p.github.repos))];

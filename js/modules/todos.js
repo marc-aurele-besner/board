@@ -700,8 +700,7 @@ function draw(root, store) {
             },
               h('input', { name: 'name', placeholder: 'Project name, Enter', 'aria-label': 'New project name', autocomplete: 'off', 'data-autofocus': true }))
           : null,
-        [...projects].sort((a, b) => a.name.localeCompare(b.name))
-          .map((p) => navItem(p.id, p.name, openCount((i) => i.projectId === p.id), projectIcon(p)))),
+        projects.map((p) => navItem(p.id, p.name, openCount((i) => i.projectId === p.id), projectIcon(p)))),
 
       h('section', { class: 'card main-pane' },
         h('div', { class: 'row between head' },
