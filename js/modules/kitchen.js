@@ -412,6 +412,7 @@ function detailPane(store, r) {
         multiline: true,
         allowEmpty: true,
         className: 'k-list-text',
+        display: (text) => h('ul', { class: 'k-steps' }, splitLines(text).map((step) => h('li', null, step))),
         onSave: (v) => updateRecipe(store, r.id, { steps: splitLines(v) }),
       })),
       block('Notes', editText({

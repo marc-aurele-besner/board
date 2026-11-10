@@ -141,6 +141,7 @@ a.btn-small.primary-link:hover { filter: brightness(1.05); }
 .k-block { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .k-block h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0; }
 .k-list-text { white-space: pre-line; min-height: 1.6em; }
+.k-steps { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; list-style: disc; }
 .k-actions { display: flex; gap: 8px; }
 .k-ideas { margin: 0; }
 .k-iter { display: flex; flex-direction: column; gap: 12px; }

@@ -4,9 +4,10 @@ import { h, icon } from './ui.js';
 import { richText } from './rich.js';
 
 // Click-to-edit text. Enter saves (Ctrl/Cmd+Enter for multiline), Escape cancels, blur saves.
-export function editText({ value = '', placeholder = 'Empty', multiline = false, className = '', allowEmpty = false, rich = false, onSave }) {
+// `display(text)` can draw the saved value as something other than plain text, such as a bullet list.
+export function editText({ value = '', placeholder = 'Empty', multiline = false, className = '', allowEmpty = false, rich = false, display = null, onSave }) {
   const current = value ?? '';
-  const view = h(rich ? 'div' : 'span', {
+  const view = h(rich || display ? 'div' : 'span', {
     class: `editable ${className}${current ? '' : ' is-placeholder'}`.trim(),
     role: 'button',
     tabindex: '0',
@@ -23,7 +24,7 @@ export function editText({ value = '', placeholder = 'Empty', multiline = false,
         start();
       }
     },
-  }, rich && current ? richText(current) : current || placeholder);
+  }, display && current ? display(current) : rich && current ? richText(current) : current || placeholder);
 
   function start() {
     let done = false;
