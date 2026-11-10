@@ -1,4 +1,7 @@
-import { h, uid, now, todayISO, empty } from '../ui.js';
+import { h, uid, now, todayISO, empty, icon, notice } from '../ui.js';
+import { editText, pickChip } from '../inline.js';
+import { ask } from '../ai.js';
+import { setupBanner, hasOpenRouter } from '../integrations.js';
 
 const COLLECTION = 'recipes';
 const STATUSES = [
@@ -6,9 +9,10 @@ const STATUSES = [
   ['testing', 'Testing'],
   ['final', 'Final'],
 ];
+const STATUS_TONE = { idea: 'todo', testing: 'doing', final: 'done' };
 
-// View state: which status tab, search text, and the open recipe.
-const view = { tab: 'testing', query: '', selectedId: null };
+// View state: status tab, search text, the open recipe, and whether the "New" and "Log" forms are open.
+const view = { tab: 'testing', query: '', selectedId: null, adding: false, logOpen: false };
 
 const splitLines = (text) => text.split('\n').map((s) => s.trim()).filter(Boolean);
 const splitTags = (text) => [...new Set(text.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean))];
@@ -20,64 +24,24 @@ const averageRating = (versions) => {
   return rated.length ? rated.reduce((a, b) => a + b, 0) / rated.length : null;
 };
 const stars = (n) => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
+const lastActivity = (r) => r.versions.reduce((latest, v) => (v.date > latest ? v.date : latest), r.created.slice(0, 10));
+const attempts = (r) => `${r.versions.length} ${r.versions.length === 1 ? 'try' : 'tries'}`;
 
-function addRecipe(store, v) {
-  const title = v.title.trim();
-  if (!title) return;
+// Every change goes through one of these, so the store saves and re-renders.
+function updateRecipe(store, id, patch) {
+  store.update(COLLECTION, (d) => {
+    const r = findRecipe(d, id);
+    if (r) Object.assign(r, patch);
+  });
+}
+
+function addRecipe(store, title, status) {
   const id = uid();
   view.selectedId = id;
-  store.update(COLLECTION, (d) =>
-    d.recipes.push({
-      id,
-      title,
-      status: STATUSES.some(([key]) => key === v.status) ? v.status : view.tab,
-      tags: splitTags(v.tags),
-      ingredients: [],
-      steps: [],
-      notes: '',
-      versions: [],
-      created: now(),
-    }));
-}
-
-function saveRecipe(store, id, v) {
-  store.update(COLLECTION, (d) => {
-    const r = findRecipe(d, id);
-    if (!r) return;
-    r.title = v.title.trim() || r.title;
-    r.status = v.status;
-    r.tags = splitTags(v.tags);
-    r.ingredients = splitLines(v.ingredients);
-    r.steps = splitLines(v.steps);
-    r.notes = v.notes;
-  });
-  view.tab = v.status;
-}
-
-function logIteration(store, id, v) {
-  const changes = v.changes.trim();
-  const notes = v.notes.trim();
-  if (!changes && !notes) return;
-  store.update(COLLECTION, (d) => {
-    const r = findRecipe(d, id);
-    if (!r) return;
-    r.versions.push({
-      id: uid(),
-      date: v.date || todayISO(),
-      changes,
-      rating: Number(v.rating) || null,
-      notes,
-    });
-    if (r.status === 'idea') r.status = 'testing';
-  });
-}
-
-function setStatus(store, id, status) {
-  store.update(COLLECTION, (d) => {
-    const r = findRecipe(d, id);
-    if (r) r.status = status;
-  });
   view.tab = status;
+  view.adding = false;
+  store.update(COLLECTION, (d) =>
+    d.recipes.push({ id, title, status, tags: [], ingredients: [], steps: [], notes: '', versions: [], created: now() }));
 }
 
 function deleteRecipe(store, id) {
@@ -88,152 +52,318 @@ function deleteRecipe(store, id) {
   });
 }
 
-function recipeList(store, recipes, onSelect) {
+function logIteration(store, id, v) {
+  const changes = v.changes.trim();
+  const notes = v.notes.trim();
+  if (!changes && !notes) return;
+  store.update(COLLECTION, (d) => {
+    const r = findRecipe(d, id);
+    if (!r) return;
+    r.versions.push({ id: uid(), date: v.date || todayISO(), changes, rating: Number(v.rating) || null, notes });
+    if (r.status === 'idea') r.status = 'testing';
+  });
+  view.logOpen = false;
+}
+
+function removeVersion(store, id, versionId) {
+  store.update(COLLECTION, (d) => {
+    const r = findRecipe(d, id);
+    if (r) r.versions = r.versions.filter((v) => v.id !== versionId);
+  });
+}
+
+// --- Suggest variations (task 4) ---
+
+const ideas = { recipeId: null, status: 'idle', text: '' };
+
+async function runIdeas(store, r) {
+  ideas.recipeId = r.id;
+  ideas.status = 'loading';
+  store.refresh();
+  try {
+    ideas.text = (await ask(store, 'task-recipe', [
+      {
+        role: 'system',
+        content: 'You help a home cook improve a recipe. Given the recipe and its past attempts as JSON, suggest three concrete variations to test next. For each, give the change and a one-line reason. Plain text, concise.',
+      },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          title: r.title,
+          ingredients: r.ingredients,
+          steps: r.steps,
+          notes: r.notes,
+          attempts: r.versions.map((v) => ({ date: v.date, changes: v.changes, rating: v.rating, notes: v.notes })),
+        }),
+      },
+    ])).trim();
+    ideas.status = 'ok';
+  } catch (err) {
+    ideas.status = 'error';
+    ideas.text = err.message;
+  }
+  store.refresh();
+}
+
+function ideasBlock(r) {
+  if (ideas.recipeId !== r.id || ideas.status === 'idle') return null;
+  if (ideas.status === 'loading') return h('p', { class: 'muted small' }, 'Thinking about variations…');
+  if (ideas.status === 'error') return notice({ text: ideas.text });
+  return h('div', { class: 'card-inset k-ideas' }, h('pre', { class: 'ai-text' }, ideas.text));
+}
+
+// --- List ---
+
+function recipeCards(store, recipes) {
   const q = view.query.trim().toLowerCase();
   const shown = recipes
     .filter((r) => r.status === view.tab)
     .filter((r) => !q || r.title.toLowerCase().includes(q) || r.tags.some((t) => t.includes(q)))
-    .sort((a, b) => a.title.localeCompare(b.title));
-  if (!shown.length) return empty(q ? 'No matches.' : 'Nothing in this list yet.');
-  return h('ul', { class: 'recipe-list' },
+    .sort((a, b) => lastActivity(b).localeCompare(lastActivity(a)));
+  if (!shown.length) return empty(q ? 'No recipes match.' : 'Nothing here yet.');
+  return h('ul', { class: 'k-list' },
     shown.map((r) => {
       const avg = averageRating(r.versions);
+      const open = () => {
+        view.selectedId = r.id;
+        store.refresh();
+      };
       return h('li', {
-        class: r.id === view.selectedId ? 'recipe-item active' : 'recipe-item',
-        onclick: () => onSelect(r.id),
+        class: r.id === view.selectedId ? 'k-card active' : 'k-card',
+        tabindex: '0',
+        onclick: open,
+        onkeydown: (e) => {
+          if (e.key === 'Enter') open();
+        },
       },
-        h('div', { class: 'grow' },
-          h('strong', null, r.title),
-          r.tags.length ? h('div', { class: 'tags' }, r.tags.map((t) => h('span', { class: 'tag' }, t))) : null),
-        h('div', { class: 'meta' },
-          avg !== null ? h('span', { title: `Average of ${r.versions.length} tries` }, stars(avg)) : null,
-          h('span', null, `${r.versions.length} tries`)));
+        h('strong', { class: 'k-card-title' }, r.title),
+        r.tags.length ? h('div', { class: 'tags' }, r.tags.map((t) => h('span', { class: 'tag' }, t))) : null,
+        h('div', { class: 'k-card-meta muted small' },
+          avg !== null ? h('span', { class: 'stars' }, stars(avg)) : null,
+          h('span', null, attempts(r)),
+          h('span', null, lastActivity(r))));
     }));
 }
 
-function recipeDetail(store, r) {
-  const versions = [...r.versions].reverse();
-  return h('div', { class: 'stack-lg' },
+function listPane(store, recipes) {
+  const box = h('div', { class: 'k-list-box' });
+  const fill = () => box.replaceChildren(recipeCards(store, recipes));
+  fill();
+  return h('section', { class: 'card k-side' },
     h('div', { class: 'row between' },
-      h('h2', null, r.title),
+      h('h2', null, 'Recipes'),
+      h('button', {
+        type: 'button',
+        class: 'btn-small primary',
+        onclick: () => {
+          view.adding = !view.adding;
+          store.refresh();
+        },
+      }, icon('plus'), 'New')),
+    view.adding
+      ? h('form', {
+          class: 'k-new',
+          onsubmit: (e) => {
+            e.preventDefault();
+            const v = formValues(e.currentTarget);
+            const title = v.title.trim();
+            if (title) addRecipe(store, title, v.status);
+          },
+        },
+          h('input', { name: 'title', placeholder: 'Recipe name, Enter', 'aria-label': 'New recipe name', autocomplete: 'off', 'data-autofocus': true }),
+          h('select', { name: 'status', value: view.tab, 'aria-label': 'Status' },
+            STATUSES.map(([k, l]) => h('option', { value: k }, l))))
+      : null,
+    h('div', { class: 'segmented' },
+      STATUSES.map(([key, label]) =>
+        h('button', {
+          type: 'button',
+          class: key === view.tab ? 'seg active' : 'seg',
+          onclick: () => {
+            view.tab = key;
+            view.selectedId = null;
+            store.refresh();
+          },
+        }, `${label} · ${recipes.filter((r) => r.status === key).length}`))),
+    h('input', {
+      type: 'search',
+      class: 'k-search',
+      placeholder: 'Search title or tag',
+      'aria-label': 'Search recipes',
+      value: view.query,
+      // Only the list refills while typing, so the search box keeps focus.
+      oninput: (e) => {
+        view.query = e.target.value;
+        fill();
+      },
+    }),
+    box);
+}
+
+// --- Detail ---
+
+const block = (title, child) => h('div', { class: 'k-block' }, h('h3', null, title), child);
+
+function iterationCard(store, r, v) {
+  return h('li', { class: 'timeline-item' },
+    h('span', { class: 'timeline-dot', 'aria-hidden': 'true' }),
+    h('div', { class: 'timeline-body' },
+      h('div', { class: 'row between' },
+        h('span', { class: 'muted small' }, v.date),
+        h('div', { class: 'row' },
+          v.rating ? h('span', { class: 'stars' }, stars(v.rating)) : null,
+          h('button', {
+            type: 'button',
+            class: 'icon-btn',
+            title: 'Delete iteration',
+            'aria-label': 'Delete iteration',
+            onclick: () => removeVersion(store, r.id, v.id),
+          }, icon('x')))),
+      v.changes ? h('p', { class: 'iter-changes' }, v.changes) : null,
+      v.notes ? h('p', { class: 'muted small' }, v.notes) : null));
+}
+
+function logForm(store, r) {
+  return h('form', {
+    class: 'card-inset k-log',
+    onsubmit: (e) => {
+      e.preventDefault();
+      logIteration(store, r.id, formValues(e.currentTarget));
+      store.refresh();
+    },
+  },
+    h('div', { class: 'row' },
+      h('input', { name: 'date', type: 'date', value: todayISO(), 'aria-label': 'Date' }),
+      h('select', { name: 'rating', 'aria-label': 'Rating' },
+        h('option', { value: '' }, 'No rating'),
+        [5, 4, 3, 2, 1].map((n) => h('option', { value: n }, `${n} ★`)))),
+    h('textarea', { name: 'changes', rows: 2, placeholder: 'What did you change? e.g. 20% less sugar, rested dough 2h' }),
+    h('input', { name: 'notes', placeholder: 'Result: texture, timing, what to try next', autocomplete: 'off' }),
+    h('div', { class: 'row end' }, h('button', { class: 'primary btn-small', type: 'submit' }, 'Log iteration')));
+}
+
+function detailPane(store, r) {
+  const avg = averageRating(r.versions);
+  const versions = [...r.versions].sort((a, b) => b.date.localeCompare(a.date));
+  return h('section', { class: 'card k-main' },
+    h('header', { class: 'k-head' },
+      h('div', { class: 'k-title' },
+        editText({
+          value: r.title,
+          placeholder: 'Untitled recipe',
+          className: 'k-h1',
+          onSave: (title) => updateRecipe(store, r.id, { title }),
+        }),
+        h('div', { class: 'k-meta row' },
+          pickChip({
+            value: r.status,
+            options: STATUSES.map(([v, l]) => ({ value: v, label: l, tone: STATUS_TONE[v] })),
+            onPick: (status) => {
+              updateRecipe(store, r.id, { status });
+              view.tab = status;
+            },
+          }),
+          h('span', { class: 'muted small' }, attempts(r)),
+          avg !== null ? h('span', { class: 'stars' }, `${stars(avg)} ${avg.toFixed(1)}`) : null,
+          h('span', { class: 'muted small' }, `last tried ${lastActivity(r)}`))),
       h('div', { class: 'row' },
         r.status !== 'final'
-          ? h('button', { type: 'button', class: 'primary', onclick: () => setStatus(store, r.id, 'final') }, 'Promote to final')
+          ? h('button', {
+              type: 'button',
+              class: 'btn-small primary',
+              onclick: () => {
+                view.tab = 'final';
+                updateRecipe(store, r.id, { status: 'final' });
+              },
+            }, 'Promote to final')
           : null,
-        h('button', { type: 'button', class: 'danger', onclick: () => deleteRecipe(store, r.id) }, 'Delete'))),
+        h('button', { type: 'button', class: 'btn-small danger', onclick: () => deleteRecipe(store, r.id) }, 'Delete'))),
 
-    h('form', {
-      class: 'stack',
-      onsubmit: (e) => {
-        e.preventDefault();
-        saveRecipe(store, r.id, formValues(e.currentTarget));
-      },
-    },
-      h('details', { open: r.ingredients.length === 0 && r.steps.length === 0 },
-        h('summary', null, 'Recipe'),
-        h('label', null, 'Title', h('input', { name: 'title', value: r.title, required: true })),
-        h('div', { class: 'row' },
-          h('label', { class: 'grow' }, 'Status',
-            h('select', { name: 'status', value: r.status },
-              STATUSES.map(([key, label]) => h('option', { value: key }, label)))),
-          h('label', { class: 'grow' }, 'Tags (comma separated)',
-            h('input', { name: 'tags', value: r.tags.join(', ') }))),
-        h('label', null, 'Ingredients (one per line)',
-          h('textarea', { name: 'ingredients', rows: 6 }, r.ingredients.join('\n'))),
-        h('label', null, 'Steps (one per line)',
-          h('textarea', { name: 'steps', rows: 6 }, r.steps.join('\n'))),
-        h('label', null, 'Notes',
-          h('textarea', { name: 'notes', rows: 3 }, r.notes))),
-      h('div', { class: 'row end' }, h('button', { class: 'primary', type: 'submit' }, 'Save recipe'))),
+    h('div', { class: 'k-tags' },
+      h('span', { class: 'muted small' }, 'Tags'),
+      editText({
+        value: r.tags.join(', '),
+        placeholder: 'Add tags, comma separated',
+        allowEmpty: true,
+        onSave: (v) => updateRecipe(store, r.id, { tags: splitTags(v) }),
+      })),
 
-    h('section', { class: 'stack' },
-      h('h3', null, 'Log an iteration'),
-      h('form', {
-        class: 'stack card-inset',
-        onsubmit: (e) => {
-          e.preventDefault();
-          logIteration(store, r.id, formValues(e.currentTarget));
-        },
-      },
-        h('div', { class: 'row' },
-          h('label', { class: 'grow' }, 'Date', h('input', { type: 'date', name: 'date', value: todayISO() })),
-          h('label', { class: 'grow' }, 'Rating',
-            h('select', { name: 'rating' },
-              h('option', { value: '' }, '—'),
-              [5, 4, 3, 2, 1].map((n) => h('option', { value: n }, `${n} ★`))))),
-        h('label', null, 'What did you change?',
-          h('textarea', { name: 'changes', rows: 2, placeholder: 'e.g. 20% less sugar, rested dough 2h' })),
-        h('label', null, 'Result notes',
-          h('input', { name: 'notes', placeholder: 'Texture, timing, what to try next' })),
-        h('div', { class: 'row end' }, h('button', { class: 'primary', type: 'submit' }, 'Log iteration'))),
+    h('div', { class: 'k-grid' },
+      block('Ingredients', editText({
+        value: r.ingredients.join('\n'),
+        placeholder: 'One ingredient per line',
+        multiline: true,
+        allowEmpty: true,
+        className: 'k-list-text',
+        onSave: (v) => updateRecipe(store, r.id, { ingredients: splitLines(v) }),
+      })),
+      block('Steps', editText({
+        value: r.steps.join('\n'),
+        placeholder: 'One step per line',
+        multiline: true,
+        allowEmpty: true,
+        className: 'k-list-text',
+        onSave: (v) => updateRecipe(store, r.id, { steps: splitLines(v) }),
+      })),
+      block('Notes', editText({
+        value: r.notes,
+        placeholder: 'What you learned, what to watch for',
+        rich: true,
+        multiline: true,
+        allowEmpty: true,
+        className: 'k-list-text',
+        onSave: (v) => updateRecipe(store, r.id, { notes: v.trim() }),
+      }))),
+
+    hasOpenRouter(store) ? null : setupBanner('openrouter', 'Suggesting variations needs an OpenRouter key.'),
+    h('div', { class: 'k-actions' },
+      h('button', {
+        type: 'button',
+        class: 'btn-small',
+        disabled: ideas.status === 'loading',
+        onclick: () => runIdeas(store, r),
+      }, 'Suggest variations with AI')),
+    ideasBlock(r),
+
+    h('section', { class: 'k-iter' },
+      h('div', { class: 'row between' },
+        h('h3', null, 'Iterations'),
+        h('button', {
+          type: 'button',
+          class: 'btn-small',
+          onclick: () => {
+            view.logOpen = !view.logOpen;
+            store.refresh();
+          },
+        }, view.logOpen ? 'Close' : 'Log an iteration')),
+      view.logOpen ? logForm(store, r) : null,
       versions.length
-        ? h('ol', { class: 'versions' },
-            versions.map((v) =>
-              h('li', null,
-                h('div', { class: 'meta' },
-                  h('span', null, v.date),
-                  v.rating ? h('span', null, stars(v.rating)) : null),
-                v.changes ? h('p', null, v.changes) : null,
-                v.notes ? h('p', { class: 'muted' }, v.notes) : null)))
-        : empty('No iterations yet.')));
+        ? h('ol', { class: 'timeline' }, versions.map((v) => iterationCard(store, r, v)))
+        : empty('No iterations yet. Log one after each attempt.')));
+}
+
+function emptyDetail(store) {
+  return h('section', { class: 'card k-main k-empty' },
+    h('h2', null, 'Pick a recipe'),
+    h('p', { class: 'muted' }, 'Recipes you are testing live here. Each attempt is an iteration, so you can see what changed, how it turned out, and what to try next.'),
+    h('button', {
+      type: 'button',
+      class: 'btn-small primary',
+      onclick: () => {
+        view.adding = true;
+        store.refresh();
+      },
+    }, icon('plus'), 'New recipe'));
 }
 
 function draw(root, store) {
   const { recipes } = store.get(COLLECTION);
+  if (view.selectedId && !recipes.some((r) => r.id === view.selectedId)) view.selectedId = null;
   const selected = recipes.find((r) => r.id === view.selectedId) ?? null;
-  if (!selected) view.selectedId = null;
-
-  const list = h('div', { class: 'recipe-list-wrap' });
-  const renderList = () => list.replaceChildren(recipeList(store, recipes, (id) => {
-    view.selectedId = id;
-    store.refresh();
-  }));
-  renderList();
-
   root.replaceChildren(
-    h('div', { class: 'split kitchen' },
-      h('section', { class: 'card side-pane' },
-        h('div', { class: 'segmented' },
-          STATUSES.map(([key, label]) =>
-            h('button', {
-              type: 'button',
-              class: key === view.tab ? 'seg active' : 'seg',
-              onclick: () => {
-                view.tab = key;
-                store.refresh();
-              },
-            }, `${label} (${recipes.filter((r) => r.status === key).length})`))),
-        h('input', {
-          type: 'search',
-          placeholder: 'Search title or tag',
-          'aria-label': 'Search recipes',
-          value: view.query,
-          // Update only the list here so the search box keeps focus while typing.
-          oninput: (e) => {
-            view.query = e.target.value;
-            renderList();
-          },
-        }),
-        list,
-        h('form', {
-          class: 'stack',
-          onsubmit: (e) => {
-            e.preventDefault();
-            addRecipe(store, formValues(e.currentTarget));
-          },
-        },
-          h('h3', null, 'New recipe'),
-          h('input', { name: 'title', placeholder: 'Recipe name', 'aria-label': 'New recipe name', autocomplete: 'off', 'data-autofocus': true }),
-          h('input', { name: 'tags', placeholder: 'Tags, comma separated', 'aria-label': 'Tags', autocomplete: 'off' }),
-          h('div', { class: 'row' },
-            h('select', { name: 'status', 'aria-label': 'Status', value: view.tab },
-              STATUSES.map(([key, label]) => h('option', { value: key }, label))),
-            h('button', { class: 'primary', type: 'submit' }, 'Add')))),
-
-      h('section', { class: 'card main-pane' },
-        selected
-          ? recipeDetail(store, selected)
-          : empty('Pick a recipe on the left, or add a new one.'))));
+    h('div', { class: 'kitchen-shell' },
+      listPane(store, recipes),
+      selected ? detailPane(store, selected) : emptyDetail(store)));
 }
 
 export default {
@@ -243,4 +373,12 @@ export default {
   collection: COLLECTION,
   defaults: { recipes: [] },
   render: draw,
+  serialize: () => ({ tab: view.tab, recipe: view.selectedId ?? '', q: view.query }),
+  restore: (p = {}) => {
+    view.tab = ['idea', 'testing', 'final'].includes(p.tab) ? p.tab : 'testing';
+    view.selectedId = p.recipe || null;
+    view.query = p.q || '';
+    view.logOpen = false;
+    view.adding = false;
+  },
 };

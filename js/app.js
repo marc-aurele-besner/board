@@ -2,13 +2,16 @@
 import { fsSupported, pickFolder, loadHandle, hasPermission } from './storage.js';
 import { createStore } from './store.js';
 import { h, icon } from './ui.js';
+import { configure } from './github.js';
+import { ensureTasks } from './modules/settings.js';
 import { modules } from './modules/index.js';
-import { migrateLegacyProjects } from './modules/projects.js';
+import { migrateLegacyProjects, migrateProjectShape } from './modules/projects.js';
 
 const app = document.getElementById('app');
 const STATUS_LABELS = { saved: 'Saved', saving: 'Saving…', error: 'Save failed' };
 
 let store = null;
+let lastSection = null;
 let pendingHandle = null; // remembered folder that still needs permission
 let connectError = '';
 
@@ -29,21 +32,42 @@ function toggleTheme() {
   render();
 }
 
-const collectionDefaults = () => Object.fromEntries(modules.map((m) => [m.collection, m.defaults]));
-const currentModule = () => modules.find((m) => m.id === location.hash.replace(/^#\//, '')) ?? modules[0];
+const collectionDefaults = () => Object.fromEntries(modules.filter((m) => m.collection).map((m) => [m.collection, m.defaults]));
+// The URL is #/<section>?<view params>. The params restore each section's view after a refresh.
+function readRoute() {
+  const [path = '', query = ''] = location.hash.replace(/^#\//, '').split('?');
+  return { id: path || 'home', params: Object.fromEntries(new URLSearchParams(query)) };
+}
+const currentModule = () => modules.find((m) => m.id === readRoute().id) ?? modules[0];
+
+// Writes the section's view into the URL without adding history entries.
+function syncUrl(mod) {
+  const params = mod.serialize?.() ?? {};
+  const kept = Object.entries(params).filter(([, v]) => v !== '' && v !== null && v !== undefined && v !== false);
+  const query = new URLSearchParams(kept).toString();
+  const hash = `#/${mod.id}${query ? `?${query}` : ''}`;
+  if (location.hash !== hash) history.replaceState(null, '', hash);
+}
 
 function render() {
   if (!store) return renderConnect();
   const mod = currentModule();
   const main = h('main', { class: 'view' });
+  // Only a change of section plays the entrance animation; edits within a section re-render silently.
+  if (mod.id !== lastSection) {
+    main.classList.add('enter');
+    lastSection = mod.id;
+  }
   mod.render(main, store);
+  syncUrl(mod);
   app.replaceChildren(
     h('header', { class: 'topbar' },
-      h('div', { class: 'brand' }, 'Board'),
+      h('a', { href: '#/home', class: 'brand' }, 'Board'),
       h('nav', { class: 'tabs' },
-        modules.map((m) => h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab' }, icon(m.icon), m.title))),
+        modules.filter((m) => !m.hidden).map((m) => h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab' }, icon(m.icon), m.title))),
       h('div', { class: 'topbar-end' },
         h('span', { id: 'save-status', class: `status ${store.status}` }, STATUS_LABELS[store.status]),
+        h('a', { href: '#/settings', class: 'icon-btn settings-link', title: 'Settings', 'aria-label': 'Settings' }, icon('settings')),
         h('button', {
           type: 'button',
           class: 'icon-btn theme-toggle',
@@ -93,10 +117,14 @@ async function open(handle) {
     return renderConnect();
   }
   store = next;
+  configure(store.get('settings').github?.token ?? '');
   migrateLegacyProjects(store);
+  migrateProjectShape(store);
+  ensureTasks(store);
   store.subscribe(render);
   store.onStatus(updateStatus);
   connectError = '';
+  currentModule().restore?.(readRoute().params);
   render();
 }
 
@@ -120,7 +148,12 @@ async function reconnect() {
 }
 
 async function boot() {
-  window.addEventListener('hashchange', () => store && render());
+  // A link or the back button changed the route: load that section's view from the URL, then render.
+  window.addEventListener('hashchange', () => {
+    if (!store) return;
+    currentModule().restore?.(readRoute().params);
+    render();
+  });
   window.addEventListener('beforeunload', () => store?.flush());
   if (!fsSupported()) return renderConnect();
   try {

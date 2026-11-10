@@ -10,7 +10,13 @@ export function h(tag, attrs, ...children) {
   for (const [key, value] of Object.entries(attrs ?? {})) {
     if (value === null || value === undefined || value === false) continue;
     if (key === 'class') el.className = value;
-    else if (key === 'style') Object.assign(el.style, value);
+    else if (key === 'style') {
+      for (const [prop, val] of Object.entries(value)) {
+        // Custom properties (--name) need setProperty; plain properties can be assigned.
+        if (prop.startsWith('--')) el.style.setProperty(prop, val);
+        else el.style[prop] = val;
+      }
+    }
     else if (key.startsWith('on')) el.addEventListener(key.slice(2), value);
     else if (key === 'value' || key === 'checked') props.push([key, value]);
     else el.setAttribute(key, value === true ? '' : value);
@@ -36,10 +42,36 @@ export function todayISO() {
 
 export const monthKey = (isoDate) => isoDate.slice(0, 7); // YYYY-MM
 
-const currencyFormat = new Intl.NumberFormat(undefined, { style: 'currency', currency: CURRENCY });
-export const money = (n) => currencyFormat.format(n);
+export const CURRENCIES = ['USD', 'CAD'];
+
+// Formats an amount with two decimals in the given currency (default: CURRENCY).
+const formatters = new Map();
+export const money = (n, currency = CURRENCY) => {
+  if (!formatters.has(currency)) formatters.set(currency, new Intl.NumberFormat(undefined, { style: 'currency', currency }));
+  return formatters.get(currency).format(n);
+};
 
 export const empty = (text) => h('p', { class: 'empty' }, text);
+
+// A loading bar for work whose length is not known, with a label saying what is happening.
+export function progress(label) {
+  return h('div', { class: 'progress', role: 'status', 'aria-live': 'polite' },
+    h('div', { class: 'progress-label' }, label),
+    h('div', { class: 'progress-track' }, h('div', { class: 'progress-bar' })));
+}
+
+// A status box with an icon, the message, and optional action buttons. tone: 'error' | 'ok' | 'info'.
+export function notice({ tone = 'error', text, actions = [] }) {
+  const iconName = tone === 'error' ? 'alert' : tone === 'ok' ? 'check' : 'info';
+  return h('div', { class: `notice ${tone}`, role: tone === 'error' ? 'alert' : 'status' },
+    icon(iconName),
+    h('div', { class: 'notice-body' },
+      h('p', null, text),
+      actions.length ? h('div', { class: 'notice-actions' }, actions) : null));
+}
+
+// Todo status replaced the old `done` flag. Items saved before that fall back to `done`.
+export const statusOf = (item) => item.status ?? (item.done ? 'done' : 'todo');
 
 // Stroke icons (Lucide-style, 24×24 grid). Markup here is trusted static code.
 const ICON_PATHS = {
@@ -49,6 +81,16 @@ const ICON_PATHS = {
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
   x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
   'chevron-down': '<polyline points="6 9 12 15 18 9"/>',
+  check: '<polyline points="20 6 9 17 4 12"/>',
+  activity: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  alert: '<circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
+  info: '<circle cx="12" cy="12" r="9"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  refresh: '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
+  home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1Z"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
   grip: '<circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/>',
   'align-left': '<line x1="17" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="17" y1="18" x2="3" y2="18"/>',
   repo: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7"/><path d="M18 10.5c0 4-6 3-10.5 6.5"/>',
