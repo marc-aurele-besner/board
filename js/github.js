@@ -209,3 +209,26 @@ export function refreshRepo(repo, onChange) {
   }
   return repoStats(repo, onChange);
 }
+
+// Opens an issue in a repo. Needs a token that can write issues for the repo's owner (Issues: Read and write).
+export async function createIssue(repo, title, body) {
+  const res = await fetch(`${API}/repos/${repo}/issues`, {
+    method: 'POST',
+    headers: { ...headers(repo), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, body }),
+  });
+  if (res.status === 403 || res.status === 404) {
+    throw new Error('GitHub refused to create the issue. The token needs Issues: Read and write for this repo.');
+  }
+  if (!res.ok) throw new Error(explain(res.status));
+  const issue = await res.json();
+  return { repo, number: issue.number, url: issue.html_url, title: issue.title };
+}
+
+// An existing issue of a repo, as a link a task can keep.
+export async function getIssue(repo, number) {
+  const res = await fetch(`${API}/repos/${repo}/issues/${number}`, { headers: headers(repo) });
+  if (!res.ok) throw new Error(res.status === 404 ? `Issue #${number} was not found in ${repo}.` : explain(res.status));
+  const issue = await res.json();
+  return { repo, number: issue.number, url: issue.html_url, title: issue.title };
+}
