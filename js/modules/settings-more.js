@@ -252,11 +252,12 @@ function resendRow(store, p, keys, relay, setKey) {
     : h('div', { class: 'resend-sub muted small' },
         key ? [h('code', null, maskKey(key)), shared ? ` · shared with ${shared} other project${shared === 1 ? '' : 's'}` : ''] : 'No key');
 
+  // Three columns that line up from row to row: project, key, actions. On a phone the key moves under the name.
   return h('li', { class: key ? 'resend-row has-key' : 'resend-row' },
-    projectIcon(p),
-    h('div', { class: 'resend-name' }, h('strong', { title: p.name }, p.name), body),
-    msg ? h('span', { class: `resend-msg small ${msg.ok ? 'ok' : 'error'}`, role: 'status' }, msg.text) : null,
-    editing ? null : h('div', { class: 'resend-actions' },
+    h('div', { class: 'resend-name' }, projectIcon(p), h('strong', { title: p.name }, p.name)),
+    h('div', { class: 'resend-key' }, body,
+      msg ? h('span', { class: `resend-msg small ${msg.ok ? 'ok' : 'error'}`, role: 'status' }, msg.text) : null),
+    editing ? h('div', { class: 'resend-actions' }) : h('div', { class: 'resend-actions' },
       key
         ? [
             h('button', { type: 'button', class: 'btn-small', onclick: test }, 'Test'),
@@ -292,7 +293,8 @@ export function resendCard(store) {
     const q = resendView.query.trim().toLowerCase();
     const shown = projects.filter((p) => !q || p.name.toLowerCase().includes(q));
     list.replaceChildren(...(shown.length
-      ? shown.map((p) => resendRow(store, p, keys, cfg.relay, setKey))
+      ? [h('li', { class: 'resend-row resend-head', 'aria-hidden': 'true' }, h('span', null, 'Project'), h('span', null, 'API key'), h('span')),
+          ...shown.map((p) => resendRow(store, p, keys, cfg.relay, setKey))]
       : [h('li', { class: 'empty' }, all.length ? 'No project matches.' : 'No projects yet. Add one in Projects.')]));
   };
   paint();
