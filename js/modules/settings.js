@@ -1,6 +1,7 @@
 import { h, icon, empty } from '../ui.js';
 import { configure, checkGithubToken } from '../github.js';
-import { editText, pickChip } from '../inline.js';
+import { editText } from '../inline.js';
+import { modelChip } from '../model-picker.js';
 
 const COLLECTION = 'settings';
 const OPENROUTER_CHECK = 'https://openrouter.ai/api/v1/auth/key';
@@ -207,9 +208,8 @@ function modelsPanel(store) {
       h('div', { class: 'grow' },
         h('strong', null, 'Default model'),
         h('p', { class: 'muted small' }, 'Used by every task without its own model.')),
-      pickChip({
-        value: models.default || null,
-        options,
+      modelChip({
+        value: models.default,
         placeholder: 'Choose a model',
         onPick: (v) => updateModels(store, { default: v ?? '' }),
       })),
@@ -231,11 +231,11 @@ function modelsPanel(store) {
                   allowEmpty: true,
                   onSave: (description) => updateTask(store, t.id, { description }),
                 }))),
-              pickChip({
-                value: t.model || null,
-                options,
+              modelChip({
+                value: t.model,
                 nullable: true,
                 nullLabel: models.default ? `Default: ${models.default}` : 'Use default',
+                requireImages: t.id === 'task-receipt',
                 onPick: (v) => updateTask(store, t.id, { model: v ?? '' }),
               }),
               h('button', {
