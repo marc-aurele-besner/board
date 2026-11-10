@@ -33,11 +33,16 @@ const PRIORITY_ORDER = { high: 0, medium: 1, low: 2, none: 3 };
 const NO_CATEGORY = '__none';
 // Lists that are not a project: everything, no project, due today or late, waiting to be organized, made by a rule.
 const SMART_LISTS = ['all', 'personal', 'today', 'organize', 'auto'];
+// Ways to lay out the same tasks: [key, label, icon]. The list, status and column filters apply to all of them.
+const LAYOUTS = [['table', 'Table', 'list'], ['board', 'Board', 'columns'], ['project', 'By project', 'folder'], ['status', 'By status', 'check-square']];
+// In "By status", what is being worked on comes first and what is done comes last.
+const STATUS_GROUP_ORDER = ['doing', 'review', 'ondeck', 'todo', 'blocked', 'paused', 'done'];
 
 // View state lives here so it survives re-renders.
 // filter: one of SMART_LISTS, or a project id. status: a STATUS_FILTERS key. category: '' means any.
 // sort: { key, dir }. colFilter: per-column filters. An empty value means "any".
 const view = {
+  layout: 'table',
   filter: 'all',
   status: 'open',
   category: '',
@@ -521,6 +526,64 @@ function todoRow(store, item, ctx) {
       : null);
 }
 
+// --- Board: one column per status; dragging a card to a column changes its status ---
+
+function boardCard(store, item, projects) {
+  const p = projects.find((x) => x.id === item.projectId);
+  const priority = item.priority ?? 'none';
+  return h('article', {
+    class: 'kanban-card',
+    draggable: 'true',
+    ondragstart: (e) => {
+      view.dragId = item.id;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', item.id); // Firefox needs data to start a drag
+      e.currentTarget.classList.add('dragging');
+    },
+    ondragend: (e) => {
+      view.dragId = null;
+      e.currentTarget.classList.remove('dragging');
+    },
+  },
+    editText({ value: item.text, placeholder: 'Untitled', className: 'todo-title', onSave: (text) => updateItem(store, item.id, { text }) }),
+    h('div', { class: 'row kanban-meta' },
+      p ? h('span', { class: 'row small' }, projectIcon(p), p.name) : h('span', { class: 'muted small' }, 'Personal'),
+      priority !== 'none' ? h('span', { class: `pill tone-${priority}` }, label(PRIORITIES, priority)) : null,
+      item.category ? h('span', { class: 'tag' }, item.category) : null,
+      dueChip(item),
+      autoBadge(item)),
+    h('div', { class: 'row between' },
+      pickChip({
+        value: statusOf(item),
+        options: STATUSES.map(([v, l]) => ({ value: v, label: l, tone: STATUS_TONE[v] })),
+        onPick: (v) => updateItem(store, item.id, { status: v }),
+      }),
+      h('button', { type: 'button', class: 'icon-btn', title: 'Delete', 'aria-label': `Delete "${item.text}"`, onclick: () => removeItem(store, item.id) }, icon('x'))));
+}
+
+function boardView(store, items, projects) {
+  return h('div', { class: 'kanban' }, STATUSES.map(([key, name]) => {
+    const cards = items.filter((i) => statusOf(i) === key);
+    return h('section', {
+      class: 'kanban-col',
+      ondragover: (e) => {
+        if (!view.dragId) return;
+        e.preventDefault();
+        e.currentTarget.classList.add('drop-target');
+      },
+      ondragleave: (e) => e.currentTarget.classList.remove('drop-target'),
+      ondrop: (e) => {
+        e.preventDefault();
+        e.currentTarget.classList.remove('drop-target');
+        if (view.dragId) updateItem(store, view.dragId, { status: key });
+        view.dragId = null;
+      },
+    },
+      h('h3', { class: 'row between' }, h('span', { class: `pill tone-${STATUS_TONE[key]}` }, name), h('span', { class: 'count' }, String(cards.length))),
+      cards.length ? cards.map((item) => boardCard(store, item, projects)) : h('p', { class: 'muted small' }, 'Drop a task here'));
+  }));
+}
+
 // --- Sorting and column filters ---
 
 const columnValue = (item, key, projects) => {
@@ -861,6 +924,25 @@ function draw(root, store) {
   );
   const columnsActive = Object.values(view.colFilter).some(Boolean);
 
+  const rowOf = (item) => todoRow(store, item, { store, projects, projectLabel: view.filter === 'all' ? projectName(item.projectId) : '' });
+  const grouped = (groups) => h('div', { class: 'todo-groups' },
+    groups.filter(([, rows]) => rows.length).map(([name, rows]) =>
+      h('section', { class: 'todo-group' },
+        h('h3', { class: 'row' }, name, h('span', { class: 'count' }, String(rows.length))),
+        h('ul', { class: 'todo-list' }, rows.map(rowOf)))));
+  let listBody;
+  if (!visible.length) {
+    listBody = h('p', { class: 'empty' }, columnsActive || view.sort.key ? 'No todo matches these filters.' : 'Nothing matches these filters.');
+  } else if (view.layout === 'board') {
+    listBody = boardView(store, visible, projects);
+  } else if (view.layout === 'project') {
+    listBody = grouped([['Personal', visible.filter((i) => !i.projectId)], ...projectTree(projects).map(({ project: p }) => [p.name, visible.filter((i) => i.projectId === p.id)])]);
+  } else if (view.layout === 'status') {
+    listBody = grouped(STATUS_GROUP_ORDER.map((key) => [label(STATUSES, key), visible.filter((i) => statusOf(i) === key)]));
+  } else {
+    listBody = h('ul', { class: 'todo-list' }, visible.map(rowOf));
+  }
+
   root.replaceChildren(
     h('div', { class: 'split' },
       h('aside', { class: 'card side' },
@@ -988,6 +1070,19 @@ function draw(root, store) {
                 store.refresh();
               },
             }, 'Labels'),
+            h('div', { class: 'segmented layout-seg', role: 'group', 'aria-label': 'View' },
+              LAYOUTS.map(([key, text, iconName]) =>
+                h('button', {
+                  type: 'button',
+                  class: view.layout === key ? 'seg active' : 'seg',
+                  title: `${text} view`,
+                  'aria-label': `${text} view`,
+                  'aria-pressed': String(view.layout === key),
+                  onclick: () => {
+                    view.layout = key;
+                    store.refresh();
+                  },
+                }, icon(iconName), view.layout === key ? text : null))),
             h('span', { class: 'muted small' }, `${visible.length} shown`))),
 
         listHint ? h('p', { class: 'muted small' }, listHint) : null,
@@ -1017,7 +1112,7 @@ function draw(root, store) {
           }),
           h('button', { class: 'primary', type: 'submit' }, 'Add')),
 
-        h('div', { class: 'todo-table' },
+        h('div', { class: view.layout === 'table' ? 'todo-table' : 'todo-table no-columns' },
           h('div', { class: 'todo-row todo-head' },
             h('span'), h('span'),
             columnHeader(store, 'text', 'Task'),
@@ -1028,15 +1123,7 @@ function draw(root, store) {
             columnHeader(store, 'due', 'Deadline'),
             h('span')),
           columnFilters(store, projects, categories),
-          visible.length
-            ? h('ul', { class: 'todo-list' },
-                visible.map((item) =>
-                  todoRow(store, item, {
-                    store,
-                    projects,
-                    projectLabel: view.filter === 'all' ? projectName(item.projectId) : '',
-                  })))
-            : h('p', { class: 'empty' }, columnsActive || view.sort.key ? 'No todo matches these filters.' : 'Nothing matches these filters.')))));
+          listBody))));
 }
 
 export default {
@@ -1048,6 +1135,7 @@ export default {
   render: draw,
   // View state kept in the URL, so a refresh returns to the same list.
   serialize: () => ({
+    view: view.layout === 'table' ? '' : view.layout,
     filter: view.filter,
     status: view.status,
     category: view.category,
@@ -1055,6 +1143,7 @@ export default {
     sort: view.sort.key ? `${view.sort.key}.${view.sort.dir}` : '',
   }),
   restore: (p = {}) => {
+    view.layout = LAYOUTS.some(([k]) => k === p.view) ? p.view : 'table';
     view.filter = p.filter || 'all';
     view.status = p.status || 'open';
     view.category = p.category || '';
