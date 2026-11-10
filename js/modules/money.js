@@ -302,6 +302,17 @@ async function readReceipt(store, file, categories) {
         projectId: null,
       }))
       .filter((x) => x.amount > 0);
+    // A tax is counted once. When the document prints its taxes as totals and those add up to the bill total,
+    // the taxes on the lines are the same money, so they are dropped. Without that, the lines keep their taxes.
+    const netSum = round2(receipt.items.reduce((s, x) => s + x.amount, 0));
+    const docTaxSum = round2(receipt.taxes.reduce((s, t) => s + t.amount, 0));
+    const lineTaxSum = round2(receipt.items.reduce((s, x) => s + x.tax, 0));
+    const docAddsUp = receipt.total !== null && Math.abs(round2(netSum + docTaxSum) - receipt.total) < 0.01;
+    if (docTaxSum > 0 && lineTaxSum > 0 && (docAddsUp || receipt.total === null)) {
+      receipt.items.forEach((x) => {
+        x.tax = 0;
+      });
+    }
     receipt.status = receipt.items.length ? 'ok' : 'error';
     if (!receipt.items.length) receipt.error = 'No charges were found in that file.';
   } catch (err) {
