@@ -1,5 +1,5 @@
 // Monitoring tabs for the project websites: visitors (Google Analytics) and search (Google Search Console, Bing).
-import { h, empty, notice, progress, icon } from '../ui.js';
+import { h, empty, notice, progress, icon, refreshIcon } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { isConnected } from '../google.js';
 import { analyticsReport, searchReport, bingReport } from '../webstats.js';
@@ -148,15 +148,19 @@ function table(head, rows, format) {
   })), rows);
 }
 
-const refreshButton = (store, keys) =>
-  h('button', {
+function refreshButton(store, keys) {
+  const busy = [keys].flat().some((key) => cache.get(key)?.status === 'loading');
+  return h('button', {
     type: 'button',
     class: 'btn-small',
+    disabled: busy,
+    'aria-busy': busy ? 'true' : null,
     onclick: () => {
       for (const key of [keys].flat()) cache.delete(key);
       store.refresh();
     },
-  }, 'Refresh');
+  }, refreshIcon(busy), busy ? 'Refreshing…' : 'Refresh');
+}
 
 // --- Web analytics ---
 
