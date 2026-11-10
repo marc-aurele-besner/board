@@ -94,7 +94,7 @@ function credentialCard(store, cfg) {
     store.update(COLLECTION, (d) => {
       d[id] = { ...d[id], [field]: value };
     });
-    if (id === 'github') configure(value);
+    if (id === 'github') configure(store.get(COLLECTION).github);
     view.results[id] = null;
     store.refresh();
   };
@@ -535,6 +535,92 @@ function appearanceCard(store) {
         : empty('No labels yet. Create them from Projects.')));
 }
 
+// --- Keys per organization ---
+
+// The organization name from what was typed: a name, or a github.com link to one.
+const orgNameFrom = (text) => String(text ?? '').trim().replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\/.*$/, '');
+
+// Result of the last test of an organization key, and which one is being tested.
+const orgKeys = { message: '', ok: true, testing: null };
+
+function orgKeysCard(store) {
+  const orgs = store.get(COLLECTION).github?.orgs ?? [];
+  const saveOrgs = (list) => {
+    store.update(COLLECTION, (d) => {
+      d.github = { ...d.github, orgs: list };
+    });
+    configure(store.get(COLLECTION).github);
+    store.refresh();
+  };
+  const testOrg = (entry) => {
+    orgKeys.testing = entry.org;
+    orgKeys.message = '';
+    store.refresh();
+    checkGithubToken(entry.token)
+      .then((login) => {
+        orgKeys.ok = true;
+        orgKeys.message = `${entry.org}: connected as ${login}.`;
+      })
+      .catch((err) => {
+        orgKeys.ok = false;
+        orgKeys.message = `${entry.org}: ${err.message}`;
+      })
+      .finally(() => {
+        orgKeys.testing = null;
+        store.refresh();
+      });
+  };
+  const mask = (token) => `••••${token.slice(-4)}`;
+
+  return h('section', { class: 'card panel' },
+    h('header', { class: 'panel-head' },
+      h('div', null,
+        h('h2', null, 'Keys per organization'),
+        h('p', { class: 'muted' }, 'Each organization can have its own key, used for its repos, private ones included. Repos from other owners use the default key above.'))),
+
+    orgs.length
+      ? h('ul', { class: 'org-keys' },
+          orgs.map((o) =>
+            h('li', null,
+              h('span', { class: 'pill tone-plain' }, o.org),
+              h('code', { class: 'muted small' }, mask(o.token)),
+              h('span', { class: 'grow' }),
+              h('button', {
+                type: 'button',
+                class: 'btn-small',
+                disabled: orgKeys.testing === o.org,
+                onclick: () => testOrg(o),
+              }, orgKeys.testing === o.org ? 'Testing…' : 'Test'),
+              h('button', {
+                type: 'button',
+                class: 'btn-small danger',
+                onclick: () => {
+                  if (confirm(`Remove the key for ${o.org}? Its repos fall back to the default key.`)) {
+                    saveOrgs(orgs.filter((x) => x.org !== o.org));
+                  }
+                },
+              }, icon('x'), 'Remove'))))
+      : empty('No organization keys yet.'),
+
+    orgKeys.message ? notice({ tone: orgKeys.ok ? 'ok' : 'error', text: orgKeys.message }) : null,
+
+    h('form', {
+      class: 'org-key-form',
+      onsubmit: (e) => {
+        e.preventDefault();
+        const f = new FormData(e.currentTarget);
+        const org = orgNameFrom(f.get('org'));
+        const token = String(f.get('token') ?? '').trim();
+        if (!/^[\w.-]+$/.test(org) || !token) return;
+        saveOrgs([...orgs.filter((x) => x.org.toLowerCase() !== org.toLowerCase()), { org, token }]);
+        e.currentTarget.reset();
+      },
+    },
+      h('input', { name: 'org', placeholder: 'Organization, e.g. my-org', 'aria-label': 'Organization', autocomplete: 'off', spellcheck: false }),
+      h('input', { name: 'token', type: 'password', placeholder: 'github_pat_…', 'aria-label': 'Token for this organization', autocomplete: 'off', spellcheck: false }),
+      h('button', { class: 'primary', type: 'submit' }, 'Add key')));
+}
+
 // --- Page ---
 
 function draw(root, store) {
@@ -582,7 +668,7 @@ function draw(root, store) {
       : view.section === 'google' ? googleCard(store)
         : view.section === 'exchange' ? exchangeCard(store)
         : view.section === 'appearance' ? appearanceCard(store)
-        : github;
+        : h('div', { class: 'stack-lg' }, github, orgKeysCard(store));
 
   const nav = h('nav', { class: 'settings-nav', 'aria-label': 'Settings sections' },
     SECTIONS.map(([key, label]) =>
@@ -611,7 +697,7 @@ export default {
   icon: 'settings',
   hidden: true, // opened from the gear icon in the top bar
   collection: COLLECTION,
-  defaults: { github: { token: '' }, openrouter: { key: '' }, google: { clientId: '' }, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) } },
+  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) } },
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),
   restore: (p = {}) => {

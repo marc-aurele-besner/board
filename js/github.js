@@ -5,16 +5,22 @@
 const TTL_MS = 15 * 60 * 1000;
 const API = 'https://api.github.com';
 const memory = new Map(); // "owner/repo" -> { status: 'loading' | 'ok' | 'error', issues?, prs?, error?, at? }
-let token = ''; // personal access token from settings; enables private repos and a higher rate limit
+// Tokens from settings: a default token for any repo, and one token per organization. An organization's
+// token is used for its repos (private ones included); the default covers the rest.
+let config = { token: '', orgs: {} };
+const hasToken = () => Boolean(config.token || Object.keys(config.orgs).length);
+const tokenFor = (repo) => config.orgs[String(repo).split('/')[0].toLowerCase()] || config.token;
+const headers = (repo) => {
+  const t = tokenFor(repo);
+  return { Accept: 'application/vnd.github+json', ...(t ? { Authorization: `Bearer ${t}` } : {}) };
+};
 
-const headers = () => ({
-  Accept: 'application/vnd.github+json',
-  ...(token ? { Authorization: `Bearer ${token}` } : {}),
-});
-
-// Called on startup and whenever the token changes. Cached results may be stale for the new token, so they are dropped.
-export function configure(newToken) {
-  token = newToken ?? '';
+// Called on startup and whenever a key changes. Cached results may be stale for the new keys, so they are dropped.
+export function configure(github) {
+  config = {
+    token: github?.token ?? '',
+    orgs: Object.fromEntries((github?.orgs ?? []).filter((o) => o.org && o.token).map((o) => [o.org.toLowerCase(), o.token])),
+  };
   memory.clear();
   try {
     for (const key of Object.keys(localStorage)) {
@@ -56,15 +62,15 @@ function writeStored(repo, data) {
 
 function explain(status) {
   if (status === 401) return 'Token rejected. Check it in Settings';
-  if (status === 404) return token ? 'Not found, or the token cannot see it' : 'Not found, or private. Add a token in Settings';
+  if (status === 404) return hasToken() ? 'Not found, or the token cannot see it' : 'Not found, or private. Add a token in Settings';
   if (status === 403 || status === 429) return 'GitHub rate limit reached, try again later';
   return `GitHub error ${status}`;
 }
 
 async function fetchStats(repo) {
   const [infoRes, pullsRes] = await Promise.all([
-    fetch(`${API}/repos/${repo}`, { headers: headers() }),
-    fetch(`${API}/repos/${repo}/pulls?state=open&per_page=1`, { headers: headers() }),
+    fetch(`${API}/repos/${repo}`, { headers: headers(repo) }),
+    fetch(`${API}/repos/${repo}/pulls?state=open&per_page=1`, { headers: headers(repo) }),
   ]);
   for (const res of [infoRes, pullsRes]) {
     if (!res.ok) throw new Error(explain(res.status));
@@ -108,7 +114,7 @@ export function repoStats(repo, onChange) {
 
 // The newest open issues and PRs of a repo, for triage. Each entry is { number, title, pr, updated, author, labels }.
 export async function openItems(repo) {
-  const res = await fetch(`${API}/repos/${repo}/issues?state=open&per_page=30`, { headers: headers() });
+  const res = await fetch(`${API}/repos/${repo}/issues?state=open&per_page=30`, { headers: headers(repo) });
   if (!res.ok) throw new Error(explain(res.status));
   const list = await res.json();
   return list.map((i) => ({
@@ -127,10 +133,11 @@ const ACTIVITY_TTL_MS = 10 * 60 * 1000;
 
 // All pages of a list endpoint, up to `maxPages` pages of 100.
 async function pagesOf(url, maxPages = 3) {
+  const repo = url.match(/repos\/([^/]+\/[^/?]+)/)?.[1] ?? '';
   const out = [];
   for (let page = 1; page <= maxPages; page++) {
     const sep = url.includes('?') ? '&' : '?';
-    const res = await fetch(`${url}${sep}per_page=100&page=${page}`, { headers: headers() });
+    const res = await fetch(`${url}${sep}per_page=100&page=${page}`, { headers: headers(repo) });
     if (!res.ok) throw new Error(explain(res.status));
     const list = await res.json();
     out.push(...list);
@@ -173,7 +180,7 @@ export async function fetchActivity(repo, since) {
 const decodeBase64Utf8 = (b64) => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s+/g, '')), (c) => c.charCodeAt(0)));
 
 export async function fetchRepoOverview(repo) {
-  const get = (path) => fetch(`${API}/repos/${repo}${path}`, { headers: headers() });
+  const get = (path) => fetch(`${API}/repos/${repo}${path}`, { headers: headers(repo) });
   const [info, languages, readme, contents] = await Promise.all([get(''), get('/languages'), get('/readme'), get('/contents')]);
   if (!info.ok) throw new Error(explain(info.status));
   const meta = await info.json();

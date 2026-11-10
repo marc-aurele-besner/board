@@ -447,6 +447,7 @@ function receiptPanel(store) {
           },
         }, 'Dismiss'))),
 
+    billLabelRow(store, projectOptions),
     totalCheck(grandTotal),
 
     h('ul', { class: 'review-list' },
@@ -818,6 +819,52 @@ function entriesSection(store, inPeriod, projectOptions, cur) {
             ? entryRow(store, r.single, projectOptions, cur)
             : billGroup(store, r.items, projectOptions, cur))))
       : empty('No entries in this period.'));
+}
+
+// Labels for the whole bill, set as soon as it is read: vendor, project and category. Each applies to every charge.
+function billLabelRow(store, projectOptions) {
+  const items = receipt.items;
+  const projectIds = [...new Set(items.map((x) => x.projectId ?? null))];
+  const categories = [...new Set(items.map((x) => x.category))];
+  const sameProject = projectIds.length === 1 ? projectIds[0] : undefined;
+  const sameCategory = categories.length === 1 ? categories[0] : null;
+  return h('div', { class: 'bill-label-row' },
+    h('div', { class: 'bill-field' },
+      h('span', { class: 'muted small' }, 'Vendor'),
+      editText({
+        value: receipt.vendor,
+        placeholder: receipt.fileName,
+        onSave: (vendor) => {
+          receipt.vendor = vendor;
+          store.refresh();
+        },
+      })),
+    h('div', { class: 'bill-field' },
+      h('span', { class: 'muted small' }, 'Project for all charges'),
+      pickChip({
+        value: sameProject === undefined ? null : sameProject,
+        options: projectOptions,
+        nullable: true,
+        nullLabel: sameProject === undefined ? 'Mixed' : 'No project',
+        onPick: (projectId) => {
+          items.forEach((x) => {
+            x.projectId = projectId;
+          });
+          store.refresh();
+        },
+      })),
+    h('div', { class: 'bill-field' },
+      h('span', { class: 'muted small' }, 'Category for all charges'),
+      editText({
+        value: sameCategory ?? '',
+        placeholder: sameCategory === null ? 'Mixed' : 'Category',
+        onSave: (category) => {
+          items.forEach((x) => {
+            x.category = category || 'Uncategorized';
+          });
+          store.refresh();
+        },
+      })));
 }
 
 // --- Page ---
