@@ -337,6 +337,7 @@ function todoRow(store, item, ctx) {
           editText({
             value: item.description,
             placeholder: 'Add a description… paste notes, links, steps',
+            rich: true,
             multiline: true,
             allowEmpty: true,
             onSave: (description) => updateItem(store, item.id, { description }),

@@ -196,6 +196,19 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   .progress-bar { animation: none; left: 0; width: 100%; opacity: 0.45; }
 }
 
+/* Rich descriptions: links as chips, bullets and checkboxes */
+.rich-line { display: flex; align-items: flex-start; gap: 6px; min-height: 1.5em; white-space: normal; flex-wrap: wrap; }
+.rich-line.bullet { padding-left: 2px; }
+.rich-bullet { color: var(--muted); width: 10px; flex: none; line-height: 1.5; }
+.rich-check { margin-top: 5px; flex: none; width: auto; pointer-events: none; }
+.rich-done { text-decoration: line-through; color: var(--muted); }
+.rich-link { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 1px 8px 1px 6px; margin: 1px 0; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); text-decoration: none; font-size: 0.92em; line-height: 1.5; vertical-align: baseline; transition: border-color 0.15s ease, background-color 0.15s ease; }
+.rich-link:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface-2)); }
+.rich-link .icon { width: 12px; height: 12px; color: var(--accent); flex: none; }
+.rich-host { font-weight: 600; white-space: nowrap; }
+.rich-path { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rich-block { display: flex; flex-direction: column; gap: 2px; }
+
 /* Projects page, left pane: search, labels, quick add, then the tree */
 .side-tools { display: flex; flex-direction: column; gap: 8px; }
 .side-tools .chips { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 6px; margin: 0; padding-bottom: 2px; scrollbar-width: thin; }

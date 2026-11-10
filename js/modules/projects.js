@@ -1,6 +1,7 @@
 import { h, uid, now, icon, empty, statusOf, notice } from '../ui.js';
 import { repoStats, refreshRepo, openItems } from '../github.js';
 import { ask } from '../ai.js';
+import { richText } from '../rich.js';
 
 const COLLECTION = 'projects';
 const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
@@ -543,7 +544,7 @@ function projectView(store, p, items, categories) {
       h('div', { class: 'card-inset' }, h('strong', null, gh(t.issues)), h('span', { class: 'muted' }, 'open issues')),
       h('div', { class: 'card-inset' }, h('strong', null, gh(t.prs)), h('span', { class: 'muted' }, 'open PRs'))),
 
-    p.description ? h('p', null, p.description) : h('p', { class: 'muted' }, 'No description yet.'),
+    p.description ? h('div', { class: 'rich-block' }, richText(p.description)) : h('p', { class: 'muted' }, 'No description yet.'),
     triageBlock(store, p),
 
     p.website

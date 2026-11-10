@@ -1,16 +1,19 @@
 // Notion-style inline editing: click a value to edit it where it is shown, no form.
 // Each control calls onSave/onPick with the new value; the store then re-renders the page.
 import { h, icon } from './ui.js';
+import { richText } from './rich.js';
 
 // Click-to-edit text. Enter saves (Ctrl/Cmd+Enter for multiline), Escape cancels, blur saves.
-export function editText({ value = '', placeholder = 'Empty', multiline = false, className = '', allowEmpty = false, onSave }) {
+export function editText({ value = '', placeholder = 'Empty', multiline = false, className = '', allowEmpty = false, rich = false, onSave }) {
   const current = value ?? '';
-  const view = h('span', {
+  const view = h(rich ? 'div' : 'span', {
     class: `editable ${className}${current ? '' : ' is-placeholder'}`.trim(),
     role: 'button',
     tabindex: '0',
     title: 'Click to edit',
     onclick: (e) => {
+      // Links and buttons inside a rich description work as usual; only the text opens the editor.
+      if (e.target.closest('a, button, input')) return;
       e.stopPropagation();
       start();
     },
@@ -20,7 +23,7 @@ export function editText({ value = '', placeholder = 'Empty', multiline = false,
         start();
       }
     },
-  }, current || placeholder);
+  }, rich && current ? richText(current) : current || placeholder);
 
   function start() {
     let done = false;

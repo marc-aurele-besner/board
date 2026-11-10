@@ -307,6 +307,7 @@ function detailPane(store, r) {
       block('Notes', editText({
         value: r.notes,
         placeholder: 'What you learned, what to watch for',
+        rich: true,
         multiline: true,
         allowEmpty: true,
         className: 'k-list-text',
