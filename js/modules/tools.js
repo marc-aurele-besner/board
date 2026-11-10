@@ -19,10 +19,14 @@ const view = { tab: 'health', project: '', busy: new Set() };
 const pillOf = (text, tone) => h('span', { class: `pill tone-${tone}` }, text);
 const timeOf = (at) => (at ? new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never');
 
+// A check can finish in a few milliseconds; the busy state lasts long enough to be seen.
+const MIN_BUSY_MS = 600;
+
 function run(store, key, work) {
   view.busy.add(key);
   store.refresh();
-  return work()
+  const shown = new Promise((resolve) => setTimeout(resolve, MIN_BUSY_MS));
+  return Promise.all([work(), shown])
     .catch((err) => toast(err.message))
     .finally(() => {
       view.busy.delete(key);

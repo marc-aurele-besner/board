@@ -211,6 +211,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
   .progress-bar { animation: none; left: 0; width: 100%; opacity: 0.45; }
+  /* A loading spinner is the only sign a click did something, so it keeps turning, slower. */
+  .spin-icon { animation: spin 1.6s linear infinite !important; }
 }
 
 /* Home board */
