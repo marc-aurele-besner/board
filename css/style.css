@@ -238,6 +238,23 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   .stat-cell { min-width: 84px; flex: 1 1 calc(50% - 8px); }
 }
 
+/* Monitoring layout: section tabs on their own row, period buttons on a second row */
+.mon-head h2 { margin: 0; }
+.mon-head p { margin: 2px 0 0; }
+.sub-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.sub-tab { background: none; border: none; border-radius: 0; min-height: 0; padding: 8px 14px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; }
+.sub-tab:hover { background: none; color: var(--text); }
+.sub-tab.active { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+.period-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* Compact density (Settings > Appearance) */
+.compact .todo-row, .compact .project-item, .compact .board-list li, .compact .recap-row, .compact .nav-item { padding-top: 2px; padding-bottom: 2px; }
+.compact .stack-lg, .compact .stack { gap: 8px; }
+.compact .card { padding: 10px 12px; }
+
+/* Label pills take the label's own colour */
+.pill.tone-custom { font-weight: 500; }
+
 /* Monitoring: tabs and small period buttons, charts and mini stats */
 .mon-controls { gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .mon-tabs .seg { min-width: 0; padding: 4px 12px; }
@@ -245,7 +262,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .period-btn { min-height: 0; padding: 3px 9px; font-size: 0.8rem; border-radius: 999px; }
 .period-btn.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
 .chart { width: 100%; overflow-x: auto; }
-.chart svg { display: block; width: 100%; height: auto; min-width: 360px; }
+/* Charts keep a fixed, readable height; the width follows the page */
+.chart svg { display: block; width: 100%; height: 200px; }
 .chart .axis { font-size: 10px; fill: var(--muted); }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.8rem; color: var(--muted); }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
@@ -839,3 +857,9 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
   .quick { flex-wrap: wrap; }
   .quick button { width: 100%; }
 }
+
+/* Appearance: label colours */
+.label-colours { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.label-colours li { display: flex; align-items: center; gap: 10px; }
+.label-colours input[type='color'] { width: 40px; height: 30px; padding: 2px; }
+.app-seg .seg { min-width: 96px; }

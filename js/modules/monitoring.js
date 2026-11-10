@@ -438,39 +438,40 @@ function draw(root, store) {
   if (prices.status === 'idle') setTimeout(() => loadPrices(store), 0);
   const w = periodWindow(view.period);
   const body = view.tab === 'github' ? githubTab(store, w) : aiTab(store, w);
+  const periodName = PERIODS.find(([k]) => k === view.period)?.[1] ?? '';
 
   root.replaceChildren(
-    h('div', { class: 'stack-lg' },
-      h('div', { class: 'row between head' },
-        h('div', null,
-          h('h2', null, 'Monitoring'),
-          h('p', { class: 'muted small' }, view.tab === 'github'
-            ? 'Commits, pull requests and issues across the repos linked to your projects.'
-            : 'AI calls made by the board, with their cost and tokens.')),
-        h('div', { class: 'row mon-controls' },
-          h('div', { class: 'segmented mon-tabs', role: 'tablist' },
-            TABS.map(([key, label]) =>
-              h('button', {
-                type: 'button',
-                role: 'tab',
-                class: view.tab === key ? 'seg active' : 'seg',
-                'aria-selected': String(view.tab === key),
-                onclick: () => {
-                  view.tab = key;
-                  store.refresh();
-                },
-              }, label))),
-          h('div', { class: 'period', role: 'group', 'aria-label': 'Period' },
-            PERIODS.map(([key, label]) =>
-              h('button', {
-                type: 'button',
-                class: view.period === key ? 'period-btn active' : 'period-btn',
-                'aria-pressed': String(view.period === key),
-                onclick: () => {
-                  view.period = key;
-                  store.refresh();
-                },
-              }, label))))),
+    h('div', { class: 'stack-lg mon' },
+      h('header', { class: 'mon-head' },
+        h('h2', null, 'Monitoring'),
+        h('p', { class: 'muted small' }, view.tab === 'github'
+          ? 'Commits, pull requests and issues across the repos linked to your projects.'
+          : 'AI calls made by the board, with their cost and tokens.')),
+      h('nav', { class: 'sub-tabs', role: 'tablist', 'aria-label': 'Monitoring sections' },
+        TABS.map(([key, label]) =>
+          h('button', {
+            type: 'button',
+            role: 'tab',
+            class: view.tab === key ? 'sub-tab active' : 'sub-tab',
+            'aria-selected': String(view.tab === key),
+            onclick: () => {
+              view.tab = key;
+              store.refresh();
+            },
+          }, label))),
+      h('div', { class: 'period-row' },
+        h('span', { class: 'muted small' }, `Showing ${periodName.toLowerCase()}`),
+        h('div', { class: 'period', role: 'group', 'aria-label': 'Period' },
+          PERIODS.map(([key, label]) =>
+            h('button', {
+              type: 'button',
+              class: view.period === key ? 'period-btn active' : 'period-btn',
+              'aria-pressed': String(view.period === key),
+              onclick: () => {
+                view.period = key;
+                store.refresh();
+              },
+            }, label)))),
       body));
 }
 

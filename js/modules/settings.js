@@ -36,6 +36,7 @@ const SECTIONS = [
   ['models', 'Models & tasks'],
   ['google', 'Google Calendar'],
   ['exchange', 'Exchange rates'],
+  ['appearance', 'Appearance'],
 ];
 
 // Model used by a task: its own pin, else the default model. Empty string when neither is set.
@@ -434,6 +435,106 @@ function googleCard(store) {
         google.message ? h('p', { class: 'test-result', role: 'status' }, google.message) : null)));
 }
 
+// --- Appearance ---
+
+const THEME_KEY = 'board:theme'; // unset: follow the system; otherwise 'light' or 'dark'
+const DENSITY_KEY = 'board:density'; // 'comfortable' (default) or 'compact'
+
+// Applies the saved theme and density. Runs at startup and whenever either changes.
+export function applyAppearance() {
+  let theme = null;
+  let density = 'comfortable';
+  try {
+    theme = localStorage.getItem(THEME_KEY);
+    density = localStorage.getItem(DENSITY_KEY) ?? 'comfortable';
+  } catch {
+    /* storage blocked: system theme, comfortable density */
+  }
+  if (theme) document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+  document.body.classList.toggle('compact', density === 'compact');
+}
+
+function setStored(key, value) {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch {
+    /* storage blocked */
+  }
+}
+
+function appearanceCard(store) {
+  let theme = null;
+  let density = 'comfortable';
+  try {
+    theme = localStorage.getItem(THEME_KEY);
+    density = localStorage.getItem(DENSITY_KEY) ?? 'comfortable';
+  } catch {
+    /* storage blocked */
+  }
+  const choice = (label, value, current, onPick) =>
+    h('button', {
+      type: 'button',
+      class: current === value ? 'seg active' : 'seg',
+      'aria-pressed': String(current === value),
+      onclick: () => onPick(value),
+    }, label);
+  const pickTheme = (value) => {
+    setStored(THEME_KEY, value);
+    applyAppearance();
+    store.refresh();
+  };
+  const pickDensity = (value) => {
+    setStored(DENSITY_KEY, value === 'compact' ? 'compact' : null);
+    applyAppearance();
+    store.refresh();
+  };
+  const labels = store.get('projects').categories ?? [];
+  const setLabelColor = (id, color) => {
+    store.update('projects', (d) => {
+      const label = d.categories.find((x) => x.id === id);
+      if (label) label.color = color;
+    });
+  };
+
+  return h('section', { class: 'card panel' },
+    h('header', { class: 'panel-head' },
+      h('div', null,
+        h('h2', null, 'Appearance'),
+        h('p', { class: 'muted' }, 'How the board looks on this computer. Saved in this browser, and changes apply as you pick them.'))),
+
+    h('div', { class: 'svc-section' },
+      h('h3', null, 'Theme'),
+      h('div', { class: 'segmented app-seg' },
+        choice('System', null, theme, pickTheme),
+        choice('Light', 'light', theme, pickTheme),
+        choice('Dark', 'dark', theme, pickTheme))),
+
+    h('div', { class: 'svc-section' },
+      h('h3', null, 'Density'),
+      h('p', { class: 'muted small' }, 'Compact tightens the rows in tasks, projects and the board.'),
+      h('div', { class: 'segmented app-seg' },
+        choice('Comfortable', 'comfortable', density, pickDensity),
+        choice('Compact', 'compact', density, pickDensity))),
+
+    h('div', { class: 'svc-section' },
+      h('h3', null, 'Label colours'),
+      h('p', { class: 'muted small' }, 'Each project label has a colour. It shows on projects, tasks, the project tiles and in the label picker.'),
+      labels.length
+        ? h('ul', { class: 'label-colours' },
+            labels.map((l) =>
+              h('li', null,
+                h('input', {
+                  type: 'color',
+                  value: l.color || '#2f6f4e',
+                  'aria-label': `Colour for ${l.name}`,
+                  onchange: (e) => setLabelColor(l.id, e.target.value),
+                }),
+                h('span', { class: 'pill tone-custom', style: { '--c': l.color || '#2f6f4e' } }, l.name))))
+        : empty('No labels yet. Create them from Projects.')));
+}
+
 // --- Page ---
 
 function draw(root, store) {
@@ -480,6 +581,7 @@ function draw(root, store) {
     : view.section === 'models' ? modelsPanel(store)
       : view.section === 'google' ? googleCard(store)
         : view.section === 'exchange' ? exchangeCard(store)
+        : view.section === 'appearance' ? appearanceCard(store)
         : github;
 
   const nav = h('nav', { class: 'settings-nav', 'aria-label': 'Settings sections' },
@@ -513,6 +615,6 @@ export default {
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),
   restore: (p = {}) => {
-    view.section = ['github', 'openrouter', 'models', 'google', 'exchange'].includes(p.section) ? p.section : 'github';
+    view.section = ['github', 'openrouter', 'models', 'google', 'exchange', 'appearance'].includes(p.section) ? p.section : 'github';
   },
 };

@@ -1,5 +1,5 @@
 import { h, icon, money, monthKey, todayISO, statusOf, empty, uid, now, notice } from '../ui.js';
-import { projectIcon, labelsOf } from './projects.js';
+import { projectIcon, labelsOf, labelColor } from './projects.js';
 import { repoStats } from '../github.js';
 import { ask } from '../ai.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
@@ -153,14 +153,17 @@ function statStrip(store, open, doing, projects) {
 // A tile per project: icon, name, labels, and open tasks.
 function projectTiles(store, projects, open) {
   if (!projects.length) return empty('No projects yet. Create one in Projects to see it here.');
-  const label = (id) => store.get('projects').categories?.find((c) => c.id === id)?.name;
+  const label = (id) => store.get('projects').categories?.find((c) => c.id === id);
   return h('div', { class: 'tiles' },
     [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => {
       const n = open.filter((i) => i.projectId === p.id).length;
       const names = labelsOf(p).map(label).filter(Boolean);
       return h('a', { href: `#/projects?project=${p.id}`, class: 'tile' },
         h('div', { class: 'tile-head' }, projectIcon(p), h('strong', null, p.name)),
-        h('div', { class: 'tile-meta muted small' }, names.length ? names.join(' · ') : 'No label'),
+        h('div', { class: 'tile-meta' },
+          names.length
+            ? names.map((l) => h('span', { class: 'pill tone-custom', style: { '--c': labelColor(l) } }, l.name))
+            : h('span', { class: 'muted small' }, 'No label')),
         h('div', { class: 'tile-count' }, h('span', null, String(n)), h('span', { class: 'muted small' }, n === 1 ? 'open task' : 'open tasks')));
     }));
 }
