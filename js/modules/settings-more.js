@@ -1,13 +1,14 @@
-// Settings sections for Telegram, Google Analytics, the search consoles, notifications and automations.
+// Settings sections for Telegram, Google Analytics, the search consoles, Resend, notifications and automations.
 import { h, icon, empty, notice, statusOf, copyable } from '../ui.js';
 import { editText } from '../inline.js';
 import { connect, isConnected } from '../google.js';
 import { checkBot, findChat, pollTelegram, hasTelegram } from '../telegram.js';
 import { propertyName, checkBing, BING_RELAY } from '../webstats.js';
+import { checkResend, resendSettings, RESEND_RELAY } from '../resend.js';
 import { KINDS, prefOf, setPref } from '../notifications.js';
 import { RULES, ruleOf, sitesOf } from '../automations.js';
 import { hostOf } from '../sitecheck.js';
-import { projectIcon } from './projects.js';
+import { projectIcon, projectTree } from './projects.js';
 import { setupBanner } from '../integrations.js';
 
 const link = (href, text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
@@ -213,9 +214,74 @@ export function searchCard(store) {
           result('bing')))));
 }
 
+// --- Resend ---
+
+export function resendCard(store) {
+  const cfg = resendSettings(store);
+  const keys = cfg.keys ?? {};
+  const save = (patch) => store.update('settings', (d) => {
+    d.resend = { relay: '', keys: {}, ...d.resend, ...patch };
+  });
+  const setKey = (id, key) => save({ keys: Object.fromEntries(Object.entries({ ...keys, [id]: key }).filter(([, v]) => v)) });
+  const projects = projectTree(store.get('projects').projects).map(({ project }) => project);
+  const count = projects.filter((p) => keys[p.id]).length;
+  return h('section', { class: 'card panel' },
+    head('Resend', 'The Inbox lists the emails each project sends and receives through Resend. Each project has its own key; projects that share a Resend account can share a key. Keys are saved in settings.json and go only to Resend, through a relay on this machine.',
+      badge(count ? `${count} project${count === 1 ? '' : 's'}` : 'Not set', count ? 'doing' : 'plain')),
+    h('div', { class: 'cred-body' },
+      h('div', { class: 'svc-section' },
+        h('h3', null, 'Setup'),
+        steps([
+          ['In each Resend account, open ', link('https://resend.com/api-keys', 'API Keys'), ' and create a key with Full access. A sending-only key cannot read emails.'],
+          ['In the board folder, run ', h('code', null, 'bun tools/resend-relay.js'), ' (or node) and keep it open while you use the Inbox.'],
+          'Paste each key next to its project, save, and test it.',
+        ]),
+        notice({ tone: 'info', text: 'Resend’s API does not let a web page read its answers, so the board asks a small relay on this machine to fetch them. The relay only reads emails, only forwards to Resend, and only answers pages served from this machine.' })),
+      h('form', {
+        class: 'svc-section',
+        onsubmit: (e) => {
+          e.preventDefault();
+          save({ relay: String(new FormData(e.currentTarget).get('relay') ?? '').trim() });
+          say(store, 'resend', 'Relay address saved.');
+        },
+      },
+        h('h3', null, 'Relay'),
+        h('input', { name: 'relay', type: 'url', value: cfg.relay ?? '', placeholder: `Relay address (default ${RESEND_RELAY})`, autocomplete: 'off', spellcheck: false, 'aria-label': 'Resend relay address' }),
+        h('div', { class: 'svc-actions' }, h('button', { type: 'submit' }, 'Save'))),
+      h('div', { class: 'svc-section' },
+        h('h3', null, 'Keys per project'),
+        result('resend'),
+        projects.length
+          ? h('ul', { class: 'stack' }, projects.map((p) =>
+              h('li', null,
+                h('form', {
+                  class: 'row prop-row resend-row',
+                  onsubmit: (e) => {
+                    e.preventDefault();
+                    setKey(p.id, String(new FormData(e.currentTarget).get('key') ?? '').trim());
+                    say(store, 'resend', `${p.name}: saved.`);
+                  },
+                },
+                  projectIcon(p),
+                  h('strong', { class: 'grow' }, p.name),
+                  h('input', { name: 'key', type: 'password', value: keys[p.id] ?? '', placeholder: 're_…', autocomplete: 'off', spellcheck: false, 'aria-label': `Resend API key for ${p.name}` }),
+                  h('button', { type: 'submit', class: 'btn-small' }, 'Save'),
+                  h('button', {
+                    type: 'button',
+                    class: 'btn-small',
+                    disabled: !keys[p.id],
+                    onclick: () => {
+                      say(store, 'resend', `${p.name}: testing…`);
+                      checkResend(keys[p.id], cfg.relay).then((text) => say(store, 'resend', `${p.name}: ${text}`)).catch((err) => say(store, 'resend', `${p.name}: ${err.message}`, false));
+                    },
+                  }, 'Test'),
+                  keys[p.id] ? h('button', { type: 'button', class: 'icon-btn', title: 'Remove key', 'aria-label': `Remove the Resend key of ${p.name}`, onclick: () => { setKey(p.id, ''); say(store, 'resend', `${p.name}: key removed.`); } }, icon('x')) : null))))
+          : empty('No projects yet. Add one in Projects.'))));
+}
+
 // --- Data folder ---
 
-const DATA_FILES = ['projects', 'todos', 'recipes', 'finance', 'tools', 'notifications', 'usage', 'settings'];
+const DATA_FILES = ['projects', 'todos', 'recipes', 'finance', 'tools', 'inbox', 'notifications', 'usage', 'settings'];
 
 export function dataCard(store) {
   return h('section', { class: 'card panel' },
