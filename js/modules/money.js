@@ -924,6 +924,12 @@ function dueDates(item, untilKey) {
 
 // Adds an entry for every due date up to today that has none yet. Each date is recorded on its expense,
 // so an entry the user deletes is not added again.
+// The next date a recurring expense is due, or '' when none falls within about a year. The automation rules read it too.
+export function nextRecurringDue(item) {
+  const today = ymd(startOfDay(new Date()));
+  return dueDates(item, ymd(addDays(startOfDay(new Date()), 400))).find((k) => k > today) ?? '';
+}
+
 function syncRecurring(store) {
   const today = ymd(startOfDay(new Date()));
   const missing = [];

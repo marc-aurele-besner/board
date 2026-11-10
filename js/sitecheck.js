@@ -1,0 +1,120 @@
+// Checks run against a project's website: is it reachable, when do its certificate and domain expire,
+// and which share tags does its home page carry.
+//
+// A page cannot read another site's certificate or registration, so three public lookups are used. Each one
+// receives only the site's address, which is public anyway:
+//   - rdap.org: the registries' own lookup protocol, for the domain's expiry and registrar.
+//   - api.certspotter.com, then crt.sh: the public certificate transparency logs, for the newest certificate
+//     issued for the host. The second is asked only when the first does not answer.
+//   - r.jina.ai: the page reader already used for recipes, for the home page's HTML.
+
+const TIMEOUT_MS = 12000;
+const SLOW_MS = 1500;
+const READER = 'https://r.jina.ai/';
+
+export const hostOf = (website) => {
+  try {
+    return new URL(website).hostname;
+  } catch {
+    return '';
+  }
+};
+
+// The part of a host that is registered: example.com for docs.example.com. Two-part endings such as co.uk are kept whole.
+const TWO_PART = /\.(co|com|org|net|gov|ac|edu)\.[a-z]{2}$/;
+export function registrable(host) {
+  const parts = host.split('.');
+  return parts.slice(TWO_PART.test(host) ? -3 : -2).join('.');
+}
+
+async function timed(url, options) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: ctl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Reachability and response time. The answer itself is hidden from the page by the browser ("no-cors"),
+// so this tells "answered" from "did not answer", not which status code came back.
+export async function checkHealth(website) {
+  const start = performance.now();
+  try {
+    await timed(website, { mode: 'no-cors', cache: 'no-store', redirect: 'follow' });
+    const ms = Math.round(performance.now() - start);
+    return { status: ms > SLOW_MS ? 'slow' : 'up', ms };
+  } catch {
+    return { status: 'down', ms: 0 };
+  }
+}
+
+export async function checkDomain(host) {
+  const name = registrable(host);
+  const res = await timed(`https://rdap.org/domain/${encodeURIComponent(name)}`);
+  if (res.status === 404) throw new Error('The registry does not publish this domain.');
+  if (!res.ok) throw new Error(`The domain lookup answered ${res.status}.`);
+  const data = await res.json();
+  const expiry = (data.events ?? []).find((e) => e.eventAction === 'expiration')?.eventDate;
+  if (!expiry) throw new Error('The registry did not give an expiry date.');
+  const registrarEntity = (data.entities ?? []).find((e) => (e.roles ?? []).includes('registrar'));
+  const registrar = (registrarEntity?.vcardArray?.[1] ?? []).find((v) => v[0] === 'fn')?.[3] ?? '';
+  return { name, until: expiry.slice(0, 10), registrar };
+}
+
+// The certificate with the latest expiry among those logged for this exact host (or a wildcard covering it).
+export async function checkCertificate(host) {
+  try {
+    return await fromCertSpotter(host);
+  } catch {
+    return fromCrtSh(host);
+  }
+}
+
+async function fromCertSpotter(host) {
+  const res = await timed(`https://api.certspotter.com/v1/issuances?domain=${encodeURIComponent(host)}&match_wildcards=true&expand=issuer`);
+  if (!res.ok) throw new Error(`The certificate log answered ${res.status}.`);
+  const newest = (await res.json()).filter((c) => !c.revoked).sort((a, b) => String(b.not_after).localeCompare(String(a.not_after)))[0];
+  if (!newest) throw new Error('No valid certificate is logged for this host.');
+  return { until: String(newest.not_after).slice(0, 10), issuer: newest.issuer?.friendly_name ?? newest.issuer?.name?.match(/O=([^,]+)/)?.[1] ?? '' };
+}
+
+async function fromCrtSh(host) {
+  const res = await timed(`https://crt.sh/?q=${encodeURIComponent(host)}&output=json&exclude=expired`);
+  if (!res.ok) throw new Error(`The certificate log answered ${res.status}.`);
+  const list = await res.json();
+  const wildcard = `*.${host.split('.').slice(1).join('.')}`;
+  const matching = list.filter((c) => String(c.name_value ?? '').split('\n').some((n) => n === host || n === wildcard));
+  const newest = (matching.length ? matching : list).sort((a, b) => String(b.not_after).localeCompare(String(a.not_after)))[0];
+  if (!newest) throw new Error('No valid certificate is logged for this host.');
+  const issuer = String(newest.issuer_name ?? '').match(/O=([^,]+)/)?.[1]?.replace(/"/g, '') ?? '';
+  return { until: String(newest.not_after).slice(0, 10), issuer };
+}
+
+// The share tags of a page: what a link to it shows on social networks and in chat apps.
+export async function readMeta(website) {
+  const res = await timed(`${READER}${website}`, { headers: { 'X-Return-Format': 'html' } });
+  if (!res.ok) throw new Error(`The page could not be read (${res.status}). Some sites do not allow it.`);
+  const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+  const meta = (selector) => doc.querySelector(selector)?.getAttribute('content')?.trim() ?? '';
+  const abs = (url) => {
+    try {
+      return url ? new URL(url, website).href : '';
+    } catch {
+      return '';
+    }
+  };
+  return {
+    title: doc.querySelector('title')?.textContent?.trim() ?? '',
+    description: meta('meta[name="description"]'),
+    ogTitle: meta('meta[property="og:title"]'),
+    ogDescription: meta('meta[property="og:description"]'),
+    ogImage: abs(meta('meta[property="og:image"]')),
+    ogUrl: meta('meta[property="og:url"]'),
+    twitterCard: meta('meta[name="twitter:card"]'),
+    twitterImage: abs(meta('meta[name="twitter:image"]') || meta('meta[name="twitter:image:src"]')),
+  };
+}
+
+export const daysUntil = (isoDate) => Math.round((Date.parse(`${isoDate}T00:00:00`) - new Date().setHours(0, 0, 0, 0)) / 86400000);
