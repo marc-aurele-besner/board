@@ -4,7 +4,9 @@ import { googleFetch } from './google.js';
 
 const GA = 'https://analyticsdata.googleapis.com/v1beta';
 const GSC = 'https://www.googleapis.com/webmasters/v3';
-const BING = 'https://ssl.bing.com/webmaster/api.svc/json';
+// Bing sends no CORS header, so requests go through tools/bing-relay.js running on this machine.
+export const BING_RELAY = 'http://127.0.0.1:8417';
+const BING_PATH = '/webmaster/api.svc/json';
 const post = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const num = (v) => Number(v ?? 0);
 
@@ -75,29 +77,31 @@ const bingDate = (value) => {
   return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : '';
 };
 
-async function bing(method, key, website) {
+async function bing(method, key, website, relay) {
+  const base = (relay || BING_RELAY).replace(/\/+$/, '');
   let res;
   try {
-    res = await fetch(`${BING}/${method}?siteUrl=${encodeURIComponent(website)}&apikey=${encodeURIComponent(key)}`);
+    res = await fetch(`${base}${BING_PATH}/${method}?siteUrl=${encodeURIComponent(website)}&apikey=${encodeURIComponent(key)}`);
   } catch {
-    // Bing's API does not send the header that lets a web page read its answer, so the browser blocks it.
-    throw new Error('Bing did not let this page read its answer. Its API may not allow requests from a browser.');
+    throw new Error(`Could not reach the Bing relay at ${base}. Start it with: bun tools/bing-relay.js`);
   }
-  if (res.status === 401 || res.status === 403) throw new Error('Bing rejected this key. Generate a new one under API access.');
-  if (!res.ok) throw new Error(`Bing error ${res.status}`);
-  return (await res.json()).d ?? [];
+  // Bing answers a bad key with 400 and ErrorCode 3 (InvalidApiKey).
+  const body = await res.json().catch(() => null);
+  if (res.status === 401 || res.status === 403 || body?.ErrorCode === 3) throw new Error('Bing rejected this key. Generate a new one under API access.');
+  if (!res.ok) throw new Error(body?.Message ? `Bing error ${res.status}: ${body.Message}` : `Bing error ${res.status}`);
+  return body?.d ?? [];
 }
 
-export const checkBing = async (key) => {
-  const sites = await bing('GetUserSites', key, '');
+export const checkBing = async (key, relay) => {
+  const sites = await bing('GetUserSites', key, '', relay);
   return `Connected. ${sites.length} site${sites.length === 1 ? '' : 's'} found.`;
 };
 
-export async function bingReport(key, website, from, to) {
+export async function bingReport(key, website, from, to, relay) {
   const [traffic, queries, pages] = await Promise.all([
-    bing('GetRankAndTrafficStats', key, website),
-    bing('GetQueryStats', key, website),
-    bing('GetPageStats', key, website),
+    bing('GetRankAndTrafficStats', key, website, relay),
+    bing('GetQueryStats', key, website, relay),
+    bing('GetPageStats', key, website, relay),
   ]);
   const days = {};
   for (const r of traffic) {

@@ -33,6 +33,7 @@ js/background.js      timers for the above; started once the data folder is open
 js/capture.js         parseTask() and makeTask(): one place for a task's shape
 js/palette.js         the Cmd/Ctrl+K search palette
 fonts/                bundled typefaces (SIL Open Font License)
+tools/bing-relay.js   optional local relay for Bing's API, which sends no CORS header
 ```
 
 ## Conventions

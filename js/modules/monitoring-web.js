@@ -139,7 +139,7 @@ export function searchTab(store, view, w) {
   const p = sites.find((x) => x.id === view.site) ?? sites[0];
   const b = dayBuckets(w);
   const key = `${engine}:${p.id}:${b.from}:${b.to}`;
-  const entry = load(store, key, () => (engine === 'google' ? searchReport(p.website, b.from, b.to) : bingReport(bingKey, p.website, b.from, b.to)));
+  const entry = load(store, key, () => (engine === 'google' ? searchReport(p.website, b.from, b.to) : bingReport(bingKey, p.website, b.from, b.to, settings.bing?.relay)));
   const head = h('div', { class: 'row between' }, siteChips(store, view, sites, p), refreshButton(store, key));
   if (entry.status === 'loading') return h('div', { class: 'stack-lg' }, engines, head, progress(`Reading search data for ${hostOf(p.website)}…`));
   if (entry.status === 'error') return h('div', { class: 'stack-lg' }, engines, head, notice({ text: entry.error }));
