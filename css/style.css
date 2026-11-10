@@ -1277,3 +1277,24 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .copy-chip:hover .copy-mark { color: var(--accent); }
 .copy-chip.copied { border-color: var(--income); }
 .copy-chip.copied .copy-mark { color: var(--income); }
+
+/* Keyboard shortcut sheet */
+.shortcut-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.shortcut-list li { display: flex; align-items: center; gap: 14px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.shortcut-list li:last-child { border-bottom: none; }
+.shortcut-list .keys { display: inline-flex; gap: 4px; flex: none; min-width: 84px; }
+
+/* Sample data: the bar under the top bar that says nothing is saved */
+.sample-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--surface-2); font-size: 0.9rem; }
+.sample-bar .icon { color: var(--info); flex: none; }
+.sample-bar .grow { min-width: 200px; }
+.connect .actions { flex-wrap: wrap; }
+
+/* Task board: a card's deadline and description */
+.kanban-actions { gap: 2px; flex: none; }
+.kanban-details { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border); }
+.kanban-details label { flex-wrap: nowrap; justify-content: space-between; }
+.kanban-details .editable { display: block; min-height: 1.5em; }
+
+/* Projects: a label's colour beside its name */
+.category-row .swatch-input { width: 30px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); flex: none; }

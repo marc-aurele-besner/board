@@ -30,8 +30,10 @@ js/automations.js     site checks and the rules that turn their results into tas
 js/sitecheck.js       the lookups behind Tools (health, domain, certificate, share tags)
 js/telegram.js        tasks from Telegram messages, read while the board is open
 js/background.js      timers for the above; started once the data folder is open
-js/capture.js         parseTask() and makeTask(): one place for a task's shape
-js/palette.js         the Cmd/Ctrl+K search palette
+js/capture.js         parseTask(), parseMoney() and makeTask(): one place for a task's shape
+js/palette.js         the Cmd/Ctrl+K search palette: jump, or capture a task, a Money entry or a recipe link
+js/shortcuts.js       the single-key shortcuts ("g" then a letter) and the sheet that lists them
+js/sample.js          "Explore with sample data": a data folder in memory with placeholder content
 fonts/                bundled typefaces (SIL Open Font License)
 tools/bing-relay.js   optional local relay for Bing's API, which sends no CORS header
 ```

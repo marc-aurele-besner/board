@@ -12,7 +12,15 @@ Sections (v1):
 - **Liquidity Pools**: Uniswap v3 and v4 positions of the wallets you add in Settings, on Ethereum, Base, Arbitrum One, Optimism, Polygon, BNB Chain, Avalanche, Unichain and Robinhood Chain: range, value, unclaimed fees and token split. Read-only: only public addresses are used. v4 positions cannot be listed with a call, so the board finds them by searching each wallet's history on the chain, and remembers how far it got. Most public nodes keep only recent history, so add an older v4 position by its link or number in Settings, or set a node that keeps full history. When a chain cannot be read, its last good read is shown and marked as outdated.
 - **Notifications**: the bell in the top bar lists deadlines, automated tasks, site checks, provider outages and Telegram messages.
 
-Tasks have a deadline. The lists **Today**, **To Organize** and **Automated** gather what is due, what arrived without a project or deadline (for example from Telegram), and what the board created by itself. Press Cmd/Ctrl+K or `/` to search, jump, or type a task such as `fix the footer #atlas !high friday`.
+Tasks have a deadline. The lists **Today**, **To Organize** and **Automated** gather what is due, what arrived without a project or deadline (for example from Telegram), and what the board created by itself. Press Cmd/Ctrl+K or `/` to search, jump, or capture something:
+
+- a task: `fix the footer #atlas !high friday`
+- a Money entry: `-42.50 groceries weekly shop` is an expense, `+4200 salary` is income, both dated today
+- a recipe: paste a link to import it into Kitchen
+
+Outside a field, `g` then a letter jumps to a section (`g t` for Tasks, `g m` for Money), `n` starts a new task, and `?` lists every shortcut.
+
+Deleting a task, a Money entry, a bill, a recipe or a recipe iteration shows **Undo** for a few seconds.
 
 ## Run it
 
@@ -30,6 +38,8 @@ Then open `http://localhost:<port>` in **Chrome or Edge**. The File System Acces
 
 On first launch, choose a data folder. Pick a folder **outside this repo** (for example `~/Documents/board-data`). The app writes `todos.json`, `recipes.json` and `finance.json` there. On later visits, click **Reconnect** once to re-grant permission.
 
+To look around first, click **Explore with sample data**. It opens the board on placeholder content kept in memory: nothing is written to disk, the automatic checks stay off, and a reload brings back the folder screen. It also works in Firefox and Safari.
+
 ## Data format
 
 Every file has a `schemaVersion` field. Files are plain JSON and can be edited by hand. Reload the page after editing.
@@ -42,7 +52,7 @@ Every file has a `schemaVersion` field. Files are plain JSON and can be edited b
 | `pools.json` | `{ cache: { "<chainId>:<v3\|v4>": {at, rows} }, prices: { <chainId>: {at, usd} }, scan: { <chainId>: { <wallet>: {node, from, to, span, ids, done} } } }`: the last good read of each chain and version, shown marked as outdated when a read fails; the last token prices; and how far each v4 search got. Safe to delete: it is rebuilt by the next read. |
 | `notifications.json` | `{ items: [{id, kind, text, href, key, at, read}], prefs: { <kind>: {app, telegram} } }` |
 | `recipes.json` | `{ recipes: [{id, title, status: 'idea'\|'testing'\|'final', tags, ingredients, steps, notes, images, versions: [{id, date, changes, rating, notes}], created}] }` |
-| `finance.json` | `{ entries: [{id, date, type: 'income'\|'expense', amount, category, note, created}], categories: [], budgets: { <category>: {amount, currency} } }`. A budget is per month and shows in the category breakdown when the period is one month. |
+| `finance.json` | `{ entries: [{id, date, type: 'income'\|'expense', amount, category, note, created}], categories: [], budgets: { <category>: {amount, currency} } }`. A budget is per month and shows in the category breakdown when the period is one month. A category that goes over is listed on Home and announced once under the bell. |
 
 Writes are debounced (about 300 ms) and serialized. The status pill in the top bar shows *Saving…*, *Saved* or *Save failed*.
 
