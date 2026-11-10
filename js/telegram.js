@@ -22,6 +22,12 @@ async function call(token, method, body) {
   }
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 || res.status === 404) throw new Error('Telegram rejected this token. Copy it again from BotFather.');
+  // 409: a webhook is set on the bot, or another program is reading its messages at the same time.
+  if (res.status === 409) {
+    throw new Error(/webhook/i.test(data.description ?? '')
+      ? 'This bot has a webhook set, so its messages cannot be read here. Remove the webhook, or create a separate bot for the board.'
+      : 'Another program is reading this bot’s messages. Stop it, or create a separate bot for the board.');
+  }
   if (!data.ok) throw new Error(data.description || `Telegram error ${res.status}`);
   return data.result;
 }
@@ -29,12 +35,26 @@ async function call(token, method, body) {
 // The bot's name, to confirm the token works.
 export const checkBot = async (token) => `Connected as @${(await call(token, 'getMe')).username}`;
 
-// The chat of the most recent message sent to the bot. The user sends any message first.
-export async function findChat(token) {
-  const updates = await call(token, 'getUpdates', { timeout: 0, allowed_updates: ['message'] });
-  const last = updates.filter((u) => u.message?.chat?.id).pop();
-  if (!last) throw new Error('No message found. Send your bot a message first, then try again.');
-  return String(last.message.chat.id);
+let polling = false;
+
+const lastChat = (updates) => updates.filter((u) => u.message?.chat?.id).pop()?.message.chat.id;
+
+// The chat of the most recent message sent to the bot. Messages the board already read are gone
+// from Telegram, so when none is waiting it keeps listening for a short while for a new one.
+export async function findChat(token, onWait) {
+  while (polling) await new Promise((r) => setTimeout(r, 200));
+  polling = true;
+  try {
+    let id = lastChat(await call(token, 'getUpdates', { timeout: 0, allowed_updates: ['message'] }));
+    if (!id) {
+      onWait?.();
+      id = lastChat(await call(token, 'getUpdates', { timeout: 30, allowed_updates: ['message'] }));
+    }
+    if (!id) throw new Error('No message arrived. Send your bot a message, then press Find my chat again.');
+    return String(id);
+  } finally {
+    polling = false;
+  }
 }
 
 export async function sendTelegram(store, text) {
@@ -60,8 +80,6 @@ export function taskFromMessage(store, text) {
   });
   return { task, inbox, where };
 }
-
-let polling = false;
 
 // Reads the messages that arrived since the last read. Only the saved chat can create tasks.
 export async function pollTelegram(store) {
