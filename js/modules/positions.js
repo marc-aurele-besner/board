@@ -124,7 +124,7 @@ function draw(root, store) {
   const wallets = (cfg.wallets ?? []).filter((w) => isAddress(w.address));
   if (!wallets.length) {
     return root.replaceChildren(h('div', { class: 'stack-lg' },
-      h('h2', null, 'LP positions'),
+      h('h2', null, 'Liquidity Pools'),
       setupBanner('uniswap', 'Add a wallet address in Settings to see its Uniswap positions.')));
   }
   if (state.status === 'idle' || (state.status === 'ok' && Date.now() - state.at > STALE_MS)) {
@@ -148,7 +148,7 @@ function draw(root, store) {
   root.replaceChildren(h('div', { class: 'stack-lg lp' },
     h('div', { class: 'row between lp-head' },
       h('div', null,
-        h('h2', null, 'LP positions'),
+        h('h2', null, 'Liquidity Pools'),
         h('p', { class: 'muted small' }, 'Your Uniswap v3 positions on Ethereum, read from the chain. Read-only.')),
       h('button', { type: 'button', class: 'btn-small', disabled: state.status === 'loading', onclick: () => load(store) }, icon('refresh'), state.status === 'loading' ? 'Reading…' : 'Refresh')),
 
@@ -191,7 +191,7 @@ function draw(root, store) {
 
 export default {
   id: 'positions',
-  title: 'LP positions',
+  title: 'Liquidity Pools',
   icon: 'wallet',
   collection: null,
   defaults: {},
