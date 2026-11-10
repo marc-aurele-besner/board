@@ -7,6 +7,9 @@ const SECTIONS = {
   github: ['github', 'GitHub'],
   exchange: ['exchange', 'Exchange rates'],
   uniswap: ['uniswap', 'Uniswap'],
+  telegram: ['telegram', 'Telegram'],
+  analytics: ['analytics', 'Google Analytics'],
+  search: ['search', 'Search consoles'],
 };
 
 export const settingsHref = (key) => `#/settings?section=${SECTIONS[key][0]}`;
