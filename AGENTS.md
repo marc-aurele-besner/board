@@ -53,5 +53,6 @@ js/modules/*.js       one file per section (todos, projects, kitchen, money)
 - Commit regularly, in small steps. The commits should tell a story: each one is a step the next one builds on, so reading the log explains how the change came together.
 - Keep commit subjects short (about 60 characters) and say what changed. Add a body only when the why is not obvious. No padding, and do not restate the diff.
 - Keep PR titles short. The description lists what changed and how it was checked, in a few lines.
-- Merge a PR as soon as it is ready: the strict syntax check passes, the change is complete, and nothing is left open for the user. Do not leave ready PRs open.
+- **Never leave a PR unmerged.** Every PR you open is merged in the same turn, as soon as the strict syntax check passes and the change is complete. Do not ask whether to merge, do not wait for approval, and do not end a turn with an open PR. If a merge is blocked (conflict, failing check), fix it in the same turn and merge; if that is impossible, say so explicitly and stop.
+- Before finishing any turn, list open PRs (`gh pr list --state open`). If any are open, merge them now.
 - Run the strict syntax check before every commit, and stop if it fails: `for f in js/*.js js/modules/*.js; do node --experimental-default-type=module --check "$f" || { echo "FAIL $f"; exit 1; }; done`
