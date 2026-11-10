@@ -2,7 +2,7 @@
 // Nothing here runs when the board is closed; there is no server.
 import { checkDeadlines } from './notifications.js';
 import { pollTelegram } from './telegram.js';
-import { sitesOf, siteData, checkSite, runRules } from './automations.js';
+import { sitesOf, siteData, checkSite, runRules, checkProviders, providersDue } from './automations.js';
 
 const MINUTE = 60000;
 const DAY = 24 * 60 * MINUTE;
@@ -35,6 +35,8 @@ export function startBackground(store) {
   const slow = quiet(async () => {
     checkDeadlines(store);
     await checkDueSites(store);
+    // Status pages follow the same interval as website health.
+    if (providersDue(store)) await checkProviders(store);
   });
   // Start after the first paint, so opening the board is never held up by the network.
   setTimeout(telegram, 1500);
