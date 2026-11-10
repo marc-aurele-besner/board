@@ -356,6 +356,31 @@ body.project-dragging .project-list .root-drop { display: block; }
 .test-result.ok { color: var(--income); }
 .test-result.error { color: var(--danger); }
 
+/* Money dashboard: period and grouping buttons, chart, breakdowns, and a side column for adding */
+.money { gap: 14px; }
+.money-head { align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.money-head h2 { margin: 0; }
+.money-head p { margin: 0; }
+.money-currency { display: inline-flex; min-width: 0; }
+.money-currency .seg { min-width: 56px; }
+.money-controls { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.money-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+.money-main { min-width: 0; }
+.money-side { min-width: 0; position: sticky; top: 72px; }
+.money-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.money-stats .stat strong { font-variant-numeric: tabular-nums; }
+.split-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.split-2 > .card { min-width: 0; }
+.chart .baseline { stroke: var(--border); stroke-width: 1; }
+@media (max-width: 1100px) {
+  .money-grid { grid-template-columns: 1fr; }
+  .money-side { position: static; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+}
+@media (max-width: 720px) {
+  .money-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .split-2 { grid-template-columns: 1fr; }
+}
+
 /* Home */
 .home-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--gap); align-items: start; }
 .home-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
