@@ -4,7 +4,8 @@ A personal command center that runs locally. No backend, no build step, no depen
 
 Sections (v1):
 
-- **Todos**: personal and per-project lists. Type `buy milk #home` to file a todo under a project.
+- **Todos**: personal and per-project lists. Type `buy milk #home` to file a todo under a project. Drag the grip to reorder. Paste several lines to create a todo with a description. Click the description icon to read or edit it.
+- **Projects**: quick-add by name, or a detailed form for color, description, and GitHub links (one org, several repos, or none).
 - **Kitchen**: recipe ideas, recipes you are testing, and final recipes. Log each iteration with notes and a rating.
 - **Money**: rough income and expenses per month, with totals and a per-category breakdown.
 
@@ -28,7 +29,8 @@ Every file has a `schemaVersion` field. Files are plain JSON and can be edited b
 
 | File | Shape |
 | --- | --- |
-| `todos.json` | `{ projects: [{id, name, color}], items: [{id, text, done, projectId, created}] }`. `projectId: null` means Personal. |
+| `projects.json` | `{ projects: [{id, name, color, description, github: {org, repos: ['owner/repo']}, created}] }`. `github.org` and `github.repos` may be empty, for non-coding projects. |
+| `todos.json` | `{ items: [{id, text, description, done, projectId, created}] }`. `projectId: null` means Personal. Array order is the display order (drag the grip to reorder). |
 | `recipes.json` | `{ recipes: [{id, title, status: 'idea'\|'testing'\|'final', tags, ingredients, steps, notes, versions: [{id, date, changes, rating, notes}], created}] }` |
 | `finance.json` | `{ entries: [{id, date, type: 'income'\|'expense', amount, category, note, created}], categories: [] }` |
 

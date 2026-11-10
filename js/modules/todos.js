@@ -3,16 +3,19 @@ import { makeProject } from './projects.js';
 
 const COLLECTION = 'todos';
 
-// View state lives here so it survives re-renders. filter: 'all' | 'personal' | <project id>
-const view = { filter: 'all', showDone: false };
+// View state lives here so it survives re-renders.
+// filter: 'all' | 'personal' | <project id>. expanded: ids with the description editor open.
+const view = { filter: 'all', showDone: false, expanded: new Set(), dragId: null };
 
 const isProjectFilter = (f) => f !== 'all' && f !== 'personal';
 const matchesFilter = (item) =>
   view.filter === 'all' || (view.filter === 'personal' ? item.projectId === null : item.projectId === view.filter);
 const projectsOf = (store) => store.get('projects').projects;
+const formValues = (form) => Object.fromEntries(new FormData(form));
 
 // "buy milk #home" files the item under project "home" (created if missing).
-function addItem(store, raw) {
+// Extra lines from a multi-line paste arrive as the description.
+function addItem(store, raw, description = '') {
   let text = raw.trim();
   const tag = text.match(/(?:^|\s)#([\w-]+)/);
   if (tag) text = text.replace(tag[0], ' ').replace(/\s+/g, ' ').trim();
@@ -28,7 +31,19 @@ function addItem(store, raw) {
     }
     projectId = project.id;
   }
-  store.update(COLLECTION, (d) => d.items.push({ id: uid(), text, done: false, projectId, created: now() }));
+  store.update(COLLECTION, (d) =>
+    d.items.push({ id: uid(), text, description, done: false, projectId, created: now() }));
+}
+
+// Pasting several lines: first non-empty line is the title, the rest is the description.
+function pasteAsTodo(store, e) {
+  const raw = e.clipboardData?.getData('text/plain') ?? '';
+  if (!/\r?\n/.test(raw.trim())) return; // single line: let the browser paste normally
+  e.preventDefault();
+  const lines = raw.split(/\r?\n/);
+  const first = lines.findIndex((l) => l.trim());
+  if (first < 0) return;
+  addItem(store, lines[first], lines.slice(first + 1).join('\n').trim());
 }
 
 const toggleItem = (store, id, done) =>
@@ -41,6 +56,135 @@ const removeItem = (store, id) =>
   store.update(COLLECTION, (d) => {
     d.items = d.items.filter((i) => i.id !== id);
   });
+
+function saveDescription(store, id, description) {
+  view.expanded.delete(id);
+  store.update(COLLECTION, (d) => {
+    const item = d.items.find((i) => i.id === id);
+    if (item) item.description = description.trim();
+  });
+}
+
+function toggleExpanded(store, id) {
+  if (view.expanded.has(id)) view.expanded.delete(id);
+  else view.expanded.add(id);
+  store.refresh();
+}
+
+// Move `id` next to `targetId` (before it, or after it when `after` is true).
+// The stored array order is the display order, so this is the reorder.
+function moveItem(store, id, targetId, after) {
+  if (id === targetId) return;
+  store.update(COLLECTION, (d) => {
+    const from = d.items.findIndex((i) => i.id === id);
+    if (from < 0) return;
+    const [item] = d.items.splice(from, 1);
+    let to = d.items.findIndex((i) => i.id === targetId);
+    if (to < 0) to = from;
+    d.items.splice(after ? to + 1 : to, 0, item);
+  });
+}
+
+// Drop indicator: above or below the row depending on pointer position.
+function dropSide(e) {
+  const r = e.currentTarget.getBoundingClientRect();
+  return e.clientY > r.top + r.height / 2 ? 'after' : 'before';
+}
+function clearDropMarks(el) {
+  el.classList.remove('drop-before', 'drop-after');
+}
+
+function todoItem(store, item, projectLabel) {
+  const expanded = view.expanded.has(item.id);
+  const hasDescription = Boolean(item.description);
+
+  const li = h('li', {
+    class: item.done ? 'todo-item done' : 'todo-item',
+    'data-id': item.id,
+    ondragstart: (e) => {
+      view.dragId = item.id;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', item.id); // Firefox needs data to start a drag
+      e.currentTarget.classList.add('dragging');
+    },
+    ondragend: (e) => {
+      view.dragId = null;
+      e.currentTarget.draggable = false;
+      e.currentTarget.classList.remove('dragging');
+    },
+    ondragover: (e) => {
+      if (!view.dragId || view.dragId === item.id) return;
+      e.preventDefault();
+      const side = dropSide(e);
+      e.currentTarget.classList.toggle('drop-before', side === 'before');
+      e.currentTarget.classList.toggle('drop-after', side === 'after');
+    },
+    ondragleave: (e) => clearDropMarks(e.currentTarget),
+    ondrop: (e) => {
+      if (!view.dragId) return;
+      e.preventDefault();
+      const after = dropSide(e) === 'after';
+      clearDropMarks(e.currentTarget);
+      moveItem(store, view.dragId, item.id, after);
+      view.dragId = null;
+    },
+  },
+    h('div', { class: 'todo-row' },
+      h('span', {
+        class: 'grip',
+        title: 'Drag to reorder',
+        'aria-label': 'Drag to reorder',
+        // Only the grip makes the row draggable, so text stays selectable.
+        onpointerdown: (e) => {
+          e.currentTarget.closest('li').draggable = true;
+        },
+      }, icon('grip')),
+      h('input', {
+        type: 'checkbox',
+        checked: item.done,
+        'aria-label': `Mark "${item.text}" done`,
+        onchange: (e) => toggleItem(store, item.id, e.target.checked),
+      }),
+      h('span', { class: 'grow todo-text' }, item.text),
+      projectLabel ? h('span', { class: 'badge' }, projectLabel) : null,
+      h('button', {
+        type: 'button',
+        class: hasDescription ? 'icon-btn desc-btn has-desc' : 'icon-btn desc-btn',
+        title: hasDescription ? 'Show description' : 'Add description',
+        'aria-label': hasDescription ? 'Show description' : 'Add description',
+        'aria-expanded': String(expanded),
+        onclick: () => toggleExpanded(store, item.id),
+      }, icon('align-left')),
+      h('button', {
+        type: 'button',
+        class: 'icon-btn',
+        title: 'Delete',
+        'aria-label': `Delete "${item.text}"`,
+        onclick: () => removeItem(store, item.id),
+      }, icon('x'))),
+
+    expanded
+      ? h('form', {
+          class: 'todo-desc',
+          onsubmit: (e) => {
+            e.preventDefault();
+            saveDescription(store, item.id, formValues(e.currentTarget).description);
+          },
+        },
+          h('textarea', { name: 'description', rows: 4, placeholder: 'Notes, links, steps… paste freely', 'aria-label': 'Description' }, item.description),
+          h('div', { class: 'row end' },
+            h('button', {
+              type: 'button',
+              onclick: () => {
+                view.expanded.delete(item.id);
+                store.refresh();
+              },
+            }, 'Close'),
+            h('button', { class: 'primary', type: 'submit' }, 'Save')))
+      : null);
+
+  return li;
+}
 
 function draw(root, store) {
   const projects = projectsOf(store);
@@ -65,9 +209,8 @@ function draw(root, store) {
       h('span', { class: 'grow' }, label),
       h('span', { class: 'count' }, String(count)));
 
-  const visible = items
-    .filter((i) => (view.showDone || !i.done) && matchesFilter(i))
-    .sort((a, b) => Number(a.done) - Number(b.done) || a.created.localeCompare(b.created));
+  // Stored order is the display order, so the list is not re-sorted here.
+  const visible = items.filter((i) => (view.showDone || !i.done) && matchesFilter(i));
 
   root.replaceChildren(
     h('div', { class: 'split' },
@@ -104,34 +247,19 @@ function draw(root, store) {
         },
           h('input', {
             name: 'todo',
-            placeholder: 'Add a todo… use #project to file it',
+            placeholder: 'Add a todo… use #project to file it, paste several lines for a description',
             'aria-label': 'New todo',
             autocomplete: 'off',
             'data-autofocus': true,
+            onpaste: (e) => pasteAsTodo(store, e),
           }),
           h('button', { class: 'primary', type: 'submit' }, 'Add')),
 
         visible.length
           ? h('ul', { class: 'todo-list' },
               visible.map((item) =>
-                h('li', { class: item.done ? 'done' : '' },
-                  h('input', {
-                    type: 'checkbox',
-                    checked: item.done,
-                    'aria-label': `Mark "${item.text}" done`,
-                    onchange: (e) => toggleItem(store, item.id, e.target.checked),
-                  }),
-                  h('span', { class: 'grow' }, item.text),
-                  view.filter === 'all' && item.projectId
-                    ? h('span', { class: 'badge' }, projectName(item.projectId))
-                    : null,
-                  h('button', {
-                    type: 'button',
-                    class: 'icon-btn',
-                    title: 'Delete',
-                    'aria-label': `Delete "${item.text}"`,
-                    onclick: () => removeItem(store, item.id),
-                  }, icon('x')))))
+                todoItem(store, item, view.filter === 'all' ? projectName(item.projectId) : ''))
+            )
           : h('p', { class: 'empty' }, 'Nothing here yet. Type above and press Enter.'))));
 }
 
