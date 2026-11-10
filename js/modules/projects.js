@@ -6,6 +6,7 @@ import { richText } from '../rich.js';
 import { editText, pickChip } from '../inline.js';
 import { siteIcon, clearFaviconCache } from '../favicon.js';
 import { fetchRepoOverview } from '../github.js';
+import { makeTask } from '../capture.js';
 
 const COLLECTION = 'projects';
 const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
@@ -607,6 +608,39 @@ function overviewBlock(store, p) {
     }));
 }
 
+// The project's open tasks, with a quick add, so the page is enough for a short look. Tasks has the full table.
+function projectTasks(store, p, items) {
+  const open = items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done');
+  const finish = (id) => store.update('todos', (d) => {
+    const t = d.items.find((x) => x.id === id);
+    if (!t) return;
+    t.status = 'done';
+    delete t.done;
+  });
+  return h('section', { class: 'pp-block' },
+    h('div', { class: 'row between' },
+      h('h3', null, 'Tasks'),
+      h('a', { href: `#/todos?filter=${p.id}`, class: 'btn-link' }, 'Open in Tasks')),
+    h('form', {
+      class: 'quick',
+      onsubmit: (e) => {
+        e.preventDefault();
+        const text = new FormData(e.currentTarget).get('todo').trim();
+        if (text) store.update('todos', (d) => d.items.push(makeTask({ text, projectId: p.id })));
+      },
+    },
+      h('input', { name: 'todo', placeholder: `Add a task to ${p.name}…`, 'aria-label': 'New task in this project', autocomplete: 'off' }),
+      h('button', { class: 'primary', type: 'submit' }, 'Add')),
+    open.length
+      ? h('ul', { class: 'board-list' }, open.map((i) =>
+          h('li', null,
+            h('input', { type: 'checkbox', 'aria-label': `Mark "${i.text}" done`, onchange: () => finish(i.id) }),
+            h('span', { class: 'grow' }, i.text),
+            i.due ? h('span', { class: 'muted small' }, i.due) : null,
+            i.priority && i.priority !== 'none' ? h('span', { class: `pill tone-${i.priority}` }, i.priority) : null)))
+      : h('p', { class: 'muted small' }, 'No open tasks.'));
+}
+
 function projectView(store, p, items, categories) {
   const projects = store.get(COLLECTION).projects;
   const open = items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
@@ -737,6 +771,8 @@ function projectView(store, p, items, categories) {
       stat(done, 'done tasks'),
       stat(gh(t.issues), 'open issues'),
       stat(gh(t.prs), 'open PRs')),
+
+    projectTasks(store, p, items),
 
     p.github.repos.length ? repoTable(store, p) : null,
     overviewBlock(store, p),

@@ -5,6 +5,8 @@ import { ask } from '../ai.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { connect, isConnected, upcomingEvents } from '../google.js';
 import { makeTask } from '../capture.js';
+import { sitesOf, siteData, ruleOf } from '../automations.js';
+import { hostOf, daysUntil } from '../sitecheck.js';
 
 const PRIORITY_RANK = { high: 0, medium: 1, low: 2, none: 3 };
 const RECIPE_LABEL = { testing: 'Testing', idea: 'Ideas', final: 'Final' };
@@ -224,6 +226,51 @@ function githubPanel(store, projects) {
     totals.failed ? h('p', { class: 'muted small' }, `${totals.failed} repo${totals.failed > 1 ? 's' : ''} could not be read.`) : null);
 }
 
+// What still needs connecting, in one place. Hidden once everything is set up.
+function setupCard(store) {
+  const s = store.get('settings');
+  const rows = [
+    ['github', 'GitHub token', s.github?.token],
+    ['openrouter', 'OpenRouter key, for the AI features', s.openrouter?.key],
+    ['models', 'Default AI model', s.models?.default],
+    ['google', 'Google Calendar', s.google?.clientId],
+    ['uniswap', 'Wallet for Liquidity Pools', s.uniswap?.wallets?.length],
+    ['telegram', 'Telegram bot', s.telegram?.token && s.telegram?.chatId],
+  ];
+  const done = rows.filter(([, , ok]) => ok).length;
+  if (done === rows.length) return null;
+  return h('section', { class: 'card board-panel' },
+    h('div', { class: 'row between board-panel-head' }, h('h3', null, 'Finish setting up'), h('span', { class: 'muted small' }, `${done} of ${rows.length}`)),
+    h('div', { class: 'meter' }, h('span', { style: { width: `${(done / rows.length) * 100}%` } })),
+    h('ul', { class: 'board-list' }, rows.map(([key, text, ok]) =>
+      h('li', null,
+        h('span', { class: ok ? 'tick ok' : 'tick todo' }, ok ? icon('check') : null),
+        h('span', { class: ok ? 'grow muted' : 'grow' }, text),
+        ok ? null : h('a', { href: `#/settings?section=${key}`, class: 'btn-link' }, 'Set up')))));
+}
+
+// Things from every section that want a look today. Hidden when there are none.
+function attentionCard(store, open) {
+  const today = todayISO();
+  const rows = [];
+  const add = (iconName, text, href, action) => rows.push(h('li', null, icon(iconName), h('span', { class: 'grow' }, text), h('a', { href, class: 'btn-link' }, action)));
+  const late = open.filter((i) => i.due && i.due < today).length;
+  const inbox = open.filter((i) => i.inbox).length;
+  if (late) add('clock', `${late} task${late === 1 ? '' : 's'} past the deadline`, '#/todos?filter=today', 'Review');
+  if (inbox) add('inbox', `${inbox} task${inbox === 1 ? '' : 's'} to organize`, '#/todos?filter=organize', 'Organize');
+  for (const p of sitesOf(store)) {
+    const s = siteData(store, p.id);
+    const host = hostOf(p.website);
+    if (s.health?.status === 'down') add('globe', `${host} is not answering`, '#/tools', 'Open');
+    if (s.ssl?.until && daysUntil(s.ssl.until) <= ruleOf(store, 'ssl').days) add('shield', `The SSL certificate for ${host} expires in ${daysUntil(s.ssl.until)} days`, '#/tools?tab=ssl', 'Open');
+    if (s.domain?.until && daysUntil(s.domain.until) <= ruleOf(store, 'domain').days) add('shield', `The domain ${s.domain.name} expires in ${daysUntil(s.domain.until)} days`, '#/tools?tab=ssl', 'Open');
+  }
+  if (!rows.length) return null;
+  return h('section', { class: 'card board-panel' },
+    h('div', { class: 'row between board-panel-head' }, h('h3', null, 'Needs attention')),
+    h('ul', { class: 'board-list attention' }, rows));
+}
+
 // --- Page ---
 
 function draw(root, store) {
@@ -246,6 +293,8 @@ function draw(root, store) {
           h('h2', null, greet),
           h('p', { class: 'muted' }, today)),
         statStrip(store, open.length, doing.length, projects)),
+
+      h('div', { class: 'board-row board-row-even' }, attentionCard(store, open), setupCard(store)),
 
       h('div', { class: 'board-row' },
         panel('Today', '#/todos',

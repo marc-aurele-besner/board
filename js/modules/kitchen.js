@@ -2,6 +2,8 @@ import { h, uid, now, todayISO, empty, icon, notice } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { ask, parseJson } from '../ai.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
+import { makeTask } from '../capture.js';
+import { toast } from '../toast.js';
 
 const COLLECTION = 'recipes';
 const STATUSES = [
@@ -530,6 +532,16 @@ function detailPane(store, r) {
 
     hasOpenRouter(store) ? null : setupBanner('openrouter', 'Suggesting variations needs an OpenRouter key.'),
     h('div', { class: 'k-actions' },
+      h('button', {
+        type: 'button',
+        class: 'btn-small',
+        disabled: !r.ingredients.length,
+        title: 'One task per ingredient, in Personal',
+        onclick: () => {
+          store.update('todos', (d) => d.items.push(...r.ingredients.map((text) => makeTask({ text, description: `For ${r.title}`, category: 'shopping' }))));
+          toast(`${r.ingredients.length} ingredient${r.ingredients.length === 1 ? '' : 's'} added to Tasks`);
+        },
+      }, icon('check-square'), 'Add ingredients to Tasks'),
       h('button', {
         type: 'button',
         class: 'btn-small',
