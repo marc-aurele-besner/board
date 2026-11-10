@@ -1188,6 +1188,13 @@ label.check { cursor: pointer; }
 .up-bars .slow { background: var(--warn); }
 .up-bars .na { max-width: none; background: var(--surface-2); }
 .tool-table td { vertical-align: middle; }
+.tool-table tr:has(+ .dns-raw) td { border-bottom: 0; padding-bottom: 0; }
+.dns-raw td { padding-top: 2px; }
+.dns-raw summary { cursor: pointer; }
+.dns-records { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 8px 0 4px; }
+.dns-records dt { font-weight: 600; font-size: 0.85rem; }
+.dns-records dd { margin: 0; display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.dns-records code { font-size: 0.8rem; overflow-wrap: anywhere; background: var(--surface-2); border-radius: 4px; padding: 1px 6px; }
 .meter { height: 6px; border-radius: 6px; background: var(--surface-2); overflow: hidden; }
 .meter span { display: block; height: 100%; border-radius: 6px; background: var(--accent); }
 .meta-grid { display: grid; grid-template-columns: minmax(300px, 480px) minmax(0, 1fr); gap: var(--gap); align-items: start; }
