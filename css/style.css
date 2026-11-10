@@ -1373,5 +1373,20 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
   .mail-open { flex-wrap: wrap; gap: 6px 10px; }
   .mail-main { flex-basis: calc(100% - 60px); }
 }
-.resend-row { flex-wrap: wrap; }
-.resend-row input { flex: 1 1 180px; width: auto; min-width: 0; }
+/* Settings: Resend keys per project */
+.resend-relay { flex-wrap: nowrap; }
+.resend-relay input { flex: 1; min-width: 0; }
+.resend-search { width: min(100%, 260px); }
+.resend-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 0 24px; }
+.resend-list > .empty { grid-column: 1 / -1; }
+.resend-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); min-width: 0; flex-wrap: wrap; }
+.resend-row .project-icon { flex: none; }
+.resend-name { flex: 1 1 160px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.resend-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.resend-sub code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+.resend-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.resend-msg { flex-basis: 100%; order: 5; padding-left: 30px; }
+.resend-msg.ok { color: var(--income); }
+.resend-msg.error { color: var(--danger); }
+.resend-edit { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+.resend-edit input { flex: 1; min-width: 0; }
