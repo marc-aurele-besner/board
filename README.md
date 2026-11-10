@@ -59,7 +59,7 @@ Nothing runs on a server, and everything automatic runs only while the board is 
 | Metadata preview, crawl files, recipe import | `r.jina.ai` (page reader) | the page or file address |
 | Telegram | `api.telegram.org` | your bot token, and the messages you exchange with your bot |
 | Calendar, Analytics, Search Console | Google, with your own OAuth Client ID | a read-only sign-in that lasts about an hour |
-| Bing search data | Bing Webmaster API | your API key. Bing may refuse requests from a browser; the test in Settings says so. |
+| Bing search data | Bing Webmaster API, through `tools/bing-relay.js` on your machine (Bing does not answer web pages directly) | your API key and the site address |
 
 The typefaces (Inter, Space Grotesk) are in `fonts/`, under the SIL Open Font License, so no font is fetched from another site.
 
