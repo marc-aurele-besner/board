@@ -10,7 +10,11 @@ const MAX_TICK = 887272; // the widest possible range: a "full range" position
 // layout: 'cards' or 'list'.
 const view = { filter: 'all', chain: 'all', layout: 'cards' };
 // Loaded positions and the state of the last load. shallow: chains whose node would not search back to v4's start.
-const state = { status: 'idle', rows: [], error: '', warning: '', at: 0, shallow: [] };
+// stale: chains shown from the last good read because this one failed, with when that read was.
+const state = { status: 'idle', rows: [], error: '', warning: '', at: 0, shallow: [], stale: [] };
+// pools.json keeps the last good read of each chain and version, the last good prices of each chain, and how far
+// each v4 search got. A read that fails then shows the old rows, marked as possibly out of date.
+const COLLECTION = 'pools';
 const tokenInfo = new Map(); // "chainId:token address" -> { symbol, decimals }
 let loading = false;
 let logoMap = new Map(); // "chainId:token address" -> logo URL, from the token list
@@ -20,7 +24,7 @@ let shownAt = 0; // the load whose cards are already on screen; new loads animat
 const tokenKey = (chain, address) => `${chain.id}:${address}`;
 
 // Builds one row from a position, its pool's current state and the token prices on its chain.
-function buildRow(p, pool, prices, chain) {
+function buildRow(p, pool, prices, chain, pricesAt = null) {
   if (!pool) return null;
   const m0 = tokenInfo.get(tokenKey(chain, p.token0)) ?? { symbol: '?', decimals: 18 };
   const m1 = tokenInfo.get(tokenKey(chain, p.token1)) ?? { symbol: '?', decimals: 18 };
@@ -47,6 +51,10 @@ function buildRow(p, pool, prices, chain) {
     chain: chain.name,
     chainId: chain.id,
     tokenId: p.tokenId,
+    wallet: p.owner.toLowerCase(),
+    // Set when the values use saved prices (pricesAt) or the whole row is from an earlier read (staleAt).
+    pricesAt,
+    staleAt: null,
     owner: p.label,
     addr0: p.token0,
     addr1: p.token1,
@@ -74,22 +82,22 @@ const hasValue = (p) => p.liquidity > 0n || p.owed0 > 0n || p.owed1 > 0n;
 
 // Finds and reads one chain's v4 positions: those the search found for each wallet, and those added by hand.
 // saved is the search state the last load kept for this chain, keyed by lowercase wallet address.
-async function readV4(chain, node, wallets, cfg) {
-  const saved = cfg.v4scan?.[chain.id] ?? {};
+async function readV4(chain, node, wallets, cfg, saved) {
   const scans = {};
-  await Promise.all(wallets.map(async (w) => {
+  // One wallet at a time: each search sends many requests, and public nodes limit bursts.
+  // A failed search or read fails the whole v4 read, so the last good one is shown instead of an empty list.
+  for (const w of wallets) {
     const key = w.address.toLowerCase();
-    scans[key] = await scanV4(chain, node, w.address, saved[key]).catch(() => saved[key] ?? null);
-  }));
+    scans[key] = await scanV4(chain, node, w.address, saved[key]);
+  }
   const labels = new Map(wallets.map((w) => [w.address.toLowerCase(), w.label || w.address]));
   const manual = new Set((cfg.v4ids ?? []).filter((x) => x.chainId === chain.id).map((x) => String(x.tokenId)));
   const ids = [...new Set([...Object.values(scans).flatMap((s) => s?.ids ?? []), ...manual])];
-  const read = new Map((await Promise.all(ids.map((id) => readV4Position(chain, node, id).catch(() => undefined)))).map((r, i) => [ids[i], r]));
+  const read = new Map((await Promise.all(ids.map((id) => readV4Position(chain, node, id)))).map((r, i) => [ids[i], r]));
 
   // A found position that was burned or sent to another address is dropped from the search, so it is not read again.
-  // One that could not be read this time (undefined) is kept.
   for (const [key, s] of Object.entries(scans)) {
-    if (s) s.ids = s.ids.filter((id) => read.get(id) === undefined || read.get(id)?.position.owner === key);
+    s.ids = s.ids.filter((id) => read.get(id)?.position.owner === key);
   }
   const items = [...read.values()]
     .filter((r) => r && hasValue(r.position) && (manual.has(r.position.tokenId) || labels.has(r.position.owner)))
@@ -98,11 +106,12 @@ async function readV4(chain, node, wallets, cfg) {
 }
 
 // Reads one chain: every wallet's v3 and v4 positions there, their pools and the token prices.
-async function readChain(chain, node, wallets, cfg) {
+// v3 or v4 is null when it could not be read. saved holds this chain's v4 search state and last good prices.
+async function readChain(chain, node, wallets, cfg, saved) {
   // v3 and v4 are read side by side, so one failing does not hide the other.
   const [v3Read, v4Read] = await Promise.allSettled([
     Promise.all(wallets.map(async (w) => (await readPositions(chain, node, w.address)).map((p) => ({ ...p, label: w.label || w.address })))),
-    readV4(chain, node, wallets, cfg),
+    readV4(chain, node, wallets, cfg, saved.scan),
   ]);
   if (v3Read.status === 'rejected' && v4Read.status === 'rejected') throw v3Read.reason;
   const positions = v3Read.status === 'fulfilled' ? v3Read.value.flat() : [];
@@ -122,19 +131,53 @@ async function readChain(chain, node, wallets, cfg) {
     pools.set(key, await poolState(chain, node, { token0, token1, fee: Number(fee) }).catch(() => null));
   }));
 
+  // Prices that fail fall back to the last ones read for this chain.
   let prices = {};
+  let pricesAt = null;
+  let freshPrices = null;
   try {
     prices = await usdPrices(chain, tokens);
+    freshPrices = prices;
   } catch (err) {
-    warning = [warning, `${chain.name} token prices are unavailable (${err.message}), so values are not shown.`].filter(Boolean).join(' ');
+    if (saved.prices) {
+      prices = saved.prices.usd;
+      pricesAt = saved.prices.at;
+      warning = [warning, `${chain.name} token prices could not be read (${err.message}), so values use the prices from ${ago(pricesAt)}.`].filter(Boolean).join(' ');
+    } else {
+      warning = [warning, `${chain.name} token prices are unavailable (${err.message}), so values are not shown.`].filter(Boolean).join(' ');
+    }
   }
 
-  const rows = [
-    ...positions.map((p) => buildRow(p, pools.get(`${p.token0}|${p.token1}|${p.fee}`), prices, chain)),
-    ...v4.items.map((x) => buildRow(x.position, x.pool, prices, chain)),
-  ].filter(Boolean);
-  return { rows, warning, scans: v4.scans };
+  return {
+    v3: v3Read.status === 'fulfilled' ? positions.map((p) => buildRow(p, pools.get(`${p.token0}|${p.token1}|${p.fee}`), prices, chain, pricesAt)).filter(Boolean) : null,
+    v4: v4Read.status === 'fulfilled' ? v4.items.map((x) => buildRow(x.position, x.pool, prices, chain, pricesAt)).filter(Boolean) : null,
+    warning,
+    scans: v4.scans,
+    prices: freshPrices,
+  };
 }
+
+// How long ago a time was, in words.
+function ago(at) {
+  const mins = Math.round((Date.now() - at) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  return hours < 48 ? `${hours} h ago` : `${Math.round(hours / 24)} days ago`;
+}
+
+// Rows saved by an earlier read, for the wallets and chains still chosen. JSON has no Infinity, so an open-ended
+// range comes back as null and is restored here.
+function savedRows(store, cfg, keys) {
+  const cache = store.get(COLLECTION)?.cache ?? {};
+  const wallets = new Set((cfg.wallets ?? []).map((w) => w.address.toLowerCase()));
+  const manual = new Set((cfg.v4ids ?? []).map((x) => `${x.chainId}:v4:${x.tokenId}`));
+  return keys.flatMap((key) => (cache[key]?.rows ?? [])
+    .filter((r) => wallets.has(r.wallet) || manual.has(r.ref))
+    .map((r) => ({ ...r, max: r.max ?? Infinity, staleAt: cache[key].at })));
+}
+const cacheKeys = (chains) => chains.flatMap((c) => [`${c.id}:v3`, `${c.id}:v4`]);
+const enabledChains = (cfg) => CHAINS.filter((chain) => chainSettings(cfg, chain).enabled);
 
 // Reads every enabled chain in parallel. A chain that fails is reported and does not stop the others.
 async function load(store) {
@@ -147,31 +190,50 @@ async function load(store) {
     const cfg = store.get('settings').uniswap ?? {};
     const wallets = (cfg.wallets ?? []).filter((w) => isAddress(w.address));
     const chains = CHAINS.map((chain) => ({ chain, ...chainSettings(cfg, chain) })).filter((c) => c.enabled);
-    const results = await Promise.all(chains.map(({ chain, node }) => readChain(chain, node, wallets, cfg)
-      .catch((err) => ({ rows: [], warning: `${chain.name} could not be read: ${err.message}` }))));
+    const saved = store.get(COLLECTION) ?? {};
+    const results = await Promise.all(chains.map(({ chain, node }) => readChain(chain, node, wallets, cfg, { scan: saved.scan?.[chain.id] ?? {}, prices: saved.prices?.[chain.id] })
+      .catch((err) => ({ v3: null, v4: null, warning: `${chain.name} could not be read: ${err.message}` }))));
 
-    // Keep how far each v4 search got, so the next load goes on from there.
+    // Fresh rows replace the saved ones. A chain and version that failed shows its last good read instead.
+    const now = Date.now();
+    const rows = [];
+    const cache = {};
+    const prices = {};
     const scans = {};
+    const stale = new Map();
     chains.forEach(({ chain }, i) => {
-      if (results[i].scans) scans[chain.id] = results[i].scans;
+      const r = results[i];
+      for (const version of ['v3', 'v4']) {
+        const key = `${chain.id}:${version}`;
+        if (r[version]) {
+          rows.push(...r[version]);
+          cache[key] = { at: now, rows: r[version] };
+        } else {
+          const old = savedRows(store, cfg, [key]);
+          rows.push(...old);
+          if (saved.cache?.[key]) stale.set(chain.name, Math.min(stale.get(chain.name) ?? Infinity, saved.cache[key].at));
+        }
+      }
+      if (r.prices) prices[chain.id] = { at: now, usd: { ...saved.prices?.[chain.id]?.usd, ...r.prices } };
+      // Keep how far each v4 search got, so the next load goes on from there.
+      if (r.scans) scans[chain.id] = r.scans;
     });
+    state.stale = [...stale].map(([name, at]) => ({ name, at }));
     state.shallow = chains
       .filter(({ chain }) => Object.values(scans[chain.id] ?? {}).some((s) => s?.done && s.from > chain.v4.start))
       .map(({ chain }) => chain.name);
-    if (Object.keys(scans).length) {
-      store.update('settings', (d) => {
-        d.uniswap = { ...d.uniswap, v4scan: { ...d.uniswap?.v4scan, ...scans } };
-      });
-    }
+    store.update(COLLECTION, (d) => {
+      d.cache = { ...d.cache, ...cache };
+      d.prices = { ...d.prices, ...prices };
+      d.scan = { ...d.scan, ...scans };
+    });
 
     state.warning = results.map((r) => r.warning).filter(Boolean).join(' ');
-    state.rows = results
-      .flatMap((r) => r.rows)
-      .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+    state.rows = rows.sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
     state.status = 'ok';
     state.at = Date.now();
-    // Tell the automation rules and the notifications which positions left their range.
-    poolsChanged(store, state.rows);
+    // Tell the automation rules and the notifications which positions left their range. Old rows are left out.
+    poolsChanged(store, state.rows.filter((r) => !r.staleAt));
   } catch (err) {
     state.status = 'error';
     state.error = err.message;
@@ -236,6 +298,13 @@ function distribution(row) {
     h('div', { class: 'muted small' }, `${pct0}% ${row.sym0} · ${100 - pct0}% ${row.sym1}`));
 }
 
+// Marks a row that may be out of date: read earlier, or valued with earlier prices.
+function outdatedPill(r) {
+  if (r.staleAt) return h('span', { class: 'outdated-pill', title: `This read failed. Showing the read from ${ago(r.staleAt)}.` }, `Outdated · ${ago(r.staleAt)}`);
+  if (r.pricesAt) return h('span', { class: 'outdated-pill', title: `Prices could not be read. Values use the prices from ${ago(r.pricesAt)}.` }, 'Old prices');
+  return null;
+}
+
 function poolStat(label, value) {
   return h('div', { class: 'pool-stat' }, h('span', null, label), h('strong', null, value));
 }
@@ -255,7 +324,8 @@ function poolCard(r, i) {
           h('span', { class: 'fee-pill' }, `${r.feePct}%`),
           h('span', { class: r.inRange ? 'status-pill in' : 'status-pill out' },
             h('span', { class: 'dot' }),
-            r.inRange ? 'In range' : 'Out of range'))),
+            r.inRange ? 'In range' : 'Out of range'),
+          outdatedPill(r))),
       r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn pool-open', title: 'Open on Uniswap', 'aria-label': `Open position ${r.tokenId} on Uniswap` }, icon('link')) : null),
     rangeView(r),
     h('div', { class: 'pool-stats' },
@@ -307,7 +377,7 @@ function poolTable(rows) {
         h('tr', null,
           h('td', null, h('div', { class: 'row' },
             h('div', { class: 'pair' }, logo(tokenLogoOf(r, r.addr0), r.sym0, 'token'), logo(tokenLogoOf(r, r.addr1), r.sym1, 'token second')),
-            h('div', null, h('strong', null, r.pair), h('div', { class: 'muted small' }, `${r.owner} · ${r.version} · #${r.tokenId}`)))),
+            h('div', null, h('strong', null, r.pair), outdatedPill(r), h('div', { class: 'muted small' }, `${r.owner} · ${r.version} · #${r.tokenId}`)))),
           h('td', null, h('span', { class: 'chain-chip' }, logo(chainOf(r.chainId)?.logo, r.chain, 'xs'), r.chain), h('div', { class: 'muted small' }, `${r.feePct}% fee`)),
           h('td', null,
             h('div', null, r.full ? 'Full range' : `${price(r.min)} → ${price(r.max)} ${r.sym1}`),
@@ -330,13 +400,16 @@ function draw(root, store) {
       h('h2', null, 'Liquidity Pools'),
       setupBanner('uniswap', 'Add a wallet address in Settings to see its Uniswap positions.')));
   }
+  // Until the first read lands, show what the last one saved.
+  if (state.status === 'idle' && !state.rows.length) {
+    state.rows = savedRows(store, cfg, cacheKeys(enabledChains(cfg))).sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+  }
   if (state.status === 'idle' || (state.status === 'ok' && Date.now() - state.at > STALE_MS)) {
     setTimeout(() => load(store), 0);
   }
   askLogos(store);
 
-  const enabled = CHAINS.filter((chain) => chainSettings(cfg, chain).enabled);
-  const chainCount = enabled.length;
+  const chainCount = enabledChains(cfg).length;
   const all = state.rows;
   // Chain chips show only chains that have positions, so the row stays short.
   const chainsWithRows = CHAINS.filter((c) => all.some((r) => r.chainId === c.id));
@@ -385,6 +458,9 @@ function draw(root, store) {
 
   const reading = state.status === 'loading';
   const firstRead = reading && all.length === 0;
+  const staleText = state.stale.length
+    ? `${state.stale.map((x) => `${x.name} (read ${ago(x.at)})`).join(', ')} could not be read just now. Their positions are the last ones read and may be out of date.`
+    : '';
 
   let body;
   if (firstRead) {
@@ -412,6 +488,8 @@ function draw(root, store) {
     state.shallow.length
       ? notice({ tone: 'info', text: `The node for ${state.shallow.join(', ')} keeps only recent history, so older v4 positions there are not found. Add them by link in Settings, or set a node that keeps full history.` })
       : null,
+    staleText ? notice({ tone: 'info', text: staleText }) : null,
+    !state.at && all.length ? notice({ tone: 'info', text: 'Showing the positions saved by the last read while the chains are read again.' }) : null,
     state.warning ? notice({ tone: 'info', text: state.warning }) : null,
     state.status === 'error' ? notice({ text: `The positions could not be read: ${state.error}` }) : null,
     chainCount === 0 ? notice({ tone: 'info', text: 'No chains are selected. Pick the chains to read in Settings.' }) : null,
@@ -454,8 +532,8 @@ export default {
   title: 'Liquidity Pools',
   short: 'Pools',
   icon: 'droplet',
-  collection: null,
-  defaults: {},
+  collection: COLLECTION,
+  defaults: { cache: {}, prices: {}, scan: {} },
   render: draw,
   serialize: () => ({
     filter: view.filter === 'all' ? '' : view.filter,
