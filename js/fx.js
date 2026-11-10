@@ -1,11 +1,12 @@
-// USD and CAD exchange rate. Fetched from the Frankfurter service (ECB reference rates, no key needed),
-// cached in the browser for 12 hours. A rate typed in by hand takes precedence when set.
-const URL = 'https://api.frankfurter.app/latest?from=USD&to=CAD';
-const CACHE_KEY = 'board:fx:usd-cad';
+// USD to CAD exchange rates, one per day. The rate for a date is the ECB reference rate published for that
+// day (weekends and holidays use the last published rate). Source: Frankfurter, no account or key needed.
+// A past day's rate never changes, so it is cached in the browser for good.
+const API = 'https://api.frankfurter.dev/v1';
+const CACHE_PREFIX = 'board:fx:day:';
 const MANUAL_KEY = 'board:fx:manual';
-const TTL_MS = 12 * 3600 * 1000;
 
-let memory = null; // { rate, date, at }
+const days = new Map(); // "YYYY-MM-DD" -> { rate, date }
+const inflight = new Map(); // "YYYY-MM-DD" -> Promise
 
 function readJson(key) {
   try {
@@ -15,27 +16,7 @@ function readJson(key) {
   }
 }
 
-// The rate fetched from the service: 1 USD in CAD, with the date the rate is for.
-export async function fetchUsdToCad() {
-  if (memory && Date.now() - memory.at < TTL_MS) return memory;
-  const cached = readJson(CACHE_KEY);
-  if (cached && Date.now() - cached.at < TTL_MS) return (memory = cached);
-
-  const res = await fetch(URL);
-  if (!res.ok) throw new Error(`The exchange rate service returned ${res.status}.`);
-  const data = await res.json();
-  const rate = Number(data.rates?.CAD);
-  if (!Number.isFinite(rate)) throw new Error('The exchange rate service did not return a CAD rate.');
-  memory = { rate, date: data.date, at: Date.now() };
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(memory));
-  } catch {
-    /* storage blocked: keep the rate for this page only */
-  }
-  return memory;
-}
-
-// A rate typed in by hand, or null.
+// A rate typed in by hand. It replaces the daily rates for every day when set.
 export function manualRate() {
   const v = readJson(MANUAL_KEY);
   return Number.isFinite(Number(v)) && v ? Number(v) : null;
@@ -50,7 +31,59 @@ export function setManualRate(value) {
   }
 }
 
-// Converts an amount between USD and CAD with a 1 USD = `usdToCad` CAD rate. null when no rate is known.
+// The rate for a day if it is already known (manual, memory or browser cache), else null.
+export function knownRate(day) {
+  const manual = manualRate();
+  if (manual !== null) return manual;
+  if (days.has(day)) return days.get(day).rate;
+  const cached = readJson(CACHE_PREFIX + day);
+  if (cached && Number.isFinite(cached.rate)) {
+    days.set(day, cached);
+    return cached.rate;
+  }
+  return null;
+}
+
+// Fetches the rate for one day. Concurrent requests for the same day share one request.
+export function fetchDayRate(day) {
+  const known = knownRate(day);
+  if (known !== null) return Promise.resolve(known);
+  if (inflight.has(day)) return inflight.get(day);
+  const request = fetch(`${API}/${day}?base=USD&symbols=CAD`)
+    .then((res) => {
+      if (!res.ok) throw new Error(`The exchange rate service answered ${res.status}.`);
+      return res.json();
+    })
+    .then((data) => {
+      const rate = Number(data.rates?.CAD);
+      if (!Number.isFinite(rate)) throw new Error('The exchange rate service returned no CAD rate.');
+      const entry = { rate, date: data.date ?? day };
+      days.set(day, entry);
+      try {
+        localStorage.setItem(CACHE_PREFIX + day, JSON.stringify(entry));
+      } catch {
+        /* storage blocked: the rate is kept for this page only */
+      }
+      return rate;
+    })
+    .finally(() => inflight.delete(day));
+  inflight.set(day, request);
+  return request;
+}
+
+// Forgets every cached daily rate. Used by Settings when the user asks for a fresh start.
+export function clearCachedRates() {
+  days.clear();
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith(CACHE_PREFIX)) localStorage.removeItem(key);
+    }
+  } catch {
+    /* storage blocked */
+  }
+}
+
+// Converts between USD and CAD with the rate of the day. null when no rate is known.
 export function convert(amount, from, to, usdToCad) {
   if (from === to) return amount;
   if (!usdToCad) return null;

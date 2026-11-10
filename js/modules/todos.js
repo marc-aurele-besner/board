@@ -3,6 +3,7 @@ import { createProject, projectIcon, labelsOf, projectTree, moveProject } from '
 import { editText, pickChip } from '../inline.js';
 import { repoStats } from '../github.js';
 import { ask, parseJson } from '../ai.js';
+import { setupBanner, hasOpenRouter } from '../integrations.js';
 
 const COLLECTION = 'todos';
 const STATUSES = [
@@ -473,6 +474,7 @@ function applyTidy(store, s) {
 
 function tidyPanel(store) {
   const t = view.tidy;
+  if (t.status === 'idle' && !hasOpenRouter(store)) return setupBanner('openrouter', 'Tidy with AI needs an OpenRouter key.');
   const dismiss = h('button', { type: 'button', class: 'btn-small', onclick: () => { view.tidy = { status: 'idle', items: [] }; store.refresh(); } }, 'Dismiss');
   if (t.status === 'loading') return h('div', { class: 'panel-mini' }, 'Asking the model…');
   if (t.status === 'error') return notice({ text: t.error, actions: [dismiss] });

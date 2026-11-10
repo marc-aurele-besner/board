@@ -121,6 +121,53 @@ export async function openItems(repo) {
   }));
 }
 
+// Commits, pull requests and issues of a repo since a date, for the Monitoring tab. Cached for 10 minutes.
+const activityCache = new Map();
+const ACTIVITY_TTL_MS = 10 * 60 * 1000;
+
+// All pages of a list endpoint, up to `maxPages` pages of 100.
+async function pagesOf(url, maxPages = 3) {
+  const out = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const sep = url.includes('?') ? '&' : '?';
+    const res = await fetch(`${url}${sep}per_page=100&page=${page}`, { headers: headers() });
+    if (!res.ok) throw new Error(explain(res.status));
+    const list = await res.json();
+    out.push(...list);
+    if (list.length < 100) break;
+  }
+  return out;
+}
+
+export async function fetchActivity(repo, since) {
+  const key = `${repo}|${since}`;
+  const hit = activityCache.get(key);
+  if (hit && Date.now() - hit.at < ACTIVITY_TTL_MS) return hit.data;
+  const [commits, pulls, issues] = await Promise.all([
+    pagesOf(`${API}/repos/${repo}/commits?since=${encodeURIComponent(since)}`),
+    pagesOf(`${API}/repos/${repo}/pulls?state=all&sort=updated&direction=desc`),
+    pagesOf(`${API}/repos/${repo}/issues?state=all&since=${encodeURIComponent(since)}`),
+  ]);
+  const data = {
+    commits: commits
+      .map((c) => ({ at: c.commit?.author?.date, author: c.author?.login || c.commit?.author?.name || 'unknown' }))
+      .filter((c) => c.at),
+    pulls: pulls.map((p) => ({
+      created: p.created_at,
+      merged: p.merged_at,
+      closed: p.closed_at,
+      updated: p.updated_at,
+      state: p.state,
+      author: p.user?.login ?? '',
+    })),
+    issues: issues
+      .filter((i) => !i.pull_request)
+      .map((i) => ({ created: i.created_at, closed: i.closed_at, state: i.state })),
+  };
+  activityCache.set(key, { at: Date.now(), data });
+  return data;
+}
+
 // Drops the cached copy and fetches again.
 export function refreshRepo(repo, onChange) {
   memory.delete(repo);

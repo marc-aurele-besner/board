@@ -3,6 +3,7 @@ import { connect, isConnected, upcomingEvents } from '../google.js';
 import { projectIcon, labelsOf } from './projects.js';
 import { repoStats } from '../github.js';
 import { ask } from '../ai.js';
+import { setupBanner, hasOpenRouter } from '../integrations.js';
 
 // "Plan my day" (task 2): a plain-text plan built from the open tasks.
 const plan = { status: 'idle', text: '' };
@@ -102,6 +103,7 @@ async function runPlan(store) {
 }
 
 function planBlock(store) {
+  if (!hasOpenRouter(store)) return setupBanner('openrouter', 'Plan my day needs an OpenRouter key.');
   const button = h('button', {
     type: 'button',
     class: 'btn-small',

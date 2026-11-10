@@ -1,6 +1,7 @@
 import { h, uid, now, todayISO, empty, icon, notice } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { ask } from '../ai.js';
+import { setupBanner, hasOpenRouter } from '../integrations.js';
 
 const COLLECTION = 'recipes';
 const STATUSES = [
@@ -314,6 +315,7 @@ function detailPane(store, r) {
         onSave: (v) => updateRecipe(store, r.id, { notes: v.trim() }),
       }))),
 
+    hasOpenRouter(store) ? null : setupBanner('openrouter', 'Suggesting variations needs an OpenRouter key.'),
     h('div', { class: 'k-actions' },
       h('button', {
         type: 'button',

@@ -1,4 +1,5 @@
-import { h, icon, empty } from '../ui.js';
+import { h, icon, empty, notice, todayISO } from '../ui.js';
+import { fetchDayRate, manualRate, setManualRate, clearCachedRates } from '../fx.js';
 import { configure, checkGithubToken } from '../github.js';
 import { connect, disconnect, isConnected } from '../google.js';
 import { editText } from '../inline.js';
@@ -34,6 +35,7 @@ const SECTIONS = [
   ['openrouter', 'OpenRouter'],
   ['models', 'Models & tasks'],
   ['google', 'Google Calendar'],
+  ['exchange', 'Exchange rates'],
 ];
 
 // Model used by a task: its own pin, else the default model. Empty string when neither is set.
@@ -264,6 +266,96 @@ function modelsPanel(store) {
       h('button', { class: 'primary', type: 'submit' }, 'Add task')));
 }
 
+// --- Exchange rates ---
+
+// Result of the last connection check, shown on the card.
+const exchange = { message: '', ok: null };
+
+function exchangeCard(store) {
+  const manual = manualRate();
+  const today = todayISO();
+  const check = () => {
+    exchange.message = 'Checking…';
+    exchange.ok = null;
+    store.refresh();
+    fetchDayRate(today)
+      .then((rate) => {
+        exchange.message = `Working. Today’s rate: 1 USD = ${rate.toFixed(4)} CAD.`;
+        exchange.ok = true;
+      })
+      .catch((err) => {
+        exchange.message = err.message;
+        exchange.ok = false;
+      })
+      .finally(() => store.refresh());
+  };
+  const saveManual = (e) => {
+    e.preventDefault();
+    const v = Number(new FormData(e.currentTarget).get('rate'));
+    setManualRate(v > 0 ? v : null);
+    store.refresh();
+  };
+
+  const status = manual !== null
+    ? h('span', { class: 'pill tone-doing' }, 'Your rate')
+    : exchange.ok === true
+      ? h('span', { class: 'pill tone-done' }, 'Working')
+      : exchange.ok === false
+        ? h('span', { class: 'pill tone-high' }, 'Failed')
+        : h('span', { class: 'pill tone-plain' }, 'Not checked');
+
+  return h('section', { class: 'card panel' },
+    h('header', { class: 'panel-head' },
+      h('div', null,
+        h('h2', null, 'Exchange rates'),
+        h('p', { class: 'muted' }, 'Converts USD and CAD in Money. Each amount uses the rate of its own day, from the European Central Bank through Frankfurter. No account or key is needed.')),
+      h('div', { class: 'row' }, status)),
+
+    h('div', { class: 'cred-body' },
+      h('div', { class: 'svc-section' },
+        h('h3', null, 'Check the connection'),
+        h('p', { class: 'muted small' }, 'Fetches today’s rate to confirm this browser can reach the service.'),
+        h('div', { class: 'svc-actions' },
+          h('button', { type: 'button', class: 'primary', onclick: check, disabled: exchange.message === 'Checking…' }, 'Check now')),
+        exchange.ok === null || !exchange.message
+          ? null
+          : notice({ tone: exchange.ok ? 'ok' : 'error', text: exchange.message })),
+
+      h('form', { class: 'svc-section', onsubmit: saveManual },
+        h('h3', null, 'Use one rate instead'),
+        h('p', { class: 'muted small' }, 'Optional. A fixed USD to CAD rate for every day, for example when you are offline. Leave it empty to use daily rates.'),
+        h('div', { class: 'input-group' },
+          h('input', {
+            name: 'rate',
+            type: 'number',
+            step: '0.0001',
+            min: '0',
+            value: manual ?? '',
+            placeholder: 'e.g. 1.3800',
+            inputmode: 'decimal',
+            'aria-label': 'Fixed USD to CAD rate',
+          })),
+        h('div', { class: 'svc-actions' },
+          h('button', { class: 'primary', type: 'submit' }, 'Save'),
+          manual !== null
+            ? h('button', { type: 'button', onclick: () => { setManualRate(null); store.refresh(); } }, 'Use daily rates')
+            : null),
+
+        h('h3', null, 'Stored rates'),
+        h('p', { class: 'muted small' }, 'Daily rates are kept in this browser so past days are not fetched again.'),
+        h('div', { class: 'svc-actions' },
+          h('button', {
+            type: 'button',
+            class: 'danger',
+            onclick: () => {
+              clearCachedRates();
+              exchange.message = 'Stored rates cleared. They will be fetched again when needed.';
+              exchange.ok = true;
+              store.refresh();
+            },
+          }, 'Forget stored rates')))));
+}
+
 // --- Google Calendar ---
 
 // Connection state and the last message shown on the card.
@@ -387,6 +479,7 @@ function draw(root, store) {
   const content = view.section === 'openrouter' ? openrouter
     : view.section === 'models' ? modelsPanel(store)
       : view.section === 'google' ? googleCard(store)
+        : view.section === 'exchange' ? exchangeCard(store)
         : github;
 
   const nav = h('nav', { class: 'settings-nav', 'aria-label': 'Settings sections' },
@@ -420,6 +513,6 @@ export default {
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),
   restore: (p = {}) => {
-    view.section = ['github', 'openrouter', 'models', 'google'].includes(p.section) ? p.section : 'github';
+    view.section = ['github', 'openrouter', 'models', 'google', 'exchange'].includes(p.section) ? p.section : 'github';
   },
 };

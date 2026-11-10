@@ -1,6 +1,7 @@
 import { h, uid, now, icon, empty, statusOf, notice } from '../ui.js';
 import { repoStats, refreshRepo, openItems } from '../github.js';
 import { ask } from '../ai.js';
+import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { richText } from '../rich.js';
 
 const COLLECTION = 'projects';
@@ -499,6 +500,7 @@ async function runTriage(store, p) {
 
 function triageBlock(store, p) {
   if (!p.github.repos.length) return null;
+  if (!hasOpenRouter(store)) return setupBanner('openrouter', 'Triage with AI needs an OpenRouter key.');
   const mine = triage.projectId === p.id ? triage : { status: 'idle' };
   const button = h('button', {
     type: 'button',

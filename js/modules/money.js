@@ -2,7 +2,8 @@ import { h, uid, now, todayISO, monthKey, money, empty, icon, notice, progress, 
 import { editText, pickChip } from '../inline.js';
 import { ask, parseJson } from '../ai.js';
 import { readPdf } from '../pdf-reader.js';
-import { fetchUsdToCad, manualRate, setManualRate, convert } from '../fx.js';
+import { knownRate, fetchDayRate, manualRate, setManualRate, convert } from '../fx.js';
+import { setupBanner, hasOpenRouter } from '../integrations.js';
 
 const COLLECTION = 'finance';
 const TYPES = [['expense', 'Expense'], ['income', 'Income']];
@@ -16,14 +17,15 @@ const receipt = { status: 'idle', items: [], total: null, currency: DEFAULT_CURR
 // Monthly spending review (task 6).
 const spend = { month: '', status: 'idle', text: '' };
 // Exchange rate: the reference rate from the service, or null until it arrives.
-const fx = { status: 'idle', rate: null, date: '', error: '' };
+// Rates: days asked for, days still loading, and days that failed with the reason.
+const fx = { requested: new Set(), pending: 0, failed: new Map() };
+let shownDays = []; // the days of the month on screen, whose rates are needed
 
 const round2 = (n) => Math.round(n * 100) / 100;
 const formValues = (form) => Object.fromEntries(new FormData(form));
 const entryCurrency = (e) => e.currency ?? DEFAULT_CURRENCY;
-const currentRate = () => manualRate() ?? fx.rate;
-// An entry's amount in the shown currency, or null when no rate can convert it.
-const shownAmount = (e) => convert(e.amount, entryCurrency(e), view.currency, currentRate());
+// An entry's amount in the shown currency, at the rate of the entry's own day. null when that rate is not known yet.
+const shownAmount = (e) => convert(e.amount, entryCurrency(e), view.currency, knownRate(e.date));
 
 // Adds entries. Each carries its currency, optional project, and `source` naming the bill it came from.
 function addEntries(store, list) {
@@ -78,50 +80,54 @@ function removeEntry(store, id) {
   });
 }
 
-// --- Exchange rate ---
+// --- Exchange rates, one per day ---
 
-function loadRate(store) {
-  if (fx.status === 'loading') return;
-  fx.status = 'loading';
+// Asks for the rates of the given days that are not known yet. Called after a render, never inside one.
+function scheduleRates(store, dayList) {
+  const missing = [...new Set(dayList)].filter((d) => knownRate(d) === null && !fx.requested.has(d));
+  if (!missing.length) return;
+  for (const d of missing) fx.requested.add(d);
+  fx.pending += missing.length;
   store.refresh();
-  fetchUsdToCad()
-    .then((r) => {
-      fx.rate = r.rate;
-      fx.date = r.date;
-      fx.status = 'ok';
-      fx.error = '';
-    })
-    .catch((err) => {
-      fx.status = 'error';
-      fx.error = err.message;
-    })
-    .finally(() => store.refresh());
+  for (const d of missing) {
+    fetchDayRate(d)
+      .then(() => fx.failed.delete(d))
+      .catch((err) => fx.failed.set(d, err.message))
+      .finally(() => {
+        fx.pending -= 1;
+        store.refresh();
+      });
+  }
 }
 
-function rateLine(store) {
-  const rate = currentRate();
-  if (rate !== null) {
-    const source = manualRate() !== null ? 'your rate' : `reference rate for ${fx.date}`;
-    return h('p', { class: 'muted small rate-line' }, `1 USD = ${rate.toFixed(4)} CAD · ${source}`,
-      manualRate() !== null
-        ? h('button', { type: 'button', class: 'btn-small', onclick: () => { setManualRate(null); store.refresh(); } }, 'Use reference rate')
-        : null);
+// Forgets the failed days and asks for them again.
+function retryRates(store) {
+  for (const d of fx.failed.keys()) fx.requested.delete(d);
+  fx.failed.clear();
+  setTimeout(() => scheduleRates(store, shownDays), 0);
+  store.refresh();
+}
+
+// The line under the header: the state of the rates, or the banner that sets them up.
+function fxBanner(store) {
+  const manual = manualRate();
+  if (manual !== null) {
+    return h('p', { class: 'muted small rate-line' },
+      `Using your rate for every day: 1 USD = ${manual.toFixed(4)} CAD.`,
+      h('button', { type: 'button', class: 'btn-small', onclick: () => { setManualRate(null); store.refresh(); } }, 'Use daily rates'));
   }
-  if (fx.status === 'loading' || fx.status === 'idle') return h('p', { class: 'muted small rate-line' }, 'Loading the exchange rate…');
-  return notice({
-    text: `${fx.error || 'No exchange rate is available.'} Enter a USD → CAD rate to convert amounts.`,
-    actions: [h('form', {
-      class: 'row',
-      onsubmit: (e) => {
-        e.preventDefault();
-        const v = Number(new FormData(e.currentTarget).get('rate'));
-        if (v > 0) setManualRate(v);
-        store.refresh();
-      },
-    },
-      h('input', { name: 'rate', type: 'number', step: '0.0001', min: '0', placeholder: 'e.g. 1.37', inputmode: 'decimal', 'aria-label': 'USD to CAD rate' }),
-      h('button', { type: 'button', class: 'btn-small primary', onclick: (e) => e.currentTarget.closest('form').requestSubmit() }, 'Use this rate'))],
-  });
+  if (fx.failed.size) {
+    const count = fx.failed.size;
+    const [[, message]] = fx.failed;
+    return setupBanner('exchange', `Exchange rates could not be loaded for ${count} day${count > 1 ? 's' : ''}. ${message} Totals that need them are left out until they load.`, {
+      tone: 'error',
+      actions: [h('button', { type: 'button', class: 'btn-small', onclick: () => retryRates(store) }, 'Try again')],
+    });
+  }
+  if (fx.pending) {
+    return h('p', { class: 'muted small rate-line' }, `Loading exchange rates for ${fx.pending} day${fx.pending > 1 ? 's' : ''}…`);
+  }
+  return h('p', { class: 'muted small rate-line' }, 'Each amount converts with the exchange rate of its own day (European Central Bank).');
 }
 
 // --- Bills and screenshots ---
@@ -456,10 +462,9 @@ function spendingBlock(store, month, monthEntries) {
 // --- Page ---
 
 function draw(root, store) {
-  if (fx.status === 'idle') {
-    // Load after this render finishes, so the refresh does not run inside it.
-    setTimeout(() => loadRate(store), 0);
-  }
+  // The days on screen need their rates. They are asked for after this render, so the refresh does not run inside it.
+  shownDays = entries.filter((e) => monthKey(e.date) === view.month).map((e) => e.date).concat(todayISO());
+  setTimeout(() => scheduleRates(store, shownDays), 0);
   const { entries, categories } = store.get(COLLECTION);
   const projects = store.get('projects').projects;
   const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, color: p.color }));
@@ -516,8 +521,9 @@ function draw(root, store) {
             },
           }))),
 
-      rateLine(store),
+      fxBanner(store),
 
+      hasOpenRouter(store) ? null : setupBanner('openrouter', 'Reading bills and screenshots needs an OpenRouter key.'),
       dropZone(store, categories),
       receiptPanel(store),
 
