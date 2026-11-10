@@ -639,7 +639,7 @@ function draw(root, store) {
       ['Open ', link('https://github.com/settings/personal-access-tokens/new', 'the fine-grained token page'), '.'],
       'Resource owner: your account, or the organization that owns the private repos.',
       'Repository access: "Only select repositories", then pick the repos you link to projects.',
-      'Permissions: set Contents, Issues and Pull requests to Read-only. Contents lets the board read a repo’s README and file list so it can explain the repo. Metadata is added automatically.',
+      'Permissions: set Contents and Pull requests to Read-only, and Issues to Read and write (so tasks can create issues). Contents lets the board read a repo’s README and file list. Metadata is added automatically.',
       'Choose an expiration, generate, and copy the token. It starts with github_pat_.',
     ],
     placeholder: 'github_pat_…',

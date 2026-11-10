@@ -1,7 +1,8 @@
 import { h, uid, now, icon, statusOf, empty, notice } from '../ui.js';
 import { createProject, projectIcon, labelsOf, projectTree, moveProject, labelColor } from './projects.js';
 import { editText, pickChip } from '../inline.js';
-import { repoStats } from '../github.js';
+import { repoStats, createIssue, getIssue } from '../github.js';
+import { openDialog } from '../modal.js';
 import { ask, parseJson } from '../ai.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 
@@ -219,6 +220,119 @@ let dragProjectId = null;
 // Sorting by a column replaces the stored order, so drag-to-reorder is off while a sort is active.
 const reorderEnabled = () => !view.sort.key;
 
+// --- GitHub issues for a task ---
+
+// "#12", "12" or a github.com issue link, as { repo, number }. null when the text is not an issue reference.
+function parseIssueRef(text, defaultRepo) {
+  const t = String(text ?? '').trim();
+  const link = t.match(/github\.com\/([^/\s]+\/[^/\s]+)\/issues\/(\d+)/);
+  if (link) return { repo: link[1], number: Number(link[2]) };
+  const number = t.match(/^#?(\d+)$/);
+  if (number) return { repo: defaultRepo, number: Number(number[1]) };
+  return null;
+}
+
+// Creates a new issue for a task, or links an existing one. The task keeps the issue's repo, number, link and title.
+function openIssueDialog(store, item, repos) {
+  let repo = repos[0];
+  let mode = 'create';
+  const body = h('div', { class: 'stack' });
+  const message = h('div', null);
+  const dialog = openDialog({ title: 'GitHub issue', body: h('div', { class: 'stack' }, body, message) });
+
+  const fail = (text) => message.replaceChildren(notice({ text }));
+  const saved = (issue) => {
+    updateItem(store, item.id, { issue });
+    dialog.close();
+  };
+  const create = (title, text) => {
+    createIssue(repo, title, text).then(saved).catch((err) => fail(err.message));
+  };
+  const link = (target, number) => {
+    getIssue(target, number).then(saved).catch((err) => fail(err.message));
+  };
+
+  const paint = () => {
+    const repoPick = repos.length > 1
+      ? h('label', { class: 'bill-field' },
+          h('span', { class: 'muted small' }, 'Repository'),
+          h('select', {
+            value: repo,
+            onchange: (e) => {
+              repo = e.target.value;
+              paint();
+            },
+          }, repos.map((r) => h('option', { value: r }, r))))
+      : h('p', { class: 'muted small' }, `Repository: ${repo}`);
+    const modes = h('div', { class: 'segmented' },
+      [['create', 'Create new'], ['link', 'Link existing']].map(([key, label]) =>
+        h('button', {
+          type: 'button',
+          class: mode === key ? 'seg active' : 'seg',
+          onclick: () => {
+            mode = key;
+            paint();
+          },
+        }, label)));
+    const form = mode === 'create'
+      ? h('form', {
+          class: 'stack',
+          onsubmit: (e) => {
+            e.preventDefault();
+            const f = new FormData(e.currentTarget);
+            create(String(f.get('title') ?? '').trim(), String(f.get('body') ?? '').trim());
+          },
+        },
+          h('input', { name: 'title', value: item.text, required: true, 'aria-label': 'Issue title' }),
+          h('textarea', { name: 'body', rows: 4, placeholder: 'Issue description', 'aria-label': 'Issue description' }, item.description ?? ''),
+          h('div', { class: 'row end' }, h('button', { class: 'primary', type: 'submit' }, 'Create issue')))
+      : h('form', {
+          class: 'stack',
+          onsubmit: (e) => {
+            e.preventDefault();
+            const ref = parseIssueRef(new FormData(e.currentTarget).get('ref'), repo);
+            if (!ref) return fail('Enter an issue number like 12, or a github.com issue link.');
+            link(ref.repo, ref.number);
+          },
+        },
+          h('input', { name: 'ref', placeholder: '#12 or a github.com issue link', 'aria-label': 'Issue number or link' }),
+          h('div', { class: 'row end' }, h('button', { class: 'primary', type: 'submit' }, 'Link issue')));
+    const unlink = item.issue
+      ? h('button', {
+          type: 'button',
+          class: 'btn-small danger',
+          onclick: () => {
+            updateItem(store, item.id, { issue: null });
+            dialog.close();
+          },
+        }, `Unlink #${item.issue.number}`)
+      : null;
+    body.replaceChildren(repoPick, modes, form, unlink);
+  };
+  paint();
+}
+
+// The issue of a task as a link (#12, opens in a new tab), or a button to create or link one.
+function issueControl(store, item, repos) {
+  if (item.issue) {
+    return h('a', {
+      href: item.issue.url,
+      target: '_blank',
+      rel: 'noopener',
+      class: 'issue-link',
+      title: `${item.issue.repo} #${item.issue.number}: ${item.issue.title}`,
+      'aria-label': `Open issue #${item.issue.number}`,
+    }, icon('repo'), `#${item.issue.number}`);
+  }
+  return h('button', {
+    type: 'button',
+    class: 'icon-btn',
+    title: 'Create or link a GitHub issue',
+    'aria-label': 'Create or link a GitHub issue',
+    onclick: () => openIssueDialog(store, item, repos),
+  }, icon('repo'));
+}
+
 // One todo row. Title, description, and the pickers all edit in place.
 // ctx: { store, projects, projectLabel }
 function todoRow(store, item, ctx) {
@@ -226,6 +340,7 @@ function todoRow(store, item, ctx) {
   const status = statusOf(item);
   const priority = item.priority ?? 'none';
   const hasDescription = Boolean(item.description);
+  const repos = projects.find((p) => p.id === item.projectId)?.github.repos ?? [];
   const projectOptions = [...ctx.projects].sort((a, b) => a.name.localeCompare(b.name))
     .map((p) => ({ value: p.id, label: p.name, color: p.color }));
   const categoryNames = categoriesFor(store, item.projectId);
@@ -314,6 +429,7 @@ function todoRow(store, item, ctx) {
           onCreate: (name) => updateItem(store, item.id, { category: createTodoCategory(store, name, item.projectId) }),
         })),
       h('div', { class: 'todo-actions' },
+        repos.length || item.issue ? issueControl(store, item, repos) : null,
         hasDescription
           ? h('span', { class: 'desc-indicator', title: 'Has a description', 'aria-label': 'Has a description' }, icon('align-left'))
           : null,

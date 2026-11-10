@@ -4,6 +4,7 @@ import { ask, parseJson } from '../ai.js';
 import { readPdf } from '../pdf-reader.js';
 import { knownRate, fetchDayRate, fetchRateRange, manualRate, setManualRate, convert } from '../fx.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
+import { projectIcon } from './projects.js';
 import { barChart, legend } from '../chart.js';
 import { openDialog } from '../modal.js';
 
@@ -50,6 +51,11 @@ const parseYmd = (s) => {
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const round2 = (n) => Math.round(n * 100) / 100;
+// Categories are saved with a capital first letter, so "hosting" and "Hosting" are the same category.
+const capitalize = (s) => {
+  const t = String(s ?? '').trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : '';
+};
 const formValues = (form) => Object.fromEntries(new FormData(form));
 const entryCurrency = (e) => e.currency ?? DEFAULT_CURRENCY;
 // An entry's amount in the shown currency, at the rate of the entry's own day. null when that rate is not known yet.
@@ -105,7 +111,7 @@ function bucketKeys(from, to, group) {
 function addEntries(store, list) {
   store.update(COLLECTION, (d) => {
     for (const e of list) {
-      const category = e.category || 'Uncategorized';
+      const category = capitalize(e.category) || 'Uncategorized';
       d.entries.push({
         id: uid(),
         date: e.date,
@@ -144,6 +150,7 @@ function updateEntry(store, id, patch) {
   store.update(COLLECTION, (d) => {
     const e = d.entries.find((x) => x.id === id);
     if (!e) return;
+    if (patch.category !== undefined) patch = { ...patch, category: capitalize(patch.category) || patch.category };
     Object.assign(e, patch);
     if (patch.category && !d.categories.some((c) => c.toLowerCase() === patch.category.toLowerCase())) d.categories.push(patch.category);
   });
@@ -378,7 +385,8 @@ function receiptPanel(store) {
   }
 
   const projects = store.get('projects').projects;
-  const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, color: p.color }));
+  // Projects on a bill show their icon and name, not a coloured pill.
+  const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, plainIcon: projectIcon(p) }));
   const cur = receipt.currency;
   const source = receipt.vendor || receipt.fileName;
   const netTotal = round2(receipt.items.reduce((s, x) => s + x.amount, 0));
@@ -408,7 +416,7 @@ function receiptPanel(store) {
         currency: cur,
         category: 'Taxes',
         note: t.note,
-        projectId: null,
+        projectId: t.projectId ?? null,
         source,
         billId,
       })),
@@ -540,7 +548,16 @@ function receiptPanel(store) {
             },
           })),
           h('span', { class: 'num total' }, money(t.amount, cur)),
-          h('span', { class: 'muted small' }, 'No project'),
+          pickChip({
+            value: t.projectId ?? null,
+            options: projectOptions,
+            nullable: true,
+            nullLabel: 'No project',
+            onPick: (v) => {
+              t.projectId = v;
+              store.refresh();
+            },
+          }),
           h('span', { class: 'muted small' }, 'Taxes'),
           h('button', {
             type: 'button',
@@ -660,6 +677,7 @@ const openBills = new Set(); // ids of the bills whose charges are shown
 
 // Sets fields on every charge of a bill at once: the bill's category or project.
 function updateBill(store, billId, patch) {
+  if (patch.category !== undefined) patch = { ...patch, category: capitalize(patch.category) || patch.category };
   store.update(COLLECTION, (d) => {
     for (const e of d.entries) {
       if (e.billId === billId) Object.assign(e, patch);
