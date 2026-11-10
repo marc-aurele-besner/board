@@ -187,7 +187,8 @@ export function pickChip({ value = null, options, placeholder = 'Set', nullable 
 export function pill(label, opt = {}) {
   const text = label === null || label === undefined ? '' : String(label);
   // An option with an icon (a project's) shows the icon and the name, without a pill.
-  if (opt.plainIcon) return h('span', { class: 'opt-plain' }, opt.plainIcon, text);
+  // A DOM node can sit in one place only, so an icon passed as a function is built again for each use.
+  if (opt.plainIcon) return h('span', { class: 'opt-plain' }, typeof opt.plainIcon === 'function' ? opt.plainIcon() : opt.plainIcon, text);
   if (opt.color) return h('span', { class: 'pill tone-custom', style: { '--c': opt.color } }, text);
   return h('span', { class: `pill tone-${opt.tone ?? 'plain'}` }, text);
 }
