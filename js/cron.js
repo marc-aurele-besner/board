@@ -109,12 +109,15 @@ function lastSlot(s, at) {
   return null;
 }
 
+// The later of the last run and the moment the flow was switched on, so switching a flow on never replays a past slot.
+const sinceOf = (f) => Math.max(Date.parse(f.lastRun) || 0, Date.parse(f.enabledAt || f.created) || 0);
+
 const intervalMs = (s) => Math.max(5, Number(s.minutes) || 60) * MINUTE;
 
 export function nextRun(flow, at = new Date()) {
   const s = flow.schedule;
   if (s.every === 'interval') {
-    const since = Date.parse(flow.lastRun || flow.enabledAt || flow.created) || at.getTime();
+    const since = sinceOf(flow) || at.getTime();
     return new Date(Math.max(at.getTime(), since + intervalMs(s)));
   }
   const t = lastSlot(s, at);
@@ -125,7 +128,7 @@ export function nextRun(flow, at = new Date()) {
 // Due when a slot has passed since the last run, or since the flow was switched on. A missed slot runs once, not once per slot.
 export function isDue(flow, at = new Date()) {
   if (!flow.enabled || !flow.steps.length) return false;
-  const since = Date.parse(flow.lastRun || flow.enabledAt || flow.created) || 0;
+  const since = sinceOf(flow);
   const s = flow.schedule;
   if (s.every === 'interval') return at.getTime() - since >= intervalMs(s);
   return lastSlot(s, at).getTime() > since;
