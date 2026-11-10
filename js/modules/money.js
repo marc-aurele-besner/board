@@ -26,9 +26,10 @@ const RANGES = [
   ['all', 'All'],
 ];
 const GROUPS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month'], ['year', 'Year']];
+const KINDS = [['all', 'All'], ['fixed', 'Fixed'], ['flex', 'Flex']];
 
 // View state: the currency totals are shown in, the period, and how it is grouped in the chart.
-const view = { currency: DEFAULT_CURRENCY, range: 'month', group: 'day' };
+const view = { currency: DEFAULT_CURRENCY, range: 'month', group: 'day', kind: 'all' };
 // A bill is read into charges (the line items), a currency and a bill total. Only the charges become entries.
 // taxes: tax lines printed on the document as totals (GST, QST, ...), not attached to one charge.
 // original: the bill file itself, kept with the entries so it can be opened later.
@@ -903,6 +904,187 @@ function billLabelRow(store, projectOptions) {
       })));
 }
 
+// --- Recurring expenses ---
+
+// Due dates of a recurring expense, from its start date up to a day (inclusive), as YYYY-MM-DD.
+// A day past the month's end (the 31st in April) falls on the last day of that month.
+function dueDates(item, untilKey) {
+  const start = parseYmd(item.startDate);
+  const step = item.cadence === 'yearly' ? 12 : 1;
+  const dates = [];
+  for (let i = 0; i < 5000; i += 1) {
+    const first = new Date(start.getFullYear(), start.getMonth() + i * step, 1);
+    const lastDay = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+    const key = ymd(new Date(first.getFullYear(), first.getMonth(), Math.min(start.getDate(), lastDay)));
+    if (key > untilKey) break;
+    dates.push(key);
+  }
+  return dates;
+}
+
+// Adds an entry for every due date up to today that has none yet. Each date is recorded on its expense,
+// so an entry the user deletes is not added again.
+function syncRecurring(store) {
+  const today = ymd(startOfDay(new Date()));
+  const missing = [];
+  for (const item of store.get(COLLECTION).recurring) {
+    const done = new Set(item.generated);
+    for (const key of dueDates(item, today)) if (!done.has(key)) missing.push([item.id, key]);
+  }
+  if (!missing.length) return;
+  store.update(COLLECTION, (d) => {
+    for (const [id, key] of missing) {
+      const item = d.recurring.find((r) => r.id === id);
+      if (!item || item.generated.includes(key)) continue;
+      item.generated.push(key);
+      d.entries.push({
+        id: uid(),
+        date: key,
+        type: 'expense',
+        amount: item.amount,
+        tax: 0,
+        billId: '',
+        currency: item.currency,
+        category: item.category,
+        note: item.name,
+        projectId: item.projectId ?? null,
+        source: 'Recurring',
+        recurringId: item.id,
+        created: now(),
+      });
+      if (!d.categories.some((c) => c.toLowerCase() === item.category.toLowerCase())) d.categories.push(item.category);
+    }
+  });
+}
+
+const KIND_OPTIONS = [{ value: 'fixed', label: 'Fixed' }, { value: 'flex', label: 'Flex' }];
+const CADENCE_OPTIONS = [{ value: 'monthly', label: 'Monthly' }, { value: 'yearly', label: 'Yearly' }];
+
+function addRecurring(store, values) {
+  const name = String(values.name ?? '').trim();
+  const amount = round2(Number(values.amount));
+  if (!name || !(amount > 0)) return false;
+  const category = capitalize(values.category) || 'Uncategorized';
+  store.update(COLLECTION, (d) => {
+    d.recurring.push({
+      id: uid(),
+      name,
+      amount,
+      currency: CURRENCIES.includes(values.currency) ? values.currency : DEFAULT_CURRENCY,
+      category,
+      projectId: null,
+      cadence: values.cadence === 'yearly' ? 'yearly' : 'monthly',
+      kind: values.kind === 'flex' ? 'flex' : 'fixed',
+      startDate: DATE.test(values.startDate) ? values.startDate : todayISO(),
+      generated: [],
+      created: now(),
+    });
+    if (!d.categories.some((c) => c.toLowerCase() === category.toLowerCase())) d.categories.push(category);
+  });
+  return true;
+}
+
+function updateRecurring(store, id, patch) {
+  if (patch.category !== undefined) patch = { ...patch, category: capitalize(patch.category) || 'Uncategorized' };
+  store.update(COLLECTION, (d) => {
+    const item = d.recurring.find((r) => r.id === id);
+    if (!item) return;
+    Object.assign(item, patch);
+    if (patch.category && !d.categories.some((c) => c.toLowerCase() === patch.category.toLowerCase())) d.categories.push(patch.category);
+  });
+}
+
+// Stops future entries. The entries it already added stay, as one-off lines.
+function removeRecurring(store, id) {
+  if (!confirm('Stop this recurring expense? The entries it already added stay in Money.')) return;
+  store.update(COLLECTION, (d) => {
+    d.recurring = d.recurring.filter((r) => r.id !== id);
+  });
+}
+
+function recurringRow(store, r) {
+  const today = todayISO();
+  const next = dueDates(r, ymd(addDays(startOfDay(new Date()), 400))).find((k) => k > today);
+  return h('li', { class: 'recurring-row' },
+    h('div', { class: 'recurring-main' },
+      editText({ value: r.name, onSave: (name) => updateRecurring(store, r.id, { name }) }),
+      h('span', { class: 'muted small' }, `Next due ${next ?? '—'}`)),
+    h('div', { class: 'recurring-amount' },
+      editText({
+        value: r.amount.toFixed(2),
+        className: 'expense',
+        onSave: (v) => {
+          const n = round2(Number(v));
+          if (n > 0) updateRecurring(store, r.id, { amount: n });
+          else store.refresh();
+        },
+      }),
+      pickChip({
+        value: r.currency,
+        options: CURRENCIES.map((c) => ({ value: c, label: c })),
+        onPick: (currency) => updateRecurring(store, r.id, { currency }),
+      })),
+    pickChip({ value: r.cadence, options: CADENCE_OPTIONS, onPick: (cadence) => updateRecurring(store, r.id, { cadence }) }),
+    pickChip({ value: r.kind, options: KIND_OPTIONS, onPick: (kind) => updateRecurring(store, r.id, { kind }) }),
+    categoryChip(store, r.category, 'Category', (category) => updateRecurring(store, r.id, { category })),
+    h('button', {
+      type: 'button',
+      class: 'icon-btn',
+      title: 'Stop',
+      'aria-label': `Stop ${r.name}`,
+      onclick: () => removeRecurring(store, r.id),
+    }, icon('x')));
+}
+
+function recurringForm(store, cur) {
+  return h('form', {
+    class: 'stack',
+    onsubmit: (e) => {
+      e.preventDefault();
+      if (addRecurring(store, formValues(e.currentTarget))) e.currentTarget.reset();
+      store.refresh();
+    },
+  },
+    h('div', { class: 'row' },
+      h('input', { name: 'name', placeholder: 'Name, e.g. Rent', required: true, 'aria-label': 'Name', autocomplete: 'off' }),
+      h('input', { name: 'amount', type: 'number', step: '0.01', min: '0', placeholder: 'Amount', required: true, inputmode: 'decimal', 'aria-label': 'Amount' })),
+    h('div', { class: 'row' },
+      h('select', { name: 'kind', 'aria-label': 'Fixed or flex' },
+        KIND_OPTIONS.map((o) => h('option', { value: o.value }, o.label))),
+      h('select', { name: 'cadence', 'aria-label': 'How often' },
+        CADENCE_OPTIONS.map((o) => h('option', { value: o.value }, o.label))),
+      h('select', { name: 'currency', value: cur, 'aria-label': 'Currency' },
+        CURRENCIES.map((c) => h('option', { value: c }, c)))),
+    h('div', { class: 'row' },
+      h('input', { name: 'category', list: 'finance-categories', placeholder: 'Category', 'aria-label': 'Category', autocomplete: 'off' }),
+      h('input', { name: 'startDate', type: 'date', value: todayISO(), 'aria-label': 'Start date' })),
+    h('div', { class: 'row end' }, h('button', { class: 'primary', type: 'submit' }, 'Add recurring expense')));
+}
+
+// Fixed and flex expenses, each as a monthly amount in the shown currency, then the list to edit.
+function recurringCard(store, cur) {
+  const { recurring } = store.get(COLLECTION);
+  const today = todayISO();
+  const perMonth = { fixed: 0, flex: 0 };
+  let uncounted = 0;
+  for (const r of recurring) {
+    const monthly = r.cadence === 'yearly' ? r.amount / 12 : r.amount;
+    const v = convert(round2(monthly), r.currency ?? DEFAULT_CURRENCY, cur, knownRate(today));
+    if (v === null) uncounted += 1;
+    else perMonth[r.kind === 'flex' ? 'flex' : 'fixed'] += v;
+  }
+  return h('section', { class: 'card stack' },
+    h('div', { class: 'row between' },
+      h('h3', null, 'Recurring'),
+      h('span', { class: 'muted small' }, `Fixed ${money(round2(perMonth.fixed), cur)} · Flex ${money(round2(perMonth.flex), cur)} a month`)),
+    h('p', { class: 'muted small' }, 'Fixed costs stay the same each time. Flex costs change. Each due date adds an entry on its own.'),
+    recurring.length
+      ? h('ul', { class: 'recurring-list' }, recurring.map((r) => recurringRow(store, r)))
+      : empty('No recurring expenses yet.'),
+    uncounted ? h('p', { class: 'muted small' }, `${uncounted} ${uncounted === 1 ? 'expense is' : 'expenses are'} left out of the monthly totals until its rate loads.`) : null,
+    recurringForm(store, cur));
+}
+
 // --- Page ---
 
 // One row of a breakdown: its share of the total, filled in the colour of its category when it has one.
@@ -918,12 +1100,17 @@ function draw(root, store) {
   // Projects show their icon and name, without a pill.
   const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) }));
   const cur = view.currency;
+  // Recurring entries are added after this render, so the change does not run inside it.
+  setTimeout(() => syncRecurring(store), 0);
+  // Fixed or flex: an entry takes the kind of its recurring expense. Other entries are one-off.
+  const kindById = new Map(store.get(COLLECTION).recurring.map((r) => [r.id, r.kind]));
+  const kindOf = (e) => (e.recurringId ? kindById.get(e.recurringId) ?? 'one-off' : 'one-off');
 
   const w = windowFor(view.range, entries);
   const fromKey = ymd(w.from);
   const toKey = ymd(w.to);
   const inPeriod = entries
-    .filter((e) => e.date >= fromKey && e.date < toKey)
+    .filter((e) => e.date >= fromKey && e.date < toKey && (view.kind === 'all' || kindOf(e) === view.kind))
     .sort((a, b) => b.date.localeCompare(a.date) || b.created.localeCompare(a.created));
 
   // Rates for the days on screen, asked for after this render.
@@ -1000,6 +1187,17 @@ function draw(root, store) {
               'aria-pressed': String(view.range === k),
               onclick: () => {
                 view.range = k;
+                store.refresh();
+              },
+            }, l))),
+        h('div', { class: 'period', role: 'group', 'aria-label': 'Expense type' },
+          KINDS.map(([k, l]) =>
+            h('button', {
+              type: 'button',
+              class: view.kind === k ? 'period-btn active' : 'period-btn',
+              'aria-pressed': String(view.kind === k),
+              onclick: () => {
+                view.kind = k;
                 store.refresh();
               },
             }, l))),
@@ -1081,6 +1279,8 @@ function draw(root, store) {
               h('div', { class: 'row end' }, h('button', { class: 'primary', type: 'submit' }, 'Add entry')),
               h('datalist', { id: 'finance-categories' }, categories.map((c) => h('option', { value: c }))))),
 
+          recurringCard(store, cur),
+
           h('section', { class: 'card stack' },
             h('h3', null, 'Review'),
             spendingBlock(store, view.range, inPeriod))))));
@@ -1091,12 +1291,13 @@ export default {
   title: 'Money',
   icon: 'wallet',
   collection: COLLECTION,
-  defaults: { entries: [], categories: [], bills: [] },
+  defaults: { entries: [], categories: [], bills: [], categoryColors: {}, recurring: [] },
   render: draw,
-  serialize: () => ({ cur: view.currency, range: view.range === 'month' ? '' : view.range, group: view.group === 'day' ? '' : view.group }),
+  serialize: () => ({ cur: view.currency, range: view.range === 'month' ? '' : view.range, group: view.group === 'day' ? '' : view.group, kind: view.kind === 'all' ? '' : view.kind }),
   restore: (p = {}) => {
     view.currency = CURRENCIES.includes(p.cur) ? p.cur : DEFAULT_CURRENCY;
     view.range = RANGES.some(([k]) => k === p.range) ? p.range : 'month';
     view.group = GROUPS.some(([k]) => k === p.group) ? p.group : 'day';
+    view.kind = KINDS.some(([k]) => k === p.kind) ? p.kind : 'all';
   },
 };
