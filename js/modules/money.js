@@ -16,6 +16,7 @@ const DEFAULT_CURRENCY = 'USD'; // entries saved before currencies existed are t
 const DAY = 86400000;
 const RANGES = [
   ['month', 'This month'],
+  ['lastmonth', 'Last month'],
   ['today', 'Today'],
   ['yesterday', 'Yesterday'],
   ['7', '7 days'],
@@ -66,6 +67,7 @@ function windowFor(range, entries) {
   if (range === 'today') return { from: today, to: tomorrow };
   if (range === 'yesterday') return { from: addDays(today, -1), to: today };
   if (range === 'month') return { from: new Date(today.getFullYear(), today.getMonth(), 1), to: new Date(today.getFullYear(), today.getMonth() + 1, 1) };
+  if (range === 'lastmonth') return { from: new Date(today.getFullYear(), today.getMonth() - 1, 1), to: new Date(today.getFullYear(), today.getMonth(), 1) };
   if (range === 'year') return { from: new Date(today.getFullYear() - 1, 0, 1), to: new Date(today.getFullYear(), 0, 1) };
   if (range === 'all') {
     const first = entries.map((e) => e.date).sort()[0];
