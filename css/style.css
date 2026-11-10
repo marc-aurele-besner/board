@@ -172,11 +172,22 @@ textarea.editable-field { resize: vertical; }
 .pop-item.create { color: var(--accent); justify-content: flex-start; }
 .pop-item .icon { width: 14px; height: 14px; }
 .pop-empty { color: var(--muted); padding: 6px; margin: 0; font-size: 0.9rem; }
-.pill.tone-todo, .pill.tone-plain, .pill.tone-low { color: var(--muted); }
-.pill.tone-doing { color: var(--accent); }
-.pill.tone-done { color: var(--muted); text-decoration: line-through; }
-.pill.tone-high { color: var(--danger); font-weight: 600; }
-.pill.tone-medium { color: var(--expense); }
+/* Pill colors. Each pill sets --c; the tint and border are derived from it, so they work in both themes.
+   Status, priority and project pills each get their own color. A project pill sets --c inline. */
+.pill[class*="tone-"], .pill.doing, .pill[class*="priority-"] {
+  --c: var(--muted);
+  background: color-mix(in srgb, var(--c) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c) 40%, transparent);
+  color: var(--c);
+}
+.pill.tone-plain { --c: var(--muted); }
+.pill.tone-todo { --c: #7d7a72; }
+.pill.tone-doing, .pill.doing { --c: #3b74b8; }
+.pill.tone-done { --c: #2f8f5b; }
+.pill.tone-low, .pill.priority-low { --c: #2e8a8a; }
+.pill.tone-medium, .pill.priority-medium { --c: #c7811a; }
+.pill.tone-high, .pill.priority-high { --c: #c0392b; font-weight: 600; }
+.pill.tone-custom { font-weight: 500; }
 .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); }
 .card {
   background: var(--surface);
@@ -308,10 +319,6 @@ button.danger { color: var(--danger); }
 .toolbar label { flex-direction: column; }
 .toolbar select { width: auto; min-width: 140px; }
 .pill { font-size: 0.75rem; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); white-space: nowrap; }
-.pill.doing { color: var(--accent); }
-.pill.priority-low { color: var(--muted); }
-.pill.priority-medium { color: var(--expense); }
-.pill.priority-high { color: var(--danger); font-weight: 600; }
 .todo-desc .row { align-items: flex-end; }
 .hint { font-size: 0.8rem; color: var(--muted); margin: 0 0 4px; }
 .todo-desc { display: flex; flex-direction: column; gap: 8px; padding: 8px 0 4px 40px; }

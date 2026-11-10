@@ -10,7 +10,13 @@ export function h(tag, attrs, ...children) {
   for (const [key, value] of Object.entries(attrs ?? {})) {
     if (value === null || value === undefined || value === false) continue;
     if (key === 'class') el.className = value;
-    else if (key === 'style') Object.assign(el.style, value);
+    else if (key === 'style') {
+      for (const [prop, val] of Object.entries(value)) {
+        // Custom properties (--name) need setProperty; plain properties can be assigned.
+        if (prop.startsWith('--')) el.style.setProperty(prop, val);
+        else el.style[prop] = val;
+      }
+    }
     else if (key.startsWith('on')) el.addEventListener(key.slice(2), value);
     else if (key === 'value' || key === 'checked') props.push([key, value]);
     else el.setAttribute(key, value === true ? '' : value);

@@ -195,7 +195,7 @@ function todoRow(store, item, ctx) {
   const priority = item.priority ?? 'none';
   const hasDescription = Boolean(item.description);
   const projectOptions = [...ctx.projects].sort((a, b) => a.name.localeCompare(b.name))
-    .map((p) => ({ value: p.id, label: p.name }));
+    .map((p) => ({ value: p.id, label: p.name, color: p.color }));
   const categoryNames = categoriesFor(store, item.projectId);
   if (item.category && !categoryNames.includes(item.category)) categoryNames.push(item.category);
 

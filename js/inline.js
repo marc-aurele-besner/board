@@ -103,7 +103,7 @@ function showPicker(anchor, { options, value, nullable, nullLabel, allowCreate, 
     onCreate(name);
   };
 
-  const row = (v, label, tone, selected) =>
+  const row = (v, label, opt, selected) =>
     h('button', {
       type: 'button',
       class: `pop-item${selected ? ' selected' : ''}`,
@@ -111,7 +111,7 @@ function showPicker(anchor, { options, value, nullable, nullLabel, allowCreate, 
       'aria-selected': String(selected),
       onclick: () => choose(v),
     },
-      h('span', { class: `pill tone-${tone ?? 'plain'}` }, label),
+      pill(label, opt),
       selected ? icon('check') : null);
 
   const renderList = () => {
@@ -120,8 +120,8 @@ function showPicker(anchor, { options, value, nullable, nullLabel, allowCreate, 
     const shown = options.filter((o) => !q || o.label.toLowerCase().includes(lower));
     const exact = options.some((o) => o.label.toLowerCase() === lower);
     list.replaceChildren(
-      nullable && !q ? row(null, nullLabel ?? 'None', 'plain', !value) : null,
-      ...shown.map((o) => row(o.value, o.label, o.tone, o.value === value)),
+      nullable && !q ? row(null, nullLabel ?? 'None', {}, !value) : null,
+      ...shown.map((o) => row(o.value, o.label, o, o.value === value)),
       allowCreate && q && !exact
         ? h('button', { type: 'button', class: 'pop-item create', onclick: () => create(q) }, icon('plus'), `Create “${q}”`)
         : null,
@@ -172,8 +172,14 @@ export function pickChip({ value = null, options, placeholder = 'Set', nullable 
         onCreate: (name) => onCreate?.(name),
       });
     },
-  }, found ? h('span', { class: `pill tone-${found.tone ?? 'plain'}` }, label) : h('span', { class: 'muted' }, label));
+  }, found ? pill(label, found) : h('span', { class: 'muted' }, label));
   return chip;
+}
+
+// A colored pill. An option with `color` (a project's color) gets that color; otherwise `tone` picks one from the CSS palette.
+export function pill(label, opt = {}) {
+  if (opt.color) return h('span', { class: 'pill tone-custom', style: { '--c': opt.color } }, label);
+  return h('span', { class: `pill tone-${opt.tone ?? 'plain'}` }, label);
 }
 
 // Keeps a row's own click (for example, opening its details) from firing when a control inside it is used.
