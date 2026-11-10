@@ -10,7 +10,7 @@ let started = false;
 
 const olderThan = (at, ms) => !at || Date.now() - Date.parse(at) > ms;
 
-// Health follows the interval chosen in Tools. Certificates, domains and DNS change slowly, so they are looked up once a day.
+// Health follows the interval chosen in Tools. Certificates, domains, DNS and crawl files change slowly, so they are looked up once a day.
 async function checkDueSites(store) {
   const every = (store.get('tools').every || 60) * MINUTE;
   for (const p of sitesOf(store)) {
@@ -20,6 +20,7 @@ async function checkDueSites(store) {
       olderThan(s.ssl?.at, DAY) ? 'ssl' : null,
       olderThan(s.domain?.at, DAY) ? 'domain' : null,
       olderThan(s.dns?.at, DAY) ? 'dns' : null,
+      olderThan(s.crawl?.at, DAY) ? 'crawl' : null,
     ].filter(Boolean);
     if (parts.length) await checkSite(store, p, parts);
   }
