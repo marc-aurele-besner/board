@@ -21,10 +21,11 @@ function recordUsage(store, task, model, usage) {
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
 // messages: [{ role, content }]. content can be text or an array with text and image_url parts.
-export async function ask(store, taskId, messages) {
+// `model` overrides the task's model for one call (a Cron step can pick its own).
+export async function ask(store, taskId, messages, { model: override = '' } = {}) {
   const key = store.get('settings').openrouter?.key ?? '';
   if (!key) throw new Error('Add an OpenRouter key in Settings first.');
-  const model = modelForTask(store, taskId);
+  const model = override || modelForTask(store, taskId);
   if (!model) throw new Error('No model is set for this task. Pick one in Settings → Models & tasks.');
 
   const res = await fetch(ENDPOINT, {

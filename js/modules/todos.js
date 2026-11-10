@@ -494,6 +494,9 @@ function todoRow(store, item, ctx) {
         })),
       h('div', { class: 'todo-actions' },
         repos.length || item.issue ? issueControl(store, item, repos) : null,
+        item.email
+          ? h('a', { href: `#/inbox?email=${encodeURIComponent(item.email.id)}`, class: 'icon-btn', title: 'Open the email', 'aria-label': 'Open the email this task came from' }, icon('mail'))
+          : null,
         hasDescription
           ? h('span', { class: 'desc-indicator', title: 'Has a description', 'aria-label': 'Has a description' }, icon('align-left'))
           : null,

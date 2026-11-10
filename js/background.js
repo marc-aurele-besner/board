@@ -1,7 +1,8 @@
-// Work that runs by itself while the board is open: reading Telegram, checking sites, and announcing deadlines.
+// Work that runs by itself while the board is open: reading Telegram, checking sites, Cron flows, and announcing deadlines.
 // Nothing here runs when the board is closed; there is no server.
 import { checkDeadlines } from './notifications.js';
 import { pollTelegram } from './telegram.js';
+import { runDueFlows } from './cron.js';
 import { sitesOf, siteData, checkSite, runRules, checkProviders, providersDue, checkBudgets } from './automations.js';
 
 const MINUTE = 60000;
@@ -32,6 +33,7 @@ export function startBackground(store) {
   started = true;
   const quiet = (work) => () => Promise.resolve().then(work).catch((err) => console.warn('Background work failed', err));
   const telegram = quiet(() => pollTelegram(store));
+  const cron = quiet(() => runDueFlows(store));
   const slow = quiet(async () => {
     checkDeadlines(store);
     checkBudgets(store);
@@ -42,6 +44,8 @@ export function startBackground(store) {
   // Start after the first paint, so opening the board is never held up by the network.
   setTimeout(telegram, 1500);
   setTimeout(slow, 3000);
+  setTimeout(cron, 4000);
   setInterval(telegram, MINUTE);
+  setInterval(cron, MINUTE);
   setInterval(slow, 5 * MINUTE);
 }

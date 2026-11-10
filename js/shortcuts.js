@@ -10,8 +10,10 @@ export const JUMPS = [
   ['k', 'kitchen', 'Kitchen'],
   ['m', 'money', 'Money'],
   ['l', 'positions', 'Liquidity Pools'],
+  ['i', 'inbox', 'Inbox'],
   ['o', 'monitoring', 'Monitoring'],
   ['u', 'tools', 'Tools'],
+  ['c', 'cron', 'Cron'],
   ['s', 'settings', 'Settings'],
 ];
 
