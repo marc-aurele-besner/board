@@ -653,6 +653,173 @@ function spendingBlock(store, range, periodEntries) {
   return h('div', { class: 'stack' }, button, h('div', { class: 'card-inset' }, h('pre', { class: 'ai-text' }, spend.text)));
 }
 
+// --- Entries: one line per bill (its charges open underneath), one line per entry otherwise ---
+
+const openBills = new Set(); // ids of the bills whose charges are shown
+
+// Sets fields on every charge of a bill at once: the bill's category or project.
+function updateBill(store, billId, patch) {
+  store.update(COLLECTION, (d) => {
+    for (const e of d.entries) {
+      if (e.billId === billId) Object.assign(e, patch);
+    }
+    if (patch.category && !d.categories.some((c) => c.toLowerCase() === patch.category.toLowerCase())) d.categories.push(patch.category);
+  });
+}
+
+// Deletes a bill with all its charges, after asking.
+function removeBill(store, billId) {
+  if (!confirm('Delete this bill and all its charges?')) return;
+  store.update(COLLECTION, (d) => {
+    d.entries = d.entries.filter((e) => e.billId !== billId);
+    d.bills = d.bills.filter((b) => b.id !== billId);
+  });
+}
+
+// One entry as a single line. Charges of a bill use the same line, indented.
+function entryRow(store, e, projectOptions, cur, child = false) {
+  const converted = shownAmount(e);
+  const original = entryCurrency(e);
+  return h('li', { class: child ? 'entry-row child' : 'entry-row' },
+    h('span', { class: 'entry-toggle' }),
+    editText({
+      value: e.date,
+      className: 'muted date',
+      onSave: (date) => {
+        if (DATE.test(date)) updateEntry(store, e.id, { date });
+        else store.refresh();
+      },
+    }),
+    h('span', { class: 'entry-main grow' },
+      editText({
+        value: e.note,
+        placeholder: e.category || 'Add a description',
+        allowEmpty: true,
+        onSave: (note) => updateEntry(store, e.id, { note }),
+      }),
+      e.tax ? h('span', { class: 'muted small' }, `incl. tax ${money(e.tax, original)}`) : null),
+    editText({
+      value: e.category,
+      placeholder: 'Category',
+      className: 'entry-cat',
+      onSave: (category) => updateEntry(store, e.id, { category }),
+    }),
+    pickChip({
+      value: e.projectId ?? null,
+      options: projectOptions,
+      nullable: true,
+      nullLabel: 'No project',
+      onPick: (projectId) => updateEntry(store, e.id, { projectId }),
+    }),
+    h('span', { class: 'amount' },
+      editText({
+        value: e.amount.toFixed(2),
+        className: e.type === 'income' ? 'income' : 'expense',
+        onSave: (v) => {
+          const n = round2(Number(v));
+          if (n > 0) updateEntry(store, e.id, { amount: n });
+          else store.refresh();
+        },
+      }),
+      pickChip({
+        value: original,
+        options: CURRENCIES.map((c) => ({ value: c, label: c })),
+        onPick: (currency) => updateEntry(store, e.id, { currency }),
+      }),
+      original !== cur && converted !== null ? h('span', { class: 'muted small' }, `≈ ${money(converted, cur)}`) : null),
+    h('button', {
+      type: 'button',
+      class: 'icon-btn',
+      title: 'Delete',
+      'aria-label': `Delete entry ${e.category} ${e.amount.toFixed(2)}`,
+      onclick: () => removeEntry(store, e.id),
+    }, icon('x')));
+}
+
+// A bill as one line: its total, with its category and project for the whole bill. Expands to its charges.
+function billGroup(store, items, projectOptions, cur) {
+  const first = items[0];
+  const billId = first.billId;
+  const open = openBills.has(billId);
+  const sameCategory = items.every((i) => i.category === first.category) ? first.category : null;
+  const sameProject = items.every((i) => (i.projectId ?? null) === (first.projectId ?? null)) ? (first.projectId ?? null) : undefined;
+  const total = items.reduce((s, i) => {
+    const v = shownAmount(i);
+    return v === null || s === null ? null : s + v;
+  }, 0);
+  const tax = round2(items.reduce((s, i) => s + (i.tax || 0), 0));
+
+  const head = h('div', { class: 'entry-row group-head' },
+    h('button', {
+      type: 'button',
+      class: open ? 'icon-btn chevron open' : 'icon-btn chevron',
+      title: open ? 'Hide charges' : 'Show charges',
+      'aria-label': open ? 'Hide charges' : 'Show charges',
+      'aria-expanded': String(open),
+      onclick: () => {
+        if (open) openBills.delete(billId);
+        else openBills.add(billId);
+        store.refresh();
+      },
+    }, icon('chevron-down')),
+    h('span', { class: 'muted date' }, first.date),
+    h('span', { class: 'entry-main grow' },
+      h('strong', null, first.source || 'Bill'),
+      h('span', { class: 'muted small' }, ` · ${items.length} charge${items.length === 1 ? '' : 's'}${tax ? ` · tax ${money(tax, cur)}` : ''}`)),
+    editText({
+      value: sameCategory ?? '',
+      placeholder: sameCategory === null ? 'Mixed categories' : 'Category',
+      className: 'entry-cat',
+      onSave: (category) => updateBill(store, billId, { category }),
+    }),
+    pickChip({
+      value: sameProject === undefined ? null : sameProject,
+      options: projectOptions,
+      nullable: true,
+      nullLabel: sameProject === undefined ? 'Mixed projects' : 'No project',
+      onPick: (projectId) => updateBill(store, billId, { projectId }),
+    }),
+    h('span', { class: 'amount' }, total === null ? '—' : money(total, cur)),
+    h('button', {
+      type: 'button',
+      class: 'icon-btn',
+      title: 'Delete bill',
+      'aria-label': 'Delete bill and its charges',
+      onclick: () => removeBill(store, billId),
+    }, icon('x')));
+
+  return h('li', { class: 'entry-group' },
+    head,
+    open ? h('ul', { class: 'entry-children' }, items.map((i) => entryRow(store, i, projectOptions, cur, true))) : null);
+}
+
+function entriesSection(store, inPeriod, projectOptions, cur) {
+  const rows = [];
+  const groups = new Map();
+  for (const e of inPeriod) {
+    if (!e.billId) {
+      rows.push({ single: e });
+      continue;
+    }
+    if (!groups.has(e.billId)) {
+      const group = { items: [] };
+      groups.set(e.billId, group);
+      rows.push(group);
+    }
+    groups.get(e.billId).items.push(e);
+  }
+  return h('section', { class: 'card stack' },
+    h('div', { class: 'row between' },
+      h('h3', null, 'Entries'),
+      h('span', { class: 'muted small' }, `${inPeriod.length} line${inPeriod.length === 1 ? '' : 's'}`)),
+    rows.length
+      ? h('ul', { class: 'entries' },
+          rows.map((r) => (r.single
+            ? entryRow(store, r.single, projectOptions, cur)
+            : billGroup(store, r.items, projectOptions, cur))))
+      : empty('No entries in this period.'));
+}
+
 // --- Page ---
 
 const bar = (label, amount, total, cur) =>
@@ -798,76 +965,7 @@ function draw(root, store) {
                 ? h('ul', { class: 'bars' }, projectRows.map(([name, v]) => bar(name, v, expense, cur)))
                 : empty('No expenses in this period.'))),
 
-          h('section', { class: 'card stack' },
-            h('h3', null, 'Entries'),
-            inPeriod.length
-              ? h('ul', { class: 'entries' },
-                  inPeriod.map((e) => {
-                    const converted = shownAmount(e);
-                    return h('li', null,
-                      editText({
-                        value: e.date,
-                        className: 'muted date',
-                        onSave: (date) => {
-                          if (DATE.test(date)) updateEntry(store, e.id, { date });
-                          else store.refresh();
-                        },
-                      }),
-                      h('span', { class: 'grow' },
-                        editText({
-                          value: e.category,
-                          placeholder: 'Category',
-                          onSave: (category) => updateEntry(store, e.id, { category }),
-                        }),
-                        editText({
-                          value: e.note,
-                          placeholder: 'Add a note',
-                          allowEmpty: true,
-                          className: 'muted',
-                          onSave: (note) => updateEntry(store, e.id, { note }),
-                        }),
-                        e.source ? h('span', { class: 'muted small' }, `from ${e.source}${e.tax ? ` · tax ${money(e.tax, entryCurrency(e))}` : ''}`) : null,
-                        e.billId ? h('button', { type: 'button', class: 'btn-link-inline', onclick: () => showBill(store, e.billId) }, 'original bill') : null),
-                      pickChip({
-                        value: e.projectId ?? null,
-                        options: projectOptions,
-                        nullable: true,
-                        nullLabel: 'No project',
-                        onPick: (projectId) => updateEntry(store, e.id, { projectId }),
-                      }),
-                      pickChip({
-                        value: e.type,
-                        options: TYPES.map(([v, l]) => ({ value: v, label: l, tone: v === 'income' ? 'done' : 'high' })),
-                        onPick: (type) => updateEntry(store, e.id, { type }),
-                      }),
-                      h('span', { class: 'amount' },
-                        editText({
-                          value: e.amount.toFixed(2),
-                          className: e.type === 'income' ? 'income' : 'expense',
-                          onSave: (v) => {
-                            const n = round2(Number(v));
-                            if (n > 0) updateEntry(store, e.id, { amount: n });
-                            else store.refresh();
-                          },
-                        }),
-                        pickChip({
-                          value: entryCurrency(e),
-                          options: CURRENCIES.map((c) => ({ value: c, label: c })),
-                          onPick: (currency) => updateEntry(store, e.id, { currency }),
-                        }),
-                        entryCurrency(e) !== cur && converted !== null
-                          ? h('span', { class: 'muted small' }, `≈ ${money(converted, cur)}`)
-                          : null),
-                      h('button', {
-                        type: 'button',
-                        class: 'icon-btn',
-                        title: 'Delete',
-                        'aria-label': `Delete entry ${e.category} ${e.amount.toFixed(2)}`,
-                        onclick: () => removeEntry(store, e.id),
-                      }, icon('x')));
-                  }))
-              : empty('No entries in this period.'))),
-
+          entriesSection(store, inPeriod, projectOptions, cur)),
         h('aside', { class: 'money-side stack-lg' },
           h('section', { class: 'card stack' },
             h('h3', null, 'Add a bill or screenshot'),
