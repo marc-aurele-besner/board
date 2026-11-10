@@ -2,7 +2,7 @@ import { h, icon, empty, notice, todayISO } from '../ui.js';
 import { fetchDayRate, manualRate, setManualRate, clearCachedRates } from '../fx.js';
 import { configure, checkGithubToken } from '../github.js';
 import { connect, disconnect, isConnected } from '../google.js';
-import { editText } from '../inline.js';
+import { editText, pill } from '../inline.js';
 import { modelChip } from '../model-picker.js';
 import { isAddress, CHAINS, chainSettings, savedNode } from '../uniswap.js';
 
@@ -47,6 +47,7 @@ const SECTION_GROUPS = [
     items: [
       ['appearance', 'Appearance', 'palette'],
       ['models', 'Models & tasks', 'cpu'],
+      ['categories', 'Categories', 'tag'],
       ['exchange', 'Exchange rates', 'coins'],
     ],
   },
@@ -469,6 +470,41 @@ export function applyAppearance() {
   document.body.classList.toggle('compact', density === 'compact');
 }
 
+// Colours for Money categories. The colour is saved on the Money data, so it shows wherever the category does.
+function categoriesCard(store) {
+  const fin = store.get('finance');
+  const colors = fin.categoryColors ?? {};
+  const names = [...new Set([...fin.categories, ...fin.entries.map((e) => e.category).filter(Boolean)])].sort((a, b) => a.localeCompare(b));
+  const setColor = (name, color) => store.update('finance', (d) => {
+    d.categoryColors = { ...(d.categoryColors ?? {}), [name]: color };
+  });
+  const clearColor = (name) => store.update('finance', (d) => {
+    const next = { ...(d.categoryColors ?? {}) };
+    delete next[name];
+    d.categoryColors = next;
+  });
+
+  return h('section', { class: 'card panel' },
+    h('header', { class: 'panel-head' },
+      h('div', null,
+        h('h2', null, 'Categories'),
+        h('p', { class: 'muted' }, 'Pick a colour for each category. Money shows it on the category wherever it appears, and in the category breakdown.'))),
+    names.length
+      ? h('ul', { class: 'category-colors' }, names.map((name) =>
+          h('li', null,
+            h('input', {
+              type: 'color',
+              value: colors[name] ?? '#8a8a85',
+              'aria-label': `Colour for ${name}`,
+              onchange: (e) => setColor(name, e.currentTarget.value),
+            }),
+            pill(name, { color: colors[name] }),
+            h('span', { class: 'grow' }),
+            h('span', { class: 'muted small' }, `${fin.entries.filter((e) => e.category === name).length} entries`),
+            colors[name] ? h('button', { type: 'button', class: 'btn-small', onclick: () => clearColor(name) }, 'Reset') : null)))
+      : empty('No categories yet. They appear here once an entry uses one.'));
+}
+
 const uniswapView = { message: '', ok: null };
 
 // Public wallet addresses whose Uniswap v3 positions the LP tab reads, and the chains and nodes to read them from.
@@ -779,6 +815,7 @@ function draw(root, store) {
         : view.section === 'exchange' ? exchangeCard(store)
         : view.section === 'appearance' ? appearanceCard(store)
         : view.section === 'uniswap' ? uniswapCard(store)
+        : view.section === 'categories' ? categoriesCard(store)
         : h('div', { class: 'stack-lg' }, tokenGuide(), github, orgKeysCard(store));
 
   const nav = h('nav', { class: 'settings-nav', 'aria-label': 'Settings sections' },

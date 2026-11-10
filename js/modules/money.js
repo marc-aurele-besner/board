@@ -703,9 +703,9 @@ function removeBill(store, billId) {
 
 // Every known category: the saved list plus any an entry uses, so none is missing from the picker.
 function categoryOptions(store) {
-  const { entries, categories } = store.get(COLLECTION);
+  const { entries, categories, categoryColors = {} } = store.get(COLLECTION);
   const names = new Set([...categories, ...entries.map((e) => e.category).filter(Boolean)]);
-  return [...names].sort((a, b) => a.localeCompare(b)).map((c) => ({ value: c, label: c }));
+  return [...names].sort((a, b) => a.localeCompare(b)).map((c) => ({ value: c, label: c, color: categoryColors[c] }));
 }
 
 // Category picker: a searchable list of categories, with “Create” for a new one.
@@ -905,13 +905,14 @@ function billLabelRow(store, projectOptions) {
 
 // --- Page ---
 
-const bar = (label, amount, total, cur) =>
+// One row of a breakdown: its share of the total, filled in the colour of its category when it has one.
+const bar = (label, amount, total, cur, color) =>
   h('li', null,
     h('div', { class: 'row between' }, h('span', null, label), h('span', null, `${money(amount, cur)} · ${total ? Math.round((amount / total) * 100) : 0}%`)),
-    h('div', { class: 'bar-track' }, h('div', { class: 'bar-fill', style: { width: `${total ? (amount / total) * 100 : 0}%` } })));
+    h('div', { class: 'bar-track' }, h('div', { class: 'bar-fill', style: color ? { width: `${total ? (amount / total) * 100 : 0}%`, background: color } : { width: `${total ? (amount / total) * 100 : 0}%` } })));
 
 function draw(root, store) {
-  const { entries, categories } = store.get(COLLECTION);
+  const { entries, categories, categoryColors = {} } = store.get(COLLECTION);
   const projects = store.get('projects').projects;
   const projectById = new Map(projects.map((p) => [p.id, p]));
   // Projects show their icon and name, without a pill.
@@ -1041,7 +1042,7 @@ function draw(root, store) {
             h('section', { class: 'card stack' },
               h('h3', null, 'Expenses by category'),
               categoryRows.length
-                ? h('ul', { class: 'bars' }, categoryRows.map(([name, v]) => bar(name, v, expense, cur)))
+                ? h('ul', { class: 'bars' }, categoryRows.map(([name, v]) => bar(name, v, expense, cur, categoryColors[name])))
                 : empty('No expenses in this period.')),
             h('section', { class: 'card stack' },
               h('h3', null, 'Expenses by project'),
