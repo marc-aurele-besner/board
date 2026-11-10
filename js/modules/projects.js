@@ -595,7 +595,7 @@ function projectForm(store, project, projectCount, categories) {
 function categoriesPanel(store, categories, projects) {
   return h('div', { class: 'stack-lg' },
     h('div', { class: 'row between' },
-      h('h2', null, 'Categories'),
+      h('h2', null, 'Labels'),
       h('button', {
         type: 'button',
         onclick: () => {
@@ -604,7 +604,7 @@ function categoriesPanel(store, categories, projects) {
           store.refresh();
         },
       }, 'Done')),
-    h('p', { class: 'muted' }, 'Categories group projects (Personal, Web, Crypto…). Todo categories can be scoped to one of them in the Todos section.'),
+    h('p', { class: 'muted' }, 'Labels group projects (Personal, Web, Crypto…). A project can have several. Todo categories can be scoped to a label in the Todos section.'),
     view.error ? h('p', { class: 'error', role: 'alert' }, view.error) : null,
     h('ul', { class: 'stack' },
       categories.map((c) => {
@@ -720,7 +720,7 @@ function draw(root, store) {
                 view.error = '';
                 store.refresh();
               },
-            }, 'Categories'))),
+            }, 'Labels'))),
         listBox),
 
       h('section', { class: 'card main-pane' }, detail)));
