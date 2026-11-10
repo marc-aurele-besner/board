@@ -1,5 +1,5 @@
 import { h, uid, now, icon, statusOf, empty, notice } from '../ui.js';
-import { createProject, projectIcon, labelsOf, projectTree, moveProject } from './projects.js';
+import { createProject, projectIcon, labelsOf, projectTree, moveProject, labelColor } from './projects.js';
 import { editText, pickChip } from '../inline.js';
 import { repoStats } from '../github.js';
 import { ask, parseJson } from '../ai.js';
@@ -521,7 +521,7 @@ function projectMeta(store, p) {
   if (!p) return null;
   const open = store.get(COLLECTION).items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
   return h('span', { class: 'row meta-inline' },
-    labelsFor(store, p).map((l) => h('span', { class: 'pill tone-plain' }, l.name)),
+    labelsFor(store, p).map((l) => h('span', { class: 'pill tone-custom', style: { '--c': labelColor(l) } }, l.name)),
     h('span', { class: 'muted small' }, `${open} open`),
     h('button', {
       type: 'button',

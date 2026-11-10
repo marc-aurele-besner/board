@@ -11,10 +11,13 @@ const COLLECTION = 'projects';
 const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
 const SLUG = /^[\w.-]+$/;
 const DEFAULT_CATEGORIES = [
-  { id: 'cat-personal', name: 'Personal' },
-  { id: 'cat-web', name: 'Web' },
-  { id: 'cat-crypto', name: 'Crypto' },
+  { id: 'cat-personal', name: 'Personal', color: '#2f6f4e' },
+  { id: 'cat-web', name: 'Web', color: '#3b6ea8' },
+  { id: 'cat-crypto', name: 'Crypto', color: '#b08416' },
 ];
+
+// The colour a label is shown in. Chosen in Settings > Appearance.
+export const labelColor = (label) => label?.color || PALETTE[0];
 
 // View state. mode: 'view' | 'categories'. Projects are edited in place, so there is no edit or new mode.
 // category filter: 'all' | 'none' | <category id>.
@@ -65,6 +68,14 @@ export function projectTree(projects) {
 
 // Brings projects saved before labels and parents existing up to the current shape. Runs once on open.
 export function migrateProjectShape(store) {
+  // Labels saved before colours existed get one from the palette, in order.
+  if (store.get(COLLECTION).categories.some((c) => !c.color)) {
+    store.update(COLLECTION, (d) => {
+      d.categories.forEach((c, i) => {
+        if (!c.color) c.color = PALETTE[i % PALETTE.length];
+      });
+    });
+  }
   const needsUpdate = store.get(COLLECTION).projects.some((p) => !Array.isArray(p.labels) || p.parentId === undefined || 'categoryId' in p);
   if (!needsUpdate) return;
   store.update(COLLECTION, (d) => {
@@ -275,7 +286,7 @@ function addCategory(store, name) {
     return store.refresh();
   }
   view.error = '';
-  store.update(COLLECTION, (d) => d.categories.push({ id: uid(), name }));
+  store.update(COLLECTION, (d) => d.categories.push({ id: uid(), name, color: PALETTE[d.categories.length % PALETTE.length] }));
 }
 
 function renameCategory(store, category, name) {
@@ -635,7 +646,7 @@ function projectView(store, p, items, categories) {
       h('div', { class: 'pp-field' },
         h('span', { class: 'pp-label' }, 'Labels'),
         h('div', { class: 'pp-chips' },
-          labels.map((l) => h('span', { class: 'pill tone-plain pill-x' },
+          labels.map((l) => h('span', { class: 'pill tone-custom pill-x', style: { '--c': labelColor(l) } },
             l.name,
             h('button', {
               type: 'button',
@@ -646,7 +657,7 @@ function projectView(store, p, items, categories) {
           freeLabels.length
             ? pickChip({
                 value: null,
-                options: freeLabels.map((c) => ({ value: c.id, label: c.name })),
+                options: freeLabels.map((c) => ({ value: c.id, label: c.name, color: labelColor(c) })),
                 placeholder: '+ Add label',
                 onPick: (id) => {
                   if (id) toggleLabel(store, p, id, true);

@@ -3,7 +3,7 @@ import { fsSupported, pickFolder, loadHandle, hasPermission } from './storage.js
 import { createStore } from './store.js';
 import { h, icon } from './ui.js';
 import { configure } from './github.js';
-import { ensureTasks } from './modules/settings.js';
+import { ensureTasks, applyAppearance } from './modules/settings.js';
 import { modules } from './modules/index.js';
 import { migrateLegacyProjects, migrateProjectShape } from './modules/projects.js';
 
@@ -148,6 +148,7 @@ async function reconnect() {
 }
 
 async function boot() {
+  applyAppearance();
   // A link or the back button changed the route: load that section's view from the URL, then render.
   window.addEventListener('hashchange', () => {
     if (!store) return;
