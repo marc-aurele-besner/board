@@ -1,23 +1,31 @@
-import { h, uid, now, todayISO, monthKey, money, empty, icon, notice, progress } from '../ui.js';
+import { h, uid, now, todayISO, monthKey, money, empty, icon, notice, progress, CURRENCIES } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { ask, parseJson } from '../ai.js';
 import { readPdf } from '../pdf-reader.js';
+import { fetchUsdToCad, manualRate, setManualRate, convert } from '../fx.js';
 
 const COLLECTION = 'finance';
 const TYPES = [['expense', 'Expense'], ['income', 'Income']];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const DEFAULT_CURRENCY = 'USD'; // entries saved before currencies existed are treated as USD
 
-// View state: the month being shown (YYYY-MM).
-const view = { month: monthKey(todayISO()) };
-// A bill is read into charges (the line items) and a bill total. Only the charges become entries.
-const receipt = { status: 'idle', items: [], total: null, vendor: '', error: '', fileName: '', stage: '' };
+// View state: the month shown, and the currency totals are shown in.
+const view = { month: monthKey(todayISO()), currency: DEFAULT_CURRENCY };
+// A bill is read into charges (the line items), a currency and a bill total. Only the charges become entries.
+const receipt = { status: 'idle', items: [], total: null, currency: DEFAULT_CURRENCY, vendor: '', error: '', fileName: '', stage: '' };
 // Monthly spending review (task 6).
 const spend = { month: '', status: 'idle', text: '' };
+// Exchange rate: the reference rate from the service, or null until it arrives.
+const fx = { status: 'idle', rate: null, date: '', error: '' };
 
 const round2 = (n) => Math.round(n * 100) / 100;
 const formValues = (form) => Object.fromEntries(new FormData(form));
+const entryCurrency = (e) => e.currency ?? DEFAULT_CURRENCY;
+const currentRate = () => manualRate() ?? fx.rate;
+// An entry's amount in the shown currency, or null when no rate can convert it.
+const shownAmount = (e) => convert(e.amount, entryCurrency(e), view.currency, currentRate());
 
-// Adds entries. Each may carry a project, and `source` names the bill it came from.
+// Adds entries. Each carries its currency, optional project, and `source` naming the bill it came from.
 function addEntries(store, list) {
   store.update(COLLECTION, (d) => {
     for (const e of list) {
@@ -26,7 +34,8 @@ function addEntries(store, list) {
         id: uid(),
         date: e.date,
         type: e.type ?? 'expense',
-        amount: e.amount,
+        amount: round2(e.amount),
+        currency: CURRENCIES.includes(e.currency) ? e.currency : DEFAULT_CURRENCY,
         category,
         note: e.note || '',
         projectId: e.projectId ?? null,
@@ -43,7 +52,14 @@ function addEntry(store, v) {
   if (!(amount > 0)) return;
   const date = v.date || todayISO();
   view.month = monthKey(date); // show the month the entry landed in
-  addEntries(store, [{ date, type: v.type === 'income' ? 'income' : 'expense', amount, category: v.category.trim(), note: v.note.trim() }]);
+  addEntries(store, [{
+    date,
+    type: v.type === 'income' ? 'income' : 'expense',
+    amount,
+    currency: v.currency,
+    category: v.category.trim(),
+    note: v.note.trim(),
+  }]);
 }
 
 // Every change to an entry goes through here, so a new category is remembered too.
@@ -59,6 +75,52 @@ function updateEntry(store, id, patch) {
 function removeEntry(store, id) {
   store.update(COLLECTION, (d) => {
     d.entries = d.entries.filter((e) => e.id !== id);
+  });
+}
+
+// --- Exchange rate ---
+
+function loadRate(store) {
+  if (fx.status === 'loading') return;
+  fx.status = 'loading';
+  store.refresh();
+  fetchUsdToCad()
+    .then((r) => {
+      fx.rate = r.rate;
+      fx.date = r.date;
+      fx.status = 'ok';
+      fx.error = '';
+    })
+    .catch((err) => {
+      fx.status = 'error';
+      fx.error = err.message;
+    })
+    .finally(() => store.refresh());
+}
+
+function rateLine(store) {
+  const rate = currentRate();
+  if (rate !== null) {
+    const source = manualRate() !== null ? 'your rate' : `reference rate for ${fx.date}`;
+    return h('p', { class: 'muted small rate-line' }, `1 USD = ${rate.toFixed(4)} CAD · ${source}`,
+      manualRate() !== null
+        ? h('button', { type: 'button', class: 'btn-small', onclick: () => { setManualRate(null); store.refresh(); } }, 'Use reference rate')
+        : null);
+  }
+  if (fx.status === 'loading' || fx.status === 'idle') return h('p', { class: 'muted small rate-line' }, 'Loading the exchange rate…');
+  return notice({
+    text: `${fx.error || 'No exchange rate is available.'} Enter a USD → CAD rate to convert amounts.`,
+    actions: [h('form', {
+      class: 'row',
+      onsubmit: (e) => {
+        e.preventDefault();
+        const v = Number(new FormData(e.currentTarget).get('rate'));
+        if (v > 0) setManualRate(v);
+        store.refresh();
+      },
+    },
+      h('input', { name: 'rate', type: 'number', step: '0.0001', min: '0', placeholder: 'e.g. 1.37', inputmode: 'decimal', 'aria-label': 'USD to CAD rate' }),
+      h('button', { type: 'button', class: 'btn-small primary', onclick: (e) => e.currentTarget.closest('form').requestSubmit() }, 'Use this rate'))],
   });
 }
 
@@ -97,9 +159,9 @@ const readAsDataUrl = (file) =>
 
 const receiptPrompt = (categories) => [
   'You read bills, invoices and receipts. Reply with JSON only, in this shape:',
-  '{"vendor": string, "date": "YYYY-MM-DD", "currency": string, "items": [{"date": "YYYY-MM-DD", "description": string, "amount": number, "category": string}], "total": number}.',
+  '{"vendor": string, "date": "YYYY-MM-DD", "currency": "USD" or "CAD" or the ISO code on the document, "items": [{"date": "YYYY-MM-DD", "description": string, "amount": number, "category": string}], "total": number}.',
   'Rules:',
-  '- items: one object per charge line on the document, across every page. Amounts are positive numbers.',
+  '- items: one object per charge line on the document, across every page. Amounts are positive numbers with cents, like 19.99.',
   '- Do NOT list subtotals, tax, totals, balances, credits or payments as items. Put the amount due on the document in "total".',
   '- If a line has no date of its own, use the document date.',
   `- category: pick from ${categories.join(', ') || 'none yet'} when one fits, otherwise a short new name.`,
@@ -129,6 +191,8 @@ async function readReceipt(store, file, categories) {
     const parsed = parseJson(reply);
     const doc = Array.isArray(parsed) ? { items: parsed } : parsed;
     const documentDate = DATE.test(doc.date) ? doc.date : todayISO();
+    const docCurrency = String(doc.currency ?? '').toUpperCase();
+    receipt.currency = CURRENCIES.includes(docCurrency) ? docCurrency : view.currency;
     receipt.vendor = String(doc.vendor ?? '').trim();
     receipt.total = Number.isFinite(Number(doc.total)) ? round2(Math.abs(Number(doc.total))) : null;
     receipt.items = (doc.items ?? [])
@@ -152,16 +216,17 @@ async function readReceipt(store, file, categories) {
 
 // The check at the top of the review: do the charges add up to the bill total?
 function totalCheck(itemsTotal) {
+  const cur = receipt.currency;
   if (receipt.total === null) {
-    return notice({ tone: 'info', text: `Charges add up to ${money(itemsTotal)}. The bill total could not be read, so there is nothing to check against.` });
+    return notice({ tone: 'info', text: `Charges add up to ${money(itemsTotal, cur)}. The bill total could not be read, so there is nothing to check against.` });
   }
   const diff = round2(itemsTotal - receipt.total);
   if (Math.abs(diff) < 0.01) {
-    return notice({ tone: 'ok', text: `Charges add up to the bill total of ${money(receipt.total)}.` });
+    return notice({ tone: 'ok', text: `Charges add up to the bill total of ${money(receipt.total, cur)}.` });
   }
   return notice({
     tone: 'error',
-    text: `The charges add up to ${money(itemsTotal)}, but the bill total is ${money(receipt.total)} (a difference of ${money(diff)}). Check for missing or extra charges before adding.`,
+    text: `The charges add up to ${money(itemsTotal, cur)}, but the bill total is ${money(receipt.total, cur)} (a difference of ${money(diff, cur)}). Check for missing or extra charges before adding.`,
   });
 }
 
@@ -183,10 +248,7 @@ function receiptPanel(store) {
   const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, color: p.color }));
   const itemsTotal = round2(receipt.items.reduce((s, x) => s + x.amount, 0));
   const source = receipt.vendor || receipt.fileName;
-  const dismiss = () => {
-    receipt.status = 'idle';
-    store.refresh();
-  };
+  const cur = receipt.currency;
 
   return h('div', { class: 'panel-mini receipt' },
     h('div', { class: 'row between' },
@@ -194,6 +256,15 @@ function receiptPanel(store) {
         h('strong', null, `${receipt.items.length} charges from ${source}`),
         h('div', { class: 'muted small' }, 'Each charge can go to its own project and category. The bill total is only for checking.')),
       h('div', { class: 'row' },
+        h('label', { class: 'inline' }, 'Currency',
+          h('select', {
+            value: cur,
+            'aria-label': 'Bill currency',
+            onchange: (e) => {
+              receipt.currency = e.target.value;
+              store.refresh();
+            },
+          }, CURRENCIES.map((c) => h('option', { value: c }, c)))),
         h('button', {
           type: 'button',
           class: 'btn-small primary',
@@ -202,6 +273,7 @@ function receiptPanel(store) {
               date: x.date,
               type: 'expense',
               amount: x.amount,
+              currency: cur,
               category: x.category,
               note: x.note,
               projectId: x.projectId,
@@ -213,13 +285,20 @@ function receiptPanel(store) {
             store.refresh();
           },
         }, `Add ${receipt.items.length} charges`),
-        h('button', { type: 'button', class: 'btn-small', onclick: dismiss }, 'Dismiss'))),
+        h('button', {
+          type: 'button',
+          class: 'btn-small',
+          onclick: () => {
+            receipt.status = 'idle';
+            store.refresh();
+          },
+        }, 'Dismiss'))),
 
     totalCheck(itemsTotal),
 
     h('ul', { class: 'review-list' },
       h('li', { class: 'review-row review-head muted small' },
-        h('span', null, 'Date'), h('span', null, 'Charge'), h('span', { class: 'num' }, 'Amount'),
+        h('span', null, 'Date'), h('span', null, 'Charge'), h('span', { class: 'num' }, `Amount (${cur})`),
         h('span', null, 'Project'), h('span', null, 'Category'), h('span', null)),
       receipt.items.map((x, i) =>
         h('li', { class: 'review-row' },
@@ -240,7 +319,7 @@ function receiptPanel(store) {
             },
           }),
           h('span', { class: 'num' }, editText({
-            value: String(x.amount),
+            value: x.amount.toFixed(2),
             onSave: (v) => {
               const n = round2(Number(v));
               if (n > 0) x.amount = n;
@@ -278,8 +357,8 @@ function receiptPanel(store) {
     ),
 
     h('div', { class: 'row end muted small' },
-      receipt.total === null ? null : h('span', null, `Bill total ${money(receipt.total)}`),
-      h('span', null, `Charges ${money(itemsTotal)}`)));
+      receipt.total === null ? null : h('span', null, `Bill total ${money(receipt.total, cur)}`),
+      h('span', null, `Charges ${money(itemsTotal, cur)}`)));
 }
 
 function dropZone(store, categories) {
@@ -335,21 +414,21 @@ async function reviewSpending(store, month, monthEntries) {
     const byCategory = {};
     for (const e of monthEntries) {
       const key = `${e.type}:${e.category}`;
-      byCategory[key] = round2((byCategory[key] ?? 0) + e.amount);
+      const value = shownAmount(e);
+      if (value !== null) byCategory[key] = round2((byCategory[key] ?? 0) + value);
     }
     spend.text = (await ask(store, 'task-budget', [
       {
         role: 'system',
-        content: 'You review a personal monthly budget. Given the month’s totals, totals by category and the entries as JSON, reply in plain text: the overall picture in two sentences, then the three things worth a second look, then one practical suggestion. Be concise and do not invent figures.',
+        content: `You review a personal monthly budget. Amounts are in ${view.currency}. Given the month’s totals, totals by category and the entries as JSON, reply in plain text: the overall picture in two sentences, then the three things worth a second look, then one practical suggestion. Be concise and do not invent figures.`,
       },
       {
         role: 'user',
         content: JSON.stringify({
           month,
-          income: round2(monthEntries.filter((e) => e.type === 'income').reduce((s, e) => s + e.amount, 0)),
-          expenses: round2(monthEntries.filter((e) => e.type === 'expense').reduce((s, e) => s + e.amount, 0)),
+          currency: view.currency,
           byCategory,
-          entries: monthEntries.slice(0, 80).map((e) => ({ date: e.date, type: e.type, amount: e.amount, category: e.category, note: e.note })),
+          entries: monthEntries.slice(0, 80).map((e) => ({ date: e.date, type: e.type, amount: shownAmount(e), category: e.category, note: e.note })),
         }),
       },
     ])).trim();
@@ -377,15 +456,30 @@ function spendingBlock(store, month, monthEntries) {
 // --- Page ---
 
 function draw(root, store) {
+  if (fx.status === 'idle') {
+    // Load after this render finishes, so the refresh does not run inside it.
+    setTimeout(() => loadRate(store), 0);
+  }
   const { entries, categories } = store.get(COLLECTION);
   const projects = store.get('projects').projects;
-  const projectById = new Map(projects.map((p) => [p.id, p]));
   const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, color: p.color }));
+  const cur = view.currency;
   const monthEntries = entries
     .filter((e) => monthKey(e.date) === view.month)
     .sort((a, b) => b.date.localeCompare(a.date) || b.created.localeCompare(a.created));
 
-  const total = (type) => round2(monthEntries.filter((e) => e.type === type).reduce((s, e) => s + e.amount, 0));
+  // Totals in the shown currency. Entries that cannot be converted yet are counted separately.
+  let unconverted = 0;
+  const total = (type) => {
+    let sum = 0;
+    for (const e of monthEntries) {
+      if (e.type !== type) continue;
+      const v = shownAmount(e);
+      if (v === null) unconverted += 1;
+      else sum += v;
+    }
+    return round2(sum);
+  };
   const income = total('income');
   const expense = total('expense');
   const net = round2(income - expense);
@@ -393,32 +487,48 @@ function draw(root, store) {
   // Expense totals per category, largest first.
   const byCategory = new Map();
   for (const e of monthEntries) {
-    if (e.type === 'expense') byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + e.amount);
+    const v = e.type === 'expense' ? shownAmount(e) : null;
+    if (v !== null) byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + v);
   }
   const breakdown = [...byCategory].sort((a, b) => b[1] - a[1]);
 
   root.replaceChildren(
     h('div', { class: 'stack-lg' },
-      h('div', { class: 'row between' },
+      h('div', { class: 'row between head' },
         h('h2', null, 'Money'),
-        h('input', {
-          type: 'month',
-          value: view.month,
-          'aria-label': 'Month',
-          onchange: (e) => {
-            view.month = e.target.value || view.month;
-            store.refresh();
-          },
-        })),
+        h('div', { class: 'row' },
+          h('label', { class: 'inline' }, 'Show in',
+            h('select', {
+              value: view.currency,
+              'aria-label': 'Show totals in currency',
+              onchange: (e) => {
+                view.currency = e.target.value;
+                store.refresh();
+              },
+            }, CURRENCIES.map((c) => h('option', { value: c }, c)))),
+          h('input', {
+            type: 'month',
+            value: view.month,
+            'aria-label': 'Month',
+            onchange: (e) => {
+              view.month = e.target.value || view.month;
+              store.refresh();
+            },
+          }))),
+
+      rateLine(store),
 
       dropZone(store, categories),
       receiptPanel(store),
 
       h('div', { class: 'summary' },
-        h('div', { class: 'card stat' }, h('span', { class: 'muted' }, 'Income'), h('strong', { class: 'income' }, money(income))),
-        h('div', { class: 'card stat' }, h('span', { class: 'muted' }, 'Expenses'), h('strong', { class: 'expense' }, money(expense))),
+        h('div', { class: 'card stat' }, h('span', { class: 'muted' }, 'Income'), h('strong', { class: 'income' }, money(income, cur))),
+        h('div', { class: 'card stat' }, h('span', { class: 'muted' }, 'Expenses'), h('strong', { class: 'expense' }, money(expense, cur))),
         h('div', { class: 'card stat' }, h('span', { class: 'muted' }, 'Net'),
-          h('strong', { class: net < 0 ? 'expense' : 'income' }, money(net)))),
+          h('strong', { class: net < 0 ? 'expense' : 'income' }, money(net, cur)))),
+      unconverted
+        ? h('p', { class: 'muted small' }, `${unconverted} ${unconverted === 1 ? 'entry' : 'entries'} in another currency ${unconverted === 1 ? 'is' : 'are'} left out until a rate is available.`)
+        : null,
 
       spendingBlock(store, view.month, monthEntries),
 
@@ -436,7 +546,9 @@ function draw(root, store) {
               h('select', { name: 'type', 'aria-label': 'Type' },
                 h('option', { value: 'expense' }, 'Expense'),
                 h('option', { value: 'income' }, 'Income')),
-              h('input', { name: 'amount', type: 'number', step: '0.01', min: '0', placeholder: 'Amount', required: true, inputmode: 'decimal', 'aria-label': 'Amount' })),
+              h('input', { name: 'amount', type: 'number', step: '0.01', min: '0', placeholder: 'Amount', required: true, inputmode: 'decimal', 'aria-label': 'Amount' }),
+              h('select', { name: 'currency', value: cur, 'aria-label': 'Currency' },
+                CURRENCIES.map((c) => h('option', { value: c }, c)))),
             h('div', { class: 'row' },
               h('input', { name: 'category', list: 'finance-categories', placeholder: 'Category', 'aria-label': 'Category', autocomplete: 'off' }),
               h('input', { name: 'date', type: 'date', value: todayISO(), 'aria-label': 'Date' })),
@@ -445,22 +557,24 @@ function draw(root, store) {
             h('datalist', { id: 'finance-categories' }, categories.map((c) => h('option', { value: c }))))),
 
         h('section', { class: 'card main-pane' },
-          h('h3', null, 'Expenses by category'),
+          h('h3', null, `Expenses by category (${cur})`),
           breakdown.length
             ? h('ul', { class: 'bars' },
                 breakdown.map(([name, amount]) =>
                   h('li', null,
-                    h('div', { class: 'row between' }, h('span', null, name), h('span', null, money(amount))),
+                    h('div', { class: 'row between' }, h('span', null, name), h('span', null, money(amount, cur))),
                     h('div', { class: 'bar-track' },
-                      h('div', { class: 'bar-fill', style: { width: `${(amount / expense) * 100}%` } })))))
+                      h('div', { class: 'bar-fill', style: { width: `${expense ? (amount / expense) * 100 : 0}%` } })))))
             : empty('No expenses this month.'))),
 
       h('section', { class: 'card main-pane' },
         h('h3', null, 'Entries'),
         monthEntries.length
           ? h('ul', { class: 'entries' },
-              monthEntries.map((e) =>
-                h('li', null,
+              monthEntries.map((e) => {
+                const converted = shownAmount(e);
+                const original = entryCurrency(e);
+                return h('li', null,
                   editText({
                     value: e.date,
                     className: 'muted date',
@@ -495,22 +609,32 @@ function draw(root, store) {
                     options: TYPES.map(([v, l]) => ({ value: v, label: l, tone: v === 'income' ? 'done' : 'high' })),
                     onPick: (type) => updateEntry(store, e.id, { type }),
                   }),
-                  editText({
-                    value: String(e.amount),
-                    className: e.type === 'income' ? 'income' : 'expense',
-                    onSave: (v) => {
-                      const n = round2(Number(v));
-                      if (n > 0) updateEntry(store, e.id, { amount: n });
-                      else store.refresh();
-                    },
-                  }),
+                  h('span', { class: 'amount' },
+                    editText({
+                      value: e.amount.toFixed(2),
+                      className: e.type === 'income' ? 'income' : 'expense',
+                      onSave: (v) => {
+                        const n = round2(Number(v));
+                        if (n > 0) updateEntry(store, e.id, { amount: n });
+                        else store.refresh();
+                      },
+                    }),
+                    pickChip({
+                      value: original,
+                      options: CURRENCIES.map((c) => ({ value: c, label: c })),
+                      onPick: (currency) => updateEntry(store, e.id, { currency }),
+                    }),
+                    original !== cur && converted !== null
+                      ? h('span', { class: 'muted small' }, `≈ ${money(converted, cur)}`)
+                      : null),
                   h('button', {
                     type: 'button',
                     class: 'icon-btn',
                     title: 'Delete',
-                    'aria-label': `Delete entry ${e.category} ${money(e.amount)}`,
+                    'aria-label': `Delete entry ${e.category} ${e.amount.toFixed(2)}`,
                     onclick: () => removeEntry(store, e.id),
-                  }, icon('x')))))
+                  }, icon('x')));
+              }))
           : empty('No entries for this month.'))));
 }
 
@@ -521,8 +645,9 @@ export default {
   collection: COLLECTION,
   defaults: { entries: [], categories: [] },
   render: draw,
-  serialize: () => ({ month: view.month }),
+  serialize: () => ({ month: view.month, cur: view.currency }),
   restore: (p = {}) => {
     view.month = /^\d{4}-\d{2}$/.test(p.month ?? '') ? p.month : monthKey(todayISO());
+    view.currency = CURRENCIES.includes(p.cur) ? p.cur : DEFAULT_CURRENCY;
   },
 };

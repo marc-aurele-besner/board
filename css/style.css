@@ -98,6 +98,11 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
 .label-opt { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); cursor: pointer; font-size: 0.85rem; }
 .label-opt input { width: auto; margin: 0; }
 
+/* Money: exchange rate line and amounts with currency */
+.rate-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0; }
+.amount { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 110px; font-variant-numeric: tabular-nums; }
+.amount .chip-pick { padding: 0 2px; min-height: 0; }
+
 /* Kitchen: recipe cards on the left, one recipe at a time on the right */
 .kitchen-shell { display: grid; grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); gap: var(--gap); align-items: start; }
 .k-side { position: sticky; top: 72px; display: flex; flex-direction: column; gap: 10px; max-height: calc(100vh - 90px); overflow: hidden; }

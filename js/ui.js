@@ -42,8 +42,14 @@ export function todayISO() {
 
 export const monthKey = (isoDate) => isoDate.slice(0, 7); // YYYY-MM
 
-const currencyFormat = new Intl.NumberFormat(undefined, { style: 'currency', currency: CURRENCY });
-export const money = (n) => currencyFormat.format(n);
+export const CURRENCIES = ['USD', 'CAD'];
+
+// Formats an amount with two decimals in the given currency (default: CURRENCY).
+const formatters = new Map();
+export const money = (n, currency = CURRENCY) => {
+  if (!formatters.has(currency)) formatters.set(currency, new Intl.NumberFormat(undefined, { style: 'currency', currency }));
+  return formatters.get(currency).format(n);
+};
 
 export const empty = (text) => h('p', { class: 'empty' }, text);
 
