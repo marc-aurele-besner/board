@@ -31,15 +31,27 @@ export function ensureTasks(store) {
   });
 }
 
-const SECTIONS = [
-  ['github', 'GitHub'],
-  ['openrouter', 'OpenRouter'],
-  ['models', 'Models & tasks'],
-  ['google', 'Google Calendar'],
-  ['exchange', 'Exchange rates'],
-  ['uniswap', 'Uniswap'],
-  ['appearance', 'Appearance'],
+// Settings pages in nav order, grouped. Each item is [key, label, icon].
+const SECTION_GROUPS = [
+  {
+    title: 'Connections',
+    items: [
+      ['github', 'GitHub', 'github'],
+      ['openrouter', 'OpenRouter', 'key'],
+      ['google', 'Google Calendar', 'calendar'],
+      ['uniswap', 'Uniswap', 'wallet'],
+    ],
+  },
+  {
+    title: 'Preferences',
+    items: [
+      ['appearance', 'Appearance', 'palette'],
+      ['models', 'Models & tasks', 'cpu'],
+      ['exchange', 'Exchange rates', 'coins'],
+    ],
+  },
 ];
+const PAGES = SECTION_GROUPS.flatMap((g) => g.items.map(([key]) => key));
 
 // Model used by a task: its own pin, else the default model. Empty string when neither is set.
 export function modelForTask(store, taskId) {
@@ -87,7 +99,7 @@ function statusBadge(saved, result) {
 
 // A key card: setup steps on the left, the key field and its actions on the right.
 function credentialCard(store, cfg) {
-  const { id, field, title, intro, steps, placeholder, check, note, docs } = cfg;
+  const { id, field, title, fieldLabel, intro, steps, placeholder, check, note, docs } = cfg;
   const saved = store.get(COLLECTION)[id]?.[field] ?? '';
   const result = view.results[id];
   const revealed = Boolean(view.reveal[id]);
@@ -132,7 +144,7 @@ function credentialCard(store, cfg) {
           save(new FormData(e.currentTarget).get('secret').trim());
         },
       },
-        h('h3', null, `${title} key`),
+        h('h3', null, fieldLabel ?? `${title} key`),
         h('div', { class: 'input-group' },
           h('input', {
             name: 'secret',
@@ -635,8 +647,8 @@ function orgKeysCard(store) {
   return h('section', { class: 'card panel' },
     h('header', { class: 'panel-head' },
       h('div', null,
-        h('h2', null, 'Keys per organization'),
-        h('p', { class: 'muted' }, 'Each organization can have its own key, used for its repos, private ones included. Repos from other owners use the default key above.'))),
+        h('h2', null, 'Organization tokens'),
+        h('p', { class: 'muted' }, 'One token per organization, made with that organization as resource owner. Same permissions as the personal token. If the organization requires approval for personal access tokens, an organization owner has to approve it before it works.'))),
 
     orgs.length
       ? h('ul', { class: 'org-keys' },
@@ -678,7 +690,24 @@ function orgKeysCard(store) {
     },
       h('input', { name: 'org', placeholder: 'Organization, e.g. my-org', 'aria-label': 'Organization', autocomplete: 'off', spellcheck: false }),
       h('input', { name: 'token', type: 'password', placeholder: 'github_pat_…', 'aria-label': 'Token for this organization', autocomplete: 'off', spellcheck: false }),
-      h('button', { class: 'primary', type: 'submit' }, 'Add key')));
+      h('button', { class: 'primary', type: 'submit' }, 'Add token')));
+}
+
+// Explains which GitHub token does what, so a personal token is not mistaken for an organization one.
+function tokenGuide() {
+  return h('section', { class: 'card panel' },
+    h('header', { class: 'panel-head' },
+      h('div', null,
+        h('h2', null, 'Which token do I need?'),
+        h('p', { class: 'muted' }, 'Start with a personal token. Add an organization token only when an organization needs its own.'))),
+    h('div', { class: 'token-guide' },
+      h('div', null,
+        h('h3', null, 'Personal token (required)'),
+        h('p', { class: 'muted small' }, 'Made from your own account. Used for every repo that has no organization token: your repos and public repos.')),
+      h('div', null,
+        h('h3', null, 'Organization token (optional)'),
+        h('p', { class: 'muted small' }, 'Made with the organization as resource owner. Used for that organization’s repos, private ones included. Add one when your personal token cannot see the organization’s private repos, or when you want that organization’s access kept separate.'))),
+    h('p', { class: 'muted small' }, 'Lookup: a repo under an organization that has a token uses that token. Every other repo uses the personal token.'));
 }
 
 // --- Page ---
@@ -692,15 +721,16 @@ function draw(root, store) {
   const github = credentialCard(store, {
     id: 'github',
     field: 'token',
-    title: 'GitHub',
+    title: 'Personal token',
+    fieldLabel: 'Personal token',
     docs: 'https://github.com/settings/personal-access-tokens',
-    intro: 'A personal access token lets the board read private repos and raises the GitHub limit from 60 to 5,000 requests per hour.',
+    intro: 'Your main token. The board uses it for every repo that has no organization token: your own repos and public repos. It also raises the GitHub limit from 60 to 5,000 requests per hour.',
     steps: [
       ['Open ', link('https://github.com/settings/personal-access-tokens/new', 'the fine-grained token page'), '.'],
-      'Resource owner: your account, or the organization that owns the private repos.',
-      'Repository access: "Only select repositories", then pick the repos you link to projects.',
-      'Permissions: set Contents and Pull requests to Read-only, and Issues to Read and write (so tasks can create issues). Contents lets the board read a repo’s README and file list. Metadata is added automatically.',
-      'Choose an expiration, generate, and copy the token. It starts with github_pat_.',
+      'Resource owner: your own account.',
+      'Repository access: "All repositories" lets the board see every repo you can see. "Only select repositories" limits it to the repos you link to projects.',
+      'Permissions: Contents and Pull requests set to Read-only. Issues set to Read and write, so tasks can create issues. Metadata is added automatically.',
+      'Choose an expiration, generate the token, and copy it. It starts with github_pat_.',
     ],
     placeholder: 'github_pat_…',
     check: checkGithubToken,
@@ -729,19 +759,22 @@ function draw(root, store) {
         : view.section === 'exchange' ? exchangeCard(store)
         : view.section === 'appearance' ? appearanceCard(store)
         : view.section === 'uniswap' ? uniswapCard(store)
-        : h('div', { class: 'stack-lg' }, github, orgKeysCard(store));
+        : h('div', { class: 'stack-lg' }, tokenGuide(), github, orgKeysCard(store));
 
   const nav = h('nav', { class: 'settings-nav', 'aria-label': 'Settings sections' },
-    SECTIONS.map(([key, label]) =>
-      h('button', {
-        type: 'button',
-        class: view.section === key ? 'settings-tab active' : 'settings-tab',
-        'aria-current': view.section === key ? 'page' : null,
-        onclick: () => {
-          view.section = key;
-          store.refresh();
-        },
-      }, label)));
+    SECTION_GROUPS.map((group) =>
+      h('div', { class: 'settings-group' },
+        h('p', { class: 'settings-group-title' }, group.title),
+        group.items.map(([key, label, iconName]) =>
+          h('button', {
+            type: 'button',
+            class: view.section === key ? 'settings-tab active' : 'settings-tab',
+            'aria-current': view.section === key ? 'page' : null,
+            onclick: () => {
+              view.section = key;
+              store.refresh();
+            },
+          }, icon(iconName), h('span', null, label))))));
 
   root.replaceChildren(
     h('div', { class: 'settings-shell' },
@@ -762,6 +795,6 @@ export default {
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),
   restore: (p = {}) => {
-    view.section = ['github', 'openrouter', 'models', 'google', 'exchange', 'uniswap', 'appearance'].includes(p.section) ? p.section : 'github';
+    view.section = PAGES.includes(p.section) ? p.section : 'github';
   },
 };
