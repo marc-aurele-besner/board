@@ -668,11 +668,33 @@ function appearanceCard(store) {
 // The organization name from what was typed: a name, or a github.com link to one.
 const orgNameFrom = (text) => String(text ?? '').trim().replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\/.*$/, '');
 
-// Result of the last test of an organization key, and which one is being tested.
-const orgKeys = { message: '', ok: true, testing: null };
+// Result of the last test of an organization key, which one is being tested, and the organization picked
+// in the dropdown (set by the "Add token" button on a row).
+const orgKeys = { message: '', ok: true, testing: null, pick: '' };
+
+// Every organization the projects use: the org set on each project, and the owner of each linked repo.
+function knownOrgs(store) {
+  const names = new Map(); // lower-case name -> name as written
+  const add = (name) => {
+    const v = String(name ?? '').trim();
+    if (v && !names.has(v.toLowerCase())) names.set(v.toLowerCase(), v);
+  };
+  for (const p of store.get('projects').projects) {
+    add(p.github?.org);
+    for (const repo of p.github?.repos ?? []) add(String(repo).split('/')[0]);
+  }
+  return [...names.values()];
+}
 
 function orgKeysCard(store) {
   const orgs = store.get(COLLECTION).github?.orgs ?? [];
+  const tokenFor = (name) => orgs.find((x) => x.org.toLowerCase() === name.toLowerCase());
+  // Projects' organizations, plus any organization that has a token but no project yet.
+  const known = knownOrgs(store);
+  const all = [...known, ...orgs.map((o) => o.org).filter((o) => !known.some((k) => k.toLowerCase() === o.toLowerCase()))]
+    .sort((a, b) => a.localeCompare(b));
+  const missing = all.filter((name) => !tokenFor(name));
+
   const saveOrgs = (list) => {
     store.update(COLLECTION, (d) => {
       d.github = { ...d.github, orgs: list };
@@ -700,51 +722,76 @@ function orgKeysCard(store) {
   };
   const mask = (token) => `••••${token.slice(-4)}`;
 
+  const rows = all.length
+    ? h('ul', { class: 'org-keys' },
+        all.map((name) => {
+          const entry = tokenFor(name);
+          return h('li', null,
+            h('span', { class: 'pill tone-plain' }, name),
+            entry
+              ? h('span', { class: 'pill tone-done' }, 'Token saved')
+              : h('span', { class: 'pill tone-doing' }, 'No token'),
+            entry ? h('code', { class: 'muted small' }, mask(entry.token)) : null,
+            h('span', { class: 'grow' }),
+            entry
+              ? h('button', {
+                  type: 'button',
+                  class: 'btn-small',
+                  disabled: orgKeys.testing === entry.org,
+                  onclick: () => testOrg(entry),
+                }, orgKeys.testing === entry.org ? 'Testing…' : 'Test')
+              : h('button', {
+                  type: 'button',
+                  class: 'btn-small primary-link',
+                  onclick: () => {
+                    orgKeys.pick = name;
+                    orgKeys.message = '';
+                    store.refresh();
+                  },
+                }, icon('plus'), 'Add token'),
+            entry
+              ? h('button', {
+                  type: 'button',
+                  class: 'btn-small danger',
+                  onclick: () => {
+                    if (confirm(`Remove the token for ${name}? Its repos fall back to the personal token.`)) {
+                      saveOrgs(orgs.filter((x) => x.org !== name));
+                    }
+                  },
+                }, icon('x'), 'Remove')
+              : null);
+        }))
+    : empty('No organizations yet. Link a project to a GitHub organization and it appears here.');
+
   return h('section', { class: 'card panel' },
     h('header', { class: 'panel-head' },
       h('div', null,
         h('h2', null, 'Organization tokens'),
-        h('p', { class: 'muted' }, 'One token per organization, made with that organization as resource owner. Same permissions as the personal token. If the organization requires approval for personal access tokens, an organization owner has to approve it before it works.'))),
+        h('p', { class: 'muted' }, `Organizations your projects use. ${missing.length ? `${missing.length} ${missing.length === 1 ? 'has' : 'have'} no token yet and use the personal token.` : 'Every organization has a token.'} A token is made with that organization as resource owner, with the same permissions as the personal token. If the organization requires approval for personal access tokens, an organization owner has to approve it first.`))),
 
-    orgs.length
-      ? h('ul', { class: 'org-keys' },
-          orgs.map((o) =>
-            h('li', null,
-              h('span', { class: 'pill tone-plain' }, o.org),
-              h('code', { class: 'muted small' }, mask(o.token)),
-              h('span', { class: 'grow' }),
-              h('button', {
-                type: 'button',
-                class: 'btn-small',
-                disabled: orgKeys.testing === o.org,
-                onclick: () => testOrg(o),
-              }, orgKeys.testing === o.org ? 'Testing…' : 'Test'),
-              h('button', {
-                type: 'button',
-                class: 'btn-small danger',
-                onclick: () => {
-                  if (confirm(`Remove the key for ${o.org}? Its repos fall back to the default key.`)) {
-                    saveOrgs(orgs.filter((x) => x.org !== o.org));
-                  }
-                },
-              }, icon('x'), 'Remove'))))
-      : empty('No organization keys yet.'),
+    rows,
 
     orgKeys.message ? notice({ tone: orgKeys.ok ? 'ok' : 'error', text: orgKeys.message }) : null,
 
+    h('h3', null, 'Add a token'),
     h('form', {
       class: 'org-key-form',
       onsubmit: (e) => {
         e.preventDefault();
         const f = new FormData(e.currentTarget);
-        const org = orgNameFrom(f.get('org'));
+        const org = orgNameFrom(f.get('other')) || String(f.get('org') ?? '');
         const token = String(f.get('token') ?? '').trim();
         if (!/^[\w.-]+$/.test(org) || !token) return;
         saveOrgs([...orgs.filter((x) => x.org.toLowerCase() !== org.toLowerCase()), { org, token }]);
+        orgKeys.pick = '';
+        orgKeys.message = '';
         e.currentTarget.reset();
       },
     },
-      h('input', { name: 'org', placeholder: 'Organization, e.g. my-org', 'aria-label': 'Organization', autocomplete: 'off', spellcheck: false }),
+      h('select', { name: 'org', value: orgKeys.pick, 'aria-label': 'Organization without a token' },
+        h('option', { value: '' }, missing.length ? 'Choose an organization without a token' : 'Every organization has a token'),
+        missing.map((name) => h('option', { value: name }, name))),
+      h('input', { name: 'other', placeholder: 'Or type another organization', 'aria-label': 'Another organization', autocomplete: 'off', spellcheck: false }),
       h('input', { name: 'token', type: 'password', placeholder: 'github_pat_…', 'aria-label': 'Token for this organization', autocomplete: 'off', spellcheck: false }),
       h('button', { class: 'primary', type: 'submit' }, 'Add token')));
 }
