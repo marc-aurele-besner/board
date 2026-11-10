@@ -763,7 +763,7 @@ function draw(root, store) {
           h('div', { class: 'row head-title' },
             h('h2', null, currentLabel),
             isProjectFilter(view.filter)
-              ? h('a', { href: `#/projects?project=${view.filter}&mode=edit`, class: 'icon-btn', title: 'Edit project', 'aria-label': 'Edit project' }, icon('pencil'))
+              ? h('a', { href: `#/projects?project=${view.filter}`, class: 'icon-btn', title: 'Open project', 'aria-label': 'Open project' }, icon('pencil'))
               : null,
             isProjectFilter(view.filter) ? projectMeta(store, projects.find((p) => p.id === view.filter)) : null),
           h('div', { class: 'row head-actions' },

@@ -3,6 +3,7 @@ import { repoStats, refreshRepo, openItems } from '../github.js';
 import { ask } from '../ai.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { richText } from '../rich.js';
+import { editText, pickChip } from '../inline.js';
 
 const COLLECTION = 'projects';
 const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
@@ -13,7 +14,7 @@ const DEFAULT_CATEGORIES = [
   { id: 'cat-crypto', name: 'Crypto' },
 ];
 
-// View state. mode: 'view' | 'edit' | 'new' | 'categories'. draft keeps typed values when validation fails.
+// View state. mode: 'view' | 'categories'. Projects are edited in place, so there is no edit or new mode.
 // category filter: 'all' | 'none' | <category id>.
 let liveStore = null;
 const view = { selectedId: null, mode: 'view', error: '', draft: null, query: '', category: 'all', notice: '' };
@@ -71,15 +72,6 @@ export function migrateProjectShape(store) {
       p.parentId = p.parentId ?? null;
     }
   });
-}
-
-// The parent select: every project except this one and its descendants, indented by depth.
-function parentOptions(store, project) {
-  const projects = store.get(COLLECTION).projects;
-  const banned = project ? descendantIds(projects, project.id) : new Set();
-  return projectTree(projects)
-    .filter(({ project: p }) => p.id !== project?.id && !banned.has(p.id))
-    .map(({ project: p, depth }) => h('option', { value: p.id }, `${'— '.repeat(depth)}${p.name}`));
 }
 
 const GITHUB_PREFIX = /^(?:https?:\/\/)?(?:www\.)?github\.com\//i;
@@ -198,59 +190,57 @@ function githubLine(p) {
 
 // --- Actions ---
 
-function saveForm(store, v) {
-  const fail = (error) => {
-    view.error = error;
-    view.draft = v;
-    store.refresh();
-  };
-  const name = v.name.trim();
-  if (!name) return fail('Name is required.');
-
-  const { projects } = store.get(COLLECTION);
-  const editingId = view.mode === 'edit' ? view.selectedId : null;
-  if (projects.some((p) => p.id !== editingId && sameName(p.name, name))) return fail(`A project named "${name}" already exists.`);
-
-  const website = normalizeWebsite(v.website);
-  if (website === null) return fail('Website must be a valid http or https address, such as example.com.');
-
-  const org = normalizeOrg(v.org);
-  if (org === null) return fail('GitHub org must be a name or a github.com/<org> URL.');
-
-  const repos = [];
-  for (const line of splitLines(v.repos)) {
-    const repo = normalizeRepo(line);
-    if (!repo) return fail(`"${line}" is not a repo. Use owner/repo or a github.com URL.`);
-    if (!repos.includes(repo)) repos.push(repo);
-  }
-
-  const parentId = v.parentId || null;
-  if (parentId && editingId && (parentId === editingId || descendantIds(projects, editingId).has(parentId))) {
-    return fail('A project cannot sit under itself or under one of its sub-projects.');
-  }
-
-  const fields = {
-    name,
-    description: v.description.trim(),
-    color: v.color || PALETTE[0],
-    website,
-    labels: v.labels ?? [],
-    parentId,
-    github: { org, repos },
-  };
-  if (editingId) {
-    store.update(COLLECTION, (d) => {
-      const p = d.projects.find((x) => x.id === editingId);
-      if (p) Object.assign(p, fields);
-    });
-  } else {
-    const { project } = createProject(store, name, fields);
-    view.selectedId = project.id;
-  }
-  view.mode = 'view';
-  view.error = '';
-  view.draft = null;
+// Shows a problem with one field on the project page. The field keeps its old value until it is fixed.
+function flashError(store, message) {
+  view.error = message;
   store.refresh();
+}
+
+// Saves a change to a project straight away: no save button. Fields are validated first, and a problem
+// is shown on the page instead of being saved.
+function updateProject(store, id, patch) {
+  const { projects } = store.get(COLLECTION);
+  const current = projects.find((p) => p.id === id);
+  if (!current) return;
+  if (patch.name !== undefined) {
+    const name = patch.name.trim();
+    if (!name) return flashError(store, 'A project needs a name.');
+    if (projects.some((p) => p.id !== id && sameName(p.name, name))) return flashError(store, `A project named "${name}" already exists.`);
+    patch = { ...patch, name };
+  }
+  if (patch.website !== undefined) {
+    const website = normalizeWebsite(patch.website);
+    if (website === null) return flashError(store, 'Website must be a valid http or https address, such as example.com.');
+    patch = { ...patch, website };
+  }
+  if (patch.org !== undefined || patch.repos !== undefined) {
+    const org = patch.org !== undefined ? normalizeOrg(patch.org) : current.github.org;
+    if (org === null) return flashError(store, 'GitHub org must be a name or a github.com/<org> URL.');
+    let repos = current.github.repos;
+    if (patch.repos !== undefined) {
+      repos = [];
+      for (const line of splitLines(patch.repos)) {
+        const repo = normalizeRepo(line);
+        if (!repo) return flashError(store, `"${line}" is not a repo. Use owner/repo or a github.com URL.`);
+        if (!repos.includes(repo)) repos.push(repo);
+      }
+    }
+    const { org: _org, repos: _repos, ...rest } = patch;
+    patch = { ...rest, github: { org, repos } };
+  }
+  if (patch.parentId !== undefined) return setParent(store, id, patch.parentId);
+  view.error = '';
+  store.update(COLLECTION, (d) => {
+    const p = d.projects.find((x) => x.id === id);
+    if (p) Object.assign(p, patch);
+  });
+}
+
+// Adds or removes one label on a project.
+function toggleLabel(store, p, labelId, on) {
+  const labels = labelsOf(p);
+  const next = on ? [...new Set([...labels, labelId])] : labels.filter((x) => x !== labelId);
+  updateProject(store, p.id, { labels: next });
 }
 
 function quickCreate(store, name) {
@@ -514,121 +504,130 @@ function triageBlock(store, p) {
   return h('div', { class: 'stack' }, button, h('div', { class: 'card-inset' }, h('pre', { class: 'ai-text' }, mine.text)));
 }
 
+// The project page. Every field is edited where it is shown; a change is saved when the field is left.
 function projectView(store, p, items, categories) {
+  const projects = store.get(COLLECTION).projects;
   const open = items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
   const done = items.filter((i) => i.projectId === p.id && statusOf(i) === 'done').length;
-  const labels = labelsOf(p).map((id) => categoryById(categories, id)).filter(Boolean);
-  const parent = p.parentId ? store.get(COLLECTION).projects.find((x) => x.id === p.parentId) : null;
-  const children = projectTree(store.get(COLLECTION).projects).filter(({ project: x }) => x.parentId === p.id);
+  const ownLabels = labelsOf(p);
+  const labels = ownLabels.map((id) => categoryById(categories, id)).filter(Boolean);
+  const freeLabels = categories.filter((c) => !ownLabels.includes(c.id));
+  const children = projects.filter((x) => x.parentId === p.id);
+  const parentChoices = projects.filter((x) => x.id !== p.id && !descendantIds(projects, p.id).has(x.id));
   const t = githubTotals(p);
   const gh = (n) => (p.github.repos.length === 0 ? '—' : t.pending ? '…' : String(n));
-  const link = (href, text, iconName) =>
-    h('li', null, icon(iconName), h('a', { href, target: '_blank', rel: 'noopener' }, text));
 
-  return h('div', { class: 'stack-lg' },
-    h('div', { class: 'row between' },
-      h('div', { class: 'stack' },
-        h('h2', { class: 'row' }, projectIcon(p, 'project-icon large'), p.name),
-        h('div', { class: 'row' },
-          labels.length ? labels.map((l) => h('span', { class: 'pill category' }, l.name)) : h('span', { class: 'muted small' }, 'No labels'),
-          parent ? h('span', { class: 'muted small' }, `· under ${parent.name}`) : null),
+  return h('div', { class: 'stack-lg project-page' },
+    view.error ? notice({ text: view.error }) : null,
+
+    h('header', { class: 'pp-head' },
+      h('div', { class: 'pp-title' },
+        h('label', { class: 'pp-color', title: 'Change the color' },
+          h('span', { class: 'dot big', style: { background: p.color } }),
+          h('input', {
+            type: 'color',
+            value: p.color,
+            class: 'sr-only',
+            'aria-label': 'Project color',
+            onchange: (e) => updateProject(store, p.id, { color: e.target.value }),
+          })),
+        projectIcon(p, 'project-icon large'),
+        editText({
+          value: p.name,
+          placeholder: 'Untitled project',
+          className: 'pp-name',
+          onSave: (name) => updateProject(store, p.id, { name }),
+        })),
+      h('button', { type: 'button', class: 'btn-small danger', onclick: () => deleteProject(store, p) }, icon('x'), 'Delete')),
+
+    h('div', { class: 'pp-meta' },
+      h('div', { class: 'pp-field' },
+        h('span', { class: 'pp-label' }, 'Labels'),
+        h('div', { class: 'pp-chips' },
+          labels.map((l) => h('span', { class: 'pill tone-plain pill-x' },
+            l.name,
+            h('button', {
+              type: 'button',
+              class: 'pill-remove',
+              'aria-label': `Remove label ${l.name}`,
+              onclick: () => toggleLabel(store, p, l.id, false),
+            }, icon('x')))),
+          freeLabels.length
+            ? pickChip({
+                value: null,
+                options: freeLabels.map((c) => ({ value: c.id, label: c.name })),
+                placeholder: '+ Add label',
+                onPick: (id) => {
+                  if (id) toggleLabel(store, p, id, true);
+                },
+              })
+            : h('span', { class: 'muted small' }, 'No more labels. Create them under Manage labels.'))),
+
+      h('div', { class: 'pp-field' },
+        h('span', { class: 'pp-label' }, 'Parent'),
+        pickChip({
+          value: p.parentId ?? null,
+          options: parentChoices.map((x) => ({ value: x.id, label: x.name })),
+          nullable: true,
+          nullLabel: 'None (top level)',
+          onPick: (parentId) => setParent(store, p.id, parentId),
+        }),
         children.length
-          ? h('p', { class: 'muted small' }, `Sub-projects: ${children.map(({ project: c }) => c.name).join(', ')}`)
+          ? h('span', { class: 'muted small' }, `Sub-projects: ${children.map((x) => x.name).join(', ')}`)
           : null),
-      h('div', { class: 'row' },
-        h('button', { type: 'button', onclick: () => { view.mode = 'edit'; view.draft = null; view.error = ''; store.refresh(); } },
-          icon('pencil'), 'Edit'),
-        h('button', { type: 'button', class: 'danger', onclick: () => deleteProject(store, p) }, icon('x'), 'Delete'))),
 
-    h('div', { class: 'stats' },
-      h('div', { class: 'card-inset' }, h('strong', null, String(open)), h('span', { class: 'muted' }, 'open tasks')),
-      h('div', { class: 'card-inset' }, h('strong', null, String(done)), h('span', { class: 'muted' }, 'done tasks')),
-      h('div', { class: 'card-inset' }, h('strong', null, gh(t.issues)), h('span', { class: 'muted' }, 'open issues')),
-      h('div', { class: 'card-inset' }, h('strong', null, gh(t.prs)), h('span', { class: 'muted' }, 'open PRs'))),
+      h('div', { class: 'pp-field' },
+        h('span', { class: 'pp-label' }, 'Open / done'),
+        h('span', null, `${open} open · ${done} done`))),
 
-    p.description ? h('div', { class: 'rich-block' }, richText(p.description)) : h('p', { class: 'muted' }, 'No description yet.'),
-    triageBlock(store, p),
+    h('section', { class: 'pp-block' },
+      h('h3', null, 'Description'),
+      editText({
+        value: p.description,
+        placeholder: 'Add a description… links and lists work',
+        multiline: true,
+        allowEmpty: true,
+        rich: true,
+        onSave: (description) => updateProject(store, p.id, { description }),
+      })),
 
-    p.website
-      ? h('section', { class: 'stack' },
-          h('h3', null, 'Website'),
-          h('ul', { class: 'links' }, link(p.website, p.website, 'globe')))
-      : null,
+    h('div', { class: 'pp-grid' },
+      h('section', { class: 'pp-block' },
+        h('h3', null, 'Website'),
+        editText({
+          value: p.website,
+          placeholder: 'example.com',
+          allowEmpty: true,
+          onSave: (website) => updateProject(store, p.id, { website }),
+        }),
+        p.website ? h('a', { href: p.website, target: '_blank', rel: 'noopener', class: 'muted small' }, p.website) : null),
+      h('section', { class: 'pp-block' },
+        h('h3', null, 'GitHub organization'),
+        editText({
+          value: p.github.org,
+          placeholder: 'my-org or github.com/my-org',
+          allowEmpty: true,
+          onSave: (org) => updateProject(store, p.id, { org }),
+        })),
+      h('section', { class: 'pp-block' },
+        h('h3', null, 'Repositories'),
+        editText({
+          value: p.github.repos.join('\n'),
+          placeholder: 'One per line: owner/repo',
+          multiline: true,
+          allowEmpty: true,
+          className: 'pp-lines',
+          onSave: (repos) => updateProject(store, p.id, { repos }),
+        }))),
 
-    h('section', { class: 'stack' },
-      h('h3', null, 'GitHub'),
-      p.github.repos.length || p.github.org
-        ? h('div', { class: 'stack' },
-            p.github.org ? h('ul', { class: 'links' }, link(`https://github.com/${p.github.org}`, p.github.org, 'building')) : null,
-            p.github.repos.length ? repoTable(store, p) : null)
-        : h('p', { class: 'muted' }, 'Not linked to GitHub. Fine for non-coding projects.')));
-}
+    h('div', { class: 'pp-stats' },
+      stat(open, 'open tasks'),
+      stat(done, 'done tasks'),
+      stat(gh(t.issues), 'open issues'),
+      stat(gh(t.prs), 'open PRs')),
 
-function projectForm(store, project, projectCount, categories) {
-  const isNew = !project;
-  const draft = view.draft ?? (project
-    ? {
-        name: project.name,
-        description: project.description,
-        color: project.color,
-        website: project.website,
-        labels: labelsOf(project),
-        parentId: project.parentId ?? '',
-        org: project.github.org,
-        repos: project.github.repos.join('\n'),
-      }
-    : { name: '', description: '', color: PALETTE[projectCount % PALETTE.length], website: '', labels: [], parentId: '', org: '', repos: '' });
-
-  return h('form', {
-    class: 'stack-lg',
-    onsubmit: (e) => {
-      e.preventDefault();
-      const fd = new FormData(e.currentTarget);
-      saveForm(store, { ...Object.fromEntries(fd), labels: fd.getAll('labels') });
-    },
-  },
-    h('h2', null, isNew ? 'New project' : 'Edit project'),
-    view.error ? h('p', { class: 'error', role: 'alert' }, view.error) : null,
-    h('div', { class: 'row' },
-      h('label', { class: 'grow' }, 'Name', h('input', { name: 'name', value: draft.name, required: true, autocomplete: 'off', 'data-autofocus': true })),
-      h('label', null, 'Color', h('input', { name: 'color', type: 'color', value: draft.color }))),
-    h('div', { class: 'row' },
-      h('fieldset', { class: 'labels grow' },
-        h('legend', null, 'Labels'),
-        categories.length
-          ? h('div', { class: 'label-picks' },
-              categories.map((c) => h('label', { class: 'label-opt' },
-                h('input', { type: 'checkbox', name: 'labels', value: c.id, checked: draft.labels.includes(c.id) }),
-                c.name)))
-          : h('span', { class: 'muted small' }, 'No labels yet. Add them from the Projects page.')),
-      h('label', { class: 'grow' }, 'Parent',
-        h('select', { name: 'parentId', value: draft.parentId },
-          h('option', { value: '' }, 'No parent (top level)'),
-          parentOptions(store, project))),
-      h('label', { class: 'grow' }, 'Website (its favicon becomes the project icon)',
-        h('input', { name: 'website', value: draft.website, placeholder: 'example.com', inputmode: 'url', autocomplete: 'off' }))),
-    h('label', null, 'Description',
-      h('textarea', { name: 'description', rows: 2, placeholder: 'What is this project about?' }, draft.description)),
-
-    h('div', { class: 'card-inset stack' },
-      h('h3', null, 'GitHub (optional)'),
-      h('p', { class: 'muted' }, 'Link an organization, one or more repositories, or leave both empty for non-coding projects.'),
-      h('label', null, 'Organization',
-        h('input', { name: 'org', value: draft.org, placeholder: 'my-org or https://github.com/my-org', autocomplete: 'off' })),
-      h('label', null, 'Repositories (one per line)',
-        h('textarea', { name: 'repos', rows: 3, placeholder: 'owner/repo or a GitHub URL' }, draft.repos))),
-
-    h('div', { class: 'row end' },
-      h('button', {
-        type: 'button',
-        onclick: () => {
-          view.mode = 'view';
-          view.draft = null;
-          view.error = '';
-          store.refresh();
-        },
-      }, 'Cancel'),
-      h('button', { class: 'primary', type: 'submit' }, isNew ? 'Create project' : 'Save changes')));
+    p.github.repos.length ? repoTable(store, p) : null,
+    triageBlock(store, p));
 }
 
 function categoriesPanel(store, categories, projects) {
@@ -649,15 +648,12 @@ function categoriesPanel(store, categories, projects) {
       categories.map((c) => {
         const count = projects.filter((p) => labelsOf(p).includes(c.id)).length;
         return h('li', { class: 'row category-row' },
-          h('form', {
-            class: 'row grow',
-            onsubmit: (e) => {
-              e.preventDefault();
-              renameCategory(store, c, formValues(e.currentTarget).name.trim());
-            },
-          },
-            h('input', { name: 'name', value: c.name, 'aria-label': 'Category name', class: 'grow' }),
-            h('button', { type: 'submit' }, 'Save')),
+          editText({
+            value: c.name,
+            placeholder: 'Name',
+            className: 'grow',
+            onSave: (name) => renameCategory(store, c, name),
+          }),
           h('span', { class: 'muted' }, `${count} project${count === 1 ? '' : 's'}`),
           h('button', { type: 'button', class: 'danger', onclick: () => deleteCategory(store, c) }, icon('x'), 'Delete'));
       })),
@@ -759,8 +755,6 @@ function draw(root, store) {
 
   let detail;
   if (view.mode === 'categories') detail = categoriesPanel(store, categories, projects);
-  else if (view.mode === 'new') detail = projectForm(store, null, projects.length, categories);
-  else if (selected && view.mode === 'edit') detail = projectForm(store, selected, projects.length, categories);
   else if (selected) detail = projectView(store, selected, items, categories);
   else detail = projectsRecap(store, projects, items, categories);
 
@@ -798,18 +792,6 @@ function draw(root, store) {
             h('button', {
               type: 'button',
               class: 'linkish',
-              onclick: (e) => {
-                const name = e.currentTarget.closest('.side-tools').querySelector('input[name="name"]').value.trim();
-                view.mode = 'new';
-                view.selectedId = null;
-                view.error = '';
-                view.draft = { name, description: '', color: PALETTE[projects.length % PALETTE.length], website: '', labels: [], parentId: '', org: '', repos: '' };
-                store.refresh();
-              },
-            }, 'Detailed form'),
-            h('button', {
-              type: 'button',
-              class: 'linkish',
               onclick: () => {
                 view.mode = 'categories';
                 view.error = '';
@@ -836,7 +818,7 @@ export default {
   }),
   restore: (p = {}) => {
     view.selectedId = p.project || null;
-    view.mode = ['edit', 'new', 'categories'].includes(p.mode) ? p.mode : 'view';
+    view.mode = p.mode === 'categories' ? 'categories' : 'view';
     view.category = p.category || 'all';
     view.query = p.q || '';
     view.error = '';
