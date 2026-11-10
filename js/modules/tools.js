@@ -208,6 +208,7 @@ const CRAWL_FILES = [
 
 function crawlTab(store, sites) {
   const p = pickedSite(sites);
+  if (!p) return crawlAll(store, sites);
   const c = siteData(store, p.id).crawl;
   const host = hostOf(p.website);
   const busy = view.busy.has(p.id) || view.busy.has('all');
@@ -271,21 +272,87 @@ function shareCard(kind, p, m) {
   return h('div', { class: 'share imsg' }, image(), h('div', { class: 'share-text' }, h('strong', null, title), h('span', { class: 'muted small' }, host)));
 }
 
-// The tabs that show one site at a time pick it with a row of chips.
-const pickedSite = (sites) => sites.find((x) => x.id === view.project) ?? sites[0];
+// The tabs that show one site at a time pick it with a row of chips. "All" comes first and is the default:
+// an empty `view.project` means every site, shown side by side in one table.
+const pickedSite = (sites) => sites.find((x) => x.id === view.project) ?? null;
 const siteChips = (store, sites, p) =>
-  h('div', { class: 'chips' }, sites.map((x) =>
+  h('div', { class: 'chips' }, [{ id: '', name: 'All' }, ...sites].map((x) =>
     h('button', {
       type: 'button',
-      class: x.id === p.id ? 'chip active' : 'chip',
+      class: x.id === (p?.id ?? '') ? 'chip active' : 'chip',
       onclick: () => {
         view.project = x.id;
         store.refresh();
       },
     }, x.name)));
 
+// The site cell of an "All" table. Its name opens the site on its own.
+const siteCell = (store, p) =>
+  h('td', null, h('div', { class: 'row' }, projectIcon(p),
+    h('div', null,
+      h('button', { type: 'button', class: 'btn-link-inline', onclick: () => { view.project = p.id; store.refresh(); } }, h('strong', null, p.name)),
+      h('div', { class: 'muted small' }, hostOf(p.website)))));
+
+// Reads every page from the metadata "All" view, which has no "Check all now" in its header.
+const readAll = (store, part, label) =>
+  h('button', {
+    type: 'button',
+    class: 'btn-small primary',
+    disabled: view.busy.has('all'),
+    onclick: () => run(store, 'all', async () => {
+      const made = await checkAllSites(store, [part]);
+      toast(made ? `${made} task${made === 1 ? '' : 's'} created automatically` : 'All sites read');
+    }),
+  }, icon('refresh'), view.busy.has('all') ? 'Reading…' : label);
+
+const againButton = (store, p, part, busy) =>
+  h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Read again', 'aria-label': `Read ${hostOf(p.website)} again`, onclick: () => check(store, p, [part]) }, icon('refresh'));
+
+const tick = (found, title) => h('span', { class: found ? 'tick ok' : 'tick miss', title }, icon(found ? 'check' : 'x'));
+
+function crawlAll(store, sites) {
+  return h('div', { class: 'stack-lg' }, siteChips(store, sites, null),
+    h('div', { class: 'card mon-scroll' },
+      h('table', { class: 'mon-table tool-table' },
+        h('thead', null, h('tr', null, ['Site', ...CRAWL_FILES.map(([, name]) => name), 'Read', ''].map((t) => h('th', null, t)))),
+        h('tbody', null, sites.map((p) => {
+          const c = siteData(store, p.id).crawl;
+          const busy = view.busy.has(p.id) || view.busy.has('all');
+          const cells = c?.robots
+            ? CRAWL_FILES.map(([k, name]) => h('td', null, c[k].unread ? h('span', { class: 'muted small' }, 'Unread') : tick(c[k].found, `${name} ${c[k].found ? 'found' : 'missing'}`),
+                k === 'robots' && c.robots.blocksSearch ? pillOf('Blocks search', 'high') : null))
+            : [h('td', { colspan: CRAWL_FILES.length }, h('span', { class: 'muted small' }, busy ? 'Reading…' : c?.error ?? 'Not read yet'))];
+          return h('tr', null, siteCell(store, p), ...cells, h('td', { class: 'muted small' }, c?.at ? timeOf(c.at) : ''), h('td', null, againButton(store, p, 'crawl', busy)));
+        })))));
+}
+
+function metaAll(store, sites) {
+  const TAGS = ['title', 'description', 'ogTitle', 'ogDescription', 'ogImage', 'ogUrl', 'twitterCard', 'twitterImage'];
+  return h('div', { class: 'stack-lg' }, siteChips(store, sites, null),
+    h('div', { class: 'card mon-scroll' },
+      h('table', { class: 'mon-table tool-table' },
+        h('thead', null, h('tr', null, ['Site', 'Share tags', 'Title', 'og:image', 'Read', ''].map((t) => h('th', null, t)))),
+        h('tbody', null, sites.map((p) => {
+          const m = siteData(store, p.id).meta;
+          const busy = view.busy.has(p.id) || view.busy.has('all');
+          const again = h('td', null, againButton(store, p, 'meta', busy));
+          if (!m || (m.error && !m.title && !m.ogTitle)) {
+            return h('tr', null, siteCell(store, p), h('td', { colspan: 4 }, h('span', { class: 'muted small' }, busy ? 'Reading…' : m?.error ?? 'Not read yet')), again);
+          }
+          const present = TAGS.filter((k) => m[k]).length;
+          return h('tr', null, siteCell(store, p),
+            h('td', null, pillOf(`${present} of ${TAGS.length}`, present === TAGS.length ? 'done' : present >= TAGS.length / 2 ? 'medium' : 'high')),
+            h('td', { class: 'cell-clip' }, m.ogTitle || m.title || h('span', { class: 'muted small' }, 'Missing')),
+            h('td', null, tick(Boolean(m.ogImage), m.ogImage ? 'og:image found' : 'og:image missing')),
+            h('td', { class: 'muted small' }, timeOf(m.at)),
+            again);
+        })))),
+    h('div', null, readAll(store, 'meta', 'Read every page')));
+}
+
 function metaTab(store, sites) {
   const p = pickedSite(sites);
+  if (!p) return metaAll(store, sites);
   const m = siteData(store, p.id).meta;
   const busy = view.busy.has(p.id);
   const chips = siteChips(store, sites, p);
