@@ -199,6 +199,8 @@ function deleteProject(store, project) {
     t.items.forEach((i) => {
       if (i.projectId === project.id) i.projectId = null;
     });
+    // Todo categories scoped to this project have nothing left to apply to.
+    if (Array.isArray(t.categories)) t.categories = t.categories.filter((c) => !(c.scope === 'project' && c.projectId === project.id));
   });
   store.update(COLLECTION, (d) => {
     d.projects = d.projects.filter((p) => p.id !== project.id);

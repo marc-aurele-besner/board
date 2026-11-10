@@ -1,5 +1,5 @@
-import { h, uid, now, icon, statusOf } from '../ui.js';
-import { makeProject, projectIcon } from './projects.js';
+import { h, uid, now, icon, statusOf, empty } from '../ui.js';
+import { createProject, projectIcon } from './projects.js';
 
 const COLLECTION = 'todos';
 const STATUSES = [
@@ -18,7 +18,17 @@ const STATUS_FILTERS = [['open', 'Open'], ['all', 'All'], ...STATUSES];
 // View state lives here so it survives re-renders.
 // filter: 'all' | 'personal' | <project id>. status: a STATUS_FILTERS key. category: '' means any.
 // expanded: ids with the details editor open.
-const view = { filter: 'all', status: 'open', category: '', expanded: new Set(), dragId: null };
+// managingCategories shows the category manager; creatingProject shows the "+" form in the sidebar.
+const view = {
+  filter: 'all',
+  status: 'open',
+  category: '',
+  expanded: new Set(),
+  dragId: null,
+  managingCategories: false,
+  creatingProject: false,
+  catError: '',
+};
 
 const isProjectFilter = (f) => f !== 'all' && f !== 'personal';
 const matchesFilter = (item) =>
@@ -32,6 +42,34 @@ const matchesCategory = (item) => !view.category || item.category === view.categ
 const projectsOf = (store) => store.get('projects').projects;
 const formValues = (form) => Object.fromEntries(new FormData(form));
 const label = (list, key) => list.find(([k]) => k === key)?.[1] ?? '';
+const sameLower = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+// Todo categories. Each has a scope: 'all' (every project), 'project' (one project),
+// or 'projectCategory' (every project in a project category such as Web).
+const todoCategories = (store) => store.get(COLLECTION).categories ?? [];
+
+// Names a todo in this project can use: general ones, plus those scoped to the project or its category.
+function categoriesFor(store, projectId) {
+  const project = projectsOf(store).find((p) => p.id === projectId);
+  return todoCategories(store)
+    .filter((c) =>
+      c.scope === 'all' ||
+      (c.scope === 'project' && c.projectId === projectId) ||
+      (c.scope === 'projectCategory' && Boolean(project) && project.categoryId === c.projectCategoryId))
+    .map((c) => c.name);
+}
+
+// Select values: "all", "project:<id>", "category:<project category id>".
+function parseScope(value) {
+  if (value.startsWith('project:')) return { scope: 'project', projectId: value.slice(8), projectCategoryId: null };
+  if (value.startsWith('category:')) return { scope: 'projectCategory', projectId: null, projectCategoryId: value.slice(9) };
+  return { scope: 'all', projectId: null, projectCategoryId: null };
+}
+function scopeValue(c) {
+  if (c.scope === 'project') return `project:${c.projectId}`;
+  if (c.scope === 'projectCategory') return `category:${c.projectCategoryId}`;
+  return 'all';
+}
 
 // "buy milk #home" files the item under project "home" (created if missing).
 // Extra lines from a multi-line paste arrive as the description.
@@ -45,10 +83,7 @@ function addItem(store, raw, description = '') {
   if (tag) {
     const projects = projectsOf(store);
     let project = projects.find((p) => p.name.toLowerCase() === tag[1].toLowerCase());
-    if (!project) {
-      project = makeProject(projects.length, { name: tag[1] });
-      store.update('projects', (d) => d.projects.push(project));
-    }
+    if (!project) project = createProject(store, tag[1]).project;
     projectId = project.id;
   }
   store.update(COLLECTION, (d) =>
@@ -92,6 +127,38 @@ function saveDetails(store, id, v) {
     item.projectId = v.project || null; // empty value means Personal
     item.description = v.description.trim();
     delete item.done;
+  });
+}
+
+function saveTodoCategory(store, id, v) {
+  const name = v.name.trim();
+  if (!name) return;
+  if (todoCategories(store).some((c) => c.id !== id && sameLower(c.name, name))) {
+    view.catError = `"${name}" already exists.`;
+    return store.refresh();
+  }
+  view.catError = '';
+  store.update(COLLECTION, (d) => {
+    const c = d.categories.find((x) => x.id === id);
+    if (c) Object.assign(c, { name }, parseScope(v.scope));
+  });
+}
+
+function addTodoCategory(store, v) {
+  const name = v.name.trim();
+  if (!name) return;
+  if (todoCategories(store).some((c) => sameLower(c.name, name))) {
+    view.catError = `"${name}" already exists.`;
+    return store.refresh();
+  }
+  view.catError = '';
+  store.update(COLLECTION, (d) => d.categories.push({ id: uid(), name, ...parseScope(v.scope) }));
+}
+
+function deleteTodoCategory(store, c) {
+  if (!confirm(`Delete category "${c.name}"? Todos keep their label.`)) return;
+  store.update(COLLECTION, (d) => {
+    d.categories = d.categories.filter((x) => x.id !== c.id);
   });
 }
 
@@ -235,10 +302,12 @@ function todoItem(store, item, ctx) {
               h('input', {
                 name: 'category',
                 value: item.category ?? '',
-                list: 'todo-categories',
+                list: `todo-categories-${item.id}`,
                 placeholder: 'e.g. errands, research',
                 autocomplete: 'off',
-              }))),
+              }),
+              h('datalist', { id: `todo-categories-${item.id}` },
+                categoriesFor(ctx.store, item.projectId).map((c) => h('option', { value: c }))))),
           h('label', null, 'Description',
             h('textarea', { name: 'description', rows: 4, placeholder: 'Notes, links, steps… paste freely' }, item.description)),
           h('div', { class: 'row end' },
@@ -253,6 +322,59 @@ function todoItem(store, item, ctx) {
       : null);
 
   return li;
+}
+
+// Manager card: name, scope, rename and delete for every todo category.
+function categoriesManager(store) {
+  const projects = projectsOf(store);
+  const projectCategories = store.get('projects').categories ?? [];
+  const scopeOptions = () => [
+    h('option', { value: 'all' }, 'All projects'),
+    h('optgroup', { label: 'One project' },
+      [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => h('option', { value: `project:${p.id}` }, p.name))),
+    h('optgroup', { label: 'Projects in a category' },
+      projectCategories.map((c) => h('option', { value: `category:${c.id}` }, c.name))),
+  ];
+  const cats = todoCategories(store);
+
+  return h('section', { class: 'card manager stack-lg' },
+    h('div', { class: 'row between' },
+      h('h3', null, 'Todo categories'),
+      h('button', {
+        type: 'button',
+        onclick: () => {
+          view.managingCategories = false;
+          store.refresh();
+        },
+      }, 'Done')),
+    h('p', { class: 'muted' }, 'General categories apply to every project. Scope one to a single project, or to all projects in a project category.'),
+    view.catError ? h('p', { class: 'error', role: 'alert' }, view.catError) : null,
+    cats.length
+      ? h('ul', { class: 'stack' },
+          cats.map((c) =>
+            h('li', { class: 'row category-row' },
+              h('form', {
+                class: 'row grow',
+                onsubmit: (e) => {
+                  e.preventDefault();
+                  saveTodoCategory(store, c.id, formValues(e.currentTarget));
+                },
+              },
+                h('input', { name: 'name', value: c.name, 'aria-label': 'Category name', class: 'grow' }),
+                h('select', { name: 'scope', value: scopeValue(c), 'aria-label': 'Applies to' }, scopeOptions()),
+                h('button', { type: 'submit' }, 'Save')),
+              h('button', { type: 'button', class: 'danger', onclick: () => deleteTodoCategory(store, c) }, icon('x'), 'Delete'))))
+      : empty('No todo categories yet. Add one below.'),
+    h('form', {
+      class: 'row',
+      onsubmit: (e) => {
+        e.preventDefault();
+        addTodoCategory(store, formValues(e.currentTarget));
+      },
+    },
+      h('input', { name: 'name', placeholder: 'New category, e.g. errands', 'aria-label': 'New category', class: 'grow', autocomplete: 'off' }),
+      h('select', { name: 'scope', 'aria-label': 'Applies to' }, scopeOptions()),
+      h('button', { class: 'primary', type: 'submit' }, 'Add')));
 }
 
 function draw(root, store) {
@@ -307,14 +429,49 @@ function draw(root, store) {
         h('p', { class: 'hint' }, 'Drag a todo onto a list to move it.'),
         navItem('all', 'All', openCount(() => true)),
         navItem('personal', 'Personal', openCount((i) => i.projectId === null)),
-        h('h2', null, 'Projects'),
+        h('div', { class: 'row between' },
+          h('h2', null, 'Projects'),
+          h('button', {
+            type: 'button',
+            class: 'icon-btn',
+            title: 'New project',
+            'aria-label': 'New project',
+            onclick: () => {
+              view.creatingProject = !view.creatingProject;
+              store.refresh();
+            },
+          }, icon('plus'))),
+        view.creatingProject
+          ? h('form', {
+              class: 'stack',
+              onsubmit: (e) => {
+                e.preventDefault();
+                const name = formValues(e.currentTarget).name.trim();
+                if (!name) return;
+                const { project } = createProject(store, name);
+                view.filter = project.id;
+                view.creatingProject = false;
+                store.refresh();
+              },
+            },
+              h('input', { name: 'name', placeholder: 'Project name, Enter', 'aria-label': 'New project name', autocomplete: 'off', 'data-autofocus': true }))
+          : null,
         [...projects].sort((a, b) => a.name.localeCompare(b.name))
           .map((p) => navItem(p.id, p.name, openCount((i) => i.projectId === p.id), projectIcon(p))),
         h('a', { href: '#/projects', class: 'side-link' }, icon('folder'), 'Manage projects')),
 
       h('section', { class: 'card main-pane' },
         h('div', { class: 'row between' },
-          h('h2', null, currentLabel)),
+          h('h2', null, currentLabel),
+          h('button', {
+            type: 'button',
+            onclick: () => {
+              view.managingCategories = !view.managingCategories;
+              view.catError = '';
+              store.refresh();
+            },
+          }, 'Manage categories')),
+        view.managingCategories ? categoriesManager(store) : null,
 
         h('div', { class: 'toolbar' },
           h('label', null, 'Show',
@@ -339,8 +496,6 @@ function draw(root, store) {
                   categories.map((c) => h('option', { value: c }, c))))
             : null),
 
-        h('datalist', { id: 'todo-categories' }, categories.map((c) => h('option', { value: c }))),
-
         h('form', {
           class: 'quick',
           onsubmit: (e) => {
@@ -363,6 +518,7 @@ function draw(root, store) {
           ? h('ul', { class: 'todo-list' },
               visible.map((item) =>
                 todoItem(store, item, {
+                  store,
                   projects,
                   projectLabel: view.filter === 'all' ? projectName(item.projectId) : '',
                 })))
@@ -374,6 +530,6 @@ export default {
   title: 'Todos',
   icon: 'check-square',
   collection: COLLECTION,
-  defaults: { items: [] },
+  defaults: { items: [], categories: [] },
   render: draw,
 };
