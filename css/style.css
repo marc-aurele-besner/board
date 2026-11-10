@@ -915,6 +915,10 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .k-import { gap: 8px; }
 .k-import-form { display: flex; gap: 6px; }
 .k-import-form input { flex: 1; min-width: 0; }
+.k-photos { display: flex; gap: 10px; overflow-x: auto; }
+.k-photo { position: relative; margin: 0; flex: 0 0 auto; }
+.k-photo img { display: block; height: 160px; width: auto; max-width: min(260px, 80vw); border-radius: 10px; border: 1px solid var(--border); object-fit: cover; }
+.k-photo-remove { position: absolute; top: 4px; right: 4px; background: var(--surface); border-radius: 999px; }
 
 /* LP positions: Uniswap v3 positions read from the chain */
 .lp-head { align-items: flex-start; gap: var(--gap); }

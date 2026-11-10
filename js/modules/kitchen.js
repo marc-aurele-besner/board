@@ -124,8 +124,18 @@ async function fetchPageText(url) {
   return res.text();
 }
 
+// Image links in the page text (markdown `![alt](url)`). Pictures are linked, not downloaded, so the recipe keeps them as URLs.
+const IMAGE_LINK = /!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g;
+const MAX_IMAGE_CANDIDATES = 60;
+const MAX_RECIPE_IMAGES = 3;
+
+function imageCandidates(text) {
+  const found = [...text.matchAll(IMAGE_LINK)].map((m) => m[1]).filter((u) => !/\.svg(\?|$)/i.test(u));
+  return [...new Set(found)].slice(0, MAX_IMAGE_CANDIDATES);
+}
+
 // Adds a recipe as an idea, with its source link. Its fields come from the model's reading of the page.
-function addImportedRecipe(store, data, url) {
+function addImportedRecipe(store, data, url, images) {
   const id = uid();
   view.selectedId = id;
   view.tab = 'idea';
@@ -139,6 +149,7 @@ function addImportedRecipe(store, data, url) {
       steps: (data.steps ?? []).map((x) => String(x).trim()).filter(Boolean),
       notes: String(data.notes ?? '').trim(),
       source: url,
+      images,
       versions: [],
       created: now(),
     }));
@@ -149,14 +160,18 @@ async function importFromText(store, text, url) {
   importState.status = 'loading';
   store.refresh();
   try {
+    const candidates = imageCandidates(text);
     const reply = await ask(store, 'task-recipe', [
       {
         role: 'system',
-        content: 'You extract a recipe from web page text. Reply with JSON only: {"title": string, "tags": string[], "ingredients": string[], "steps": string[], "notes": string}. Ingredients one per item, with quantities. Steps in order. Tags: a few short words such as cuisine or kind of dish. Notes: a short summary of anything special (serves, time, tips). Leave out page menus, ads and comments.',
+        content: `You extract a recipe from web page text. Reply with JSON only: {"title": string, "tags": string[], "ingredients": string[], "steps": string[], "notes": string, "images": string[]}. Ingredients one per item, with quantities. Steps in order. Tags: a few short words such as cuisine or kind of dish. Notes: a short summary of anything special (serves, time, tips). Images: up to ${MAX_RECIPE_IMAGES} URLs copied exactly from the "Image URLs" list that show the finished dish or the recipe's method; leave out logos, icons, ads and author photos. Leave out page menus, ads and comments.`,
       },
-      { role: 'user', content: text.slice(0, 40000) },
+      { role: 'user', content: `${text.slice(0, 40000)}\n\nImage URLs:\n${candidates.join('\n') || '(none)'}` },
     ]);
-    addImportedRecipe(store, parseJson(reply), url);
+    const data = parseJson(reply);
+    // Only links that were on the page count, so the model cannot add a picture of its own.
+    const images = [...new Set((data.images ?? []).map(String))].filter((u) => candidates.includes(u)).slice(0, MAX_RECIPE_IMAGES);
+    addImportedRecipe(store, data, url, images);
     importState.status = 'idle';
     importState.pasting = false;
     importState.url = '';
@@ -312,6 +327,29 @@ function listPane(store, recipes) {
 
 const block = (title, child) => h('div', { class: 'k-block' }, h('h3', null, title), child);
 
+// Pictures taken from the web page. They are hotlinked, so a removed picture only leaves the recipe's list.
+function removeImage(store, id, src) {
+  store.update(COLLECTION, (d) => {
+    const r = findRecipe(d, id);
+    if (r) r.images = (r.images ?? []).filter((u) => u !== src);
+  });
+}
+
+function photos(store, r) {
+  if (!r.images?.length) return null;
+  return h('div', { class: 'k-photos' },
+    r.images.map((src) =>
+      h('figure', { class: 'k-photo' },
+        h('img', { src, alt: r.title, loading: 'lazy', referrerpolicy: 'no-referrer' }),
+        h('button', {
+          type: 'button',
+          class: 'icon-btn k-photo-remove',
+          title: 'Remove picture',
+          'aria-label': 'Remove picture',
+          onclick: () => removeImage(store, r.id, src),
+        }, icon('x')))));
+}
+
 function iterationCard(store, r, v) {
   return h('li', { class: 'timeline-item' },
     h('span', { class: 'timeline-dot', 'aria-hidden': 'true' }),
@@ -397,6 +435,7 @@ function detailPane(store, r) {
       })),
 
     r.source ? h('a', { href: r.source, target: '_blank', rel: 'noopener', class: 'btn-link' }, 'Open the original recipe') : null,
+    photos(store, r),
     h('div', { class: 'k-grid' },
       block('Ingredients', editText({
         value: r.ingredients.join('\n'),

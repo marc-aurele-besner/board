@@ -31,7 +31,7 @@ Every file has a `schemaVersion` field. Files are plain JSON and can be edited b
 | --- | --- |
 | `projects.json` | `{ projects: [{id, name, color, description, github: {org, repos: ['owner/repo']}, created}] }`. `github.org` and `github.repos` may be empty, for non-coding projects. |
 | `todos.json` | `{ items: [{id, text, description, done, projectId, created}] }`. `projectId: null` means Personal. Array order is the display order (drag the grip to reorder). |
-| `recipes.json` | `{ recipes: [{id, title, status: 'idea'\|'testing'\|'final', tags, ingredients, steps, notes, versions: [{id, date, changes, rating, notes}], created}] }` |
+| `recipes.json` | `{ recipes: [{id, title, status: 'idea'\|'testing'\|'final', tags, ingredients, steps, notes, images, versions: [{id, date, changes, rating, notes}], created}] }` |
 | `finance.json` | `{ entries: [{id, date, type: 'income'\|'expense', amount, category, note, created}], categories: [] }` |
 
 Writes are debounced (about 300 ms) and serialized. The status pill in the top bar shows *Saving…*, *Saved* or *Save failed*.
