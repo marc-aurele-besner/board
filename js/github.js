@@ -168,6 +168,30 @@ export async function fetchActivity(repo, since) {
   return data;
 }
 
+// A repo's description, topics, languages, README and top-level file list, to understand what it is.
+// `contentAccess` is false when GitHub would not show the files (the token needs Contents: Read-only).
+const decodeBase64Utf8 = (b64) => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s+/g, '')), (c) => c.charCodeAt(0)));
+
+export async function fetchRepoOverview(repo) {
+  const get = (path) => fetch(`${API}/repos/${repo}${path}`, { headers: headers() });
+  const [info, languages, readme, contents] = await Promise.all([get(''), get('/languages'), get('/readme'), get('/contents')]);
+  if (!info.ok) throw new Error(explain(info.status));
+  const meta = await info.json();
+  const languageNames = languages.ok ? Object.keys(await languages.json()) : [];
+  const readmeText = readme.ok ? decodeBase64Utf8((await readme.json()).content ?? '') : '';
+  const files = contents.ok ? (await contents.json()).map((f) => ({ name: f.name, type: f.type })) : [];
+  return {
+    description: meta.description ?? '',
+    topics: meta.topics ?? [],
+    languages: languageNames,
+    defaultBranch: meta.default_branch ?? '',
+    pushedAt: meta.pushed_at ?? '',
+    readme: readmeText.slice(0, 12000),
+    files: files.slice(0, 80),
+    contentAccess: readme.ok || contents.ok,
+  };
+}
+
 // Drops the cached copy and fetches again.
 export function refreshRepo(repo, onChange) {
   memory.delete(repo);

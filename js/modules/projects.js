@@ -4,6 +4,8 @@ import { ask } from '../ai.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { richText } from '../rich.js';
 import { editText, pickChip } from '../inline.js';
+import { siteIcon, clearFaviconCache } from '../favicon.js';
+import { fetchRepoOverview } from '../github.js';
 
 const COLLECTION = 'projects';
 const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
@@ -134,16 +136,7 @@ export function createProject(store, name, fields = {}) {
 // The site's own /favicon.ico. Browsers show cross-origin images without CORS, so this
 // works without a third-party favicon service. Sites without one fall back to a dot.
 export function projectIcon(p, className = 'project-icon') {
-  const fallback = () => h('span', { class: 'dot', style: { background: p.color } });
-  if (!p.website) return fallback();
-  return h('img', {
-    class: className,
-    src: `${p.website}/favicon.ico`,
-    alt: '',
-    loading: 'lazy',
-    referrerpolicy: 'no-referrer',
-    onerror: (e) => e.currentTarget.replaceWith(fallback()),
-  });
+  return siteIcon(p, className);
 }
 
 // Projects used to live inside todos.json. Move them into projects.json once.
@@ -227,6 +220,11 @@ function updateProject(store, id, patch) {
     }
     const { org: _org, repos: _repos, ...rest } = patch;
     patch = { ...rest, github: { org, repos } };
+  }
+  if (patch.iconUrl !== undefined) {
+    const iconUrl = patch.iconUrl.trim();
+    if (iconUrl && !/^https?:\/\//i.test(iconUrl)) return flashError(store, 'The icon must be an http or https image address.');
+    patch = { ...patch, iconUrl };
   }
   if (patch.parentId !== undefined) return setParent(store, id, patch.parentId);
   view.error = '';
@@ -505,6 +503,99 @@ function triageBlock(store, p) {
 }
 
 // The project page. Every field is edited where it is shown; a change is saved when the field is left.
+// Repo overview: what a repo is, read from GitHub (description, languages, files, README), with an optional AI explanation.
+const overviews = new Map(); // repo -> { status, data?, error?, summary? }
+
+function loadOverview(store, repo) {
+  overviews.set(repo, { status: 'loading' });
+  store.refresh();
+  fetchRepoOverview(repo)
+    .then((data) => overviews.set(repo, { status: 'ok', data }))
+    .catch((err) => overviews.set(repo, { status: 'error', error: err.message }))
+    .finally(() => store.refresh());
+}
+
+async function explainRepo(store, repo, entry) {
+  entry.summary = { status: 'loading' };
+  store.refresh();
+  const d = entry.data;
+  try {
+    const text = await ask(store, 'task-summary', [
+      {
+        role: 'system',
+        content: 'You help a developer understand a code repository. From the description, topics, languages, file list and README, reply in plain text: what the project does in two sentences, its main parts (from the files), how to work on it, and anything unclear. Do not invent features.',
+      },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          repo,
+          description: d.description,
+          topics: d.topics,
+          languages: d.languages,
+          files: d.files.map((f) => (f.type === 'dir' ? `${f.name}/` : f.name)),
+          readme: d.readme,
+        }),
+      },
+    ]);
+    entry.summary = { status: 'ok', text: text.trim() };
+  } catch (err) {
+    entry.summary = { status: 'error', text: err.message };
+  }
+  store.refresh();
+}
+
+function overviewBlock(store, p) {
+  if (!p.github.repos.length) return null;
+  return h('section', { class: 'pp-block' },
+    h('h3', null, 'Understand the repo'),
+    p.github.repos.map((repo) => {
+      const entry = overviews.get(repo) ?? { status: 'idle' };
+      const head = h('div', { class: 'row between' },
+        h('strong', null, repo),
+        entry.status === 'ok'
+          ? h('button', { type: 'button', class: 'btn-small', onclick: () => loadOverview(store, repo) }, icon('refresh'), 'Refresh')
+          : null);
+      if (entry.status === 'idle') {
+        return h('div', { class: 'overview' }, head,
+          h('button', { type: 'button', class: 'btn-small', onclick: () => loadOverview(store, repo) }, 'Read repo'));
+      }
+      if (entry.status === 'loading') return h('div', { class: 'overview' }, head, h('p', { class: 'muted small' }, 'Reading the repo…'));
+      if (entry.status === 'error') return h('div', { class: 'overview' }, head, notice({ text: entry.error }));
+
+      const d = entry.data;
+      const facts = [d.languages.join(', '), d.defaultBranch ? `branch ${d.defaultBranch}` : '', d.pushedAt ? `last push ${d.pushedAt.slice(0, 10)}` : '']
+        .filter(Boolean)
+        .join(' · ');
+      return h('div', { class: 'overview' }, head,
+        d.contentAccess
+          ? null
+          : notice({
+              tone: 'info',
+              text: 'The README and file list could not be read. Give the GitHub token Contents: Read-only in Settings.',
+              actions: [h('a', { href: '#/settings?section=github', class: 'btn-small primary-link' }, 'Open GitHub settings')],
+            }),
+        d.description ? h('p', null, d.description) : null,
+        facts ? h('div', { class: 'muted small' }, facts) : null,
+        d.topics.length ? h('div', { class: 'tags' }, d.topics.map((t) => h('span', { class: 'tag' }, t))) : null,
+        d.files.length
+          ? h('div', { class: 'tags' }, d.files.map((f) => h('span', { class: f.type === 'dir' ? 'tag tag-dir' : 'tag' }, f.type === 'dir' ? `${f.name}/` : f.name)))
+          : null,
+        d.readme ? h('pre', { class: 'readme' }, d.readme) : null,
+        hasOpenRouter(store)
+          ? h('div', { class: 'row' },
+              h('button', {
+                type: 'button',
+                class: 'btn-small',
+                disabled: entry.summary?.status === 'loading',
+                onclick: () => explainRepo(store, repo, entry),
+              }, 'Explain with AI'))
+          : setupBanner('openrouter', 'Explaining the repo needs an OpenRouter key.'),
+        entry.summary?.status === 'loading' ? h('p', { class: 'muted small' }, 'Reading…') : null,
+        entry.summary?.status === 'error' ? notice({ text: entry.summary.text }) : null,
+        entry.summary?.status === 'ok' ? h('div', { class: 'card-inset' }, h('pre', { class: 'ai-text' }, entry.summary.text)) : null);
+    }));
+}
+
 function projectView(store, p, items, categories) {
   const projects = store.get(COLLECTION).projects;
   const open = items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
@@ -602,6 +693,16 @@ function projectView(store, p, items, categories) {
         }),
         p.website ? h('a', { href: p.website, target: '_blank', rel: 'noopener', class: 'muted small' }, p.website) : null),
       h('section', { class: 'pp-block' },
+        h('h3', null, 'Icon'),
+        h('div', { class: 'pp-icon-row' },
+          siteIcon(p, 'project-icon large'),
+          editText({
+            value: p.iconUrl ?? '',
+            placeholder: p.website ? 'Found from the website. Paste an image URL to override' : 'Paste an image URL',
+            allowEmpty: true,
+            onSave: (iconUrl) => updateProject(store, p.id, { iconUrl }),
+          }))),
+      h('section', { class: 'pp-block' },
         h('h3', null, 'GitHub organization'),
         editText({
           value: p.github.org,
@@ -627,6 +728,7 @@ function projectView(store, p, items, categories) {
       stat(gh(t.prs), 'open PRs')),
 
     p.github.repos.length ? repoTable(store, p) : null,
+    overviewBlock(store, p),
     triageBlock(store, p));
 }
 
@@ -789,6 +891,15 @@ function draw(root, store) {
             h('input', { name: 'name', placeholder: 'New project…', 'aria-label': 'New project name', autocomplete: 'off' }),
             h('button', { class: 'icon-btn primary-icon', type: 'submit', title: 'Add project', 'aria-label': 'Add project' }, icon('plus'))),
           h('div', { class: 'side-links' },
+            h('button', {
+              type: 'button',
+              class: 'linkish',
+              title: 'Search every project website again for its icon',
+              onclick: () => {
+                clearFaviconCache(store.get(COLLECTION).projects.map((p) => p.website).filter(Boolean));
+                store.refresh();
+              },
+            }, 'Re-run icons'),
             h('button', {
               type: 'button',
               class: 'linkish',
