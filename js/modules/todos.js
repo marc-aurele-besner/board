@@ -1,4 +1,7 @@
-import { h, uid, now, icon, statusOf, empty, notice } from '../ui.js';
+import { h, uid, icon, statusOf, empty, notice, todayISO } from '../ui.js';
+import { makeTask } from '../capture.js';
+import { AUTO_SOURCES } from '../automations.js';
+import { toast } from '../toast.js';
 import { createProject, projectIcon, labelsOf, projectTree, moveProject, labelColor } from './projects.js';
 import { editText, pickChip } from '../inline.js';
 import { repoStats, createIssue, getIssue } from '../github.js';
@@ -28,9 +31,11 @@ const STATUS_FILTERS = [['open', 'Open'], ['all', 'All'], ...STATUSES];
 const STATUS_ORDER = Object.fromEntries(STATUSES.map(([key], i) => [key, i]));
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2, none: 3 };
 const NO_CATEGORY = '__none';
+// Lists that are not a project: everything, no project, due today or late, waiting to be organized, made by a rule.
+const SMART_LISTS = ['all', 'personal', 'today', 'organize', 'auto'];
 
 // View state lives here so it survives re-renders.
-// filter: 'all' | 'personal' | <project id>. status: a STATUS_FILTERS key. category: '' means any.
+// filter: one of SMART_LISTS, or a project id. status: a STATUS_FILTERS key. category: '' means any.
 // sort: { key, dir }. colFilter: per-column filters. An empty value means "any".
 const view = {
   filter: 'all',
@@ -47,9 +52,16 @@ const view = {
   tidy: { status: 'idle', items: [] },
 };
 
-const isProjectFilter = (f) => f !== 'all' && f !== 'personal';
-const matchesFilter = (item) =>
-  view.filter === 'all' || (view.filter === 'personal' ? item.projectId === null : item.projectId === view.filter);
+const isProjectFilter = (f) => !SMART_LISTS.includes(f);
+const matchesFilter = (item) => {
+  const f = view.filter;
+  if (f === 'all') return true;
+  if (f === 'personal') return item.projectId === null;
+  if (f === 'today') return Boolean(item.due) && item.due <= todayISO();
+  if (f === 'organize') return Boolean(item.inbox);
+  if (f === 'auto') return Boolean(item.auto);
+  return item.projectId === f;
+};
 const matchesStatus = (item) => {
   const s = statusOf(item);
   if (view.status === 'open') return s !== 'done';
@@ -112,7 +124,7 @@ function addItem(store, raw, description = '') {
     projectId = project.id;
   }
   store.update(COLLECTION, (d) =>
-    d.items.push({ id: uid(), text, description, status: 'todo', priority: 'none', category: '', projectId, created: now() }));
+    d.items.push(makeTask({ text, description, projectId, due: view.filter === 'today' ? todayISO() : '' })));
 }
 
 // Pasting several lines: first non-empty line is the title, the rest is the description.
@@ -133,13 +145,41 @@ function updateItem(store, id, patch) {
     if (!item) return;
     Object.assign(item, patch);
     if ('status' in patch) delete item.done;
+    // A task that got its project and its deadline no longer waits in "To Organize".
+    if (item.inbox && item.projectId && item.due) delete item.inbox;
   });
 }
 
-const removeItem = (store, id) =>
+// Deleting is immediate, with a few seconds to take it back.
+function removeItem(store, id) {
+  const items = store.get(COLLECTION).items;
+  const index = items.findIndex((i) => i.id === id);
+  if (index < 0) return;
+  const removed = items[index];
   store.update(COLLECTION, (d) => {
     d.items = d.items.filter((i) => i.id !== id);
   });
+  toast('Task deleted', { undo: () => store.update(COLLECTION, (d) => d.items.splice(Math.min(index, d.items.length), 0, removed)) });
+}
+
+// The deadline next to a title: today and late ones stand out.
+function dueChip(item) {
+  if (!item.due || statusOf(item) === 'done') return null;
+  const today = todayISO();
+  const label = new Date(`${item.due}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  if (item.due < today) return h('span', { class: 'due late' }, `Overdue · ${label}`);
+  return h('span', { class: item.due === today ? 'due today' : 'due' }, item.due === today ? 'Today' : label);
+}
+
+// The flag on a task the board created by itself, naming where it came from.
+function autoBadge(item) {
+  if (!item.auto) return null;
+  const telegram = item.auto === 'telegram';
+  return h('span', { class: 'auto-badge', title: `Created automatically by ${AUTO_SOURCES[item.auto] ?? 'a rule'}` }, icon(telegram ? 'send' : 'zap'), telegram ? 'Telegram' : 'Auto');
+}
+
+// What a task in "To Organize" still needs.
+const missingFor = (item) => [item.projectId ? '' : 'a project', item.due ? '' : 'a deadline'].filter(Boolean).join(' and ') || 'a look';
 
 // Creates a todo category from a todo's category picker. It is scoped to that todo's project, if it has one.
 function createTodoCategory(store, name, projectId) {
@@ -400,7 +440,18 @@ function todoRow(store, item, ctx) {
           placeholder: 'Untitled',
           className: 'todo-title',
           onSave: (text) => updateItem(store, item.id, { text }),
-        })),
+        }),
+        dueChip(item),
+        autoBadge(item),
+        item.inbox ? h('span', { class: 'muted small' }, `needs ${missingFor(item)}`) : null,
+        item.inbox
+          ? h('button', {
+              type: 'button',
+              class: 'btn-small',
+              title: 'Take it out of To Organize',
+              onclick: () => updateItem(store, item.id, { inbox: false }),
+            }, 'Organized')
+          : null),
       h('div', { class: 'todo-meta' },
         pickChip({
           value: status,
@@ -427,6 +478,14 @@ function todoRow(store, item, ctx) {
           allowCreate: true,
           onPick: (v) => updateItem(store, item.id, { category: v ?? '' }),
           onCreate: (name) => updateItem(store, item.id, { category: createTodoCategory(store, name, item.projectId) }),
+        }),
+        h('input', {
+          type: 'date',
+          class: 'due-input',
+          value: item.due ?? '',
+          title: 'Deadline',
+          'aria-label': `Deadline for "${item.text}"`,
+          onchange: (e) => updateItem(store, item.id, { due: e.target.value }),
         })),
       h('div', { class: 'todo-actions' },
         repos.length || item.issue ? issueControl(store, item, repos) : null,
@@ -469,6 +528,7 @@ const columnValue = (item, key, projects) => {
   if (key === 'status') return STATUS_ORDER[statusOf(item)];
   if (key === 'priority') return PRIORITY_ORDER[item.priority ?? 'none'];
   if (key === 'project') return (projects.find((p) => p.id === item.projectId)?.name ?? 'Personal').toLowerCase();
+  if (key === 'due') return item.due || '9999-99-99'; // tasks without a deadline sort last
   return (item.category || '￿').toLowerCase(); // empty categories sort last
 };
 
@@ -527,6 +587,7 @@ function columnFilters(store, projects, categories) {
     select('priority', PRIORITIES),
     select('project', [['none', 'Personal'], ...projects.map((p) => [p.id, p.name])]),
     select('category', [[NO_CATEGORY, 'No category'], ...categories.map((c) => [c, c])]),
+    h('span'),
     h('span', null, Object.values(f).some(Boolean) || view.sort.key
       ? h('button', {
           type: 'button',
@@ -757,11 +818,16 @@ function draw(root, store) {
   const openCount = (pred) => items.filter((i) => statusOf(i) !== 'done' && pred(i)).length;
   const projectName = (id) => projects.find((p) => p.id === id)?.name ?? '';
   const currentLabel =
-    view.filter === 'all' ? 'All' : view.filter === 'personal' ? 'Personal' : projectName(view.filter);
+    { all: 'All', personal: 'Personal', today: 'Today', organize: 'To Organize', auto: 'Automated' }[view.filter] ?? projectName(view.filter);
+  const listHint = {
+    today: 'Tasks whose deadline is today or has passed.',
+    organize: 'Tasks that arrived without a project or a deadline, for example from Telegram. Give them both, or press Organized.',
+    auto: 'Tasks the board created by itself. Each one says why in its description.',
+  }[view.filter];
 
   // Personal and project lists accept dropped todos; "All" does not, since it has no project.
   const navItem = (key, text, count, leading) => {
-    const accepts = key !== 'all';
+    const accepts = key === 'personal' || isProjectFilter(key);
     return h('button', {
       type: 'button',
       class: view.filter === key ? 'nav-item active' : 'nav-item',
@@ -802,7 +868,10 @@ function draw(root, store) {
           h('h2', null, 'Lists'),
           h('span', { class: 'muted small' }, 'drag onto a list to move')),
         navItem('all', 'All', openCount(() => true)),
+        navItem('today', 'Today', openCount((i) => Boolean(i.due) && i.due <= todayISO()), icon('clock')),
         navItem('personal', 'Personal', openCount((i) => i.projectId === null)),
+        navItem('organize', 'To Organize', openCount((i) => Boolean(i.inbox)), icon('inbox')),
+        navItem('auto', 'Automated', openCount((i) => Boolean(i.auto)), icon('zap')),
         h('div', { class: 'row between' },
           h('h2', null, 'Projects'),
           h('div', { class: 'row' },
@@ -921,6 +990,8 @@ function draw(root, store) {
             }, 'Labels'),
             h('span', { class: 'muted small' }, `${visible.length} shown`))),
 
+        listHint ? h('p', { class: 'muted small' }, listHint) : null,
+
         isProjectFilter(view.filter) && view.showProject
           ? projectDetails(store, projects.find((p) => p.id === view.filter))
           : null,
@@ -954,6 +1025,7 @@ function draw(root, store) {
             columnHeader(store, 'priority', 'Priority'),
             columnHeader(store, 'project', 'Project'),
             columnHeader(store, 'category', 'Category'),
+            columnHeader(store, 'due', 'Deadline'),
             h('span')),
           columnFilters(store, projects, categories),
           visible.length
@@ -988,6 +1060,6 @@ export default {
     view.category = p.category || '';
     view.showProject = p.more === '1';
     const [key = '', dir = 'asc'] = (p.sort ?? '').split('.');
-    view.sort = { key: ['text', 'status', 'priority', 'project', 'category'].includes(key) ? key : '', dir: dir === 'desc' ? 'desc' : 'asc' };
+    view.sort = { key: ['text', 'status', 'priority', 'project', 'category', 'due'].includes(key) ? key : '', dir: dir === 'desc' ? 'desc' : 'asc' };
   },
 };
