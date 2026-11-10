@@ -1,4 +1,4 @@
-// Reads a line of text as a task: "fix the footer #atlas !high friday".
+// Reads a line of text as a task: "fix the footer #atlas !high friday", or as a Money entry: "-42.50 groceries".
 // Used by the search palette and by tasks sent through Telegram, so both understand the same words.
 import { todayISO, uid, now } from './ui.js';
 
@@ -52,6 +52,27 @@ export function parseTask(raw, projects) {
   }
   const project = tagMatch ? findProject(projects, tagMatch[1]) : null;
   return { text, projectId: project?.id ?? null, tag: tagMatch && !project ? tagMatch[1] : '', priority, due };
+}
+
+// Reads a line that starts with a sign and an amount as a Money entry: "-42.50 groceries weekly shop", "+4200 salary".
+// Minus is an expense and plus is income. A currency code anywhere in the line sets the currency. The first word left is
+// the category (an existing one when it matches the start of its name) and the rest is the note.
+// Returns null when the line is not an amount, so a task such as "3 eggs" is never taken for money.
+export function parseMoney(raw, categories = [], currencies = []) {
+  const m = String(raw ?? '').trim().match(/^([+-])\s*\$?(\d+(?:[.,]\d{1,2})?)(?:\s+(.*))?$/);
+  if (!m) return null;
+  const amount = Number(m[2].replace(',', '.'));
+  if (!(amount > 0)) return null;
+  let currency = '';
+  const words = (m[3] ?? '').split(/\s+/).filter(Boolean).filter((w) => {
+    const code = currencies.find((c) => c.toLowerCase() === w.toLowerCase());
+    if (!code || currency) return true;
+    currency = code;
+    return false;
+  });
+  const first = words.shift() ?? '';
+  const known = first ? categories.find((c) => c.toLowerCase() === first.toLowerCase()) ?? categories.find((c) => c.toLowerCase().startsWith(first.toLowerCase())) : null;
+  return { type: m[1] === '+' ? 'income' : 'expense', amount, currency, category: known ?? first, note: words.join(' ') };
 }
 
 // The stored shape of a task. Every place that creates one goes through here, so new fields have one default.
