@@ -968,7 +968,7 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .lp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--gap); }
 .pool-card { position: relative; display: flex; flex-direction: column; gap: 14px; padding: 16px; min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; transition: transform 0.25s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.25s ease, border-color 0.2s ease; }
 .pool-card:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); box-shadow: 0 14px 32px rgba(0, 0, 0, 0.1); }
-.lp-grid.enter .pool-card { animation: cardIn 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: calc(var(--i, 0) * 70ms); }
+.pool-card.enter { animation: cardIn 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: calc(var(--i, 0) * 70ms); }
 @keyframes cardIn { from { opacity: 0; transform: translateY(14px) scale(0.98); } to { opacity: 1; transform: none; } }
 
 .pool-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -989,6 +989,9 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 
 .chain-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px 2px 3px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-size: 0.75rem; color: var(--muted); }
 .chain-chip .logo { width: 16px; height: 16px; box-shadow: none; }
+.version-pill { font-size: 0.72rem; font-weight: 700; padding: 1px 7px; border-radius: 6px; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.03em; }
+.lp-add select { font-size: 16px; }
+.lp-add input { width: 100%; font-size: 16px; }
 .fee-pill { font-size: 0.72rem; font-weight: 600; padding: 1px 7px; border-radius: 6px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); font-variant-numeric: tabular-nums; }
 .status-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
 .status-pill.in { color: var(--income); background: color-mix(in srgb, var(--income) 12%, transparent); }
