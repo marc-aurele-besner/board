@@ -71,6 +71,37 @@ export function fetchDayRate(day) {
   return request;
 }
 
+const DAY_MS = 86400000;
+const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
+
+function remember(day, entry) {
+  days.set(day, entry);
+  try {
+    localStorage.setItem(CACHE_PREFIX + day, JSON.stringify(entry));
+  } catch {
+    /* storage blocked: the rate is kept for this page only */
+  }
+}
+
+// Fetches every day's rate between two dates in one request. Weekends and holidays get the last published
+// rate before them, so every day in the range is known afterwards. Ranges are capped by the caller.
+export async function fetchRateRange(from, to) {
+  const res = await fetch(`${API}/${from}..${to}?base=USD&symbols=CAD`);
+  if (!res.ok) throw new Error(`The exchange rate service answered ${res.status}.`);
+  const data = await res.json();
+  const published = data.rates ?? {};
+  for (const [day, value] of Object.entries(published)) {
+    const rate = Number(value?.CAD);
+    if (Number.isFinite(rate)) remember(day, { rate, date: day });
+  }
+  let last = null;
+  for (let t = Date.parse(from); t <= Date.parse(to); t += DAY_MS) {
+    const day = iso(t);
+    if (days.has(day)) last = days.get(day);
+    else if (last) remember(day, { rate: last.rate, date: last.date });
+  }
+}
+
 // Forgets every cached daily rate. Used by Settings when the user asks for a fresh start.
 export function clearCachedRates() {
   days.clear();
