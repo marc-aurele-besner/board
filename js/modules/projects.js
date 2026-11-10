@@ -21,6 +21,65 @@ const formValues = (form) => Object.fromEntries(new FormData(form));
 const sameName = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
 const categoryById = (categories, id) => categories.find((c) => c.id === id) ?? null;
 
+// Labels are many-to-many: a project can carry several. `categoryId` is the older single-category field.
+export const labelsOf = (p) => p.labels ?? (p.categoryId ? [p.categoryId] : []);
+
+// Every project below the given one, at any depth. Used to stop a project becoming its own ancestor.
+export function descendantIds(projects, id) {
+  const out = new Set();
+  const stack = [id];
+  while (stack.length) {
+    const current = stack.pop();
+    for (const p of projects) {
+      if (p.parentId === current && !out.has(p.id)) {
+        out.add(p.id);
+        stack.push(p.id);
+      }
+    }
+  }
+  return out;
+}
+
+// Projects as a tree, depth-first, siblings in stored order. A missing parent makes a project a root.
+export function projectTree(projects) {
+  const ids = new Set(projects.map((p) => p.id));
+  const out = [];
+  const seen = new Set();
+  const visit = (parentId, depth) => {
+    for (const p of projects) {
+      const isChild = parentId === null ? !p.parentId || !ids.has(p.parentId) : p.parentId === parentId;
+      if (!isChild || seen.has(p.id)) continue;
+      seen.add(p.id);
+      out.push({ project: p, depth });
+      visit(p.id, depth + 1);
+    }
+  };
+  visit(null, 0);
+  return out;
+}
+
+// Brings projects saved before labels and parents existing up to the current shape. Runs once on open.
+export function migrateProjectShape(store) {
+  const needsUpdate = store.get(COLLECTION).projects.some((p) => !Array.isArray(p.labels) || p.parentId === undefined || 'categoryId' in p);
+  if (!needsUpdate) return;
+  store.update(COLLECTION, (d) => {
+    for (const p of d.projects) {
+      p.labels = labelsOf(p);
+      delete p.categoryId;
+      p.parentId = p.parentId ?? null;
+    }
+  });
+}
+
+// The parent select: every project except this one and its descendants, indented by depth.
+function parentOptions(store, project) {
+  const projects = store.get(COLLECTION).projects;
+  const banned = project ? descendantIds(projects, project.id) : new Set();
+  return projectTree(projects)
+    .filter(({ project: p }) => p.id !== project?.id && !banned.has(p.id))
+    .map(({ project: p, depth }) => h('option', { value: p.id }, `${'— '.repeat(depth)}${p.name}`));
+}
+
 const GITHUB_PREFIX = /^(?:https?:\/\/)?(?:www\.)?github\.com\//i;
 const cleanPath = (text) => text.trim().replace(GITHUB_PREFIX, '').replace(/^\/+|\/+$/g, '');
 
@@ -59,7 +118,8 @@ export function makeProject(existingCount, fields = {}) {
     color: PALETTE[existingCount % PALETTE.length],
     description: '',
     website: '',
-    categoryId: null,
+    labels: [],
+    parentId: null,
     github: { org: '', repos: [] },
     created: now(),
     ...fields,
@@ -162,12 +222,18 @@ function saveForm(store, v) {
     if (!repos.includes(repo)) repos.push(repo);
   }
 
+  const parentId = v.parentId || null;
+  if (parentId && editingId && (parentId === editingId || descendantIds(projects, editingId).has(parentId))) {
+    return fail('A project cannot sit under itself or under one of its sub-projects.');
+  }
+
   const fields = {
     name,
     description: v.description.trim(),
     color: v.color || PALETTE[0],
     website,
-    categoryId: v.categoryId || null,
+    labels: v.labels ?? [],
+    parentId,
     github: { org, repos },
   };
   if (editingId) {
@@ -238,12 +304,12 @@ function renameCategory(store, category, name) {
 
 function deleteCategory(store, category) {
   const { projects } = store.get(COLLECTION);
-  const count = projects.filter((p) => p.categoryId === category.id).length;
+  const count = projects.filter((p) => labelsOf(p).includes(category.id)).length;
   if (!confirm(`Delete category "${category.name}"? ${count} project${count === 1 ? '' : 's'} will become uncategorized.`)) return;
   store.update(COLLECTION, (d) => {
     d.categories = d.categories.filter((c) => c.id !== category.id);
     d.projects.forEach((p) => {
-      if (p.categoryId === category.id) p.categoryId = null;
+      p.labels = labelsOf(p).filter((x) => x !== category.id);
     });
   });
   const todos = store.get('todos');
@@ -285,11 +351,12 @@ const dropSide = (e) => {
 function projectList(store, projects, items, categories) {
   if (!projects.length) return empty('No projects match. Try another filter, or create one above.');
   return h('ul', { class: 'project-list' },
-    projects.map((p) => {
+    projectTree(projects).map(({ project: p, depth }) => {
       const open = items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
-      const category = categoryById(categories, p.categoryId);
+      const labels = labelsOf(p).map((id) => categoryById(categories, id)).filter(Boolean);
       return h('li', {
         class: p.id === view.selectedId ? 'project-item active' : 'project-item',
+        style: { paddingLeft: `${8 + depth * 18}px` },
         'data-id': p.id,
         onclick: () => select(store, p.id),
         ondragstart: (e) => {
@@ -332,7 +399,7 @@ function projectList(store, projects, items, categories) {
         projectIcon(p),
         h('div', { class: 'grow' },
           h('strong', null, p.name),
-          h('div', { class: 'muted' }, category ? `${category.name} · ${githubLine(p)}` : githubLine(p))),
+          h('div', { class: 'muted small' }, [labels.map((l) => l.name).join(', '), githubLine(p)].filter(Boolean).join(' · '))),
         h('span', { class: 'count', title: 'Open todos' }, String(open)));
     }));
 }
@@ -411,7 +478,9 @@ function triageBlock(store, p) {
 function projectView(store, p, items, categories) {
   const open = items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
   const done = items.filter((i) => i.projectId === p.id && statusOf(i) === 'done').length;
-  const category = categoryById(categories, p.categoryId);
+  const labels = labelsOf(p).map((id) => categoryById(categories, id)).filter(Boolean);
+  const parent = p.parentId ? store.get(COLLECTION).projects.find((x) => x.id === p.parentId) : null;
+  const children = projectTree(store.get(COLLECTION).projects).filter(({ project: x }) => x.parentId === p.id);
   const t = githubTotals(p);
   const gh = (n) => (p.github.repos.length === 0 ? '—' : t.pending ? '…' : String(n));
   const link = (href, text, iconName) =>
@@ -422,7 +491,11 @@ function projectView(store, p, items, categories) {
       h('div', { class: 'stack' },
         h('h2', { class: 'row' }, projectIcon(p, 'project-icon large'), p.name),
         h('div', { class: 'row' },
-          category ? h('span', { class: 'pill category' }, category.name) : h('span', { class: 'muted' }, 'No category'))),
+          labels.length ? labels.map((l) => h('span', { class: 'pill category' }, l.name)) : h('span', { class: 'muted small' }, 'No labels'),
+          parent ? h('span', { class: 'muted small' }, `· under ${parent.name}`) : null),
+        children.length
+          ? h('p', { class: 'muted small' }, `Sub-projects: ${children.map(({ project: c }) => c.name).join(', ')}`)
+          : null),
       h('div', { class: 'row' },
         h('button', { type: 'button', onclick: () => { view.mode = 'edit'; view.draft = null; view.error = ''; store.refresh(); } },
           icon('pencil'), 'Edit'),
@@ -460,17 +533,19 @@ function projectForm(store, project, projectCount, categories) {
         description: project.description,
         color: project.color,
         website: project.website,
-        categoryId: project.categoryId ?? '',
+        labels: labelsOf(project),
+        parentId: project.parentId ?? '',
         org: project.github.org,
         repos: project.github.repos.join('\n'),
       }
-    : { name: '', description: '', color: PALETTE[projectCount % PALETTE.length], website: '', categoryId: '', org: '', repos: '' });
+    : { name: '', description: '', color: PALETTE[projectCount % PALETTE.length], website: '', labels: [], parentId: '', org: '', repos: '' });
 
   return h('form', {
     class: 'stack-lg',
     onsubmit: (e) => {
       e.preventDefault();
-      saveForm(store, formValues(e.currentTarget));
+      const fd = new FormData(e.currentTarget);
+      saveForm(store, { ...Object.fromEntries(fd), labels: fd.getAll('labels') });
     },
   },
     h('h2', null, isNew ? 'New project' : 'Edit project'),
@@ -479,10 +554,18 @@ function projectForm(store, project, projectCount, categories) {
       h('label', { class: 'grow' }, 'Name', h('input', { name: 'name', value: draft.name, required: true, autocomplete: 'off', 'data-autofocus': true })),
       h('label', null, 'Color', h('input', { name: 'color', type: 'color', value: draft.color }))),
     h('div', { class: 'row' },
-      h('label', { class: 'grow' }, 'Category',
-        h('select', { name: 'categoryId', value: draft.categoryId },
-          h('option', { value: '' }, 'No category'),
-          categories.map((c) => h('option', { value: c.id }, c.name)))),
+      h('fieldset', { class: 'labels grow' },
+        h('legend', null, 'Labels'),
+        categories.length
+          ? h('div', { class: 'label-picks' },
+              categories.map((c) => h('label', { class: 'label-opt' },
+                h('input', { type: 'checkbox', name: 'labels', value: c.id, checked: draft.labels.includes(c.id) }),
+                c.name)))
+          : h('span', { class: 'muted small' }, 'No labels yet. Add them from the Projects page.')),
+      h('label', { class: 'grow' }, 'Parent',
+        h('select', { name: 'parentId', value: draft.parentId },
+          h('option', { value: '' }, 'No parent (top level)'),
+          parentOptions(store, project))),
       h('label', { class: 'grow' }, 'Website (its favicon becomes the project icon)',
         h('input', { name: 'website', value: draft.website, placeholder: 'example.com', inputmode: 'url', autocomplete: 'off' }))),
     h('label', null, 'Description',
@@ -525,7 +608,7 @@ function categoriesPanel(store, categories, projects) {
     view.error ? h('p', { class: 'error', role: 'alert' }, view.error) : null,
     h('ul', { class: 'stack' },
       categories.map((c) => {
-        const count = projects.filter((p) => p.categoryId === c.id).length;
+        const count = projects.filter((p) => labelsOf(p).includes(c.id)).length;
         return h('li', { class: 'row category-row' },
           h('form', {
             class: 'row grow',
@@ -567,7 +650,7 @@ function draw(root, store) {
   const fillList = () => {
     const q = view.query.trim().toLowerCase();
     const shown = projects.filter((p) =>
-      (view.category === 'all' || (view.category === 'none' ? !p.categoryId : p.categoryId === view.category)) &&
+      (view.category === 'all' || (view.category === 'none' ? labelsOf(p).length === 0 : labelsOf(p).includes(view.category))) &&
       (!q || p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q)));
     listBox.replaceChildren(projectList(store, shown, items, categories));
   };
@@ -626,7 +709,7 @@ function draw(root, store) {
                 view.mode = 'new';
                 view.selectedId = null;
                 view.error = '';
-                view.draft = { name, description: '', color: PALETTE[projects.length % PALETTE.length], website: '', categoryId: '', org: '', repos: '' };
+                view.draft = { name, description: '', color: PALETTE[projects.length % PALETTE.length], website: '', labels: [], parentId: '', org: '', repos: '' };
                 store.refresh();
               },
             }, 'Detailed…'),

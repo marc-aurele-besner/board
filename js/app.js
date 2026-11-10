@@ -5,7 +5,7 @@ import { h, icon } from './ui.js';
 import { configure } from './github.js';
 import { ensureTasks } from './modules/settings.js';
 import { modules } from './modules/index.js';
-import { migrateLegacyProjects } from './modules/projects.js';
+import { migrateLegacyProjects, migrateProjectShape } from './modules/projects.js';
 
 const app = document.getElementById('app');
 const STATUS_LABELS = { saved: 'Saved', saving: 'Saving…', error: 'Save failed' };
@@ -113,6 +113,7 @@ async function open(handle) {
   store = next;
   configure(store.get('settings').github?.token ?? '');
   migrateLegacyProjects(store);
+  migrateProjectShape(store);
   ensureTasks(store);
   store.subscribe(render);
   store.onStatus(updateStatus);

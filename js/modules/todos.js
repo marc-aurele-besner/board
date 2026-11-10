@@ -1,5 +1,5 @@
 import { h, uid, now, icon, statusOf, empty } from '../ui.js';
-import { createProject, projectIcon } from './projects.js';
+import { createProject, projectIcon, labelsOf, projectTree } from './projects.js';
 import { editText, pickChip } from '../inline.js';
 import { repoStats } from '../github.js';
 import { ask, parseJson } from '../ai.js';
@@ -73,7 +73,7 @@ function categoriesFor(store, projectId) {
     .filter((c) =>
       c.scope === 'all' ||
       (c.scope === 'project' && c.projectId === projectId) ||
-      (c.scope === 'projectCategory' && Boolean(project) && project.categoryId === c.projectCategoryId))
+      (c.scope === 'projectCategory' && Boolean(project) && labelsOf(project).includes(c.projectCategoryId)))
     .map((c) => c.name);
 }
 
@@ -499,28 +499,30 @@ function tidyPanel(store) {
 // --- Project bar and details ---
 
 // Project summary under the title. "Show more" reveals the project's details.
-function projectBar(store, p) {
+// The labels a project carries, as objects with names.
+const labelsFor = (store, p) => labelsOf(p)
+  .map((id) => (store.get('projects').categories ?? []).find((c) => c.id === id))
+  .filter(Boolean);
+
+// Inline after the title: labels, open count, and a toggle for the details panel.
+function projectMeta(store, p) {
   if (!p) return null;
   const open = store.get(COLLECTION).items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
-  const category = (store.get('projects').categories ?? []).find((c) => c.id === p.categoryId);
-  return h('section', { class: 'project-bar' },
-    h('div', { class: 'row between' },
-      h('div', { class: 'row' },
-        category ? h('span', { class: 'pill tone-plain' }, category.name) : null,
-        h('span', { class: 'muted small' }, `${open} open`)),
-      h('button', {
-        type: 'button',
-        class: 'btn-small',
-        'aria-expanded': String(view.showProject),
-        onclick: () => {
-          view.showProject = !view.showProject;
-          store.refresh();
-        },
-      }, view.showProject ? 'Show less' : 'Show more')),
-    view.showProject ? projectDetails(store, p, category) : null);
+  return h('span', { class: 'row meta-inline' },
+    labelsFor(store, p).map((l) => h('span', { class: 'pill tone-plain' }, l.name)),
+    h('span', { class: 'muted small' }, `${open} open`),
+    h('button', {
+      type: 'button',
+      class: 'btn-small',
+      'aria-expanded': String(view.showProject),
+      onclick: () => {
+        view.showProject = !view.showProject;
+        store.refresh();
+      },
+    }, view.showProject ? 'Less' : 'More'));
 }
 
-function projectDetails(store, p, category) {
+function projectDetails(store, p) {
   const items = store.get(COLLECTION).items.filter((i) => i.projectId === p.id);
   const done = items.filter((i) => statusOf(i) === 'done').length;
   // Repo counts load in the background; the page refreshes when they arrive, but only while on this list.
@@ -532,7 +534,9 @@ function projectDetails(store, p, category) {
     h('div', { class: 'stats' },
       h('div', null, h('strong', null, String(items.length - done)), h('span', { class: 'muted' }, 'open')),
       h('div', null, h('strong', null, String(done)), h('span', { class: 'muted' }, 'done')),
-      category ? h('div', null, h('strong', null, category.name), h('span', { class: 'muted' }, 'category')) : null),
+      labelsFor(store, p).length
+        ? h('div', null, h('strong', null, labelsFor(store, p).map((l) => l.name).join(', ')), h('span', { class: 'muted' }, 'labels'))
+        : null),
     p.website ? h('p', null, h('a', { href: p.website, target: '_blank', rel: 'noopener' }, p.website)) : null,
     p.github.org ? h('p', null, 'GitHub: ', h('a', { href: `https://github.com/${p.github.org}`, target: '_blank', rel: 'noopener' }, p.github.org)) : null,
     p.github.repos.length
@@ -700,14 +704,39 @@ function draw(root, store) {
             },
               h('input', { name: 'name', placeholder: 'Project name, Enter', 'aria-label': 'New project name', autocomplete: 'off', 'data-autofocus': true }))
           : null,
-        projects.map((p) => navItem(p.id, p.name, openCount((i) => i.projectId === p.id), projectIcon(p)))),
+        projectTree(projects).map(({ project: p, depth }) =>
+          h('div', { class: 'tree-row', style: { paddingLeft: `${depth * 14}px` } },
+            navItem(p.id, p.name, openCount((i) => i.projectId === p.id), projectIcon(p))))),
 
       h('section', { class: 'card main-pane' },
-        h('div', { class: 'row between head' },
-          h('h2', null, currentLabel),
-          h('div', { class: 'row' },
+        h('div', { class: 'head-bar' },
+          h('div', { class: 'row head-title' },
+            h('h2', null, currentLabel),
             isProjectFilter(view.filter)
               ? h('a', { href: `#/projects?project=${view.filter}&mode=edit`, class: 'icon-btn', title: 'Edit project', 'aria-label': 'Edit project' }, icon('pencil'))
+              : null,
+            isProjectFilter(view.filter) ? projectMeta(store, projects.find((p) => p.id === view.filter)) : null),
+          h('div', { class: 'row head-actions' },
+            h('label', { class: 'inline' }, 'Show',
+              h('select', {
+                value: view.status,
+                'aria-label': 'Filter by status',
+                onchange: (e) => {
+                  view.status = e.target.value;
+                  store.refresh();
+                },
+              }, STATUS_FILTERS.map(([k, l]) => h('option', { value: k }, l)))),
+            categories.length
+              ? h('label', { class: 'inline' }, 'Category',
+                  h('select', {
+                    value: view.category,
+                    'aria-label': 'Filter by category',
+                    onchange: (e) => {
+                      view.category = e.target.value;
+                      store.refresh();
+                    },
+                  }, h('option', { value: '' }, 'All'),
+                    categories.map((c) => h('option', { value: c }, c))))
               : null,
             h('button', {
               type: 'button',
@@ -723,33 +752,12 @@ function draw(root, store) {
                 view.catError = '';
                 store.refresh();
               },
-            }, 'Categories'))),
+            }, 'Labels'),
+            h('span', { class: 'muted small' }, `${visible.length} shown`))),
 
-        isProjectFilter(view.filter) ? projectBar(store, projects.find((p) => p.id === view.filter)) : null,
-
-        h('div', { class: 'toolbar' },
-          h('label', { class: 'inline' }, 'Show',
-            h('select', {
-              value: view.status,
-              'aria-label': 'Filter by status',
-              onchange: (e) => {
-                view.status = e.target.value;
-                store.refresh();
-              },
-            }, STATUS_FILTERS.map(([k, l]) => h('option', { value: k }, l)))),
-          categories.length
-            ? h('label', { class: 'inline' }, 'Category',
-                h('select', {
-                  value: view.category,
-                  'aria-label': 'Filter by category',
-                  onchange: (e) => {
-                    view.category = e.target.value;
-                    store.refresh();
-                  },
-                }, h('option', { value: '' }, 'All'),
-                  categories.map((c) => h('option', { value: c }, c))))
-            : null,
-          h('span', { class: 'muted small count-line' }, `${visible.length} shown`)),
+        isProjectFilter(view.filter) && view.showProject
+          ? projectDetails(store, projects.find((p) => p.id === view.filter))
+          : null,
 
         view.managingCategories ? categoriesManager(store) : null,
         tidyPanel(store),

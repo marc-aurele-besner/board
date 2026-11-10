@@ -81,6 +81,22 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
 }
 .brand { font-weight: 700; letter-spacing: 0.02em; color: var(--text); text-decoration: none; }
 
+/* Todo header: one title line with inline project meta, one actions line */
+.head-bar { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.head-title { gap: 8px; flex-wrap: wrap; }
+.head-title h2 { margin: 0; }
+.head-actions { gap: 8px 10px; flex-wrap: wrap; justify-content: flex-end; }
+.head-actions .muted { margin-left: auto; }
+.meta-inline { gap: 6px; flex-wrap: wrap; }
+.tree-row { display: block; }
+
+/* Labels: several per project, picked as chips in the project form */
+.labels { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px 8px; min-width: 0; }
+.labels legend { font-size: 0.85rem; color: var(--muted); padding: 0 4px; }
+.label-picks { display: flex; flex-wrap: wrap; gap: 6px; }
+.label-opt { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); cursor: pointer; font-size: 0.85rem; }
+.label-opt input { width: auto; margin: 0; }
+
 /* AI output */
 .plan-text { white-space: pre-wrap; font-family: inherit; font-size: 0.9rem; margin: 0; background: var(--surface-2); padding: 10px; border-radius: 8px; }
 .ai-text { white-space: pre-wrap; font-family: inherit; font-size: 0.9rem; margin: 0; }

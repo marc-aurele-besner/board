@@ -1,5 +1,5 @@
 import { h, icon, money, monthKey, todayISO, statusOf, empty } from '../ui.js';
-import { projectIcon } from './projects.js';
+import { projectIcon, labelsOf } from './projects.js';
 import { repoStats } from '../github.js';
 import { ask } from '../ai.js';
 
@@ -93,8 +93,9 @@ function draw(root, store) {
     .slice(0, 6);
 
   // Projects grouped by category. Uncategorized projects get their own group.
-  const groups = [...categories.map((c) => ({ id: c.id, name: c.name, projects: projects.filter((p) => p.categoryId === c.id) }))];
-  const uncategorized = projects.filter((p) => !categories.some((c) => c.id === p.categoryId));
+  // A project with several labels appears under each of them.
+  const groups = [...categories.map((c) => ({ id: c.id, name: c.name, projects: projects.filter((p) => labelsOf(p).includes(c.id)) }))];
+  const uncategorized = projects.filter((p) => labelsOf(p).length === 0);
   if (uncategorized.length) groups.push({ id: null, name: 'Uncategorized', projects: uncategorized });
 
   // GitHub totals over every linked repo. Each lookup starts a fetch the first time.
