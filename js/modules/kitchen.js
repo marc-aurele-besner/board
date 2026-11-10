@@ -46,12 +46,17 @@ function addRecipe(store, title, status) {
     d.recipes.push({ id, title, status, tags: [], ingredients: [], steps: [], notes: '', versions: [], created: now() }));
 }
 
+// Deleting is immediate, with a few seconds to take it back. The recipe returns to its place in the list.
 function deleteRecipe(store, id) {
-  if (!confirm('Delete this recipe and its iteration history?')) return;
+  const recipes = store.get(COLLECTION).recipes;
+  const index = recipes.findIndex((r) => r.id === id);
+  if (index < 0) return;
+  const removed = recipes[index];
   view.selectedId = null;
   store.update(COLLECTION, (d) => {
     d.recipes = d.recipes.filter((r) => r.id !== id);
   });
+  toast(`“${removed.title}” deleted`, { undo: () => store.update(COLLECTION, (d) => d.recipes.splice(Math.min(index, d.recipes.length), 0, removed)) });
 }
 
 function logIteration(store, id, v) {
@@ -68,9 +73,19 @@ function logIteration(store, id, v) {
 }
 
 function removeVersion(store, id, versionId) {
+  const versions = findRecipe(store.get(COLLECTION), id)?.versions ?? [];
+  const index = versions.findIndex((v) => v.id === versionId);
+  if (index < 0) return;
+  const removed = versions[index];
   store.update(COLLECTION, (d) => {
     const r = findRecipe(d, id);
     if (r) r.versions = r.versions.filter((v) => v.id !== versionId);
+  });
+  toast('Iteration deleted', {
+    undo: () => store.update(COLLECTION, (d) => {
+      const r = findRecipe(d, id);
+      if (r) r.versions.splice(Math.min(index, r.versions.length), 0, removed);
+    }),
   });
 }
 
@@ -183,7 +198,8 @@ async function importFromText(store, text, url) {
   store.refresh();
 }
 
-async function importFromUrl(store, url) {
+// Also started from the search palette, when a link is pasted there.
+export async function importFromUrl(store, url) {
   importState.url = url;
   importState.status = 'loading';
   importState.pasting = false;
