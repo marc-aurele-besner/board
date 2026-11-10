@@ -1,4 +1,4 @@
-import { h, uid, now, icon, empty, statusOf, notice } from '../ui.js';
+import { h, uid, now, icon, refreshIcon, empty, statusOf, notice } from '../ui.js';
 import { repoStats, refreshRepo, openItems } from '../github.js';
 import { ask } from '../ai.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
@@ -459,11 +459,13 @@ function repoTable(store, p) {
           class: 'icon-btn',
           title: 'Refresh counts',
           'aria-label': `Refresh ${r}`,
+          disabled: s.status === 'loading',
+          'aria-busy': s.status === 'loading' ? 'true' : null,
           onclick: () => {
             refreshRepo(r, onRepoChange);
             store.refresh();
           },
-        }, icon('refresh'))));
+        }, refreshIcon(s.status === 'loading'))));
     })));
 }
 
@@ -564,9 +566,15 @@ function overviewBlock(store, p) {
       const entry = overviews.get(repo) ?? { status: 'idle' };
       const head = h('div', { class: 'row between' },
         h('strong', null, repo),
-        entry.status === 'ok'
-          ? h('button', { type: 'button', class: 'btn-small', onclick: () => loadOverview(store, repo) }, icon('refresh'), 'Refresh')
-          : null);
+        entry.status === 'idle'
+          ? null
+          : h('button', {
+            type: 'button',
+            class: 'btn-small',
+            disabled: entry.status === 'loading',
+            'aria-busy': entry.status === 'loading' ? 'true' : null,
+            onclick: () => loadOverview(store, repo),
+          }, refreshIcon(entry.status === 'loading'), entry.status === 'loading' ? 'Refreshing…' : 'Refresh'));
       if (entry.status === 'idle') {
         return h('div', { class: 'overview' }, head,
           h('button', { type: 'button', class: 'btn-small', onclick: () => loadOverview(store, repo) }, 'Read repo'));
