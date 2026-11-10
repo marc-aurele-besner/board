@@ -88,7 +88,10 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
   text-decoration: none;
 }
 .tab.active { background: var(--surface-2); color: var(--text); font-weight: 600; }
-.status { margin-left: auto; font-size: 0.85rem; color: var(--muted); }
+.topbar-end { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.status { font-size: 0.85rem; color: var(--muted); }
+.theme-toggle { font-size: 1.15rem; }
+.theme-toggle:hover { color: var(--text); }
 .status.error { color: var(--danger); }
 
 /* Layout */
@@ -239,7 +242,7 @@ button.danger { color: var(--danger); }
   .side, .side-pane { position: static; }
   .summary { grid-template-columns: 1fr; }
   .recipe-list { max-height: none; }
-  .status { margin-left: 0; }
+  .topbar-end { margin-left: 0; width: 100%; justify-content: space-between; }
   .quick { flex-wrap: wrap; }
   .quick button { width: 100%; }
 }

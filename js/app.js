@@ -11,6 +11,23 @@ let store = null;
 let pendingHandle = null; // remembered folder that still needs permission
 let connectError = '';
 
+const THEME_KEY = 'board:theme';
+
+// No saved choice means "follow the OS", so resolve the effective theme from both.
+const isDark = () =>
+  (document.documentElement.dataset.theme ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark';
+
+function toggleTheme() {
+  const next = isDark() ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch {
+    /* storage blocked: the choice lasts for this page only */
+  }
+  render();
+}
+
 const collectionDefaults = () => Object.fromEntries(modules.map((m) => [m.collection, m.defaults]));
 const currentModule = () => modules.find((m) => m.id === location.hash.replace(/^#\//, '')) ?? modules[0];
 
@@ -24,7 +41,15 @@ function render() {
       h('div', { class: 'brand' }, 'Board'),
       h('nav', { class: 'tabs' },
         modules.map((m) => h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab' }, icon(m.icon), m.title))),
-      h('span', { id: 'save-status', class: `status ${store.status}` }, STATUS_LABELS[store.status])),
+      h('div', { class: 'topbar-end' },
+        h('span', { id: 'save-status', class: `status ${store.status}` }, STATUS_LABELS[store.status]),
+        h('button', {
+          type: 'button',
+          class: 'icon-btn theme-toggle',
+          title: isDark() ? 'Switch to light theme' : 'Switch to dark theme',
+          'aria-label': isDark() ? 'Switch to light theme' : 'Switch to dark theme',
+          onclick: toggleTheme,
+        }, icon(isDark() ? 'sun' : 'moon')))),
     main,
   );
   main.querySelector('[data-autofocus]')?.focus();
