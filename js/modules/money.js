@@ -903,6 +903,59 @@ function billLabelRow(store, projectOptions) {
       })));
 }
 
+// --- Recurring expenses ---
+
+// Due dates of a recurring expense, from its start date up to a day (inclusive), as YYYY-MM-DD.
+// A day past the month's end (the 31st in April) falls on the last day of that month.
+function dueDates(item, untilKey) {
+  const start = parseYmd(item.startDate);
+  const step = item.cadence === 'yearly' ? 12 : 1;
+  const dates = [];
+  for (let i = 0; i < 5000; i += 1) {
+    const first = new Date(start.getFullYear(), start.getMonth() + i * step, 1);
+    const lastDay = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+    const key = ymd(new Date(first.getFullYear(), first.getMonth(), Math.min(start.getDate(), lastDay)));
+    if (key > untilKey) break;
+    dates.push(key);
+  }
+  return dates;
+}
+
+// Adds an entry for every due date up to today that has none yet. Each date is recorded on its expense,
+// so an entry the user deletes is not added again.
+function syncRecurring(store) {
+  const today = ymd(startOfDay(new Date()));
+  const missing = [];
+  for (const item of store.get(COLLECTION).recurring) {
+    const done = new Set(item.generated);
+    for (const key of dueDates(item, today)) if (!done.has(key)) missing.push([item.id, key]);
+  }
+  if (!missing.length) return;
+  store.update(COLLECTION, (d) => {
+    for (const [id, key] of missing) {
+      const item = d.recurring.find((r) => r.id === id);
+      if (!item || item.generated.includes(key)) continue;
+      item.generated.push(key);
+      d.entries.push({
+        id: uid(),
+        date: key,
+        type: 'expense',
+        amount: item.amount,
+        tax: 0,
+        billId: '',
+        currency: item.currency,
+        category: item.category,
+        note: item.name,
+        projectId: item.projectId ?? null,
+        source: 'Recurring',
+        recurringId: item.id,
+        created: now(),
+      });
+      if (!d.categories.some((c) => c.toLowerCase() === item.category.toLowerCase())) d.categories.push(item.category);
+    }
+  });
+}
+
 // --- Page ---
 
 // One row of a breakdown: its share of the total, filled in the colour of its category when it has one.
@@ -918,6 +971,8 @@ function draw(root, store) {
   // Projects show their icon and name, without a pill.
   const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) }));
   const cur = view.currency;
+  // Recurring entries are added after this render, so the change does not run inside it.
+  setTimeout(() => syncRecurring(store), 0);
 
   const w = windowFor(view.range, entries);
   const fromKey = ymd(w.from);
@@ -1091,7 +1146,7 @@ export default {
   title: 'Money',
   icon: 'wallet',
   collection: COLLECTION,
-  defaults: { entries: [], categories: [], bills: [] },
+  defaults: { entries: [], categories: [], bills: [], categoryColors: {}, recurring: [] },
   render: draw,
   serialize: () => ({ cur: view.currency, range: view.range === 'month' ? '' : view.range, group: view.group === 'day' ? '' : view.group }),
   restore: (p = {}) => {
