@@ -2,7 +2,7 @@ import { h, money, empty, notice } from '../ui.js';
 import { getCatalog } from '../model-picker.js';
 import { fetchActivity } from '../github.js';
 import { setupBanner } from '../integrations.js';
-import { analyticsTab, searchTab } from './monitoring-web.js';
+import { analyticsTab, searchTab, sortTable } from './monitoring-web.js';
 
 const COLLECTION = 'usage';
 const DAY = 86400000;
@@ -141,16 +141,12 @@ function groupTable(title, rows, label) {
   return h('section', { class: 'card stack' },
     h('h3', null, title),
     rows.length
-      ? h('div', { class: 'mon-scroll' },
-          h('table', { class: 'mon-table' },
-            h('thead', null, h('tr', null,
-              h('th', null, label), h('th', { class: 'num' }, 'Calls'), h('th', { class: 'num' }, 'Tokens'), h('th', { class: 'num' }, 'Cost'))),
-            h('tbody', null, rows.map((r) =>
-              h('tr', null,
-                h('td', null, r.label),
-                h('td', { class: 'num' }, String(r.calls)),
-                h('td', { class: 'num' }, fmtTokens(r.tokens)),
-                h('td', { class: 'num' }, r.cost === null ? '—' : `${r.estimated ? '≈ ' : ''}${usdPrecise(r.cost)}`))))))
+      ? sortTable(`ai-${label}`, [
+          { label, value: (r) => r.label },
+          { label: 'Calls', num: true, value: (r) => r.calls },
+          { label: 'Tokens', num: true, value: (r) => r.tokens, format: fmtTokens },
+          { label: 'Cost', num: true, value: (r) => r.cost, format: (v, r) => (v === null ? '—' : `${r.estimated ? '≈ ' : ''}${usdPrecise(v)}`) },
+        ], rows)
       : empty('No calls in this period.'));
 }
 
@@ -420,19 +416,14 @@ function githubTab(store, w) {
     h('section', { class: 'card stack' },
       h('h3', null, 'By repo'),
       a.repos.length
-        ? h('div', { class: 'mon-scroll' },
-            h('table', { class: 'mon-table' },
-              h('thead', null, h('tr', null,
-                h('th', null, 'Repo'), h('th', { class: 'num' }, 'Commits'), h('th', { class: 'num' }, 'PRs merged'),
-                h('th', { class: 'num' }, 'Issues closed'), h('th', { class: 'num' }, 'Open PRs'), h('th', { class: 'num' }, 'Open issues'))),
-              h('tbody', null, a.repos.map((r) =>
-                h('tr', null,
-                  h('td', null, r.repo),
-                  h('td', { class: 'num' }, String(r.commits)),
-                  h('td', { class: 'num' }, String(r.merged)),
-                  h('td', { class: 'num' }, String(r.issuesClosed)),
-                  h('td', { class: 'num' }, String(r.openPrs)),
-                  h('td', { class: 'num' }, String(r.openIssues)))))))
+        ? sortTable('gh-repos', [
+            { label: 'Repo', value: (r) => r.repo },
+            { label: 'Commits', num: true, value: (r) => r.commits },
+            { label: 'PRs merged', num: true, value: (r) => r.merged },
+            { label: 'Issues closed', num: true, value: (r) => r.issuesClosed },
+            { label: 'Open PRs', num: true, value: (r) => r.openPrs },
+            { label: 'Open issues', num: true, value: (r) => r.openIssues },
+          ], a.repos)
         : empty('Nothing loaded yet.')));
 }
 
