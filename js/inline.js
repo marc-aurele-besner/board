@@ -121,13 +121,15 @@ function showPicker(anchor, { options, value, nullable, nullLabel, allowCreate, 
     const lower = q.toLowerCase();
     const shown = options.filter((o) => !q || o.label.toLowerCase().includes(lower));
     const exact = options.some((o) => o.label.toLowerCase() === lower);
-    list.replaceChildren(
+    // replaceChildren() turns null into the text "null", so empty slots are filtered out first.
+    list.replaceChildren(...[
       nullable && !q ? row(null, nullLabel ?? 'None', {}, !value) : null,
       ...shown.map((o) => row(o.value, o.label, o, o.value === value)),
       allowCreate && q && !exact
         ? h('button', { type: 'button', class: 'pop-item create', onclick: () => create(q) }, icon('plus'), `Create “${q}”`)
         : null,
-      !shown.length && !(allowCreate && q) ? h('p', { class: 'pop-empty' }, 'Nothing to pick') : null);
+      !shown.length && !(allowCreate && q) ? h('p', { class: 'pop-empty' }, 'Nothing to pick') : null,
+    ].filter(Boolean));
   };
 
   search.addEventListener('input', renderList);
