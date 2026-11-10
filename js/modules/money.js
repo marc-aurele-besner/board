@@ -699,6 +699,26 @@ function removeBill(store, billId) {
   });
 }
 
+// Every known category: the saved list plus any an entry uses, so none is missing from the picker.
+function categoryOptions(store) {
+  const { entries, categories } = store.get(COLLECTION);
+  const names = new Set([...categories, ...entries.map((e) => e.category).filter(Boolean)]);
+  return [...names].sort((a, b) => a.localeCompare(b)).map((c) => ({ value: c, label: c }));
+}
+
+// Category picker: a searchable list of categories, with “Create” for a new one.
+function categoryChip(store, value, placeholder, onPick) {
+  return pickChip({
+    value: value || null,
+    options: categoryOptions(store),
+    placeholder,
+    allowCreate: true,
+    className: 'entry-cat',
+    onPick,
+    onCreate: onPick,
+  });
+}
+
 // One entry as a single line. Charges of a bill use the same line, indented.
 function entryRow(store, e, projectOptions, cur, child = false) {
   const converted = shownAmount(e);
@@ -721,12 +741,7 @@ function entryRow(store, e, projectOptions, cur, child = false) {
         onSave: (note) => updateEntry(store, e.id, { note }),
       }),
       e.tax ? h('span', { class: 'muted small' }, `incl. tax ${money(e.tax, original)}`) : null),
-    editText({
-      value: e.category,
-      placeholder: 'Category',
-      className: 'entry-cat',
-      onSave: (category) => updateEntry(store, e.id, { category }),
-    }),
+    categoryChip(store, e.category, 'Category', (category) => updateEntry(store, e.id, { category })),
     pickChip({
       value: e.projectId ?? null,
       options: projectOptions,
@@ -789,12 +804,7 @@ function billGroup(store, items, projectOptions, cur) {
     h('span', { class: 'entry-main grow' },
       h('strong', null, first.source || 'Bill'),
       h('span', { class: 'muted small' }, ` · ${items.length} charge${items.length === 1 ? '' : 's'}${tax ? ` · tax ${money(tax, cur)}` : ''}`)),
-    editText({
-      value: sameCategory ?? '',
-      placeholder: sameCategory === null ? 'Mixed categories' : 'Category',
-      className: 'entry-cat',
-      onSave: (category) => updateBill(store, billId, { category }),
-    }),
+    categoryChip(store, sameCategory, sameCategory === null ? 'Mixed categories' : 'Category', (category) => updateBill(store, billId, { category })),
     pickChip({
       value: sameProject === undefined ? null : sameProject,
       options: projectOptions,
