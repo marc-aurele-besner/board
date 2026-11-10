@@ -5,7 +5,7 @@ import { connect, disconnect, isConnected } from '../google.js';
 import { editText, pill } from '../inline.js';
 import { modelChip } from '../model-picker.js';
 import { isAddress, CHAINS, chainSettings, savedNode } from '../uniswap.js';
-import { telegramCard, analyticsCard, searchCard, notificationsCard, automationsCard } from './settings-more.js';
+import { telegramCard, analyticsCard, searchCard, notificationsCard, automationsCard, dataCard } from './settings-more.js';
 
 const COLLECTION = 'settings';
 const OPENROUTER_CHECK = 'https://openrouter.ai/api/v1/auth/key';
@@ -55,6 +55,7 @@ const SECTION_GROUPS = [
       ['exchange', 'Exchange rates', 'coins'],
       ['notifications', 'Notifications', 'bell'],
       ['automations', 'Automations', 'zap'],
+      ['data', 'Data folder', 'folder'],
     ],
   },
 ];
@@ -874,6 +875,7 @@ function draw(root, store) {
         : view.section === 'search' ? searchCard(store)
         : view.section === 'notifications' ? notificationsCard(store)
         : view.section === 'automations' ? automationsCard(store)
+        : view.section === 'data' ? dataCard(store)
         : h('div', { class: 'stack-lg' }, tokenGuide(), github, orgKeysCard(store));
 
   const nav = h('nav', { class: 'settings-nav', 'aria-label': 'Settings sections' },

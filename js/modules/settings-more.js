@@ -203,6 +203,22 @@ export function searchCard(store) {
           result('bing')))));
 }
 
+// --- Data folder ---
+
+const DATA_FILES = ['projects', 'todos', 'recipes', 'finance', 'tools', 'notifications', 'usage', 'settings'];
+
+export function dataCard(store) {
+  return h('section', { class: 'card panel' },
+    head('Data folder', 'Your data lives as plain JSON files in a folder you chose. It stays on this computer; back it up the way you back up any other folder.', badge('Connected', 'done')),
+    h('div', { class: 'card-inset stack' },
+      h('strong', null, store.folderName ?? 'Data folder'),
+      h('p', { class: 'muted small' }, `${DATA_FILES.map((f) => `${f}.json`).join(' · ')} · bills/`)),
+    h('div', { class: 'svc-actions' },
+      h('button', { type: 'button', onclick: () => window.dispatchEvent(new CustomEvent('board:pick-folder')) }, 'Pick another folder')),
+    h('p', { class: 'muted small' }, 'The board reloads on the folder you pick. The current folder is left as it is, and you can come back to it the same way.'),
+    h('p', { class: 'muted small' }, 'Changes are written about a third of a second after you make them. The status in the top bar says Saving…, Saved or Save failed.'));
+}
+
 // --- Notifications ---
 
 export function notificationsCard(store) {

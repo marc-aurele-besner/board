@@ -180,6 +180,17 @@ async function boot() {
   });
   window.addEventListener('beforeunload', () => store?.flush());
   document.addEventListener('keydown', onShortcut);
+  // Settings › Data folder asks for another folder.
+  // The page reloads on the new folder, so timers and caches that belong to the old one are dropped with it.
+  window.addEventListener('board:pick-folder', async () => {
+    try {
+      await store?.flush();
+      await pickFolder();
+      location.reload();
+    } catch (err) {
+      if (err.name !== 'AbortError') console.error('Could not open folder', err);
+    }
+  });
   if (!fsSupported()) return renderConnect();
   try {
     pendingHandle = await loadHandle();

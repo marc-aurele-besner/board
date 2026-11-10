@@ -5,7 +5,7 @@ import { createProject } from './modules/projects.js';
 import { toast } from './toast.js';
 
 const MAX_ROWS = 12;
-const SETTINGS = [['github', 'GitHub'], ['openrouter', 'OpenRouter'], ['google', 'Google Calendar'], ['uniswap', 'Uniswap'], ['telegram', 'Telegram'], ['analytics', 'Google Analytics'], ['search', 'Search consoles'], ['appearance', 'Appearance'], ['models', 'Models & tasks'], ['categories', 'Categories'], ['exchange', 'Exchange rates'], ['notifications', 'Notifications'], ['automations', 'Automations']];
+const SETTINGS = [['github', 'GitHub'], ['openrouter', 'OpenRouter'], ['google', 'Google Calendar'], ['uniswap', 'Uniswap'], ['telegram', 'Telegram'], ['analytics', 'Google Analytics'], ['search', 'Search consoles'], ['appearance', 'Appearance'], ['models', 'Models & tasks'], ['categories', 'Categories'], ['exchange', 'Exchange rates'], ['notifications', 'Notifications'], ['automations', 'Automations'], ['data', 'Data folder']];
 
 let overlay = null;
 
