@@ -226,6 +226,37 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .rich-path { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .rich-block { display: flex; flex-direction: column; gap: 2px; }
 
+/* Projects page, left pane: compact rows, like the Tasks list */
+.side-pane { gap: 6px; }
+.side-tools { gap: 6px; }
+.project-list { gap: 1px; }
+.project-item { padding: 4px 8px; gap: 8px; border-radius: 6px; }
+.project-item .grow { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.project-item strong { font-weight: 500; font-size: 0.92rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-item .grow > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-size: 0.78rem; }
+
+/* Project page: every field edited in place */
+.project-page { gap: 18px; }
+.pp-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.pp-title { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 280px; }
+.pp-name { font-size: 1.6rem; font-weight: 700; line-height: 1.2; white-space: normal; }
+.pp-color { display: inline-flex; cursor: pointer; }
+.dot.big { width: 14px; height: 14px; }
+.pp-meta { display: flex; flex-direction: column; gap: 10px; }
+.pp-field { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pp-label { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); min-width: 80px; }
+.pp-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pill-x { display: inline-flex; align-items: center; gap: 4px; }
+.pill-remove { background: none; border: none; padding: 0; min-height: 0; color: inherit; opacity: 0.6; }
+.pill-remove:hover { opacity: 1; background: none; }
+.pill-remove .icon { width: 11px; height: 11px; }
+.pp-block { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pp-block h3 { margin: 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.pp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 18px; }
+.pp-lines { white-space: pre-line; }
+.pp-stats { display: flex; gap: 22px; flex-wrap: wrap; }
+.pp-stats > div { display: flex; flex-direction: column; }
+
 /* Projects page, left pane: search, labels, quick add, then the tree */
 .side-tools { display: flex; flex-direction: column; gap: 8px; }
 .side-tools .chips { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 6px; margin: 0; padding-bottom: 2px; scrollbar-width: thin; }
