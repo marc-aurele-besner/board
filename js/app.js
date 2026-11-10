@@ -6,6 +6,9 @@ import { configure } from './github.js';
 import { ensureTasks, applyAppearance } from './modules/settings.js';
 import { modules } from './modules/index.js';
 import { migrateLegacyProjects, migrateProjectShape } from './modules/projects.js';
+import { bell, COLLECTION as NOTIFICATIONS, DEFAULTS as NOTIFICATION_DEFAULTS } from './notifications.js';
+import { openPalette } from './palette.js';
+import { startBackground } from './background.js';
 
 const app = document.getElementById('app');
 const STATUS_LABELS = { saved: 'Saved', saving: 'Saving…', error: 'Save failed' };
@@ -32,7 +35,12 @@ function toggleTheme() {
   render();
 }
 
-const collectionDefaults = () => Object.fromEntries(modules.filter((m) => m.collection).map((m) => [m.collection, m.defaults]));
+// One file per section, plus notifications.json, which belongs to the top bar and not to a section.
+const collectionDefaults = () => ({
+  ...Object.fromEntries(modules.filter((m) => m.collection).map((m) => [m.collection, m.defaults])),
+  [NOTIFICATIONS]: NOTIFICATION_DEFAULTS,
+});
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 // The URL is #/<section>?<view params>. The params restore each section's view after a refresh.
 function readRoute() {
   const [path = '', query = ''] = location.hash.replace(/^#\//, '').split('?');
@@ -64,10 +72,14 @@ function render() {
     h('header', { class: 'topbar' },
       h('a', { href: '#/home', class: 'brand' }, 'Board'),
       h('nav', { class: 'tabs' },
-        modules.filter((m) => !m.hidden).map((m) => h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab' }, icon(m.icon), m.title))),
+        modules.filter((m) => !m.hidden).map((m) =>
+          h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab', title: m.title, 'aria-current': m.id === mod.id ? 'page' : null },
+            icon(m.icon), h('span', { class: 'tab-label' }, m.short ?? m.title)))),
       h('div', { class: 'topbar-end' },
+        h('button', { type: 'button', class: 'search-btn', title: 'Search or jump', onclick: () => openPalette(store, modules) },
+          icon('search'), h('span', { class: 'grow' }, 'Search or jump…'), h('kbd', null, isMac ? '⌘K' : 'Ctrl K')),
         h('span', { id: 'save-status', class: `status ${store.status}` }, STATUS_LABELS[store.status]),
-        h('a', { href: '#/settings', class: 'icon-btn settings-link', title: 'Settings', 'aria-label': 'Settings' }, icon('settings')),
+        bell(store),
         h('button', {
           type: 'button',
           class: 'icon-btn theme-toggle',
@@ -126,6 +138,17 @@ async function open(handle) {
   connectError = '';
   currentModule().restore?.(readRoute().params);
   render();
+  startBackground(store);
+}
+
+// Cmd/Ctrl+K anywhere, or "/" outside a field, opens the search palette.
+function onShortcut(e) {
+  if (!store) return;
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
+  const combo = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k';
+  if (!combo && !(e.key === '/' && !typing)) return;
+  e.preventDefault();
+  openPalette(store, modules);
 }
 
 async function chooseFolder() {
@@ -156,6 +179,7 @@ async function boot() {
     render();
   });
   window.addEventListener('beforeunload', () => store?.flush());
+  document.addEventListener('keydown', onShortcut);
   if (!fsSupported()) return renderConnect();
   try {
     pendingHandle = await loadHandle();
