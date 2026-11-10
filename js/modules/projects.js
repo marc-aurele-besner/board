@@ -14,7 +14,7 @@ const DEFAULT_CATEGORIES = [
 // View state. mode: 'view' | 'edit' | 'new' | 'categories'. draft keeps typed values when validation fails.
 // category filter: 'all' | 'none' | <category id>.
 let liveStore = null;
-const view = { selectedId: null, mode: 'view', error: '', draft: null, query: '', category: 'all' };
+const view = { selectedId: null, mode: 'view', error: '', draft: null, query: '', category: 'all', notice: '' };
 
 const splitLines = (text) => text.split('\n').map((s) => s.trim()).filter(Boolean);
 const formValues = (form) => Object.fromEntries(new FormData(form));
@@ -343,14 +343,45 @@ export function moveProject(store, id, targetId, after) {
     d.projects.splice(after ? to + 1 : to, 0, project);
   });
 }
+// Three drop zones on a row: the top and bottom quarters reorder, the middle nests under the row.
 const dropSide = (e) => {
   const r = e.currentTarget.getBoundingClientRect();
-  return e.clientY > r.top + r.height / 2 ? 'after' : 'before';
+  const y = (e.clientY - r.top) / r.height;
+  if (y < 0.25) return 'before';
+  if (y > 0.75) return 'after';
+  return 'inside';
 };
+
+// Makes `id` a child of `parentId` (null for top level). A project cannot go under itself or its own children.
+function setParent(store, id, parentId) {
+  if (parentId && (parentId === id || descendantIds(store.get(COLLECTION).projects, id).has(parentId))) {
+    view.notice = 'A project cannot be placed under itself or one of its sub-projects.';
+    return store.refresh();
+  }
+  view.notice = '';
+  store.update(COLLECTION, (d) => {
+    const p = d.projects.find((x) => x.id === id);
+    if (p) p.parentId = parentId;
+  });
+}
 
 function projectList(store, projects, items, categories) {
   if (!projects.length) return empty('No projects match. Try another filter, or create one above.');
   return h('ul', { class: 'project-list' },
+    // Visible only while dragging: drop here to move a project back to the top level.
+    h('li', {
+      class: 'root-drop',
+      ondragover: (e) => {
+        if (!dragId) return;
+        e.preventDefault();
+      },
+      ondrop: (e) => {
+        if (!dragId) return;
+        e.preventDefault();
+        setParent(store, dragId, null);
+        dragId = null;
+      },
+    }, 'Drop here to make top level'),
     projectTree(projects).map(({ project: p, depth }) => {
       const open = items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
       const labels = labelsOf(p).map((id) => categoryById(categories, id)).filter(Boolean);
@@ -361,12 +392,14 @@ function projectList(store, projects, items, categories) {
         onclick: () => select(store, p.id),
         ondragstart: (e) => {
           dragId = p.id;
+          document.body.classList.add('project-dragging');
           e.dataTransfer.effectAllowed = 'move';
           e.dataTransfer.setData('text/plain', p.id); // Firefox needs data to start a drag
           e.currentTarget.classList.add('dragging');
         },
         ondragend: (e) => {
           dragId = null;
+          document.body.classList.remove('project-dragging');
           e.currentTarget.draggable = false;
           e.currentTarget.classList.remove('dragging');
         },
@@ -376,13 +409,16 @@ function projectList(store, projects, items, categories) {
           const side = dropSide(e);
           e.currentTarget.classList.toggle('drop-before', side === 'before');
           e.currentTarget.classList.toggle('drop-after', side === 'after');
+          e.currentTarget.classList.toggle('drop-inside', side === 'inside');
         },
-        ondragleave: (e) => e.currentTarget.classList.remove('drop-before', 'drop-after'),
+        ondragleave: (e) => e.currentTarget.classList.remove('drop-before', 'drop-after', 'drop-inside'),
         ondrop: (e) => {
           if (!dragId) return;
           e.preventDefault();
-          e.currentTarget.classList.remove('drop-before', 'drop-after');
-          moveProject(store, dragId, p.id, dropSide(e) === 'after');
+          const side = dropSide(e);
+          e.currentTarget.classList.remove('drop-before', 'drop-after', 'drop-inside');
+          if (side === 'inside') setParent(store, dragId, p.id);
+          else moveProject(store, dragId, p.id, side === 'after');
           dragId = null;
         },
       },
@@ -738,41 +774,45 @@ function draw(root, store) {
             fillList();
           },
         }),
-        h('div', { class: 'chips' },
-          chip('all', 'All'),
-          chip('none', 'None'),
-          categories.map((c) => chip(c.id, c.name))),
-        h('form', {
-          class: 'stack quick-project',
-          onsubmit: (e) => {
-            e.preventDefault();
-            const input = e.currentTarget.querySelector('input[name="name"]');
-            const name = input.value.trim();
-            if (name) quickCreate(store, name);
+        h('div', { class: 'side-tools' },
+          view.notice ? notice({ text: view.notice }) : null,
+          h('div', { class: 'chips' },
+            chip('all', 'All'),
+            chip('none', 'None'),
+            categories.map((c) => chip(c.id, c.name))),
+          h('form', {
+            class: 'quick-project',
+            onsubmit: (e) => {
+              e.preventDefault();
+              const input = e.currentTarget.querySelector('input[name="name"]');
+              const name = input.value.trim();
+              if (name) quickCreate(store, name);
+            },
           },
-        },
-          h('input', { name: 'name', placeholder: 'Quick add: project name, Enter', 'aria-label': 'Quick add project name', autocomplete: 'off' }),
-          h('div', { class: 'row' },
-            h('button', { class: 'primary', type: 'submit' }, 'Add'),
+            h('input', { name: 'name', placeholder: 'New project…', 'aria-label': 'New project name', autocomplete: 'off' }),
+            h('button', { class: 'icon-btn primary-icon', type: 'submit', title: 'Add project', 'aria-label': 'Add project' }, icon('plus'))),
+          h('div', { class: 'side-links' },
             h('button', {
               type: 'button',
+              class: 'linkish',
               onclick: (e) => {
-                const name = e.currentTarget.closest('form').querySelector('input[name="name"]').value.trim();
+                const name = e.currentTarget.closest('.side-tools').querySelector('input[name="name"]').value.trim();
                 view.mode = 'new';
                 view.selectedId = null;
                 view.error = '';
                 view.draft = { name, description: '', color: PALETTE[projects.length % PALETTE.length], website: '', labels: [], parentId: '', org: '', repos: '' };
                 store.refresh();
               },
-            }, 'Detailed…'),
+            }, 'Detailed form'),
             h('button', {
               type: 'button',
+              class: 'linkish',
               onclick: () => {
                 view.mode = 'categories';
                 view.error = '';
                 store.refresh();
               },
-            }, 'Labels'))),
+            }, 'Manage labels'))),
         listBox),
 
       h('section', { class: 'card main-pane' }, detail)));
