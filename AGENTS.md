@@ -8,7 +8,8 @@ A personal command center that runs locally. It is plain HTML, CSS and JavaScrip
 
 ## Run and verify
 
-- Serve the folder with a static server, for example `python3 -m http.server 8000` or `bunx serve .`, then open `http://localhost:8000` in Chrome or Edge. The File System Access API needs a secure context (`localhost` counts) and does not work in Firefox or Safari.
+- Serve the folder with a static server, for example `bunx serve .` or `python3 -m http.server 8000`, then open `http://localhost:8000` in Chrome or Edge. The File System Access API needs a secure context (`localhost` counts) and does not work in Firefox or Safari.
+- A changed module is not always picked up: `python3 -m http.server` sends no cache headers, so the browser reuses the module it cached and keeps running the old code. `bunx serve .` revalidates and reloads the new code. With the Python server, ask the user for a hard reload (Cmd+Shift+R) before checking a change in the browser.
 - Syntax check every module before committing:
   `for f in js/*.js js/modules/*.js; do node --experimental-default-type=module --check "$f" || echo "FAIL $f"; done`
 - Test real behavior in the browser when you can. Folder picking needs a user click, so ask the user to drive that step if you cannot.
