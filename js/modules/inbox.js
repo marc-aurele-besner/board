@@ -129,7 +129,7 @@ function openTaskDialog(store, e) {
 }
 
 // The task of an email as a link, or a button that makes one.
-function taskControl(store, e, onCreate = () => openTaskDialog(store, e)) {
+function taskControl(store, e, onCreate = () => openTaskDialog(store, e), label = false) {
   const task = taskOf(store, e);
   if (task) {
     const done = statusOf(task) === 'done';
@@ -139,7 +139,9 @@ function taskControl(store, e, onCreate = () => openTaskDialog(store, e)) {
       title: `${done ? 'Done' : 'Open'} task: ${task.text}`,
     }, icon('check-square'), done ? 'Done' : 'Task');
   }
-  return h('button', { type: 'button', class: 'icon-btn mail-flag', title: 'Create a task from this email', 'aria-label': `Create a task from “${e.subject}”`, onclick: onCreate }, icon('check-square'));
+  return label
+    ? h('button', { type: 'button', class: 'btn-small', onclick: onCreate }, icon('check-square'), 'Create task')
+    : h('button', { type: 'button', class: 'icon-btn mail-flag', title: 'Create a task from this email', 'aria-label': `Create a task from “${e.subject}”`, onclick: onCreate }, icon('check-square'));
 }
 
 // HTML mail is shown in a sandboxed frame: no scripts, nothing read from this page, links open in a new tab.
@@ -168,7 +170,7 @@ function openReader(store, e) {
       h('div', { class: 'row end' }, taskControl(store, e, () => {
         dialog.close();
         openTaskDialog(store, e);
-      })),
+      }, true)),
       content),
   });
   readEmail(store, e)
@@ -219,9 +221,9 @@ function draw(root, store) {
     list.replaceChildren(...(shown.length
       ? shown.slice(0, view.limit).map((e) => rowEl(store, e, projects))
       : [h('li', { class: 'empty' }, emails.length ? 'No email matches these filters.' : read.busy ? 'Reading your emails…' : 'No emails yet.')]));
-    more.replaceChildren(shown.length > view.limit
-      ? h('button', { type: 'button', class: 'btn-small', onclick: () => { view.limit += STEP; paint(); } }, `Show more (${shown.length - view.limit} left)`)
-      : null);
+    more.replaceChildren(...(shown.length > view.limit
+      ? [h('button', { type: 'button', class: 'btn-small', onclick: () => { view.limit += STEP; paint(); } }, `Show more (${shown.length - view.limit} left)`)]
+      : []));
   };
   paint();
 
