@@ -1,14 +1,15 @@
 import { h, icon, refreshIcon, money, empty, notice } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { poolsChanged } from '../automations.js';
-import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position } from '../uniswap.js';
+import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition } from '../uniswap.js';
 
 const STALE_MS = 10 * 60 * 1000;
 const MAX_TICK = 887272; // the widest possible range: a "full range" position
 
 // View state: which rows are shown.
 // layout: 'cards' or 'list'.
-const view = { filter: 'all', chain: 'all', layout: 'cards' };
+// adding: the form to add a position by hand is open; addMessage is its last error.
+const view = { filter: 'all', chain: 'all', layout: 'cards', adding: false, addMessage: '' };
 // Loaded positions and the state of the last load. shallow: chains whose node would not search back to v4's start.
 // stale: chains shown from the last good read because this one failed, with when that read was.
 // pending: chains still being read in the current load.
@@ -24,6 +25,8 @@ const seen = new Set(); // rows already on screen: only new ones animate in
 const shownTotals = { value: 0, fees: 0 }; // the totals on screen, so a change counts from there
 
 const tokenKey = (chain, address) => `${chain.id}:${address}`;
+// v3 rows keep their old key, so tasks made before v4 still match.
+const refOf = (version, chainId, tokenId) => (version === 'v3' ? `${chainId}:${tokenId}` : `${chainId}:${version}:${tokenId}`);
 
 // Builds one row from a position, its pool's current state and the token prices on its chain.
 function buildRow(p, pool, prices, chain, pricesAt = null) {
@@ -48,8 +51,7 @@ function buildRow(p, pool, prices, chain, pricesAt = null) {
     : Math.min(100, Math.max(0, ((Math.log(current) - Math.log(min)) / (Math.log(max) - Math.log(min))) * 100));
   return {
     version: p.version,
-    // v3 rows keep their old key, so tasks made before v4 still match.
-    ref: p.version === 'v3' ? `${chain.id}:${p.tokenId}` : `${chain.id}:${p.version}:${p.tokenId}`,
+    ref: refOf(p.version, chain.id, p.tokenId),
     chain: chain.name,
     chainId: chain.id,
     tokenId: p.tokenId,
@@ -93,7 +95,7 @@ async function readV4(chain, node, wallets, cfg, saved) {
     scans[key] = await scanV4(chain, node, w.address, saved[key]);
   }
   const labels = new Map(wallets.map((w) => [w.address.toLowerCase(), w.label || w.address]));
-  const manual = new Set((cfg.v4ids ?? []).filter((x) => x.chainId === chain.id).map((x) => String(x.tokenId)));
+  const manual = new Set(addedPositions(cfg).filter((x) => x.version === 'v4' && x.chainId === chain.id).map((x) => String(x.tokenId)));
   const ids = [...new Set([...Object.values(scans).flatMap((s) => s?.ids ?? []), ...manual])];
   const read = new Map((await Promise.all(ids.map((id) => readV4Position(chain, node, id)))).map((r, i) => [ids[i], r]));
 
@@ -107,9 +109,16 @@ async function readV4(chain, node, wallets, cfg, saved) {
   return { items, scans };
 }
 
-// Every wallet's v3 positions on a chain, each with its pool's current state.
-async function readV3(chain, node, wallets) {
-  const positions = (await Promise.all(wallets.map(async (w) => (await readPositions(chain, node, w.address)).map((p) => ({ ...p, label: w.label || w.address }))))).flat();
+// Every wallet's v3 positions on a chain, and those added by hand, each with its pool's current state.
+async function readV3(chain, node, wallets, cfg) {
+  const owned = (await Promise.all(wallets.map(async (w) => (await readPositions(chain, node, w.address)).map((p) => ({ ...p, label: w.label || w.address }))))).flat();
+  const labels = new Map(wallets.map((w) => [w.address.toLowerCase(), w.label || w.address]));
+  const have = new Set(owned.map((p) => p.tokenId));
+  const added = addedPositions(cfg).filter((x) => x.version === 'v3' && x.chainId === chain.id && !have.has(String(x.tokenId)));
+  const extra = (await Promise.all(added.map((x) => readV3Position(chain, node, x.tokenId))))
+    .filter((p) => p && hasValue(p))
+    .map((p) => ({ ...p, label: labels.get(p.owner) ?? shortAddress(p.owner) }));
+  const positions = [...owned, ...extra];
   const pools = new Map();
   const poolKeys = [...new Set(positions.map((p) => `${p.token0}|${p.token1}|${p.fee}`))];
   await Promise.all(poolKeys.map(async (key) => {
@@ -157,7 +166,7 @@ function ago(at) {
 function savedRows(store, cfg, keys) {
   const cache = store.get(COLLECTION)?.cache ?? {};
   const wallets = new Set((cfg.wallets ?? []).map((w) => w.address.toLowerCase()));
-  const manual = new Set((cfg.v4ids ?? []).map((x) => `${x.chainId}:v4:${x.tokenId}`));
+  const manual = new Set(addedPositions(cfg).map((x) => refOf(x.version, x.chainId, x.tokenId)));
   return keys.flatMap((key) => (cache[key]?.rows ?? [])
     .filter((r) => wallets.has(r.wallet) || manual.has(r.ref))
     .map((r) => ({ ...r, max: r.max ?? Infinity, staleAt: cache[key].at })));
@@ -234,7 +243,7 @@ async function load(store) {
         publish();
       };
       await Promise.all([
-        part('v3', () => readV3(chain, node, wallets)),
+        part('v3', () => readV3(chain, node, wallets, cfg)),
         part('v4', () => readV4(chain, node, wallets, cfg, saved.scan?.[chain.id] ?? {})),
       ]);
       state.pending = state.pending.filter((name) => name !== chain.name);
@@ -333,6 +342,7 @@ function poolCard(r, i) {
         h('strong', null, r.pair),
         h('div', { class: 'pool-meta' },
           h('span', { class: 'chain-chip' }, logo(chain?.logo, r.chain, 'xs'), r.chain),
+          h('span', { class: 'version-pill', title: `Uniswap ${r.version}` }, r.version),
           h('span', { class: 'fee-pill' }, `${r.feePct}%`),
           h('span', { class: r.inRange ? 'status-pill in' : 'status-pill out' },
             h('span', { class: 'dot' }),
@@ -346,7 +356,7 @@ function poolCard(r, i) {
     distribution(r),
     h('footer', { class: 'pool-foot muted small' },
       h('span', null, r.owner),
-      h('span', null, `${r.version} · #${r.tokenId}`)));
+      h('span', null, `#${r.tokenId}`)));
 }
 
 // Placeholders shown while the first read is running.
@@ -389,7 +399,7 @@ function poolTable(rows) {
         h('tr', null,
           h('td', null, h('div', { class: 'row' },
             h('div', { class: 'pair' }, logo(tokenLogoOf(r, r.addr0), r.sym0, 'token'), logo(tokenLogoOf(r, r.addr1), r.sym1, 'token second')),
-            h('div', null, h('strong', null, r.pair), outdatedPill(r), h('div', { class: 'muted small' }, `${r.owner} · ${r.version} · #${r.tokenId}`)))),
+            h('div', null, h('strong', null, r.pair), ' ', h('span', { class: 'version-pill', title: `Uniswap ${r.version}` }, r.version), outdatedPill(r), h('div', { class: 'muted small' }, `${r.owner} · #${r.tokenId}`)))),
           h('td', null, h('span', { class: 'chain-chip' }, logo(chainOf(r.chainId)?.logo, r.chain, 'xs'), r.chain), h('div', { class: 'muted small' }, `${r.feePct}% fee`)),
           h('td', null,
             h('div', null, r.full ? 'Full range' : `${price(r.min)} → ${price(r.max)} ${r.sym1}`),
@@ -404,13 +414,53 @@ function poolTable(rows) {
             : null))))));
 }
 
+function openAdd(store) {
+  view.adding = true;
+  view.addMessage = '';
+  store.refresh();
+}
+
+// Adds one position the board did not find: a link copied from the Uniswap app, or a number with its chain and
+// version. It is saved in Settings, where it can be removed, and read straight away.
+function addForm(store) {
+  const submit = (e) => {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const entry = parsePosition(form.get('position'), Number(form.get('chain')), String(form.get('version')));
+    if (!entry) {
+      view.addMessage = 'Paste a position link from app.uniswap.org, or type the position number and pick its chain and version.';
+      return store.refresh();
+    }
+    const error = addPosition(store, entry);
+    if (error) {
+      view.addMessage = error;
+      return store.refresh();
+    }
+    view.adding = false;
+    view.addMessage = '';
+    store.refresh();
+    load(store);
+  };
+  return h('form', { class: 'card panel stack lp-add', onsubmit: submit },
+    h('h3', null, 'Add a position'),
+    h('p', { class: 'muted small' }, 'For a position the board does not find: a v3 position held by an address not in your wallets, or a v4 position older than the node keeps. A link from app.uniswap.org names its chain and version. A number needs both picked.'),
+    h('input', { name: 'position', placeholder: 'https://app.uniswap.org/positions/v4/base/123456 or 123456', spellcheck: false, autofocus: true, 'aria-label': 'Position link or number' }),
+    h('div', { class: 'row' },
+      h('select', { name: 'chain', 'aria-label': 'Chain of the position' }, CHAINS.map((c) => h('option', { value: String(c.id) }, c.name))),
+      h('select', { name: 'version', 'aria-label': 'Uniswap version' }, h('option', { value: 'v4' }, 'v4'), h('option', { value: 'v3' }, 'v3')),
+      h('button', { type: 'submit', class: 'btn-small' }, 'Add'),
+      h('button', { type: 'button', class: 'btn-small', onclick: () => { view.adding = false; store.refresh(); } }, 'Cancel')),
+    view.addMessage ? notice({ text: view.addMessage }) : null);
+}
+
 function draw(root, store) {
   const cfg = store.get('settings').uniswap ?? {};
   const wallets = (cfg.wallets ?? []).filter((w) => isAddress(w.address));
-  if (!wallets.length) {
+  if (!wallets.length && !addedPositions(cfg).length) {
     return root.replaceChildren(h('div', { class: 'stack-lg' },
       h('h2', null, 'Liquidity Pools'),
-      setupBanner('uniswap', 'Add a wallet address in Settings to see its Uniswap positions.')));
+      setupBanner('uniswap', 'Add a wallet address in Settings to see its Uniswap positions.'),
+      view.adding ? addForm(store) : h('button', { type: 'button', class: 'btn-small', onclick: () => openAdd(store) }, icon('plus'), 'Add a position by link or number')));
   }
   // Until the first read lands, show what the last one saved.
   if (state.status === 'idle' && !state.rows.length) {
@@ -496,12 +546,15 @@ function draw(root, store) {
         h('p', { class: 'muted small' },
           `Uniswap v3 and v4 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`,
           state.pending.length ? ` Reading ${state.pending.join(', ')}…` : state.at ? ` ${updatedText()}.` : '')),
-      h('button', { type: 'button', class: 'btn-small', disabled: reading || chainCount === 0, onclick: () => load(store) },
+      h('div', { class: 'row' },
+        h('button', { type: 'button', class: 'btn-small', onclick: () => openAdd(store), title: 'Add a position the board did not find' }, icon('plus'), 'Add position'),
+        h('button', { type: 'button', class: 'btn-small', disabled: reading || chainCount === 0, onclick: () => load(store) },
         refreshIcon(reading),
-        reading ? 'Reading…' : 'Refresh')),
+          reading ? 'Reading…' : 'Refresh'))),
 
+    view.adding ? addForm(store) : null,
     state.shallow.length
-      ? notice({ tone: 'info', text: `The node for ${state.shallow.join(', ')} keeps only recent history, so older v4 positions there are not found. Add them by link in Settings, or set a node that keeps full history.` })
+      ? notice({ tone: 'info', text: `The node for ${state.shallow.join(', ')} keeps only recent history, so older v4 positions there are not found. Add them with Add position, or set a node that keeps full history in Settings.` })
       : null,
     staleText ? notice({ tone: 'info', text: staleText }) : null,
     !state.at && all.length ? notice({ tone: 'info', text: 'Showing the positions saved by the last read while the chains are read again.' }) : null,

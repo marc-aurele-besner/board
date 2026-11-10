@@ -989,6 +989,9 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 
 .chain-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px 2px 3px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-size: 0.75rem; color: var(--muted); }
 .chain-chip .logo { width: 16px; height: 16px; box-shadow: none; }
+.version-pill { font-size: 0.72rem; font-weight: 700; padding: 1px 7px; border-radius: 6px; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.03em; }
+.lp-add select { font-size: 16px; }
+.lp-add input { width: 100%; font-size: 16px; }
 .fee-pill { font-size: 0.72rem; font-weight: 600; padding: 1px 7px; border-radius: 6px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); font-variant-numeric: tabular-nums; }
 .status-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
 .status-pill.in { color: var(--income); background: color-mix(in srgb, var(--income) 12%, transparent); }

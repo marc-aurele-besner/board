@@ -158,24 +158,42 @@ export async function readPositions(chain, node, owner) {
   const ids = await Promise.all(indexes.map(async (i) => big(words(await rpcCall(node, chain.positions, SEL.tokenOfOwnerByIndex + ownerWord + pad(i.toString(16))))[0])));
   const raw = await Promise.all(ids.map((id) => rpcCall(node, chain.positions, SEL.positions + pad(id.toString(16)))));
   return raw
-    .map((hex, i) => {
-      const w = words(hex);
-      return {
-        version: 'v3',
-        chainId: chain.id,
-        tokenId: ids[i].toString(),
-        owner,
-        token0: addressOf(w[2]),
-        token1: addressOf(w[3]),
-        fee: Number(big(w[4])),
-        tickLower: Number(signed(w[5])),
-        tickUpper: Number(signed(w[6])),
-        liquidity: big(w[7]),
-        owed0: big(w[10]),
-        owed1: big(w[11]),
-      };
-    })
+    .map((hex, i) => decodeV3(chain, ids[i].toString(), owner, hex))
     .filter((p) => p.liquidity > 0n || p.owed0 > 0n || p.owed1 > 0n);
+}
+
+// A v3 position as the position manager returns it.
+function decodeV3(chain, tokenId, owner, hex) {
+  const w = words(hex);
+  return {
+    version: 'v3',
+    chainId: chain.id,
+    tokenId,
+    owner,
+    token0: addressOf(w[2]),
+    token1: addressOf(w[3]),
+    fee: Number(big(w[4])),
+    tickLower: Number(signed(w[5])),
+    tickUpper: Number(signed(w[6])),
+    liquidity: big(w[7]),
+    owed0: big(w[10]),
+    owed1: big(w[11]),
+  };
+}
+
+// One v3 position by its number, whoever owns it. null when the token was burned.
+export async function readV3Position(chain, node, tokenId) {
+  const id = pad(BigInt(tokenId).toString(16));
+  try {
+    const [owner, hex] = await Promise.all([
+      rpcCall(node, chain.positions, SEL.ownerOf + id),
+      rpcCall(node, chain.positions, SEL.positions + id),
+    ]);
+    return decodeV3(chain, String(tokenId), addressOf(words(owner)[0]), hex);
+  } catch (err) {
+    if (err.refused) return null; // both calls revert for a burned token
+    throw err;
+  }
 }
 
 // The pool a position is in: its current price (sqrt, as a float) and tick. null when the pool does not exist.
@@ -352,12 +370,37 @@ export async function readV4Position(chain, node, tokenId) {
   };
 }
 
-// Reads a v4 position link from the Uniswap app (…/positions/v4/<chain>/<id>) into a chain id and token id.
-export function parseV4Link(text) {
-  const m = String(text ?? '').match(/positions\/v4\/([a-z0-9_-]+)\/(\d+)/i);
-  if (!m) return null;
-  const chain = CHAINS.find((c) => c.app === m[1].toLowerCase());
-  return chain ? { chainId: chain.id, tokenId: m[2] } : null;
+// Positions added by hand, for those the board does not find: a v3 position held by an address that is not in the
+// wallet list, or a v4 position older than the node's history. v4ids came first, so each version has its own list.
+export const addedPositions = (cfg) => [
+  ...(cfg?.v3ids ?? []).map((x) => ({ ...x, version: 'v3' })),
+  ...(cfg?.v4ids ?? []).map((x) => ({ ...x, version: 'v4' })),
+];
+export const addedListOf = (version) => (version === 'v3' ? 'v3ids' : 'v4ids');
+
+// Reads what was typed to add a position: a Uniswap app link (…/positions/<v3|v4>/<chain>/<id>), which names its
+// chain and version, or a plain number, which takes the chain and version picked beside it.
+export function parsePosition(text, chainId, version) {
+  const s = String(text ?? '').trim();
+  const m = s.match(/positions\/(v3|v4)\/([a-z0-9_-]+)\/(\d+)/i);
+  if (m) {
+    const chain = CHAINS.find((c) => c.app === m[2].toLowerCase());
+    return chain ? { chainId: chain.id, version: m[1].toLowerCase(), tokenId: m[3] } : null;
+  }
+  return /^\d+$/.test(s) && CHAINS.some((c) => c.id === chainId) && ['v3', 'v4'].includes(version) ? { chainId, version, tokenId: s } : null;
+}
+
+// Adds a parsed position to the settings. Returns an error message, or '' when it was added.
+export function addPosition(store, entry) {
+  const cfg = store.get('settings').uniswap ?? {};
+  if (addedPositions(cfg).some((x) => x.version === entry.version && x.chainId === entry.chainId && String(x.tokenId) === entry.tokenId)) {
+    return 'That position is already in the list.';
+  }
+  const list = addedListOf(entry.version);
+  store.update('settings', (d) => {
+    d.uniswap = { wallets: [], chains: {}, ...d.uniswap, [list]: [...(d.uniswap?.[list] ?? []), { chainId: entry.chainId, tokenId: entry.tokenId }] };
+  });
+  return '';
 }
 
 // The amounts of both tokens a position holds at the pool's current price (raw units, floats).
