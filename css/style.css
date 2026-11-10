@@ -1182,6 +1182,8 @@ label.check { cursor: pointer; }
 .site-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: var(--gap); }
 .site-card { display: flex; flex-direction: column; gap: 14px; }
 .site-card.down { border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); }
+.follow-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.follow-form input { flex: 1 1 180px; min-width: 0; }
 .up-bars { display: flex; gap: 2px; height: 26px; }
 .up-bars span { flex: 1; max-width: 12px; border-radius: 2px; background: var(--income); }
 .up-bars .bad { background: var(--danger); }

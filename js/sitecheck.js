@@ -8,6 +8,7 @@
 //     issued for the host. The second is asked only when the first does not answer.
 //   - r.jina.ai: the page reader already used for recipes, for the home page's HTML and the crawl files.
 //   - cloudflare-dns.com: DNS over HTTPS, for the records that say who may send mail and issue certificates.
+// Provider status is read from each provider's own public status page; nothing about the user is sent.
 
 const TIMEOUT_MS = 12000;
 const SLOW_MS = 1500;
@@ -244,6 +245,35 @@ export async function readCrawlFiles(website) {
     security.expires = security.raw.match(/^\s*expires\s*:\s*(\S+)/im)?.[1]?.slice(0, 10) ?? '';
   }
   return { robots: { ...robots, ...rules }, sitemap, llms, security };
+}
+
+// --- Provider status ---
+
+const STATUS_KEEP = 12; // degraded components kept; large providers list hundreds
+
+// "githubstatus.com" or "https://www.githubstatus.com/history" both become the page's origin.
+export function statusPageOf(input) {
+  try {
+    const url = new URL(/^https?:\/\//i.test(input.trim()) ? input.trim() : `https://${input.trim()}`);
+    return url.hostname.includes('.') ? url.origin : '';
+  } catch {
+    return '';
+  }
+}
+
+// Statuspage's public summary: the overall state, open incidents, and the components that are not operational.
+export async function checkProvider(page) {
+  const res = await timed(`${page}/api/v2/summary.json`);
+  if (res.status === 404) throw new Error('This page does not publish a Statuspage summary.');
+  if (!res.ok) throw new Error(`The status page answered ${res.status}.`);
+  const data = await res.json().catch(() => null);
+  if (!data?.status?.indicator) throw new Error('This page does not publish a Statuspage summary. Try its full address, often with www.');
+  return {
+    indicator: data.status.indicator,
+    description: data.status.description ?? '',
+    components: (data.components ?? []).filter((c) => !c.group && c.status !== 'operational').slice(0, STATUS_KEEP).map((c) => ({ name: c.name, status: c.status })),
+    incidents: (data.incidents ?? []).filter((i) => !['resolved', 'postmortem'].includes(i.status)).map((i) => ({ name: i.name, impact: i.impact, status: i.status, url: i.shortlink ?? `${page}/incidents/${i.id}` })),
+  };
 }
 
 export const daysUntil = (isoDate) => Math.round((Date.parse(`${isoDate}T00:00:00`) - new Date().setHours(0, 0, 0, 0)) / 86400000);

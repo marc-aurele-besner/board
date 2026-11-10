@@ -8,8 +8,8 @@ Sections (v1):
 - **Projects**: quick-add by name, or a detailed form for color, description, and GitHub links (one org, several repos, or none).
 - **Kitchen**: recipe ideas, recipes you are testing, and final recipes. Log each iteration with notes and a rating.
 - **Money**: rough income and expenses per month, with totals and a per-category breakdown.
-- **Tools**: checks on each project's website: is it reachable, when its SSL certificate and domain expire, whether its domain has SPF, DMARC and DKIM records for mail, what its robots.txt, sitemap, llms.txt and security.txt say, and how a shared link to it looks.
-- **Notifications**: the bell in the top bar lists deadlines, automated tasks, site checks and Telegram messages.
+- **Tools**: checks on each project's website: is it reachable, when its SSL certificate and domain expire, whether its domain has SPF, DMARC and DKIM records for mail, what its robots.txt, sitemap, llms.txt and security.txt say, and how a shared link to it looks. **Provider status** follows the status pages of the services you rely on (GitHub, Vercel, Cloudflare, and any other Statuspage page).
+- **Notifications**: the bell in the top bar lists deadlines, automated tasks, site checks, provider outages and Telegram messages.
 
 Tasks have a deadline. The lists **Today**, **To Organize** and **Automated** gather what is due, what arrived without a project or deadline (for example from Telegram), and what the board created by itself. Press Cmd/Ctrl+K or `/` to search, jump, or type a task such as `fix the footer #atlas !high friday`.
 
@@ -37,7 +37,7 @@ Every file has a `schemaVersion` field. Files are plain JSON and can be edited b
 | --- | --- |
 | `projects.json` | `{ projects: [{id, name, color, description, github: {org, repos: ['owner/repo']}, created}] }`. `github.org` and `github.repos` may be empty, for non-coding projects. |
 | `todos.json` | `{ items: [{id, text, description, status, priority, category, projectId, due, auto, autoRef, inbox, created}] }`. `projectId: null` means Personal. `due` is a `YYYY-MM-DD` deadline or empty. `auto` names what created the task (`domain`, `ssl`, `health`, `email`, `crawl`, `recurring`, `pools`, `telegram`), and `inbox: true` keeps it in To Organize. Array order is the display order (drag the grip to reorder). |
-| `tools.json` | `{ sites: { <projectId>: { health, history, ssl, domain, dns, crawl, meta } }, every }`: the last result of each check, and the minutes between automatic health checks. |
+| `tools.json` | `{ sites: { <projectId>: { health, history, ssl, domain, dns, crawl, meta } }, every, providers: [{id, name, url}], status: { <providerId>: {indicator, description, components, incidents, at} } }`: the last result of each check, the minutes between automatic health and status checks, and the followed status pages. |
 | `notifications.json` | `{ items: [{id, kind, text, href, key, at, read}], prefs: { <kind>: {app, telegram} } }` |
 | `recipes.json` | `{ recipes: [{id, title, status: 'idea'\|'testing'\|'final', tags, ingredients, steps, notes, images, versions: [{id, date, changes, rating, notes}], created}] }` |
 | `finance.json` | `{ entries: [{id, date, type: 'income'\|'expense', amount, category, note, created}], categories: [], budgets: { <category>: {amount, currency} } }`. A budget is per month and shows in the category breakdown when the period is one month. |
@@ -56,6 +56,7 @@ Nothing runs on a server, and everything automatic runs only while the board is 
 | Domain expiry | `rdap.org` (the registries' lookup protocol) | the domain name |
 | SSL expiry | `api.certspotter.com`, then `crt.sh` (public certificate logs) | the host name |
 | DNS and email | `cloudflare-dns.com` (DNS over HTTPS) | the domain name, and the `_dmarc` and common DKIM names under it |
+| Provider status | each followed status page (Statuspage's public `/api/v2/summary.json`) | nothing but the request itself |
 | Metadata preview, crawl files, recipe import | `r.jina.ai` (page reader) | the page or file address |
 | Telegram | `api.telegram.org` | your bot token, and the messages you exchange with your bot |
 | Calendar, Analytics, Search Console | Google, with your own OAuth Client ID | a read-only sign-in that lasts about an hour |

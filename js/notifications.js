@@ -13,6 +13,7 @@ export const KINDS = [
   ['auto', 'Automated tasks', 'zap'],
   ['health', 'Website health', 'globe'],
   ['ssl', 'SSL certificates and domains', 'shield'],
+  ['status', 'Provider outages and recoveries', 'activity'],
   ['telegram', 'Telegram messages', 'send'],
   ['pools', 'Liquidity Pools out of range', 'droplet'],
 ];

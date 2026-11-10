@@ -1,13 +1,13 @@
-// Tools: checks that run against the website of each project.
-import { h, icon, empty, notice } from '../ui.js';
+// Tools: checks that run against the website of each project, and the status of the services they rely on.
+import { h, icon, empty, notice, uid } from '../ui.js';
 import { projectIcon } from './projects.js';
-import { hostOf, daysUntil } from '../sitecheck.js';
-import { sitesOf, siteData, checkSite, checkAllSites, runRules, autoTaskFor, ruleOf, emailGaps, TOOLS_DEFAULTS } from '../automations.js';
+import { hostOf, daysUntil, statusPageOf } from '../sitecheck.js';
+import { sitesOf, siteData, checkSite, checkAllSites, runRules, autoTaskFor, ruleOf, emailGaps, checkProviders, TOOLS_DEFAULTS } from '../automations.js';
 import { makeTask } from '../capture.js';
 import { toast } from '../toast.js';
 
 const COLLECTION = 'tools';
-const TABS = [['health', 'Website health', 'globe'], ['ssl', 'SSL and domains', 'shield'], ['dns', 'DNS and email', 'mail'], ['crawl', 'Crawl files', 'file'], ['meta', 'Metadata preview', 'link']];
+const TABS = [['health', 'Website health', 'globe'], ['ssl', 'SSL and domains', 'shield'], ['dns', 'DNS and email', 'mail'], ['crawl', 'Crawl files', 'file'], ['meta', 'Metadata preview', 'link'], ['status', 'Provider status', 'activity']];
 // What "Check all now" looks up on each tab.
 const TAB_PARTS = { health: ['health'], ssl: ['ssl', 'domain'], dns: ['dns'], crawl: ['crawl'] };
 const EVERY = [[15, '15 minutes'], [60, 'hour'], [360, '6 hours'], [1440, 'day']];
@@ -325,19 +325,112 @@ function metaTab(store, sites) {
           h('figure', null, h('figcaption', { class: 'muted small' }, label), shareCard(k, p, m)))))));
 }
 
+// --- Provider status ---
+
+// Common services whose status page runs on Statuspage. Any other Statuspage address can be added by hand.
+const PRESETS = [
+  ['GitHub', 'https://www.githubstatus.com'],
+  ['Vercel', 'https://www.vercel-status.com'],
+  ['Cloudflare', 'https://www.cloudflarestatus.com'],
+  ['Netlify', 'https://www.netlifystatus.com'],
+  ['npm', 'https://status.npmjs.org'],
+  ['Anthropic', 'https://status.anthropic.com'],
+  ['OpenAI', 'https://status.openai.com'],
+];
+const INDICATOR = { none: ['Operational', 'done'], minor: ['Minor issue', 'medium'], maintenance: ['Maintenance', 'medium'], major: ['Major outage', 'high'], critical: ['Critical outage', 'high'] };
+const COMPONENT = { degraded_performance: 'degraded', partial_outage: 'partial outage', major_outage: 'major outage', under_maintenance: 'maintenance' };
+
+function follow(store, name, url) {
+  const page = statusPageOf(url);
+  if (!page) return toast('Enter the address of a status page, such as www.githubstatus.com.');
+  if (store.get(COLLECTION).providers.some((pr) => pr.url === page)) return toast(`${name || page} is already followed.`);
+  const id = uid();
+  store.update(COLLECTION, (d) => {
+    d.providers.push({ id, name: name.trim() || new URL(page).hostname, url: page });
+  });
+  run(store, id, () => checkProviders(store, [id]));
+}
+
+function unfollow(store, pr) {
+  store.update(COLLECTION, (d) => {
+    d.providers = d.providers.filter((x) => x.id !== pr.id);
+    delete d.status[pr.id];
+  });
+  toast(`${pr.name} is no longer followed`);
+}
+
+function providerCard(store, pr) {
+  const s = store.get(COLLECTION).status[pr.id];
+  const busy = view.busy.has(pr.id) || view.busy.has('all');
+  const [label, tone] = s?.indicator ? INDICATOR[s.indicator] ?? [s.indicator, 'medium'] : s?.error ? ['Unreadable', 'plain'] : ['Not read yet', 'plain'];
+  return h('article', { class: `card site-card stack ${s?.indicator && s.indicator !== 'none' ? 'down' : ''}` },
+    h('div', { class: 'row between' },
+      h('div', null, h('strong', null, pr.name), h('div', null, h('a', { href: pr.url, target: '_blank', rel: 'noopener', class: 'small' }, new URL(pr.url).hostname))),
+      busy ? pillOf('Reading…', 'plain') : pillOf(label, tone)),
+    s?.description && s.indicator !== 'none' ? h('p', { class: 'small' }, s.description) : null,
+    s?.incidents?.length
+      ? h('ul', { class: 'crawl-facts' }, s.incidents.map((i) => h('li', null, h('a', { href: i.url, target: '_blank', rel: 'noopener' }, i.name), h('span', { class: 'muted small' }, ` · ${i.status}`))))
+      : null,
+    s?.components?.length
+      ? h('details', null,
+          h('summary', { class: 'muted small' }, `${s.components.length}${s.components.length >= 12 ? '+' : ''} part${s.components.length === 1 ? '' : 's'} affected`),
+          h('ul', { class: 'crawl-facts' }, s.components.map((c) => h('li', null, c.name, h('span', { class: 'muted small' }, ` · ${COMPONENT[c.status] ?? c.status}`)))))
+      : null,
+    s?.error ? h('p', { class: 'muted small' }, `${s.indicator ? 'Last read failed' : 'Could not read'}: ${s.error}`) : null,
+    h('div', { class: 'row between' },
+      h('span', { class: 'muted small' }, `Read ${timeOf(s?.at)}`),
+      h('div', { class: 'row' },
+        h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Read again', 'aria-label': `Read ${pr.name} again`, onclick: () => run(store, pr.id, () => checkProviders(store, [pr.id])) }, icon('refresh')),
+        h('button', { type: 'button', class: 'icon-btn', title: 'Stop following', 'aria-label': `Stop following ${pr.name}`, onclick: () => unfollow(store, pr) }, icon('x')))));
+}
+
+function statusTab(store) {
+  const { providers, status } = store.get(COLLECTION);
+  const followed = new Set(providers.map((pr) => pr.url));
+  const presets = PRESETS.filter(([, url]) => !followed.has(url));
+  const down = providers.filter((pr) => status[pr.id]?.indicator && status[pr.id].indicator !== 'none');
+  // The fields are read on submit, so typing never re-renders the tab.
+  const name = h('input', { type: 'text', placeholder: 'Name', 'aria-label': 'Provider name', autocomplete: 'off' });
+  const url = h('input', { type: 'text', inputmode: 'url', placeholder: 'status.example.com', 'aria-label': 'Status page address', autocomplete: 'off' });
+  return h('div', { class: 'stack-lg' },
+    providers.length
+      ? notice(down.length
+          ? { tone: 'info', text: `${down.map((pr) => pr.name).join(', ')} ${down.length === 1 ? 'reports' : 'report'} a problem right now.` }
+          : { tone: 'ok', text: 'Every followed service reports that it is working.' })
+      : null,
+    providers.length
+      ? h('div', { class: 'site-grid' }, providers.map((pr) => providerCard(store, pr)))
+      : h('div', { class: 'card' }, empty('Follow the services your projects rely on, and the bell tells you when one has an outage and when it is over.')),
+    h('section', { class: 'card stack' },
+      h('h3', null, 'Follow a service'),
+      presets.length
+        ? h('div', { class: 'chips' }, presets.map(([n, u]) => h('button', { type: 'button', class: 'chip', onclick: () => follow(store, n, u) }, icon('plus'), n)))
+        : null,
+      h('form', {
+        class: 'follow-form',
+        onsubmit: (e) => {
+          e.preventDefault();
+          follow(store, name.value, url.value);
+        },
+      }, name, url, h('button', { type: 'submit', class: 'btn-small primary' }, 'Follow'))),
+    h('p', { class: 'muted small' }, 'Works with status pages hosted on Statuspage (most providers use it). The page’s public summary is read on the same interval as website health; nothing about you is sent.'));
+}
+
 function draw(root, store) {
   const sites = sitesOf(store);
   const without = store.get('projects').projects.filter((p) => !hostOf(p.website ?? ''));
   const all = view.busy.has('all');
-  const body = !sites.length
+  // Provider status follows outside services, so it works before any project has a website.
+  const status = view.tab === 'status';
+  const body = status ? statusTab(store) : !sites.length
     ? h('div', { class: 'card stack' }, empty('No project has a website yet. Add one on a project page and it appears here.'), h('div', null, h('a', { href: '#/projects', class: 'btn-link' }, 'Open Projects')))
     : view.tab === 'ssl' ? sslTab(store, sites) : view.tab === 'dns' ? dnsTab(store, sites) : view.tab === 'crawl' ? crawlTab(store, sites) : view.tab === 'meta' ? metaTab(store, sites) : healthTab(store, sites);
 
   root.replaceChildren(
     h('div', { class: 'stack-lg tools' },
       h('header', { class: 'row between' },
-        h('div', null, h('h2', null, 'Tools'), h('p', { class: 'muted small' }, 'Checks that run against the website of each project, while the board is open.')),
-        sites.length && view.tab !== 'meta'
+        h('div', null, h('h2', null, 'Tools'), h('p', { class: 'muted small' }, 'Checks that run against the website of each project, and the services they rely on, while the board is open.')),
+        (sites.length || (status && store.get(COLLECTION).providers.length)) && view.tab !== 'meta'
           ? h('div', { class: 'row' },
               h('label', { class: 'inline' }, 'Check every',
                 h('select', {
@@ -352,6 +445,11 @@ function draw(root, store) {
                 class: 'btn-small primary',
                 disabled: all,
                 onclick: () => run(store, 'all', async () => {
+                  if (status) {
+                    await checkProviders(store);
+                    toast('All status pages read');
+                    return;
+                  }
                   const made = await checkAllSites(store, TAB_PARTS[view.tab] ?? ['health']);
                   toast(made ? `${made} task${made === 1 ? '' : 's'} created automatically` : 'All sites checked');
                 }),

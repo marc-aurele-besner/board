@@ -4,7 +4,7 @@
 import { statusOf, now, todayISO } from './ui.js';
 import { makeTask } from './capture.js';
 import { notify } from './notifications.js';
-import { checkHealth, checkDomain, checkCertificate, checkDns, readMeta, readCrawlFiles, hostOf, daysUntil } from './sitecheck.js';
+import { checkHealth, checkDomain, checkCertificate, checkDns, readMeta, readCrawlFiles, checkProvider, hostOf, daysUntil } from './sitecheck.js';
 import { nextRecurringDue } from './modules/money.js';
 
 // [key, title, description, has a "days before" setting]
@@ -23,7 +23,8 @@ export const ruleOf = (store, key) => ({ ...RULE_DEFAULTS[key], ...(store.get('s
 // What each source is called on a task's "Auto" flag.
 export const AUTO_SOURCES = { domain: 'the domain check', ssl: 'the SSL check', health: 'the website health check', email: 'the DNS check', crawl: 'the crawl files check', recurring: 'a recurring bill', pools: 'Liquidity Pools', telegram: 'a Telegram message' };
 
-export const TOOLS_DEFAULTS = { sites: {}, every: 60 }; // minutes between automatic checks
+// `every`: minutes between automatic checks. `providers`: the status pages followed in Provider status, and `status` their last answer.
+export const TOOLS_DEFAULTS = { sites: {}, every: 60, providers: [], status: {} };
 export const sitesOf = (store) => store.get('projects').projects.filter((p) => hostOf(p.website ?? ''));
 export const siteData = (store, projectId) => store.get('tools').sites[projectId] ?? {};
 export const autoTaskFor = (store, kind, ref) =>
@@ -153,5 +154,44 @@ export function sitesDue(store) {
   return sitesOf(store).some((p) => {
     const at = siteData(store, p.id).health?.at;
     return !at || Date.now() - Date.parse(at) > every;
+  });
+}
+
+// --- Provider status ---
+
+// Reads the status page of each followed provider (or only `ids`), and says when one gets worse or recovers.
+// The first answer for a provider says nothing: it shows on the page that just added it.
+export async function checkProviders(store, ids = null) {
+  const providers = store.get('tools').providers.filter((pr) => !ids || ids.includes(pr.id));
+  const found = await Promise.all(providers.map(async (pr) => {
+    try {
+      return [pr, { ...(await checkProvider(pr.url)), at: now() }];
+    } catch (err) {
+      return [pr, { error: err.name === 'AbortError' ? 'The status page took too long.' : err.message, at: now() }];
+    }
+  }));
+  const before = store.get('tools').status;
+  const was = Object.fromEntries(found.map(([pr]) => [pr.id, before[pr.id]?.indicator]));
+  store.update('tools', (d) => {
+    for (const [pr, r] of found) {
+      const last = d.status[pr.id];
+      // A failed read keeps the last answer, so one bad moment looks like neither an outage nor a recovery.
+      d.status[pr.id] = r.error && last?.indicator ? { ...last, error: r.error, at: r.at } : r;
+    }
+  });
+  for (const [pr, r] of found) {
+    if (!r.indicator || !was[pr.id] || was[pr.id] === r.indicator) continue;
+    const text = r.indicator === 'none' ? `${pr.name} is back to normal.` : `${pr.name}: ${r.description || 'something is wrong'}.`;
+    notify(store, { kind: 'status', text, href: '#/tools?tab=status', key: `status:${pr.id}:${r.indicator}:${todayISO()}` });
+  }
+}
+
+// True when a followed provider has not been read within the interval chosen in Tools.
+export function providersDue(store) {
+  const { every, providers, status } = store.get('tools');
+  const ms = (every || 60) * 60000;
+  return providers.some((pr) => {
+    const at = status[pr.id]?.at;
+    return !at || Date.now() - Date.parse(at) > ms;
   });
 }
