@@ -91,6 +91,8 @@ function positionPopover(el, anchor) {
 // Opens a searchable list anchored to `anchor`. `options` are { value, label, tone? }.
 function showPicker(anchor, { options, value, nullable, nullLabel, allowCreate, onPick, onCreate }) {
   closePicker();
+  // Options without a usable label are dropped, so no empty or "null" rows can appear.
+  options = options.filter((o) => o && o.label !== null && o.label !== undefined && String(o.label) !== '');
   const search = h('input', { class: 'pop-search', placeholder: 'Search or create…', autocomplete: 'off', 'aria-label': 'Search options' });
   const list = h('div', { class: 'pop-list', role: 'listbox' });
 
@@ -178,8 +180,9 @@ export function pickChip({ value = null, options, placeholder = 'Set', nullable 
 
 // A colored pill. An option with `color` (a project's color) gets that color; otherwise `tone` picks one from the CSS palette.
 export function pill(label, opt = {}) {
-  if (opt.color) return h('span', { class: 'pill tone-custom', style: { '--c': opt.color } }, label);
-  return h('span', { class: `pill tone-${opt.tone ?? 'plain'}` }, label);
+  const text = label === null || label === undefined ? '' : String(label);
+  if (opt.color) return h('span', { class: 'pill tone-custom', style: { '--c': opt.color } }, text);
+  return h('span', { class: `pill tone-${opt.tone ?? 'plain'}` }, text);
 }
 
 // Keeps a row's own click (for example, opening its details) from firing when a control inside it is used.

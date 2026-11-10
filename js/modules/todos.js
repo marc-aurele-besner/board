@@ -437,7 +437,8 @@ function draw(root, store) {
               view.creatingProject = !view.creatingProject;
               store.refresh();
             },
-          }, icon('plus'))),
+          }, icon('plus')),
+          h('a', { href: '#/projects', class: 'icon-btn', title: 'Edit projects', 'aria-label': 'Edit projects' }, icon('pencil'))),
         view.creatingProject
           ? h('form', {
               class: 'stack',
@@ -454,8 +455,7 @@ function draw(root, store) {
               h('input', { name: 'name', placeholder: 'Project name, Enter', 'aria-label': 'New project name', autocomplete: 'off', 'data-autofocus': true }))
           : null,
         [...projects].sort((a, b) => a.name.localeCompare(b.name))
-          .map((p) => navItem(p.id, p.name, openCount((i) => i.projectId === p.id), projectIcon(p))),
-        h('a', { href: '#/projects', class: 'side-link' }, icon('folder'), 'Manage projects')),
+          .map((p) => navItem(p.id, p.name, openCount((i) => i.projectId === p.id), projectIcon(p)))),
 
       h('section', { class: 'card main-pane' },
         h('div', { class: 'row between' },

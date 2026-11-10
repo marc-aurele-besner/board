@@ -177,7 +177,6 @@ textarea.editable-field { resize: vertical; }
 .pill[class*="tone-"], .pill.doing, .pill[class*="priority-"] {
   --c: var(--muted);
   background: color-mix(in srgb, var(--c) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--c) 40%, transparent);
   color: var(--c);
 }
 .pill.tone-plain { --c: var(--muted); }
