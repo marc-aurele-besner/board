@@ -881,3 +881,15 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 @media (max-width: 900px) {
   .entry-row { grid-template-columns: 26px 80px minmax(0, 1fr) 120px 26px; }
 }
+
+/* Organization keys */
+.org-keys { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.org-keys li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.org-keys code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.org-key-form { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr) auto; gap: 8px; align-items: center; }
+@media (max-width: 720px) { .org-key-form { grid-template-columns: 1fr; } }
+
+/* Bill labels, set when the bill is read */
+.bill-label-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 10px 12px; background: var(--surface-2); border-radius: 10px; }
+.bill-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+@media (max-width: 720px) { .bill-label-row { grid-template-columns: 1fr; } }

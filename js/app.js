@@ -117,7 +117,7 @@ async function open(handle) {
     return renderConnect();
   }
   store = next;
-  configure(store.get('settings').github?.token ?? '');
+  configure(store.get('settings').github);
   migrateLegacyProjects(store);
   migrateProjectShape(store);
   ensureTasks(store);
