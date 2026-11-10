@@ -2,16 +2,24 @@ import { h, money, empty, notice } from '../ui.js';
 import { getCatalog } from '../model-picker.js';
 import { fetchActivity } from '../github.js';
 import { setupBanner } from '../integrations.js';
+import { analyticsTab, searchTab } from './monitoring-web.js';
 
 const COLLECTION = 'usage';
 const DAY = 86400000;
 const HOUR = 3600000;
-const TABS = [['ai', 'AI usage'], ['github', 'GitHub activity']];
+const TABS = [['ai', 'AI usage'], ['github', 'GitHub activity'], ['analytics', 'Web analytics'], ['search', 'Search']];
+const SUBTITLES = {
+  ai: 'AI calls made by the board, with their cost and tokens.',
+  github: 'Commits, pull requests and issues across the repos linked to your projects.',
+  analytics: 'Visitors and page views for each project website, from Google Analytics.',
+  search: 'How each project website shows up in Google and Bing search.',
+};
 const PERIODS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['7', '7 days'], ['30', '30 days'], ['90', '90 days']];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // View state: the sub-tab and the period. The period applies to every chart and number on the page.
-const view = { tab: 'ai', period: '7' };
+// `site` and `engine` belong to the two website tabs: the project shown, and Google or Bing.
+const view = { tab: 'ai', period: '7', site: '', engine: 'google' };
 // Prices per model (USD per token), used to estimate calls that had no reported cost.
 const prices = { status: 'idle', map: new Map() };
 // GitHub activity for the linked repos over the period. Reloaded when the period changes.
@@ -61,7 +69,7 @@ const hoursLabel = (hours) => {
 
 // --- Charts: plain SVG bars, drawn from numbers and our own labels only ---
 
-function barChart(labels, series) {
+export function barChart(labels, series) {
   const W = Math.max(360, labels.length * 24);
   const H = 160;
   const PAD = 22;
@@ -88,12 +96,12 @@ function barChart(labels, series) {
   return wrap;
 }
 
-function legend(series) {
+export function legend(series) {
   return h('div', { class: 'legend' }, series.map((sr) =>
     h('span', { class: 'legend-item' }, h('span', { class: 'legend-swatch', style: { background: sr.color } }), sr.name)));
 }
 
-function stat(label, value, hint) {
+export function stat(label, value, hint) {
   return h('div', { class: 'card stat' },
     h('span', { class: 'muted small' }, label),
     h('strong', null, value),
@@ -437,16 +445,17 @@ function miniStat(n, label) {
 function draw(root, store) {
   if (prices.status === 'idle') setTimeout(() => loadPrices(store), 0);
   const w = periodWindow(view.period);
-  const body = view.tab === 'github' ? githubTab(store, w) : aiTab(store, w);
+  const body = view.tab === 'github' ? githubTab(store, w)
+    : view.tab === 'analytics' ? analyticsTab(store, view, w)
+      : view.tab === 'search' ? searchTab(store, view, w)
+        : aiTab(store, w);
   const periodName = PERIODS.find(([k]) => k === view.period)?.[1] ?? '';
 
   root.replaceChildren(
     h('div', { class: 'stack-lg mon' },
       h('header', { class: 'mon-head' },
         h('h2', null, 'Monitoring'),
-        h('p', { class: 'muted small' }, view.tab === 'github'
-          ? 'Commits, pull requests and issues across the repos linked to your projects.'
-          : 'AI calls made by the board, with their cost and tokens.')),
+        h('p', { class: 'muted small' }, SUBTITLES[view.tab])),
       h('nav', { class: 'sub-tabs', role: 'tablist', 'aria-label': 'Monitoring sections' },
         TABS.map(([key, label]) =>
           h('button', {
@@ -482,9 +491,19 @@ export default {
   collection: COLLECTION,
   defaults: { entries: [] },
   render: draw,
-  serialize: () => ({ tab: view.tab === 'ai' ? '' : view.tab, period: view.period === '7' ? '' : view.period }),
+  serialize: () => {
+    const web = view.tab === 'analytics' || view.tab === 'search';
+    return {
+      tab: view.tab === 'ai' ? '' : view.tab,
+      period: view.period === '7' ? '' : view.period,
+      site: web ? view.site : '',
+      engine: view.tab === 'search' && view.engine === 'bing' ? 'bing' : '',
+    };
+  },
   restore: (p = {}) => {
-    view.tab = p.tab === 'github' ? 'github' : 'ai';
+    view.tab = TABS.some(([k]) => k === p.tab) ? p.tab : 'ai';
+    view.site = p.site || '';
+    view.engine = p.engine === 'bing' ? 'bing' : 'google';
     view.period = PERIODS.some(([k]) => k === p.period) ? p.period : '7';
   },
 };
