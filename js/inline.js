@@ -186,6 +186,8 @@ export function pickChip({ value = null, options, placeholder = 'Set', nullable 
 // A colored pill. An option with `color` (a project's color) gets that color; otherwise `tone` picks one from the CSS palette.
 export function pill(label, opt = {}) {
   const text = label === null || label === undefined ? '' : String(label);
+  // An option with an icon (a project's) shows the icon and the name, without a pill.
+  if (opt.plainIcon) return h('span', { class: 'opt-plain' }, opt.plainIcon, text);
   if (opt.color) return h('span', { class: 'pill tone-custom', style: { '--c': opt.color } }, text);
   return h('span', { class: `pill tone-${opt.tone ?? 'plain'}` }, text);
 }

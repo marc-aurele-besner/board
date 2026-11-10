@@ -893,3 +893,7 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .bill-label-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 10px 12px; background: var(--surface-2); border-radius: 10px; }
 .bill-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 @media (max-width: 720px) { .bill-label-row { grid-template-columns: 1fr; } }
+
+/* Options shown with an icon and a name, no pill */
+.opt-plain { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.opt-plain .project-icon { width: 14px; height: 14px; }
