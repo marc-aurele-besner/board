@@ -753,7 +753,7 @@ function draw(root, store) {
                 e.currentTarget.closest('.tree-row').draggable = true;
               },
             }, icon('grip')),
-            navItem(p.id, p.name, openCount((i) => i.projectId === p.id), projectIcon(p)))),
+            navItem(p.id, p.name, openCount((i) => i.projectId === p.id), projectIcon(p))))),
 
       h('section', { class: 'card main-pane' },
         h('div', { class: 'head-bar' },
