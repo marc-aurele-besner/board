@@ -390,7 +390,7 @@ function receiptPanel(store) {
 
   const projects = store.get('projects').projects;
   // Projects on a bill show their icon and name, not a coloured pill.
-  const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, plainIcon: projectIcon(p) }));
+  const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) }));
   const cur = receipt.currency;
   const source = receipt.vendor || receipt.fileName;
   const netTotal = round2(receipt.items.reduce((s, x) => s + x.amount, 0));
@@ -856,7 +856,9 @@ function entriesSection(store, inPeriod, projectOptions, cur) {
 // Labels for the whole bill, set as soon as it is read: vendor, project and category. Each applies to every charge.
 function billLabelRow(store, projectOptions) {
   const items = receipt.items;
-  const projectIds = [...new Set(items.map((x) => x.projectId ?? null))];
+  // The bill's project covers its tax lines too: they are saved as entries of the same bill.
+  const lines = [...receipt.items, ...receipt.taxes];
+  const projectIds = [...new Set(lines.map((x) => x.projectId ?? null))];
   const categories = [...new Set(items.map((x) => x.category))];
   const sameProject = projectIds.length === 1 ? projectIds[0] : undefined;
   const sameCategory = categories.length === 1 ? categories[0] : null;
@@ -879,7 +881,7 @@ function billLabelRow(store, projectOptions) {
         nullable: true,
         nullLabel: sameProject === undefined ? 'Mixed' : 'No project',
         onPick: (projectId) => {
-          items.forEach((x) => {
+          lines.forEach((x) => {
             x.projectId = projectId;
           });
           store.refresh();
@@ -911,7 +913,7 @@ function draw(root, store) {
   const projects = store.get('projects').projects;
   const projectById = new Map(projects.map((p) => [p.id, p]));
   // Projects show their icon and name, without a pill.
-  const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, plainIcon: projectIcon(p) }));
+  const projectOptions = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) }));
   const cur = view.currency;
 
   const w = windowFor(view.range, entries);
