@@ -57,11 +57,21 @@ const removeItem = (store, id) =>
     d.items = d.items.filter((i) => i.id !== id);
   });
 
-function saveDescription(store, id, description) {
+function saveDetails(store, id, v) {
   view.expanded.delete(id);
   store.update(COLLECTION, (d) => {
     const item = d.items.find((i) => i.id === id);
-    if (item) item.description = description.trim();
+    if (!item) return;
+    item.description = v.description.trim();
+    item.projectId = v.project || null; // empty value means Personal
+  });
+}
+
+// Used by drag-and-drop onto a sidebar list. projectId null means Personal.
+function moveToProject(store, id, projectId) {
+  store.update(COLLECTION, (d) => {
+    const item = d.items.find((i) => i.id === id);
+    if (item) item.projectId = projectId;
   });
 }
 
@@ -94,7 +104,7 @@ function clearDropMarks(el) {
   el.classList.remove('drop-before', 'drop-after');
 }
 
-function todoItem(store, item, projectLabel) {
+function todoItem(store, item, projects, projectLabel) {
   const expanded = view.expanded.has(item.id);
   const hasDescription = Boolean(item.description);
 
@@ -171,10 +181,16 @@ function todoItem(store, item, projectLabel) {
           class: 'todo-desc',
           onsubmit: (e) => {
             e.preventDefault();
-            saveDescription(store, item.id, formValues(e.currentTarget).description);
+            saveDetails(store, item.id, formValues(e.currentTarget));
           },
         },
-          h('textarea', { name: 'description', rows: 4, placeholder: 'Notes, links, steps… paste freely', 'aria-label': 'Description' }, item.description),
+          h('label', null, 'Project',
+            h('select', { name: 'project', value: item.projectId ?? '' },
+              h('option', { value: '' }, 'Personal'),
+              [...projects].sort((a, b) => a.name.localeCompare(b.name))
+                .map((p) => h('option', { value: p.id }, p.name)))),
+          h('label', null, 'Description',
+            h('textarea', { name: 'description', rows: 4, placeholder: 'Notes, links, steps… paste freely' }, item.description)),
           h('div', { class: 'row end' },
             h('button', {
               type: 'button',
@@ -199,18 +215,34 @@ function draw(root, store) {
   const currentLabel =
     view.filter === 'all' ? 'All' : view.filter === 'personal' ? 'Personal' : projectName(view.filter);
 
-  const navItem = (key, label, count, color) =>
-    h('button', {
+  // Personal and project lists accept dropped todos; "All" does not, since it has no project.
+  const navItem = (key, label, count, color) => {
+    const accepts = key !== 'all';
+    return h('button', {
       type: 'button',
       class: view.filter === key ? 'nav-item active' : 'nav-item',
       onclick: () => {
         view.filter = key;
         store.refresh();
       },
+      ondragover: (e) => {
+        if (!accepts || !view.dragId) return;
+        e.preventDefault();
+        e.currentTarget.classList.add('drop-target');
+      },
+      ondragleave: (e) => e.currentTarget.classList.remove('drop-target'),
+      ondrop: (e) => {
+        if (!accepts || !view.dragId) return;
+        e.preventDefault();
+        e.currentTarget.classList.remove('drop-target');
+        moveToProject(store, view.dragId, key === 'personal' ? null : key);
+        view.dragId = null;
+      },
     },
       color ? h('span', { class: 'dot', style: { background: color } }) : null,
       h('span', { class: 'grow' }, label),
       h('span', { class: 'count' }, String(count)));
+  };
 
   // Stored order is the display order, so the list is not re-sorted here.
   const visible = items.filter((i) => (view.showDone || !i.done) && matchesFilter(i));
@@ -219,6 +251,7 @@ function draw(root, store) {
     h('div', { class: 'split' },
       h('aside', { class: 'card side' },
         h('h2', null, 'Lists'),
+        h('p', { class: 'hint' }, 'Drag a todo onto a list to move it.'),
         navItem('all', 'All', openCount(() => true)),
         navItem('personal', 'Personal', openCount((i) => i.projectId === null)),
         h('h2', null, 'Projects'),
@@ -261,7 +294,7 @@ function draw(root, store) {
         visible.length
           ? h('ul', { class: 'todo-list' },
               visible.map((item) =>
-                todoItem(store, item, view.filter === 'all' ? projectName(item.projectId) : ''))
+                todoItem(store, item, projects, view.filter === 'all' ? projectName(item.projectId) : ''))
             )
           : h('p', { class: 'empty' }, 'Nothing here yet. Type above and press Enter.'))));
 }
