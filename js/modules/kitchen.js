@@ -12,7 +12,8 @@ const STATUSES = [
 const STATUS_TONE = { idea: 'todo', testing: 'doing', final: 'done' };
 
 // View state: status tab, search text, the open recipe, and whether the "New" and "Log" forms are open.
-const view = { tab: 'testing', query: '', selectedId: null, adding: false, logOpen: false };
+// tab: 'all' or a status. layout: 'cards' or 'list'.
+const view = { tab: 'all', layout: 'cards', query: '', selectedId: null, adding: false, logOpen: false };
 
 const splitLines = (text) => text.split('\n').map((s) => s.trim()).filter(Boolean);
 const splitTags = (text) => [...new Set(text.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean))];
@@ -38,7 +39,6 @@ function updateRecipe(store, id, patch) {
 function addRecipe(store, title, status) {
   const id = uid();
   view.selectedId = id;
-  view.tab = status;
   view.adding = false;
   store.update(COLLECTION, (d) =>
     d.recipes.push({ id, title, status, tags: [], ingredients: [], steps: [], notes: '', versions: [], created: now() }));
@@ -138,7 +138,6 @@ function imageCandidates(text) {
 function addImportedRecipe(store, data, url, images) {
   const id = uid();
   view.selectedId = id;
-  view.tab = 'idea';
   store.update(COLLECTION, (d) =>
     d.recipes.push({
       id,
@@ -234,57 +233,138 @@ function importBlock(store) {
       : null);
 }
 
-// --- List ---
+// --- Gallery ---
 
-function recipeCards(store, recipes) {
-  const q = view.query.trim().toLowerCase();
-  const shown = recipes
-    .filter((r) => r.status === view.tab)
-    .filter((r) => !q || r.title.toLowerCase().includes(q) || r.tags.some((t) => t.includes(q)))
-    .sort((a, b) => lastActivity(b).localeCompare(lastActivity(a)));
-  if (!shown.length) return empty(q ? 'No recipes match.' : 'Nothing here yet.');
-  return h('ul', { class: 'k-list' },
-    shown.map((r) => {
-      const avg = averageRating(r.versions);
-      const open = () => {
-        view.selectedId = r.id;
-        store.refresh();
-      };
-      return h('li', {
-        class: r.id === view.selectedId ? 'k-card active' : 'k-card',
-        tabindex: '0',
-        onclick: open,
-        onkeydown: (e) => {
-          if (e.key === 'Enter') open();
-        },
-      },
-        h('strong', { class: 'k-card-title' }, r.title),
-        r.tags.length ? h('div', { class: 'tags' }, r.tags.map((t) => h('span', { class: 'tag' }, t))) : null,
-        h('div', { class: 'k-card-meta muted small' },
-          avg !== null ? h('span', { class: 'stars' }, stars(avg)) : null,
-          h('span', null, attempts(r)),
-          h('span', null, lastActivity(r))));
-    }));
+const matches = (r, q) => !q || `${r.title} ${r.tags.join(' ')} ${r.ingredients.join(' ')}`.toLowerCase().includes(q);
+const statusLabel = (status) => STATUSES.find(([k]) => k === status)?.[1] ?? status;
+const open = (store, r) => {
+  view.selectedId = r.id;
+  view.logOpen = false;
+  store.refresh();
+};
+
+// A stable colour for a recipe without a picture, so its card still looks like its own.
+function hueOf(text) {
+  let hash = 0;
+  for (const c of String(text)) hash = (hash * 31 + c.charCodeAt(0)) % 360;
+  return hash;
 }
 
-function listPane(store, recipes) {
-  const box = h('div', { class: 'k-list-box' });
-  const fill = () => box.replaceChildren(recipeCards(store, recipes));
-  fill();
-  return h('section', { class: 'card k-side' },
-    h('div', { class: 'row between' },
-      h('h2', null, 'Recipes'),
+// The picture of a recipe: its first imported image, or its initial on its own colour.
+function cover(r, cls) {
+  const letter = () => h('span', { class: 'r-letter', 'aria-hidden': 'true' }, r.title.slice(0, 1).toUpperCase());
+  const box = h('div', { class: cls, style: { '--hue': hueOf(r.title) } });
+  const src = r.images?.[0];
+  if (src) box.append(h('img', { src, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => e.currentTarget.replaceWith(letter()) }));
+  else box.append(letter());
+  return box;
+}
+
+function recipeCard(store, r) {
+  const avg = averageRating(r.versions);
+  const blurb = r.notes || r.ingredients.slice(0, 4).join(' · ') || 'No notes yet. Open it to add ingredients and steps.';
+  const card = cover(r, 'r-cover');
+  card.append(h('span', { class: `pill tone-${STATUS_TONE[r.status]} r-status` }, statusLabel(r.status)));
+  if (avg !== null) card.append(h('span', { class: 'r-rate' }, h('span', { class: 'stars' }, stars(avg)), ` ${avg.toFixed(1)}`));
+  return h('li', null,
+    h('button', { type: 'button', class: 'r-card', onclick: () => open(store, r) },
+      card,
+      h('div', { class: 'r-body' },
+        h('strong', { class: 'r-title' }, r.title),
+        r.tags.length ? h('div', { class: 'tags' }, r.tags.map((t) => h('span', { class: 'tag' }, t))) : null,
+        h('p', { class: 'muted small r-blurb' }, blurb),
+        h('div', { class: 'row between muted small r-foot' },
+          h('span', null, attempts(r)),
+          h('span', null, `${r.versions.length ? 'last tried' : 'added'} ${lastActivity(r)}`)))));
+}
+
+function recipeTable(store, shown) {
+  return h('div', { class: 'card mon-scroll' },
+    h('table', { class: 'mon-table r-table' },
+      h('thead', null, h('tr', null, ['Recipe', 'Status', 'Rating', 'Tries', 'Last tried', 'Notes'].map((t) => h('th', null, t)))),
+      h('tbody', null, shown.map((r) => {
+        const avg = averageRating(r.versions);
+        return h('tr', { tabindex: '0', onclick: () => open(store, r), onkeydown: (e) => { if (e.key === 'Enter') open(store, r); } },
+          h('td', null, h('div', { class: 'row r-name' }, cover(r, 'r-thumb'),
+            h('div', null, h('strong', null, r.title), r.tags.length ? h('div', { class: 'tags' }, r.tags.map((t) => h('span', { class: 'tag' }, t))) : null))),
+          h('td', null, h('span', { class: `pill tone-${STATUS_TONE[r.status]}` }, statusLabel(r.status))),
+          h('td', null, avg !== null ? [h('span', { class: 'stars' }, stars(avg)), h('span', { class: 'muted small' }, ` ${avg.toFixed(1)}`)] : h('span', { class: 'muted small' }, 'Not rated')),
+          h('td', null, String(r.versions.length)),
+          h('td', null, r.versions.length ? lastActivity(r) : h('span', { class: 'muted small' }, 'Never')),
+          h('td', { class: 'muted small r-note' }, r.notes || r.ingredients.slice(0, 4).join(' · ')));
+      }))));
+}
+
+// The recipes that match the search and the tab, as cards or as a list.
+function results(store, recipes) {
+  const q = view.query.trim().toLowerCase();
+  const shown = recipes
+    .filter((r) => (view.tab === 'all' || r.status === view.tab) && matches(r, q))
+    .sort((a, b) => lastActivity(b).localeCompare(lastActivity(a)));
+  if (!shown.length) return empty(q ? 'No recipes match.' : 'Nothing here yet.');
+  return view.layout === 'list' ? recipeTable(store, shown) : h('ul', { class: 'r-grid' }, shown.map((r) => recipeCard(store, r)));
+}
+
+function gallery(store, recipes) {
+  const box = h('div', { class: 'r-results' });
+  const tabs = h('div', { class: 'segmented r-tabs' });
+  // Only the results and the tab counts refill while typing, so the search box keeps focus.
+  const fill = () => {
+    const q = view.query.trim().toLowerCase();
+    const found = recipes.filter((r) => matches(r, q));
+    tabs.replaceChildren(...[['all', 'All'], ...STATUSES].map(([key, label]) =>
       h('button', {
         type: 'button',
-        class: 'btn-small primary',
+        class: key === view.tab ? 'seg active' : 'seg',
+        'aria-pressed': String(key === view.tab),
+        onclick: () => {
+          view.tab = key;
+          store.refresh();
+        },
+      }, `${label} · ${key === 'all' ? found.length : found.filter((r) => r.status === key).length}`)));
+    box.replaceChildren(results(store, recipes));
+  };
+  fill();
+  const layout = (key, label, iconName) =>
+    h('button', {
+      type: 'button',
+      class: view.layout === key ? 'seg active' : 'seg',
+      'aria-pressed': String(view.layout === key),
+      onclick: () => {
+        view.layout = key;
+        store.refresh();
+      },
+    }, icon(iconName), label);
+  const testing = recipes.filter((r) => r.status === 'testing').length;
+  return h('div', { class: 'stack-lg kitchen' },
+    h('header', null,
+      h('h2', null, 'Kitchen'),
+      h('p', { class: 'muted small' }, `${recipes.length} recipe${recipes.length === 1 ? '' : 's'} · ${testing} in testing. Each attempt is an iteration, so you can see what changed and what to try next.`)),
+    h('div', { class: 'r-bar' },
+      h('label', { class: 'r-search' }, icon('search'),
+        h('input', {
+          type: 'search',
+          placeholder: 'Search recipes by name, tag or ingredient',
+          'aria-label': 'Search recipes',
+          value: view.query,
+          oninput: (e) => {
+            view.query = e.target.value;
+            fill();
+          },
+        })),
+      tabs,
+      h('div', { class: 'segmented r-layout', role: 'group', 'aria-label': 'View' }, layout('cards', 'Cards', 'cards'), layout('list', 'List', 'list')),
+      h('button', {
+        type: 'button',
+        class: 'primary',
         onclick: () => {
           view.adding = !view.adding;
           store.refresh();
         },
-      }, icon('plus'), 'New')),
+      }, icon('plus'), 'New recipe')),
     view.adding
       ? h('form', {
-          class: 'k-new',
+          class: 'k-new card-inset',
           onsubmit: (e) => {
             e.preventDefault();
             const v = formValues(e.currentTarget);
@@ -293,33 +373,11 @@ function listPane(store, recipes) {
           },
         },
           h('input', { name: 'title', placeholder: 'Recipe name, Enter', 'aria-label': 'New recipe name', autocomplete: 'off', 'data-autofocus': true }),
-          h('select', { name: 'status', value: view.tab, 'aria-label': 'Status' },
-            STATUSES.map(([k, l]) => h('option', { value: k }, l))))
+          h('select', { name: 'status', value: view.tab === 'all' ? 'testing' : view.tab, 'aria-label': 'Status' },
+            STATUSES.map(([k, l]) => h('option', { value: k }, l))),
+          h('button', { class: 'primary', type: 'submit' }, 'Add'))
       : null,
-    importBlock(store),
-    h('div', { class: 'segmented' },
-      STATUSES.map(([key, label]) =>
-        h('button', {
-          type: 'button',
-          class: key === view.tab ? 'seg active' : 'seg',
-          onclick: () => {
-            view.tab = key;
-            view.selectedId = null;
-            store.refresh();
-          },
-        }, `${label} · ${recipes.filter((r) => r.status === key).length}`))),
-    h('input', {
-      type: 'search',
-      class: 'k-search',
-      placeholder: 'Search title or tag',
-      'aria-label': 'Search recipes',
-      value: view.query,
-      // Only the list refills while typing, so the search box keeps focus.
-      oninput: (e) => {
-        view.query = e.target.value;
-        fill();
-      },
-    }),
+    h('div', { class: 'r-import' }, importBlock(store)),
     box);
 }
 
@@ -392,6 +450,14 @@ function detailPane(store, r) {
   const avg = averageRating(r.versions);
   const versions = [...r.versions].sort((a, b) => b.date.localeCompare(a.date));
   return h('section', { class: 'card k-main' },
+    h('div', null, h('button', {
+      type: 'button',
+      class: 'btn-small',
+      onclick: () => {
+        view.selectedId = null;
+        store.refresh();
+      },
+    }, icon('arrow-left'), 'All recipes')),
     h('header', { class: 'k-head' },
       h('div', { class: 'k-title' },
         editText({
@@ -406,7 +472,6 @@ function detailPane(store, r) {
             options: STATUSES.map(([v, l]) => ({ value: v, label: l, tone: STATUS_TONE[v] })),
             onPick: (status) => {
               updateRecipe(store, r.id, { status });
-              view.tab = status;
             },
           }),
           h('span', { class: 'muted small' }, attempts(r)),
@@ -418,7 +483,6 @@ function detailPane(store, r) {
               type: 'button',
               class: 'btn-small primary',
               onclick: () => {
-                view.tab = 'final';
                 updateRecipe(store, r.id, { status: 'final' });
               },
             }, 'Promote to final')
@@ -491,28 +555,11 @@ function detailPane(store, r) {
         : empty('No iterations yet. Log one after each attempt.')));
 }
 
-function emptyDetail(store) {
-  return h('section', { class: 'card k-main k-empty' },
-    h('h2', null, 'Pick a recipe'),
-    h('p', { class: 'muted' }, 'Recipes you are testing live here. Each attempt is an iteration, so you can see what changed, how it turned out, and what to try next.'),
-    h('button', {
-      type: 'button',
-      class: 'btn-small primary',
-      onclick: () => {
-        view.adding = true;
-        store.refresh();
-      },
-    }, icon('plus'), 'New recipe'));
-}
-
 function draw(root, store) {
   const { recipes } = store.get(COLLECTION);
   if (view.selectedId && !recipes.some((r) => r.id === view.selectedId)) view.selectedId = null;
   const selected = recipes.find((r) => r.id === view.selectedId) ?? null;
-  root.replaceChildren(
-    h('div', { class: 'kitchen-shell' },
-      listPane(store, recipes),
-      selected ? detailPane(store, selected) : emptyDetail(store)));
+  root.replaceChildren(selected ? detailPane(store, selected) : gallery(store, recipes));
 }
 
 export default {
@@ -522,9 +569,10 @@ export default {
   collection: COLLECTION,
   defaults: { recipes: [] },
   render: draw,
-  serialize: () => ({ tab: view.tab, recipe: view.selectedId ?? '', q: view.query }),
+  serialize: () => ({ tab: view.tab === 'all' ? '' : view.tab, view: view.layout === 'list' ? 'list' : '', recipe: view.selectedId ?? '', q: view.query }),
   restore: (p = {}) => {
-    view.tab = ['idea', 'testing', 'final'].includes(p.tab) ? p.tab : 'testing';
+    view.tab = ['idea', 'testing', 'final'].includes(p.tab) ? p.tab : 'all';
+    view.layout = p.view === 'list' ? 'list' : 'cards';
     view.selectedId = p.recipe || null;
     view.query = p.q || '';
     view.logOpen = false;
