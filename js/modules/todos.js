@@ -7,9 +7,15 @@ import { ask, parseJson } from '../ai.js';
 const COLLECTION = 'todos';
 const STATUSES = [
   ['todo', 'To do'],
-  ['doing', 'Doing'],
-  ['done', 'Done'],
+  ['blocked', 'Blocked'],
+  ['paused', 'Paused'],
+  ['ondeck', 'On Deck'],
+  ['doing', 'In progress'],
+  ['review', 'In Review'],
+  ['done', 'Completed'],
 ];
+// Each status uses one of the palette tones, so pills stay consistent across the app.
+const STATUS_TONE = { todo: 'todo', blocked: 'high', paused: 'plain', ondeck: 'low', doing: 'doing', review: 'medium', done: 'done' };
 const PRIORITIES = [
   ['none', 'No priority'],
   ['low', 'Low'],
@@ -17,7 +23,7 @@ const PRIORITIES = [
   ['high', 'High'],
 ];
 const STATUS_FILTERS = [['open', 'Open'], ['all', 'All'], ...STATUSES];
-const STATUS_ORDER = { todo: 0, doing: 1, done: 2 };
+const STATUS_ORDER = Object.fromEntries(STATUSES.map(([key], i) => [key, i]));
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2, none: 3 };
 const NO_CATEGORY = '__none';
 
@@ -279,7 +285,7 @@ function todoRow(store, item, ctx) {
       h('div', { class: 'todo-meta' },
         pickChip({
           value: status,
-          options: STATUSES.map(([v, l]) => ({ value: v, label: l, tone: v })),
+          options: STATUSES.map(([v, l]) => ({ value: v, label: l, tone: STATUS_TONE[v] })),
           onPick: (v) => updateItem(store, item.id, { status: v }),
         }),
         pickChip({
