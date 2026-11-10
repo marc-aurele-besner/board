@@ -1245,3 +1245,12 @@ label.check { cursor: pointer; }
 .rule-list li:last-child { border-bottom: none; }
 .rule-days input { width: 76px; }
 .prop-row { flex-wrap: nowrap; padding: 6px 0; border-bottom: 1px solid var(--border); }
+
+/* Copy chips: inline values the user pastes elsewhere. */
+.copy-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 1px 6px 1px 8px; margin: 1px 0; min-height: 0; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font-size: 0.85rem; line-height: 1.5; vertical-align: baseline; cursor: copy; }
+.copy-chip code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; text-align: left; user-select: all; }
+.copy-chip .copy-mark { display: inline-flex; color: var(--muted); font-size: 0.8rem; }
+.copy-chip:hover { border-color: var(--accent); }
+.copy-chip:hover .copy-mark { color: var(--accent); }
+.copy-chip.copied { border-color: var(--income); }
+.copy-chip.copied .copy-mark { color: var(--income); }
