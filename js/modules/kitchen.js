@@ -1,6 +1,6 @@
 import { h, uid, now, todayISO, empty, icon, notice } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
-import { ask } from '../ai.js';
+import { ask, parseJson } from '../ai.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 
 const COLLECTION = 'recipes';
@@ -112,6 +112,113 @@ function ideasBlock(r) {
   return h('div', { class: 'card-inset k-ideas' }, h('pre', { class: 'ai-text' }, ideas.text));
 }
 
+// --- Import a recipe from a web page ---
+
+// The page is read through a reader service that returns its text with CORS, since most recipe sites cannot be read directly.
+const READER = 'https://r.jina.ai/';
+const importState = { status: 'idle', error: '', url: '', pasting: false };
+
+async function fetchPageText(url) {
+  const res = await fetch(READER + url, { headers: { Accept: 'text/plain' } });
+  if (!res.ok) throw new Error(`The page could not be read (${res.status}). Some sites do not allow it.`);
+  return res.text();
+}
+
+// Adds a recipe as an idea, with its source link. Its fields come from the model's reading of the page.
+function addImportedRecipe(store, data, url) {
+  const id = uid();
+  view.selectedId = id;
+  view.tab = 'idea';
+  store.update(COLLECTION, (d) =>
+    d.recipes.push({
+      id,
+      title: String(data.title ?? '').trim() || 'Imported recipe',
+      status: 'idea',
+      tags: [...new Set((data.tags ?? []).map((t) => String(t).trim().toLowerCase()).filter(Boolean))],
+      ingredients: (data.ingredients ?? []).map((x) => String(x).trim()).filter(Boolean),
+      steps: (data.steps ?? []).map((x) => String(x).trim()).filter(Boolean),
+      notes: String(data.notes ?? '').trim(),
+      source: url,
+      versions: [],
+      created: now(),
+    }));
+}
+
+// Turns the page text into a recipe with the model, then adds it.
+async function importFromText(store, text, url) {
+  importState.status = 'loading';
+  store.refresh();
+  try {
+    const reply = await ask(store, 'task-recipe', [
+      {
+        role: 'system',
+        content: 'You extract a recipe from web page text. Reply with JSON only: {"title": string, "tags": string[], "ingredients": string[], "steps": string[], "notes": string}. Ingredients one per item, with quantities. Steps in order. Tags: a few short words such as cuisine or kind of dish. Notes: a short summary of anything special (serves, time, tips). Leave out page menus, ads and comments.',
+      },
+      { role: 'user', content: text.slice(0, 40000) },
+    ]);
+    addImportedRecipe(store, parseJson(reply), url);
+    importState.status = 'idle';
+    importState.pasting = false;
+    importState.url = '';
+  } catch (err) {
+    importState.status = 'error';
+    importState.error = err.message;
+  }
+  store.refresh();
+}
+
+async function importFromUrl(store, url) {
+  importState.url = url;
+  importState.status = 'loading';
+  importState.pasting = false;
+  store.refresh();
+  try {
+    const text = await fetchPageText(url);
+    if (text.trim().length < 300) throw new Error('The page had too little text to read a recipe.');
+    await importFromText(store, text, url);
+  } catch (err) {
+    importState.status = 'error';
+    importState.error = `${err.message} You can paste the recipe text instead.`;
+    importState.pasting = true;
+    store.refresh();
+  }
+}
+
+// The import box at the top of the recipe list: a link, or pasted text when the page cannot be read.
+function importBlock(store) {
+  const s = importState;
+  return h('div', { class: 'k-import stack' },
+    h('form', {
+      class: 'k-import-form',
+      onsubmit: (e) => {
+        e.preventDefault();
+        const url = String(new FormData(e.currentTarget).get('url') ?? '').trim();
+        if (!/^https?:\/\/\S+$/i.test(url)) {
+          s.status = 'error';
+          s.error = 'Enter a full link that starts with https://';
+          return store.refresh();
+        }
+        importFromUrl(store, url);
+      },
+    },
+      h('input', { name: 'url', type: 'url', placeholder: 'Import a recipe from a link', 'aria-label': 'Recipe link', inputmode: 'url', autocomplete: 'off' }),
+      h('button', { class: 'btn-small primary', type: 'submit', disabled: s.status === 'loading' }, s.status === 'loading' ? 'Reading…' : 'Import')),
+    hasOpenRouter(store) ? null : setupBanner('openrouter', 'Importing a recipe needs an OpenRouter key.'),
+    s.status === 'error' ? notice({ text: s.error }) : null,
+    s.pasting
+      ? h('form', {
+          class: 'stack',
+          onsubmit: (e) => {
+            e.preventDefault();
+            importFromText(store, String(new FormData(e.currentTarget).get('text') ?? ''), s.url);
+          },
+        },
+          h('p', { class: 'muted small' }, 'Copy the recipe text from the page and paste it here.'),
+          h('textarea', { name: 'text', rows: 5, 'aria-label': 'Recipe text' }),
+          h('div', { class: 'row end' }, h('button', { class: 'btn-small primary', type: 'submit' }, 'Import text')))
+      : null);
+}
+
 // --- List ---
 
 function recipeCards(store, recipes) {
@@ -174,6 +281,7 @@ function listPane(store, recipes) {
           h('select', { name: 'status', value: view.tab, 'aria-label': 'Status' },
             STATUSES.map(([k, l]) => h('option', { value: k }, l))))
       : null,
+    importBlock(store),
     h('div', { class: 'segmented' },
       STATUSES.map(([key, label]) =>
         h('button', {
@@ -288,6 +396,7 @@ function detailPane(store, r) {
         onSave: (v) => updateRecipe(store, r.id, { tags: splitTags(v) }),
       })),
 
+    r.source ? h('a', { href: r.source, target: '_blank', rel: 'noopener', class: 'btn-link' }, 'Open the original recipe') : null,
     h('div', { class: 'k-grid' },
       block('Ingredients', editText({
         value: r.ingredients.join('\n'),
