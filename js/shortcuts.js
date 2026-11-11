@@ -4,7 +4,7 @@ import { openDialog } from './modal.js';
 
 // "g" then one of these letters jumps to a section.
 export const JUMPS = [
-  ['h', 'home', 'Home'],
+  ['h', 'home', 'Board'],
   ['t', 'todos', 'Tasks'],
   ['a', 'calendar', 'Calendar'],
   ['p', 'projects', 'Projects'],

@@ -372,7 +372,7 @@ function draw(root, store) {
 
 export default {
   id: 'home',
-  title: 'Home',
+  title: 'Board',
   icon: 'home',
   collection: null,
   defaults: {},

@@ -438,12 +438,15 @@ function copyButton(store, item) {
 }
 
 // Hands tasks to claude in a new Dev terminal, in the folder of the first task's project that has one.
+// They are being worked on now, so open ones move to "In progress" (completed ones stay done).
 function devTasks(store, items) {
   if (!items.length) return;
   const projects = projectsOf(store);
   const list = items.map((i) => taskMarkdown(store, i, projects)).join('\n');
   const folder = items.map((i) => projects.find((p) => p.id === i.projectId)).find((p) => p?.localPath);
   for (const i of items) view.selected.delete(i.id);
+  const moving = items.filter((i) => !['done', 'doing'].includes(statusOf(i))).map((i) => i.id);
+  if (moving.length) updateItems(store, moving, { status: 'doing' });
   startClaudeSession({ prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}`, projectId: folder?.id });
 }
 
