@@ -67,3 +67,22 @@ export function categoryColor(store, name) {
   if (!name) return '';
   return (store.get('todos').categories ?? []).find((c) => sameLower(c.name, name))?.color ?? '';
 }
+
+// The project labels a category scoped to labels applies to. Older files saved one label as `projectCategoryId`.
+export function categoryLabelIds(c) {
+  if (c.scope !== 'projectCategory') return [];
+  return c.projectCategoryIds ?? (c.projectCategoryId ? [c.projectCategoryId] : []);
+}
+
+// Task categories once a project label is gone: one scoped to it moves to `targetId`, or only loses that label.
+// A category left with no label is dropped, as it would apply to no project.
+export function withoutLabel(categories, id, targetId = null) {
+  return categories.flatMap((c) => {
+    const ids = categoryLabelIds(c);
+    if (!ids.includes(id)) return [c];
+    const next = [...new Set(ids.map((x) => (x === id ? targetId : x)).filter(Boolean))];
+    if (!next.length) return [];
+    const { projectCategoryId, ...rest } = c;
+    return [{ ...rest, projectCategoryIds: next }];
+  });
+}
