@@ -180,6 +180,36 @@ function dueChip(item) {
   return h('span', { class: item.due === today ? 'due today' : 'due' }, item.due === today ? 'Today' : label);
 }
 
+// Time left until the end of the deadline day: hours on the last day, days before that.
+function timeLeft(due) {
+  const ms = new Date(`${due}T23:59:59`) - Date.now();
+  const hours = Math.floor(Math.abs(ms) / 3_600_000);
+  const plural = (n, unit) => `${n} ${unit}${n === 1 ? '' : 's'}`;
+  const span = hours < 24 ? plural(Math.max(hours, 1), 'hour') : plural(Math.floor(hours / 24), 'day');
+  return ms < 0 ? `${span} late` : `in ${span}`;
+}
+
+// The deadline in a task row: an icon button when none is set, the time left when one is.
+// Both open the native date picker on a hidden input.
+function dueControl(store, item) {
+  const input = h('input', {
+    type: 'date',
+    class: 'due-picker',
+    value: item.due ?? '',
+    tabindex: '-1',
+    'aria-hidden': 'true',
+    onchange: (e) => updateItem(store, item.id, { due: e.target.value }),
+  });
+  const open = () => {
+    try { input.showPicker(); } catch { input.focus(); }
+  };
+  const date = item.due ? new Date(`${item.due}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  const button = item.due
+    ? h('button', { type: 'button', class: 'btn-small due-left', title: `Deadline: ${date}`, 'aria-label': `Deadline for "${item.text}": ${date}. Change it`, onclick: open }, timeLeft(item.due))
+    : h('button', { type: 'button', class: 'icon-btn', title: 'Set a deadline', 'aria-label': `Set a deadline for "${item.text}"`, onclick: open }, icon('calendar'));
+  return h('span', { class: 'due-control' }, button, input);
+}
+
 // The flag on a task the board created by itself, naming where it came from.
 function autoBadge(item) {
   if (!item.auto) return null;
@@ -488,14 +518,7 @@ function todoRow(store, item, ctx) {
           onPick: (v) => updateItem(store, item.id, { category: v ?? '' }),
           onCreate: (name) => updateItem(store, item.id, { category: createTodoCategory(store, name, item.projectId) }),
         }),
-        h('input', {
-          type: 'date',
-          class: 'due-input',
-          value: item.due ?? '',
-          title: 'Deadline',
-          'aria-label': `Deadline for "${item.text}"`,
-          onchange: (e) => updateItem(store, item.id, { due: e.target.value }),
-        })),
+        dueControl(store, item)),
       h('div', { class: 'todo-actions' },
         repos.length || item.issue ? issueControl(store, item, repos) : null,
         item.email
