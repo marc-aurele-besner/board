@@ -10,8 +10,12 @@ import { pickChip } from '../inline.js';
 
 const COLLECTION = 'settings';
 // editing: the contract in the form ('' for a new one, null when the form is closed). busy: an ABI fetch running.
-// chainId, projectId: the form's picks, kept here because a redraw (an error, a fetch) would otherwise reset them.
-const contractsView = { editing: null, message: '', ok: null, busy: false, chainId: 1, projectId: '' };
+// draft: what the form holds, kept here because a redraw (a pick, an error, a fetch) would otherwise reset it.
+const contractsView = { editing: null, message: '', ok: null, busy: false, draft: {} };
+const draftOf = (c) => ({ label: c?.label ?? '', address: c?.address ?? '', chainId: c?.chainId ?? 1, projectId: c?.projectId ?? '', abi: c?.abi?.length ? JSON.stringify(c.abi, null, 2) : '' });
+const keep = (key) => (e) => {
+  contractsView.draft[key] = e.currentTarget.value;
+};
 
 const say = (store, ok, message) => {
   Object.assign(contractsView, { ok, message });
@@ -27,16 +31,16 @@ const counts = (abi) => {
 
 function contractForm(store, settings) {
   const editing = contractsOf(settings).find((c) => c.id === contractsView.editing) ?? null;
+  const draft = contractsView.draft;
   const chains = allChains(settings);
   const projects = store.get('projects').projects ?? [];
 
   const save = (e) => {
     e.preventDefault();
-    const form = new FormData(e.currentTarget);
-    const label = String(form.get('label') ?? '').trim();
-    const address = String(form.get('address') ?? '').trim();
-    const chainId = Number(contractsView.chainId);
-    const abiText = String(form.get('abi') ?? '').trim();
+    const label = draft.label.trim();
+    const address = draft.address.trim();
+    const chainId = Number(draft.chainId);
+    const abiText = draft.abi.trim();
     if (!label) return say(store, false, 'Give the contract a name.');
     if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return say(store, false, 'That is not a contract address. It starts with 0x and has 40 hex characters.');
     let abi = [];
@@ -49,7 +53,7 @@ function contractForm(store, settings) {
     }
     const dupe = contractsOf(settings).find((c) => c.id !== editing?.id && c.chainId === chainId && c.address.toLowerCase() === address.toLowerCase());
     if (dupe) return say(store, false, `That contract is already saved, as ${dupe.label}.`);
-    const entry = { id: editing?.id ?? uid(), label, chainId, address, projectId: contractsView.projectId ?? '', abi };
+    const entry = { id: editing?.id ?? uid(), label, chainId, address, projectId: draft.projectId, abi };
     store.update(COLLECTION, (d) => {
       const list = contractsOf(d);
       d.contracts = editing ? list.map((c) => (c.id === editing.id ? entry : c)) : [...list, entry];
@@ -59,17 +63,14 @@ function contractForm(store, settings) {
   };
 
   // Fills the ABI field from Etherscan, for the chain and address typed in the form.
-  const fetchInto = async (e) => {
-    const form = e.currentTarget.form;
-    const address = form.address.value.trim();
+  const fetchInto = async () => {
+    const address = draft.address.trim();
     if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return say(store, false, 'Type the contract address first.');
     contractsView.busy = true;
     say(store, true, 'Fetching the ABI from Etherscan…');
     try {
-      const abi = await fetchAbi(etherscanKey(settings), Number(contractsView.chainId), address);
-      // The field was redrawn by the refresh above; write into the one on the page now.
-      const field = document.querySelector('textarea[name="abi"]');
-      if (field) field.value = JSON.stringify(abi, null, 2);
+      const abi = await fetchAbi(etherscanKey(settings), Number(draft.chainId), address);
+      draft.abi = JSON.stringify(abi, null, 2);
       contractsView.busy = false;
       say(store, true, `ABI fetched: ${counts(abi)}. Save to keep it.`);
     } catch (err) {
@@ -81,31 +82,31 @@ function contractForm(store, settings) {
   return h('form', { class: 'stack contract-form', onsubmit: save },
     h('h3', null, editing ? `Edit ${editing.label}` : 'Add a contract'),
     h('div', { class: 'row' },
-      h('input', { name: 'label', value: editing?.label ?? '', placeholder: 'Name', 'aria-label': 'Contract name' }),
+      h('input', { name: 'label', value: draft.label, oninput: keep('label'), placeholder: 'Name', 'aria-label': 'Contract name' }),
       pickChip({
-        value: contractsView.chainId,
+        value: draft.chainId,
         className: 'field-pick',
         placeholder: 'Chain',
         options: chains.map((c) => ({ value: c.id, label: c.name, plainIcon: () => logo(c.logo, c.name, 'xs') })),
         onPick: (id) => {
-          contractsView.chainId = id;
+          draft.chainId = id;
           store.refresh();
         },
       }),
       pickChip({
-        value: contractsView.projectId || null,
+        value: draft.projectId || null,
         className: 'field-pick',
         nullable: true,
         nullLabel: 'No project',
         options: [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
         onPick: (id) => {
-          contractsView.projectId = id ?? '';
+          draft.projectId = id ?? '';
           store.refresh();
         },
       })),
-    h('input', { name: 'address', value: editing?.address ?? '', placeholder: 'Contract address 0x…', spellcheck: false, 'aria-label': 'Contract address' }),
-    h('textarea', { name: 'abi', rows: 8, spellcheck: false, placeholder: 'ABI as JSON: [{"type":"function","name":"balanceOf",…}]. A Hardhat or Foundry artifact works too.', 'aria-label': 'Contract ABI' },
-      editing?.abi?.length ? JSON.stringify(editing.abi, null, 2) : ''),
+    h('input', { name: 'address', value: draft.address, oninput: keep('address'), placeholder: 'Contract address 0x…', spellcheck: false, 'aria-label': 'Contract address' }),
+    h('textarea', { name: 'abi', rows: 8, spellcheck: false, placeholder: 'ABI as JSON: [{"type":"function","name":"balanceOf",…}]. A Hardhat or Foundry artifact works too.', 'aria-label': 'Contract ABI', oninput: keep('abi') },
+      draft.abi),
     h('div', { class: 'row' },
       h('button', { type: 'submit', class: 'btn-small primary' }, editing ? 'Save contract' : 'Add contract'),
       h('button', { type: 'button', class: 'btn-small', disabled: contractsView.busy, title: 'Needs the Etherscan API key set in Settings → Uniswap', onclick: fetchInto }, contractsView.busy ? 'Fetching…' : 'Fetch ABI from Etherscan'),
@@ -129,7 +130,7 @@ export function contractsCard(store) {
   };
   const edit = (id) => {
     const c = list.find((x) => x.id === id);
-    Object.assign(contractsView, { editing: id, chainId: c?.chainId ?? 1, projectId: c?.projectId ?? '' });
+    Object.assign(contractsView, { editing: id, draft: draftOf(c) });
     say(store, null, '');
   };
 
