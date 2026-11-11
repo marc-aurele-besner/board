@@ -416,7 +416,9 @@ function reachedMint(events, liquidity) {
 // the last load saved: { node, from, to, span, done, reached, floor, events }. Like the v4 search: new blocks first, then back
 // toward the opening while the node keeps the blocks. done means the opening was reached, or the node will not
 // search further back. Collects get their block's time.
-export async function positionHistory(chain, node, pos, prev) {
+// onRange, when given, hears each block range before it is read: { dir: 'new' | 'back', from, to }, so the page
+// can say what is being searched.
+export async function positionHistory(chain, node, pos, prev, onRange = null) {
   const head = Number(await rpc(node, 'eth_blockNumber', []));
   const query = await historyQuery(chain, node, pos);
   const floor = pos.version === 'v4' ? chain.v4.start : 0;
@@ -437,6 +439,7 @@ export async function positionHistory(chain, node, pos, prev) {
   let cursor = Math.max(s.to + 1, head - s.span * (HISTORY_CALLS / 2) + 1);
   while (cursor <= head && calls > 0) {
     calls--;
+    onRange?.({ dir: 'new', from: cursor, to: Math.min(head, cursor + s.span - 1) });
     const r = await historyIn(node, query, cursor, head, s.span, true);
     if (!r.events) break;
     add(r.events);
@@ -450,6 +453,7 @@ export async function positionHistory(chain, node, pos, prev) {
       break;
     }
     calls--;
+    onRange?.({ dir: 'back', from: Math.max(floor, s.from - s.span), to: s.from - 1 });
     const r = await historyIn(node, query, floor, s.from - 1, s.span, false);
     if (!r.events) {
       s.done = r.refused;
