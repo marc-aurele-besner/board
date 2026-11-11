@@ -1477,6 +1477,7 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .lp-coverage-chains { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .lp-coverage-chains li { display: grid; grid-template-columns: minmax(0, 10rem) minmax(0, 1fr) 4rem 3rem; align-items: center; gap: 10px; }
 .lp-coverage-chains strong, .lp-coverage-chains li > :last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.lp-coverage-chains .chain-chip { justify-self: start; max-width: 100%; }
 @media (max-width: 520px) {
   .lp-coverage-chains li { grid-template-columns: minmax(0, 1fr) auto auto; }
   .lp-coverage-chains .meter { grid-column: 1 / -1; grid-row: 2; }
