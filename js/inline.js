@@ -97,7 +97,7 @@ function showPicker(anchor, { options, value, nullable, nullLabel, allowCreate, 
   closePicker();
   // Options without a usable label are dropped, so no empty or "null" rows can appear.
   options = options.filter((o) => o && o.label !== null && o.label !== undefined && String(o.label) !== '');
-  const search = h('input', { class: 'pop-search', placeholder: 'Search or create…', autocomplete: 'off', 'aria-label': 'Search options' });
+  const search = h('input', { class: 'pop-search', placeholder: allowCreate ? 'Search or create…' : 'Search…', autocomplete: 'off', 'aria-label': 'Search options' });
   const list = h('div', { class: 'pop-list', role: 'listbox' });
 
   const choose = (v) => {

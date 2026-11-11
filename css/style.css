@@ -1607,6 +1607,8 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 }
 /* Inbox: Resend emails of every project */
 .inbox-pickers select { min-width: 0; max-width: 100%; }
+/* The project picker sits beside the selects, so it takes their outline and height. */
+.inbox-pickers .inbox-project-pick { min-height: 38px; padding: 4px 10px; border-color: var(--border); border-radius: 8px; background: var(--bg); font-size: 0.95rem; }
 .inbox-search { width: 100%; font-size: 16px; }
 .inbox-card { padding: 0; overflow: hidden; }
 .mail-list { list-style: none; margin: 0; padding: 0; }
