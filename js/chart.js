@@ -6,7 +6,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&
 // Bars per label. With several series the bars stack; `grouped` puts them side by side instead.
 // tip(i): what to show for label i on hover, focus or tap, as a node or text. Without it, the tooltip lists each series' value.
 export function barChart(labels, series, { grouped = false, format = (v) => v.toLocaleString(), tip = null } = {}) {
-  const MIN_W = Math.max(360, labels.length * (grouped ? 30 : 24));
+  const MIN_W = Math.max(360, labels.length * (grouped ? 30 : 16));
   // Matches the CSS height, so one SVG unit is one pixel and the axis text keeps its size.
   const H = 200;
   const PAD = 24;
