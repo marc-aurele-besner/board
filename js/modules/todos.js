@@ -3,7 +3,7 @@ import { makeTask } from '../capture.js';
 import { AUTO_SOURCES } from '../automations.js';
 import { toast } from '../toast.js';
 import { createProject, projectIcon, labelsOf, projectTree, moveProject, labelColor } from './projects.js';
-import { editText, pickChip } from '../inline.js';
+import { editText, pickChip, pickButton } from '../inline.js';
 import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
 import { openDialog } from '../modal.js';
 import { ask, parseJson } from '../ai.js';
@@ -511,19 +511,21 @@ function selectBox(store, item, order = []) {
 }
 
 // Shown while tasks are ticked: change them all at once, copy them, or delete them.
-// A select's first option is its label; picking a value applies it and the select resets on re-render.
+// Each field opens the same searchable, colored picker as a row's chips; picking a value applies it to every ticked task.
 function batchBar(store, visible, projects, categories) {
   const items = store.get(COLLECTION).items.filter((i) => view.selected.has(i.id));
   if (!items.length) return null;
   const ids = items.map((i) => i.id);
   const apply = (patch) => updateItems(store, ids, patch);
   const select = (name, options, onPick) =>
-    h('select', {
-      'aria-label': `Set ${name.toLowerCase()} of the selected tasks`,
-      onchange: (e) => {
-        if (e.target.value) onPick(e.target.value);
-      },
-    }, h('option', { value: '' }, `${name}…`), options.map(([v, l]) => h('option', { value: v }, l)));
+    pickButton({ label: name, title: `Set the ${name.toLowerCase()} of the selected tasks`, options, onPick });
+  const deadline = h('input', {
+    type: 'date',
+    class: 'due-picker',
+    tabindex: '-1',
+    'aria-hidden': 'true',
+    onchange: (e) => apply({ due: e.target.value }),
+  });
   const allShown = visible.length > 0 && visible.every((i) => view.selected.has(i.id));
   return h('div', { class: 'batch-bar', role: 'toolbar', 'aria-label': 'Selected tasks' },
     // The count doubles as the way out, so clearing never wraps onto a line of its own.
@@ -548,19 +550,24 @@ function batchBar(store, visible, projects, categories) {
           },
         }, `Select all ${visible.length} shown`),
     h('button', { type: 'button', class: 'btn-small', title: 'Mark the selected tasks done', onclick: () => apply({ status: 'done' }) }, icon('check'), 'Done'),
-    select('Status', STATUSES, (v) => apply({ status: v })),
-    select('Priority', PRIORITIES, (v) => apply({ priority: v })),
-    select('Project', [['__personal', 'Personal'], ...[...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => [p.id, p.name])],
-      (v) => apply({ projectId: v === '__personal' ? null : v })),
-    select('Category', [[NO_CATEGORY, 'No category'], ...categories.map((c) => [c, c])],
+    select('Status', STATUSES.map(([v, l]) => ({ value: v, label: l, tone: STATUS_TONE[v] })), (v) => apply({ status: v })),
+    select('Priority', PRIORITIES.map(([v, l]) => ({ value: v, label: l, tone: v === 'none' ? 'plain' : v })), (v) => apply({ priority: v })),
+    select('Project', [
+      { value: '__personal', label: 'Personal' },
+      ...[...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, color: p.color })),
+    ], (v) => apply({ projectId: v === '__personal' ? null : v })),
+    select('Category', [{ value: NO_CATEGORY, label: 'No category' }, ...categories.map((c) => ({ value: c, label: c }))],
       (v) => apply({ category: v === NO_CATEGORY ? '' : v })),
-    h('label', { class: 'inline small' }, 'Deadline',
-      h('input', {
-        type: 'date',
-        class: 'due-input',
-        'aria-label': 'Set the deadline of the selected tasks',
-        onchange: (e) => apply({ due: e.target.value }),
-      })),
+    h('span', { class: 'due-control' },
+      h('button', {
+        type: 'button',
+        class: 'btn-small',
+        title: 'Set the deadline of the selected tasks',
+        onclick: () => {
+          try { deadline.showPicker(); } catch { deadline.focus(); }
+        },
+      }, icon('calendar'), 'Deadline'),
+      deadline),
     h('span', { class: 'grow' }),
     h('button', { type: 'button', class: 'btn-small', title: 'Copy the selected tasks as a Markdown list', onclick: () => copyTasks(store, items) }, icon('copy'), 'Copy'),
     h('button', { type: 'button', class: 'btn-small danger', onclick: () => removeItems(store, ids) }, icon('trash'), 'Delete'));

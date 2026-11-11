@@ -97,7 +97,7 @@ function showPicker(anchor, { options, value, nullable, nullLabel, allowCreate, 
   closePicker();
   // Options without a usable label are dropped, so no empty or "null" rows can appear.
   options = options.filter((o) => o && o.label !== null && o.label !== undefined && String(o.label) !== '');
-  const search = h('input', { class: 'pop-search', placeholder: 'Search or create…', autocomplete: 'off', 'aria-label': 'Search options' });
+  const search = h('input', { class: 'pop-search', placeholder: allowCreate ? 'Search or create…' : 'Search…', autocomplete: 'off', 'aria-label': 'Search options' });
   const list = h('div', { class: 'pop-list', role: 'listbox' });
 
   const choose = (v) => {
@@ -182,6 +182,23 @@ export function pickChip({ value = null, options, placeholder = 'Set', nullable 
     },
   }, found ? pill(label, found) : h('span', { class: 'muted' }, label));
   return chip;
+}
+
+// A button that names an action and opens the same searchable picker, for setting a value on many things at once.
+// options: [{ value, label, tone?, color? }].
+export function pickButton({ label, options, title, className = 'btn-small', onPick }) {
+  const button = h('button', {
+    type: 'button',
+    class: `${className} pick-btn`.trim(),
+    title: title ?? label,
+    'aria-haspopup': 'listbox',
+    onclick: (e) => {
+      e.stopPropagation();
+      if (openPicker && openPicker.anchor === button) return closePicker();
+      showPicker(button, { options, value: undefined, onPick });
+    },
+  }, label, icon('chevron-down'));
+  return button;
 }
 
 // A colored pill. An option with `color` (a project's color) gets that color; otherwise `tone` picks one from the CSS palette.

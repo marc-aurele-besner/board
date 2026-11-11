@@ -853,7 +853,7 @@ button.danger { color: var(--danger); }
 .kanban-title { gap: 8px; align-items: flex-start; flex-wrap: nowrap; }
 .kanban-title .todo-select { margin-top: 3px; flex: none; }
 .batch-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 10px; margin-bottom: 10px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--surface); }
-.batch-bar select { width: auto; padding: 3px 6px; font-size: 13px; }
+.batch-bar .pick-btn .icon { width: 13px; height: 13px; color: var(--muted); }
 .batch-bar .btn-small { display: inline-flex; align-items: center; gap: 4px; }
 .batch-bar .btn-small.danger { color: var(--danger); }
 .batch-bar .grow { flex: 1; }
@@ -1878,4 +1878,3 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .call-block > header { padding: 6px 10px; background: var(--surface-2); gap: 8px; }
 .call-block .btn-small .icon { width: 13px; height: 13px; }
 .call-pre { margin: 0; padding: 10px; max-height: 420px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 0.85rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
-@media (max-width: 720px) { .batch-bar select, .batch-bar input { font-size: 16px; } }
