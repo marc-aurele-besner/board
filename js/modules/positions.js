@@ -1,4 +1,6 @@
-import { h, icon, refreshIcon, money, empty, notice } from '../ui.js';
+import { h, icon, refreshIcon, money, empty, notice, uid, todayISO } from '../ui.js';
+import { barChart } from '../chart.js';
+import { toast } from '../toast.js';
 import { setupBanner } from '../integrations.js';
 import { poolsChanged } from '../automations.js';
 import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed } from '../uniswap.js';
@@ -128,6 +130,38 @@ function nextBaselines(old = {}, rows, now) {
     if (typeof r.fee0 !== 'number' || typeof r.fee1 !== 'number') continue;
     const b = baselineOf(old, r);
     if (!b || r.fee0 < b.f0 || r.fee1 < b.f1) out[r.ref] = { at: now, f0: r.fee0, f1: r.fee1, v: BASELINE_V };
+  }
+  return out;
+}
+
+// Collections seen between the last saved read of a part (before) and this one: unclaimed fees only fall when they
+// are collected. What was unclaimed at the last read is logged, so fees earned between that read and the collect
+// are missed: the amount is a floor. Fees read from the stored amounts lag, so only full reads are compared.
+function collectsOf(before, rows, now) {
+  if (!before?.rows?.length) return [];
+  const old = new Map(before.rows.map((r) => [r.ref, r]));
+  const out = [];
+  for (const r of rows) {
+    const o = old.get(r.ref);
+    if (!o?.feesFull || !r.feesFull || typeof o.fee0 !== 'number' || typeof r.fee0 !== 'number') continue;
+    if (!(o.fee0 > 0 || o.fee1 > 0) || !(r.fee0 < o.fee0 || r.fee1 < o.fee1)) continue;
+    const p0 = r.p0 ?? o.p0;
+    const p1 = r.p1 ?? o.p1;
+    out.push({
+      id: uid(),
+      at: new Date(now).toISOString(),
+      since: new Date(before.at).toISOString(),
+      source: 'auto',
+      ref: r.ref,
+      pair: r.pair,
+      chain: r.chain,
+      tokenId: r.tokenId,
+      a0: o.fee0,
+      a1: o.fee1,
+      sym0: r.sym0,
+      sym1: r.sym1,
+      usd: p0 != null && p1 != null ? o.fee0 * p0 + o.fee1 * p1 : null,
+    });
   }
   return out;
 }
@@ -346,6 +380,8 @@ async function load(store) {
           }
           // Save as each part lands, so a reload mid-read keeps what was already read.
           store.update(COLLECTION, (d) => {
+            const found = collectsOf(d.cache?.[key], done.rows, Date.now());
+            if (found.length) d.collected = [...(d.collected ?? []), ...found];
             d.cache = { ...d.cache, [key]: { at: Date.now(), rows: done.rows } };
             d.fees = nextBaselines(d.fees, done.rows, Date.now());
             if (done.prices) d.prices = { ...d.prices, [chain.id]: { at: Date.now(), usd: { ...d.prices?.[chain.id]?.usd, ...done.prices } } };
@@ -896,7 +932,7 @@ export default {
   short: 'Pools',
   icon: 'droplet',
   collection: COLLECTION,
-  defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {} },
+  defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [] },
   render: draw,
   serialize: () => ({
     filter: view.filter === 'all' ? '' : view.filter,
