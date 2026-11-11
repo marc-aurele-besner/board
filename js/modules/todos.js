@@ -520,7 +520,17 @@ function batchBar(store, visible, projects, categories) {
     }, h('option', { value: '' }, `${name}…`), options.map(([v, l]) => h('option', { value: v }, l)));
   const allShown = visible.length > 0 && visible.every((i) => view.selected.has(i.id));
   return h('div', { class: 'batch-bar', role: 'toolbar', 'aria-label': 'Selected tasks' },
-    h('strong', null, `${items.length} selected`),
+    // The count doubles as the way out, so clearing never wraps onto a line of its own.
+    h('button', {
+      type: 'button',
+      class: 'btn-small batch-count',
+      title: 'Clear the selection',
+      'aria-label': `${items.length} selected, clear the selection`,
+      onclick: () => {
+        view.selected.clear();
+        store.refresh();
+      },
+    }, `${items.length} selected`, icon('x')),
     allShown
       ? null
       : h('button', {
@@ -547,17 +557,7 @@ function batchBar(store, visible, projects, categories) {
       })),
     h('span', { class: 'grow' }),
     h('button', { type: 'button', class: 'btn-small', title: 'Copy the selected tasks as a Markdown list', onclick: () => copyTasks(store, items) }, icon('copy'), 'Copy'),
-    h('button', { type: 'button', class: 'btn-small danger', onclick: () => removeItems(store, ids) }, icon('trash'), 'Delete'),
-    h('button', {
-      type: 'button',
-      class: 'icon-btn',
-      title: 'Clear the selection',
-      'aria-label': 'Clear the selection',
-      onclick: () => {
-        view.selected.clear();
-        store.refresh();
-      },
-    }, icon('x')));
+    h('button', { type: 'button', class: 'btn-small danger', onclick: () => removeItems(store, ids) }, icon('trash'), 'Delete'));
 }
 
 // Ticks or unticks every task shown, from the table header.
