@@ -470,7 +470,7 @@ function googleField(store, p) {
     : null;
 }
 
-// The logos of a project's connected services, for the overview rows: Gmail and Google Calendar (hover lists the addresses) and Resend.
+// The logos of a project's connected services, for the overview rows and the project page header: Gmail and Google Calendar (hover lists the addresses) and Resend.
 function serviceMarks(store, p) {
   const mark = (name, title, label) => h('span', { class: 'service-mark', title, role: 'img', 'aria-label': `${label} connected` }, icon(name));
   const marks = [
@@ -721,7 +721,8 @@ function projectView(store, p, items, categories) {
           placeholder: 'Untitled project',
           className: 'pp-name',
           onSave: (name) => updateProject(store, p.id, { name }),
-        })),
+        }),
+        serviceMarks(store, p)),
       h('button', { type: 'button', class: 'btn-small danger', onclick: () => deleteProject(store, p) }, icon('x'), 'Delete')),
 
     h('div', { class: 'pp-meta' },
