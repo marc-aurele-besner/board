@@ -5,10 +5,13 @@ import { allChains, chainById, explorerUrl } from '../chains.js';
 import { parseAbi, readsOf, writesOf, eventsOf } from '../abi.js';
 import { contractsOf, etherscanKey, fetchAbi } from '../contracts.js';
 import { logo } from './positions.js';
+import { projectIcon } from './projects.js';
+import { pickChip } from '../inline.js';
 
 const COLLECTION = 'settings';
 // editing: the contract in the form ('' for a new one, null when the form is closed). busy: an ABI fetch running.
-const contractsView = { editing: null, message: '', ok: null, busy: false };
+// chainId, projectId: the form's picks, kept here because a redraw (an error, a fetch) would otherwise reset them.
+const contractsView = { editing: null, message: '', ok: null, busy: false, chainId: 1, projectId: '' };
 
 const say = (store, ok, message) => {
   Object.assign(contractsView, { ok, message });
@@ -32,7 +35,7 @@ function contractForm(store, settings) {
     const form = new FormData(e.currentTarget);
     const label = String(form.get('label') ?? '').trim();
     const address = String(form.get('address') ?? '').trim();
-    const chainId = Number(form.get('chain'));
+    const chainId = Number(contractsView.chainId);
     const abiText = String(form.get('abi') ?? '').trim();
     if (!label) return say(store, false, 'Give the contract a name.');
     if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return say(store, false, 'That is not a contract address. It starts with 0x and has 40 hex characters.');
@@ -46,7 +49,7 @@ function contractForm(store, settings) {
     }
     const dupe = contractsOf(settings).find((c) => c.id !== editing?.id && c.chainId === chainId && c.address.toLowerCase() === address.toLowerCase());
     if (dupe) return say(store, false, `That contract is already saved, as ${dupe.label}.`);
-    const entry = { id: editing?.id ?? uid(), label, chainId, address, projectId: String(form.get('project') ?? ''), abi };
+    const entry = { id: editing?.id ?? uid(), label, chainId, address, projectId: contractsView.projectId ?? '', abi };
     store.update(COLLECTION, (d) => {
       const list = contractsOf(d);
       d.contracts = editing ? list.map((c) => (c.id === editing.id ? entry : c)) : [...list, entry];
@@ -63,7 +66,7 @@ function contractForm(store, settings) {
     contractsView.busy = true;
     say(store, true, 'Fetching the ABI from Etherscan…');
     try {
-      const abi = await fetchAbi(etherscanKey(settings), Number(form.chain.value), address);
+      const abi = await fetchAbi(etherscanKey(settings), Number(contractsView.chainId), address);
       // The field was redrawn by the refresh above; write into the one on the page now.
       const field = document.querySelector('textarea[name="abi"]');
       if (field) field.value = JSON.stringify(abi, null, 2);
@@ -79,10 +82,27 @@ function contractForm(store, settings) {
     h('h3', null, editing ? `Edit ${editing.label}` : 'Add a contract'),
     h('div', { class: 'row' },
       h('input', { name: 'label', value: editing?.label ?? '', placeholder: 'Name', 'aria-label': 'Contract name' }),
-      h('select', { name: 'chain', 'aria-label': 'Chain' }, chains.map((c) => h('option', { value: String(c.id), selected: editing ? c.id === editing.chainId : c.id === 1 }, c.name))),
-      h('select', { name: 'project', 'aria-label': 'Project (optional)' },
-        h('option', { value: '' }, 'No project'),
-        projects.map((p) => h('option', { value: p.id, selected: editing?.projectId === p.id }, p.name)))),
+      pickChip({
+        value: contractsView.chainId,
+        className: 'field-pick',
+        placeholder: 'Chain',
+        options: chains.map((c) => ({ value: c.id, label: c.name, plainIcon: () => logo(c.logo, c.name, 'xs') })),
+        onPick: (id) => {
+          contractsView.chainId = id;
+          store.refresh();
+        },
+      }),
+      pickChip({
+        value: contractsView.projectId || null,
+        className: 'field-pick',
+        nullable: true,
+        nullLabel: 'No project',
+        options: [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
+        onPick: (id) => {
+          contractsView.projectId = id ?? '';
+          store.refresh();
+        },
+      })),
     h('input', { name: 'address', value: editing?.address ?? '', placeholder: 'Contract address 0x…', spellcheck: false, 'aria-label': 'Contract address' }),
     h('textarea', { name: 'abi', rows: 8, spellcheck: false, placeholder: 'ABI as JSON: [{"type":"function","name":"balanceOf",…}]. A Hardhat or Foundry artifact works too.', 'aria-label': 'Contract ABI' },
       editing?.abi?.length ? JSON.stringify(editing.abi, null, 2) : ''),
@@ -108,7 +128,8 @@ export function contractsCard(store) {
     say(store, true, `${c.label} removed.`);
   };
   const edit = (id) => {
-    contractsView.editing = id;
+    const c = list.find((x) => x.id === id);
+    Object.assign(contractsView, { editing: id, chainId: c?.chainId ?? 1, projectId: c?.projectId ?? '' });
     say(store, null, '');
   };
 
