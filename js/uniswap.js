@@ -59,15 +59,19 @@ export const isNative = (address) => String(address).toLowerCase() === NATIVE;
 // keyed "chainId:address" in lowercase. Fetched once; a token the list does not carry gets a monogram instead.
 const TOKEN_LIST_DIR = 'https://raw.githubusercontent.com/Uniswap/default-token-list/main/src/tokens';
 const TOKEN_LIST_FILE = { 1: 'mainnet', 8453: 'base', 42161: 'arbitrum', 10: 'optimism', 137: 'polygon', 56: 'bnb', 43114: 'avalanche', 130: 'unichain', 4663: 'robinhood', 324: 'zksync' };
+let list = null;
 let logos = null;
-export function tokenLogos() {
-  logos ??= Promise.allSettled(Object.values(TOKEN_LIST_FILE).map(async (file) => {
+// Every token on the lists: { chainId, address, symbol, decimals, logoURI }. A list that fails to load is left out.
+export function tokenList() {
+  list ??= Promise.allSettled(Object.values(TOKEN_LIST_FILE).map(async (file) => {
     const res = await fetch(`${TOKEN_LIST_DIR}/${file}.json`);
     if (!res.ok) throw new Error(String(res.status));
     return res.json();
-  })).then((results) => new Map(results
-    .filter((r) => r.status === 'fulfilled')
-    .flatMap((r) => r.value)
+  })).then((results) => results.filter((r) => r.status === 'fulfilled' && Array.isArray(r.value)).flatMap((r) => r.value));
+  return list;
+}
+export function tokenLogos() {
+  logos ??= tokenList().then((tokens) => new Map(tokens
     .filter((t) => t.logoURI)
     .map((t) => [`${t.chainId}:${t.address.toLowerCase()}`, t.logoURI])
     .concat(CHAINS.map((c) => [`${c.id}:${NATIVE}`, c.native.logo]))));
@@ -159,6 +163,8 @@ function pickNode(urls, tried) {
   return (up.length ? up : left).reduce((a, b) => (wait(b) < wait(a) ? b : a));
 }
 
+const isLimit = (e) => e.code === -32005 || /usage limit|rate limit|request limit|daily limit|limit exceeded|limit reached|too many|over capacity|upgrade/i.test(String(e.message ?? ''));
+
 // One request to one node. With other nodes to fall back on, a node that takes too long is given up on.
 async function rpcOne(url, method, params, alone, retry = true) {
   const h = health(url);
@@ -185,7 +191,9 @@ async function rpcOne(url, method, params, alone, retry = true) {
     h.downUntil = 0;
     if (json.error) {
       const err = new Error(`The node refused the call: ${json.error.message ?? 'error'}.`);
-      err.refused = true; // the node answered and said no, unlike a network error, which may pass
+      // A node over its rate or plan limit says so as an error too. That is the node, not the call, so another
+      // node is asked; anything else (a revert, bad params) is the answer, and the node answered and said no.
+      err.refused = !isLimit(json.error);
       throw err;
     }
     return json.result;

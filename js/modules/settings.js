@@ -49,7 +49,7 @@ const SECTION_GROUPS = [
       ['github', 'GitHub', 'github'],
       ['openrouter', 'OpenRouter', 'key'],
       ['google', 'Google Calendar', 'calendar'],
-      ['uniswap', 'Uniswap', 'wallet'],
+      ['uniswap', 'DeFi wallets', 'wallet'],
       ['blockchains', 'Blockchains', 'cube'],
       ['contracts', 'Smart contracts', 'code'],
       ['telegram', 'Telegram', 'send'],
@@ -592,8 +592,8 @@ function uniswapCard(store) {
   };
 
   return h('section', { class: 'card panel' },
-    h('h2', null, 'Uniswap'),
-    h('p', { class: 'muted small' }, 'Add the public address of each wallet that holds Uniswap v3 or v4 positions. The board only reads them. It never asks for a key and never signs anything.'),
+    h('h2', null, 'DeFi wallets'),
+    h('p', { class: 'muted small' }, 'Add the public address of each wallet to follow. DeFi reads this list for its Uniswap positions and its wallet balances. The board only reads them. It never asks for a key and never signs anything.'),
     wallets.length
       ? h('ul', { class: 'stack' }, wallets.map((w, i) => h('li', { class: 'row between' },
         h('span', null, w.label ? `${w.label} · ` : '', copyable(w.address)),

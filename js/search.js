@@ -4,7 +4,7 @@ import { taskMatcher } from './task-query.js';
 import { openShortcuts } from './shortcuts.js';
 import { statusName } from './task-labels.js';
 
-export const SETTINGS = [['github', 'GitHub'], ['openrouter', 'OpenRouter'], ['google', 'Google Calendar'], ['uniswap', 'Uniswap'], ['telegram', 'Telegram'], ['analytics', 'Google Analytics'], ['search', 'Search consoles'], ['exchange', 'Exchange rates'], ['appearance', 'Appearance'], ['models', 'Models & tasks'], ['categories', 'Labels'], ['notifications', 'Notifications'], ['automations', 'Automations'], ['data', 'Data folder']];
+export const SETTINGS = [['github', 'GitHub'], ['openrouter', 'OpenRouter'], ['google', 'Google Calendar'], ['uniswap', 'DeFi wallets'], ['telegram', 'Telegram'], ['analytics', 'Google Analytics'], ['search', 'Search consoles'], ['exchange', 'Exchange rates'], ['appearance', 'Appearance'], ['models', 'Models & tasks'], ['categories', 'Labels'], ['notifications', 'Notifications'], ['automations', 'Automations'], ['data', 'Data folder']];
 
 // [key, label, icon], in the order the page lists them.
 export const GROUPS = [['tasks', 'Tasks', 'check-square'], ['projects', 'Projects', 'folder'], ['recipes', 'Recipes', 'chef-hat'], ['sections', 'Sections', 'home'], ['settings', 'Settings', 'settings']];
