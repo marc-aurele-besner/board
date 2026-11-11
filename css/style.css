@@ -183,7 +183,6 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
-.brand { font-weight: 700; letter-spacing: 0.02em; color: var(--text); text-decoration: none; }
 
 /* Todo header: one title line with inline project meta, one actions line */
 .head-bar { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
@@ -1424,8 +1423,7 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 
 /* ==== Topbar redesign ==== */
 /* Headings and the brand use the display face; everything else stays on the text face. */
-h1, h2, h3, .brand, .k-h1, .pp-name { font-family: var(--display); }
-.brand { font-size: 1.1rem; }
+h1, h2, h3, .k-h1, .pp-name { font-family: var(--display); }
 kbd { font: 0.72rem var(--font); padding: 1px 6px; border-radius: 5px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); }
 
 /* Top bar: every section in one row. Labels fold away on narrower screens, and the row scrolls on phones. */

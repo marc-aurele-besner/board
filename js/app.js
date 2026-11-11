@@ -91,7 +91,6 @@ function render({ user = true } = {}) {
   // replaceChildren would print a null as text, so the parts that may be absent are filtered out.
   app.replaceChildren(...[
     h('header', { class: 'topbar' },
-      h('a', { href: '#/home', class: 'brand' }, 'Board'),
       h('nav', { class: 'tabs' },
         modules.filter((m) => !m.hidden).map((m) =>
           h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab', title: m.title, 'aria-current': m.id === mod.id ? 'page' : null },
