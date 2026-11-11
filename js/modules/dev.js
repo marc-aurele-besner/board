@@ -1,27 +1,30 @@
-// Dev: terminals on this machine. Each session runs commands in its own folder (the board, the home folder, or a
-// project's local folder) through the runner that `bun start` starts, and shows their output as it comes.
+// Dev: a small IDE for this machine, Cursor style. A workspace folder (the board, the home folder, or a project's
+// local folder) is shown as a file tree; files open read-only with syntax colours; terminals sit below.
+// Commands run in a real pseudo-terminal through the runner `bun start` starts, so interactive programs such as
+// the Claude CLI work: keys typed in the terminal go to the program, and vt.js draws what it prints.
 // Sessions live in this tab only: a reload closes the streams, and the runner stops what they were running.
 import { h, icon, notice, uid } from '../ui.js';
 import { toast } from '../toast.js';
-import { TERMINAL_RUNNER, runnerInfo, runCommand } from '../terminal.js';
+import { TERMINAL_RUNNER, runnerInfo, runCommand, sendInput } from '../terminal.js';
+import { createTerminal, styleOf, colorOf } from '../vt.js';
+import { explorer, editor, setRoot, hasOpenFiles, baseName } from './dev-files.js';
 
 const COLLECTION = 'dev';
 const DEFAULTS = { history: [], runner: '' };
 const HISTORY_MAX = 100;
-const LINES_MAX = 5000;
 const RECENT_SHOWN = 8;
-// Escape sequences for colours, cursor moves and window titles: the output is shown as plain text.
-const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
-// View state: the sessions, the one shown, and what the runner said about itself.
-const view = { sessions: [], active: '', info: null, infoError: '', checking: false, count: 0, pending: '' };
+// View state: the workspace, the sessions, the one shown, and what the runner said about itself.
+const view = { workspace: 'board', sessions: [], active: '', info: null, infoError: '', checking: false, count: 0, pending: null };
+let currentStore = null;
 
 const runnerOf = (store) => store.get(COLLECTION).runner || TERMINAL_RUNNER;
 const maxSessions = () => view.info?.max ?? 12;
 const activeSession = () => view.sessions.find((s) => s.id === view.active) ?? view.sessions[0];
 const projectsWithFolder = (store) => store.get('projects').projects.filter((p) => p.localPath);
 
-// Where a session starts: 'board', 'home', or 'p:<project id>'.
+// Where a workspace is: 'board', 'home', or 'p:<project id>'.
 function rootPath(store, root) {
   if (root === 'home') return view.info?.home ?? '~';
   if (root.startsWith('p:')) return store.get('projects').projects.find((p) => p.id === root.slice(2))?.localPath ?? '';
@@ -33,12 +36,34 @@ function rootLabel(store, root) {
   return 'Board';
 }
 
-function newSession(store, root = 'board') {
+// What the file explorer needs from this module.
+const filesCtx = (store) => ({
+  base: () => runnerOf(store),
+  ready: () => !!view.info,
+  refresh: () => store.refresh(),
+  openTerminal: (path) => {
+    const s = newSession(store, path);
+    if (s) store.refresh();
+  },
+});
+
+// The terminal answers questions programs ask (cursor position, colours) as the theme shows it.
+function themeColor(which) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(which === 'fg' ? '--text' : '--surface-2').trim();
+  const m = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(value);
+  return m ? `rgb:${m[1]}${m[1]}/${m[2]}${m[2]}/${m[3]}${m[3]}` : '';
+}
+
+function newSession(store, cwd = rootPath(store, view.workspace)) {
   if (view.sessions.length >= maxSessions()) {
     toast(`${maxSessions()} terminals are open. Close one first.`);
     return null;
   }
-  const s = { id: uid(), n: ++view.count, root, cwd: rootPath(store, root), lines: [], open: null, cr: false, running: false, abort: null, exit: null, command: '', started: 0, browse: -1, stick: true };
+  const s = { id: uid(), n: ++view.count, cwd, running: false, abort: null, pid: 0, exit: null, command: '', started: 0, browse: -1, stick: true, el: null };
+  s.term = createTerminal({
+    reply: (data) => s.running && s.pid && sendInput(runnerOf(store), s.pid, { data }),
+    background: themeColor,
+  });
   view.sessions.push(s);
   view.active = s.id;
   return s;
@@ -46,75 +71,180 @@ function newSession(store, root = 'board') {
 
 function closeSession(s) {
   s.abort?.abort();
+  s.observer?.disconnect();
   view.sessions = view.sessions.filter((x) => x !== s);
   if (view.active === s.id) view.active = view.sessions.at(-1)?.id ?? '';
 }
 
-// Adds output to a session. A carriage return starts the line over, as progress bars expect.
-function write(s, text, cls = '') {
-  for (const part of text.replace(ANSI, '').split(/(\r\n|\n|\r)/)) {
-    if (part === '\n' || part === '\r\n') {
-      s.open = null;
-      s.cr = false;
-    } else if (part === '\r') {
-      s.cr = true;
-    } else if (part) {
-      if (s.cr && s.open) s.open.text = '';
-      s.cr = false;
-      if (!s.open) {
-        s.open = { text: '', cls };
-        s.lines.push(s.open);
-      }
-      s.open.text += part;
-    }
-  }
-  if (s.lines.length > LINES_MAX) s.lines.splice(0, s.lines.length - LINES_MAX);
-}
-const note = (s, text, cls) => {
-  s.open = null;
-  s.lines.push({ text, cls });
-};
+// Drawing. A terminal's elements are made once and moved into each new page, so its output, scroll and focus
+// survive the page being rebuilt. Lines are drawn again only when they changed.
+const drawn = new WeakMap();
 
-// Output arrives many times a second, so it is drawn into the open terminal directly, once per frame,
-// instead of rebuilding the page.
-const nodes = new WeakMap();
-function lineNode(line) {
-  let el = nodes.get(line);
-  if (!el) {
-    el = h('div', { class: line.cls ? `term-line ${line.cls}` : 'term-line' });
-    nodes.set(line, el);
+function spanStyle(key) {
+  const s = styleOf(key);
+  const cls = [s.cls, s.bold && 'b', s.dim && 'd', s.italic && 'i', s.under && 'u', s.strike && 's'].filter(Boolean).join(' ');
+  let fg = s.fg !== undefined ? colorOf(s.fg) : '';
+  let bg = s.bg !== undefined ? colorOf(s.bg) : '';
+  if (s.inverse) [fg, bg] = [bg || 'var(--surface-2)', fg || 'var(--text)'];
+  const style = {};
+  if (fg) style.color = fg;
+  if (bg) style.background = bg;
+  return { class: cls || null, style };
+}
+
+function lineNode(line, cursorX = -1) {
+  const was = drawn.get(line);
+  if (was && was.v === line.v && was.cx === cursorX) return was.el;
+  const el = was?.el ?? h('div', { class: 'term-line' });
+  const spans = [];
+  const end = Math.max(line.cells.length, cursorX + 1);
+  let x = 0;
+  while (x < end) {
+    const cursor = x === cursorX;
+    const key = line.cells[x]?.k ?? '';
+    let text = line.cells[x]?.c ?? ' ';
+    x++;
+    // Cells of one style make one span; the cursor's cell gets its own.
+    while (!cursor && x < end && x !== cursorX && (line.cells[x]?.k ?? '') === key) {
+      text += line.cells[x]?.c ?? ' ';
+      x++;
+    }
+    const attrs = spanStyle(key);
+    spans.push(key || cursor ? h('span', { ...attrs, class: [attrs.class, cursor && 'term-cursor'].filter(Boolean).join(' ') || null }, text) : text);
   }
-  if (el.textContent !== line.text) el.textContent = line.text || '​';
+  el.replaceChildren(...spans);
+  drawn.set(line, { v: line.v, cx: cursorX, el });
   return el;
 }
-let frame = 0;
-function paint() {
-  frame = 0;
-  for (const s of view.sessions) {
-    const out = document.querySelector(`.term-out[data-session="${s.id}"]`);
-    if (!out) continue;
-    out.replaceChildren(...s.lines.map(lineNode));
-    if (s.stick) out.scrollTop = out.scrollHeight;
-  }
+
+function paint(s) {
+  if (!s.el) return;
+  const { term } = s;
+  const { history, screen, out } = s.el;
+  // History lines never change once scrolled off; only new ones are added, and old ones dropped.
+  const drop = Math.min(history.childElementCount, term.trimmed - s.el.from);
+  for (let i = 0; i < drop; i++) history.firstChild.remove();
+  if (term.trimmed > s.el.from) s.el.from = term.trimmed;
+  for (let i = s.el.from + history.childElementCount - term.trimmed; i < term.history.length; i++) history.append(lineNode(term.history[i]));
+  const cursorY = s.running && term.cursor ? term.y : -1;
+  screen.replaceChildren(...term.screen.slice(0, term.used()).map((l, y) => lineNode(l, y === cursorY ? Math.min(term.x, term.cols - 1) : -1)));
+  if (s.stick) out.scrollTop = out.scrollHeight;
 }
-const schedulePaint = () => (frame ||= requestAnimationFrame(paint));
+
+let frame = 0;
+const schedulePaint = () => (frame ||= requestAnimationFrame(() => {
+  frame = 0;
+  view.sessions.forEach(paint);
+}));
+
+// Columns and rows that fit the terminal, from the size of one character.
+function fit(s) {
+  const out = s.el?.out;
+  if (!out?.isConnected || !out.clientWidth) return;
+  const probe = h('span', { class: 'term-probe' }, 'M'.repeat(20));
+  out.append(probe);
+  const box = probe.getBoundingClientRect();
+  probe.remove();
+  const css = getComputedStyle(out);
+  const width = out.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
+  const height = out.clientHeight - parseFloat(css.paddingTop) - parseFloat(css.paddingBottom);
+  const cols = Math.max(20, Math.floor(width / (box.width / 20)));
+  const rows = Math.max(5, Math.floor(height / box.height));
+  if (cols === s.term.cols && rows === s.term.rows) return;
+  s.term.resize(cols, rows);
+  if (s.running && s.pid) sendInput(runnerOf(currentStore), s.pid, { cols, rows });
+  schedulePaint();
+}
+
+// Keys for the program, as a terminal sends them.
+function keyData(e, appCursor) {
+  if (e.isComposing || e.metaKey) return null;
+  const mod = 1 + (e.shiftKey ? 1 : 0) + (e.altKey ? 2 : 0) + (e.ctrlKey ? 4 : 0);
+  const arrows = { ArrowUp: 'A', ArrowDown: 'B', ArrowRight: 'C', ArrowLeft: 'D', Home: 'H', End: 'F' };
+  if (arrows[e.key]) return mod > 1 ? `\x1b[1;${mod}${arrows[e.key]}` : `${appCursor ? '\x1bO' : '\x1b['}${arrows[e.key]}`;
+  const named = {
+    Enter: e.shiftKey || e.altKey ? '\x1b\r' : '\r',
+    Backspace: e.altKey ? '\x1b\x7f' : e.ctrlKey ? '\x08' : '\x7f',
+    Tab: e.shiftKey ? '\x1b[Z' : '\t',
+    Escape: '\x1b',
+    Delete: '\x1b[3~',
+    Insert: '\x1b[2~',
+    PageUp: '\x1b[5~',
+    PageDown: '\x1b[6~',
+    F1: '\x1bOP', F2: '\x1bOQ', F3: '\x1bOR', F4: '\x1bOS', F5: '\x1b[15~', F6: '\x1b[17~', F7: '\x1b[18~', F8: '\x1b[19~', F9: '\x1b[20~', F10: '\x1b[21~', F11: '\x1b[23~', F12: '\x1b[24~',
+  };
+  if (named[e.key]) return named[e.key];
+  if (e.ctrlKey && !e.altKey) {
+    const k = e.key.length === 1 ? e.key.toLowerCase() : '';
+    if (k >= 'a' && k <= 'z') return String.fromCharCode(k.charCodeAt(0) - 96);
+    if (k === ' ' || k === '@' || k === '2') return '\x00';
+    const ctrl = { '[': '\x1b', '\\': '\x1c', ']': '\x1d', '^': '\x1e', '6': '\x1e', '_': '\x1f', '-': '\x1f', '/': '\x1f' };
+    return ctrl[k] ?? null;
+  }
+  if ([...e.key].length !== 1) return null;
+  // On a Mac, Option types characters (é, ∫); elsewhere Alt+key is ESC then the key, as terminals send it.
+  return e.altKey && !isMac ? `\x1b${e.key}` : e.key;
+}
+
+function onTerminalKey(store, s, e) {
+  if (!s.running || !s.pid) {
+    // Typing in the output of an idle terminal goes to its command line.
+    if ([...e.key].length === 1 && !e.metaKey && !e.ctrlKey) document.querySelector('.term-input')?.focus();
+    return;
+  }
+  // Copy keeps working: Cmd+C on a Mac, and Ctrl+C elsewhere while text is selected.
+  if (e.ctrlKey && e.key === 'c' && !isMac && String(getSelection())) return;
+  const data = keyData(e, s.term.appCursor);
+  if (data === null) return;
+  e.preventDefault();
+  s.stick = true;
+  sendInput(runnerOf(store), s.pid, { data });
+}
+
+function onTerminalPaste(store, s, e) {
+  if (!s.running || !s.pid) return;
+  e.preventDefault();
+  const text = (e.clipboardData?.getData('text') ?? '').replace(/\r?\n/g, '\r');
+  if (text) sendInput(runnerOf(store), s.pid, { data: s.term.paste ? `\x1b[200~${text}\x1b[201~` : text });
+}
+
+function elementsOf(store, s) {
+  if (s.el) return s.el;
+  const history = h('div', { class: 'term-history' });
+  const screen = h('div', { class: 'term-screen' });
+  const out = h('div', {
+    class: 'term-out',
+    tabindex: '0',
+    role: 'log',
+    'aria-label': `Terminal ${s.n} output`,
+    // Scrolling up to read stops following new output; scrolling back to the end follows it again.
+    onscroll: () => (s.stick = out.scrollHeight - out.scrollTop - out.clientHeight < 24),
+    onkeydown: (e) => onTerminalKey(store, s, e),
+    onpaste: (e) => onTerminalPaste(store, s, e),
+  }, history, screen);
+  s.el = { out, history, screen, from: 0 };
+  s.observer = new ResizeObserver(() => fit(s));
+  s.observer.observe(out);
+  return s.el;
+}
 
 const duration = (ms) => (ms < 1000 ? `${Math.round(ms)}ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`);
-const exitText = (exit) => {
+function exitText(exit) {
   if (!exit) return '';
   if (exit.stopped) return `Stopped after ${duration(exit.ms)}`;
   if (exit.failed) return 'Could not run';
   if (exit.signal) return `Ended by ${exit.signal} after ${duration(exit.ms)}`;
   return `Exit ${exit.code} · ${duration(exit.ms)}`;
-};
+}
 
 async function checkRunner(store) {
   view.checking = true;
   try {
     view.info = await runnerInfo(runnerOf(store));
     view.infoError = '';
-    // Sessions opened before the runner answered learn their folder now.
-    for (const s of view.sessions) if (!s.cwd && !s.lines.length) s.cwd = rootPath(store, s.root);
+    // Terminals opened before the runner answered learn their folder now.
+    for (const s of view.sessions) if (!s.cwd && !s.command) s.cwd = rootPath(store, view.workspace);
+    setRoot(filesCtx(store), rootPath(store, view.workspace));
   } catch (err) {
     view.info = null;
     view.infoError = err.message;
@@ -130,25 +260,36 @@ function remember(store, command) {
   });
 }
 
+function clearTerminal(s) {
+  s.term.clear();
+  schedulePaint();
+}
+
 async function run(store, s, command) {
   if (command === 'clear') {
-    s.lines = [];
-    s.open = null;
+    clearTerminal(s);
     return store.refresh();
   }
-  note(s, `${s.cwd || rootLabel(store, s.root)} $ ${command}`, 't-cmd');
+  fit(s);
+  s.term.note(`${s.cwd || 'board'} $ ${command}`, 't-cmd');
   const ctl = new AbortController();
-  Object.assign(s, { running: true, abort: ctl, exit: null, command, started: performance.now(), stick: true, browse: -1 });
+  Object.assign(s, { running: true, abort: ctl, pid: 0, exit: null, command, started: performance.now(), stick: true, browse: -1 });
   remember(store, command);
+  // Keys now go to the program.
+  requestAnimationFrame(() => s.el?.out.focus({ preventScroll: true }));
   try {
     await runCommand(runnerOf(store), {
       command,
       cwd: s.cwd,
+      cols: s.term.cols,
+      rows: s.term.rows,
       signal: ctl.signal,
       onEvent: (e) => {
-        if (e.t === 'start' || e.t === 'cwd') s.cwd = e.cwd ?? e.d;
-        else if (e.t === 'out') write(s, e.d);
-        else if (e.t === 'err') write(s, e.d, 't-err');
+        if (e.t === 'start') {
+          s.pid = e.pid;
+          s.cwd = e.cwd;
+        } else if (e.t === 'out' || e.t === 'err') s.term.write(e.d);
+        else if (e.t === 'cwd') s.cwd = e.d;
         else if (e.t === 'exit') s.exit = { code: e.code, signal: e.signal, ms: e.ms };
         schedulePaint();
       },
@@ -157,37 +298,55 @@ async function run(store, s, command) {
   } catch (err) {
     if (err.name === 'AbortError') s.exit = { stopped: true, ms: performance.now() - s.started };
     else {
-      note(s, err.message, 't-err');
+      s.term.note(err.message, 't-err');
       s.exit = { failed: true };
       // The runner may have gone away; ask again so the page says so.
       if (/reach the terminal runner/.test(err.message)) checkRunner(store);
     }
   } finally {
-    Object.assign(s, { running: false, abort: null });
-    note(s, exitText(s.exit), s.exit?.code === 0 ? 't-meta t-ok' : 't-meta');
-    if (!view.sessions.includes(s)) return;
-    if (!location.hash.startsWith('#/dev')) toast(`${command.length > 40 ? `${command.slice(0, 40)}…` : command}: ${exitText(s.exit).toLowerCase()}`);
-    store.refresh();
+    Object.assign(s, { running: false, abort: null, pid: 0 });
+    s.term.reset();
+    s.term.note(exitText(s.exit), s.exit?.code === 0 ? 't-meta t-ok' : 't-meta');
+    schedulePaint();
+    if (view.sessions.includes(s)) {
+      if (!location.hash.startsWith('#/dev')) toast(`${command.length > 40 ? `${command.slice(0, 40)}…` : command}: ${exitText(s.exit).toLowerCase()}`);
+      store.refresh();
+    }
   }
+}
+
+function workspacePicker(store) {
+  const roots = [['board', 'This board'], ['home', 'Home folder'], ...projectsWithFolder(store).map((p) => [`p:${p.id}`, p.name])];
+  if (!roots.some(([v]) => v === view.workspace)) roots.push([view.workspace, rootLabel(store, view.workspace)]);
+  return h('select', {
+    class: 'ide-workspace',
+    value: view.workspace,
+    'aria-label': 'Workspace folder',
+    title: 'The folder the files and new terminals open in. Projects show here once they have a local folder.',
+    onchange: (e) => {
+      view.workspace = e.target.value;
+      setRoot(filesCtx(store), rootPath(store, view.workspace));
+      store.refresh();
+    },
+  }, roots.map(([v, label]) => h('option', { value: v }, label)));
 }
 
 function sessionTabs(store) {
   const full = view.sessions.length >= maxSessions();
-  return h('nav', { class: 'sub-tabs term-tabs', role: 'tablist', 'aria-label': 'Terminals' },
+  return h('nav', { class: 'term-tabs', role: 'tablist', 'aria-label': 'Terminals' },
     view.sessions.map((s) => {
       const active = s.id === activeSession()?.id;
       return h('div', { class: active ? 'term-tab active' : 'term-tab' },
         h('button', {
           type: 'button',
           role: 'tab',
-          class: active ? 'sub-tab active' : 'sub-tab',
           'aria-selected': String(active),
           title: s.cwd,
           onclick: () => {
             view.active = s.id;
             store.refresh();
           },
-        }, s.running ? h('span', { class: 'term-dot', title: 'Running' }) : icon('terminal'), `${s.n} · ${rootLabel(store, s.root)}`),
+        }, s.running ? h('span', { class: 'term-dot', title: 'Running' }) : icon('terminal'), `${s.n} · ${s.cwd ? baseName(s.cwd) : 'board'}`),
         h('button', {
           type: 'button',
           class: 'term-close',
@@ -201,55 +360,36 @@ function sessionTabs(store) {
     }),
     h('button', {
       type: 'button',
-      class: 'sub-tab term-new',
+      class: 'term-new',
       disabled: full,
-      title: full ? `Up to ${maxSessions()} terminals. Start the board with TERMINAL_MAX set higher for more.` : 'Open a new terminal in the same starting folder',
+      title: full ? `Up to ${maxSessions()} terminals. Start the board with TERMINAL_MAX set higher for more.` : 'Open a new terminal in the workspace folder',
+      'aria-label': 'New terminal',
       onclick: () => {
-        newSession(store, activeSession()?.root ?? 'board');
+        newSession(store);
         store.refresh();
       },
-    }, icon('plus'), 'New'));
-}
-
-function folderPicker(store, s) {
-  const roots = [['board', 'This board'], ['home', 'Home folder'], ...projectsWithFolder(store).map((p) => [`p:${p.id}`, p.name])];
-  // A project whose folder was removed keeps its sessions, listed under its name.
-  if (!roots.some(([v]) => v === s.root)) roots.push([s.root, rootLabel(store, s.root)]);
-  return h('label', { class: 'inline' }, 'Folder',
-    h('select', {
-      value: s.root,
-      'aria-label': 'Terminal folder',
-      disabled: s.running,
-      onchange: (e) => {
-        s.root = e.target.value;
-        s.cwd = rootPath(store, s.root);
-        note(s, `Folder: ${s.cwd || rootLabel(store, s.root)}`, 't-meta');
-        store.refresh();
-      },
-    }, roots.map(([v, label]) => h('option', { value: v }, label))));
+    }, icon('plus')));
 }
 
 function terminal(store, s) {
   const history = store.get(COLLECTION).history;
+  const { out } = elementsOf(store, s);
+  out.toggleAttribute('data-autofocus', s.running);
   const input = h('input', {
     name: 'command',
     class: 'term-input',
-    placeholder: s.running ? 'Running… Ctrl+C stops it' : 'Type a command and press Enter',
+    placeholder: s.running ? 'Running: type in the terminal above. Stop ends it.' : 'Type a command and press Enter',
     autocomplete: 'off',
     autocapitalize: 'off',
     spellcheck: false,
+    disabled: s.running,
     'aria-label': 'Command',
-    'data-autofocus': true,
+    'data-autofocus': !s.running,
     // Up and Down walk the saved commands, newest first, as in a shell.
     onkeydown: (e) => {
-      if (e.key === 'c' && e.ctrlKey && s.running) {
+      if (e.key === 'l' && e.ctrlKey) {
         e.preventDefault();
-        s.abort?.abort();
-      } else if (e.key === 'l' && e.ctrlKey) {
-        e.preventDefault();
-        s.lines = [];
-        s.open = null;
-        schedulePaint();
+        clearTerminal(s);
       } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && history.length) {
         e.preventDefault();
         s.browse = Math.max(-1, Math.min(history.length - 1, s.browse + (e.key === 'ArrowUp' ? 1 : -1)));
@@ -257,41 +397,23 @@ function terminal(store, s) {
       }
     },
   });
-  const out = h('div', {
-    class: 'term-out',
-    'data-session': s.id,
-    role: 'log',
-    'aria-live': 'off',
-    tabindex: '0',
-    // Scrolling up to read stops following new output; scrolling back to the end follows it again.
-    onscroll: (e) => {
-      const el = e.currentTarget;
-      s.stick = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
-    },
-  }, s.lines.map(lineNode));
-  if (!s.lines.length) out.append(h('div', { class: 'term-line t-meta' }, `Commands run in ${s.cwd || 'the board folder'}. cd moves this terminal; clear empties it.`));
 
   return h('section', { class: 'card term' },
     h('div', { class: 'term-head' },
-      folderPicker(store, s),
+      sessionTabs(store),
       h('code', { class: 'term-cwd', title: s.cwd }, s.cwd || '…'),
       h('div', { class: 'row term-actions' },
         h('button', {
           type: 'button',
-          class: 'btn-small',
-          disabled: !s.lines.length,
-          onclick: () => navigator.clipboard.writeText(s.lines.map((l) => l.text).join('\n')).then(() => toast('Output copied'), () => toast('Could not copy')),
-        }, icon('copy'), 'Copy'),
-        h('button', {
-          type: 'button',
-          class: 'btn-small',
-          disabled: !s.lines.length,
+          class: 'icon-btn',
+          title: 'Copy the output',
+          'aria-label': 'Copy the output',
           onclick: () => {
-            s.lines = [];
-            s.open = null;
-            store.refresh();
+            const text = [...s.term.history, ...s.term.screen.slice(0, s.term.used())].map((l) => Array.from({ length: l.cells.length }, (_, i) => l.cells[i]?.c ?? ' ').join('').trimEnd()).join('\n');
+            navigator.clipboard.writeText(text.trim()).then(() => toast('Output copied'), () => toast('Could not copy'));
           },
-        }, icon('trash'), 'Clear'))),
+        }, icon('copy')),
+        h('button', { type: 'button', class: 'icon-btn', title: 'Clear the output (Ctrl+L)', 'aria-label': 'Clear the output', onclick: () => clearTerminal(s) }, icon('trash')))),
     out,
     h('form', {
       class: 'term-form',
@@ -307,11 +429,11 @@ function terminal(store, s) {
       h('span', { class: 'term-prompt', 'aria-hidden': 'true' }, '$'),
       input,
       s.running
-        ? h('button', { type: 'submit', class: 'btn-small danger' }, icon('stop'), 'Stop')
+        ? h('button', { type: 'submit', class: 'btn-small danger', title: 'Stop the command and anything it started' }, icon('stop'), 'Stop')
         : h('button', { type: 'submit', class: 'btn-small primary', disabled: !view.info }, icon('play'), 'Run')),
     h('div', { class: 'row between term-status' },
       h('span', { class: 'muted small' }, s.running ? `Running ${s.command}` : exitText(s.exit) || 'Ready'),
-      history.length
+      history.length && !s.running
         ? h('div', { class: 'term-recent', 'aria-label': 'Recent commands' },
             history.slice(0, RECENT_SHOWN).map((c) =>
               h('button', {
@@ -349,12 +471,22 @@ function runnerNotice(store) {
 }
 
 function draw(root, store) {
+  currentStore = store;
   if (!view.info && !view.infoError && !view.checking) checkRunner(store);
-  if (view.pending) newSession(store, view.pending);
-  view.pending = '';
+  if (view.pending) {
+    view.workspace = view.pending;
+    view.pending = null;
+    setRoot(filesCtx(store), rootPath(store, view.workspace));
+    const open = view.sessions.find((x) => x.cwd === rootPath(store, view.workspace));
+    if (open) view.active = open.id;
+    else newSession(store);
+  }
   if (!view.sessions.length) newSession(store);
   const s = activeSession();
   const busy = view.sessions.filter((x) => x.running).length;
+  // The page is rebuilt around the terminal; it keeps the keys if it had them.
+  const focused = document.activeElement === s.el?.out;
+  const ctx = filesCtx(store);
 
   root.replaceChildren(
     h('div', { class: 'stack-lg dev' },
@@ -362,17 +494,18 @@ function draw(root, store) {
         h('h2', null, 'Dev'),
         h('p', { class: 'muted small' },
           view.info
-            ? `Commands run on this machine in ${view.info.shell.split(/[\\/]/).pop()}, with their output shown as it comes. ${busy} of ${view.info.max} running. Closing or reloading the page stops them.`
-            : 'Commands run on this machine, with their output shown as it comes.')),
+            ? `Files and terminals on this machine, in ${view.info.shell.split(/[\\/]/).pop()}. Interactive programs such as claude work: click the terminal and type. ${busy} of ${view.info.max} running; closing or reloading the page stops them.`
+            : 'Files and terminals on this machine.')),
       view.infoError ? runnerNotice(store) : null,
-      sessionTabs(store),
-      terminal(store, s)));
-  // The page was rebuilt: put each terminal back at the end of its output.
+      h('div', { class: 'ide' },
+        explorer(ctx, workspacePicker(store)),
+        h('div', { class: hasOpenFiles() ? 'ide-main has-file' : 'ide-main' },
+          editor(ctx),
+          terminal(store, s)))));
   requestAnimationFrame(() => {
-    for (const x of view.sessions) {
-      const out = document.querySelector(`.term-out[data-session="${x.id}"]`);
-      if (out && x.stick) out.scrollTop = out.scrollHeight;
-    }
+    if (focused) s.el.out.focus({ preventScroll: true });
+    fit(s);
+    paint(s);
   });
 }
 
@@ -389,12 +522,8 @@ export default {
   defaults: DEFAULTS,
   render: draw,
   serialize: () => ({}),
-  // #/dev?project=<id> (from a project page) opens a terminal in that project's folder, or shows the one already open.
+  // #/dev?project=<id> (from a project page) opens that project's folder, with a terminal in it.
   restore: (p = {}) => {
-    if (!p.project) return;
-    const root = `p:${p.project}`;
-    const open = view.sessions.find((s) => s.root === root);
-    if (open) view.active = open.id;
-    else view.pending = root;
+    if (p.project) view.pending = `p:${p.project}`;
   },
 };
