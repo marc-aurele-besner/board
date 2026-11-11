@@ -8,8 +8,8 @@ A personal command center that runs locally. It is plain HTML, CSS and JavaScrip
 
 ## Run and verify
 
-- Serve the folder with a static server, for example `bunx serve .` or `python3 -m http.server 8000`, then open `http://localhost:8000` in Chrome or Edge. The File System Access API needs a secure context (`localhost` counts) and does not work in Firefox or Safari.
-- A changed module is not always picked up: `python3 -m http.server` sends no cache headers, so the browser reuses the module it cached and keeps running the old code. `bunx serve .` revalidates and reloads the new code. With the Python server, ask the user for a hard reload (Cmd+Shift+R) before checking a change in the browser.
+- Serve the folder with a static server, `bun tools/serve.js` (or `node tools/serve.js`), then open `http://localhost:8000` in Chrome or Edge. The File System Access API needs a secure context (`localhost` counts) and does not work in Firefox or Safari.
+- A changed module is not always picked up: `python3 -m http.server` sends no cache headers, so the browser reuses the module it cached and keeps running the old code. `tools/serve.js` marks every file `no-cache`, so a reload runs the new code. With the Python server, ask the user for a hard reload (Cmd+Shift+R) before checking a change in the browser.
 - Syntax check every module before committing:
   `for f in js/*.js js/modules/*.js; do node --experimental-default-type=module --check "$f" || echo "FAIL $f"; done`
 - Test real behavior in the browser when you can. Folder picking needs a user click, so ask the user to drive that step if you cannot.
@@ -36,6 +36,7 @@ js/palette.js         the Cmd/Ctrl+K search palette: jump, or capture a task, a 
 js/shortcuts.js       the single-key shortcuts ("g" then a letter) and the sheet that lists them
 js/sample.js          "Explore with sample data": a data folder in memory with placeholder content
 fonts/                bundled typefaces (SIL Open Font License)
+tools/serve.js        local static server with no-cache headers; no dependencies
 tools/bing-relay.js   optional local relay for Bing's API, which sends no CORS header
 tools/resend-relay.js optional local relay for Resend's API (Inbox), which sends no CORS header
 ```
