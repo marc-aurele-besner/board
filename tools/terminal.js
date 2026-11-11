@@ -38,8 +38,9 @@ async function folderOf(path) {
 
 // Commands run in a pseudo-terminal, so interactive programs (the Claude CLI, prompts, progress bars) work and
 // colour their output as in a real terminal. The page draws that output with its own terminal emulator.
-function commandEnv(dir) {
-  const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', PAGER: 'cat', GIT_PAGER: 'cat', BOARD_RUN_DIR: dir };
+// COLORFGBG tells programs that read it whether the page is light or dark (foreground;background).
+function commandEnv(dir, theme) {
+  const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: theme === 'dark' ? '15;0' : '0;15', PAGER: 'cat', GIT_PAGER: 'cat', BOARD_RUN_DIR: dir };
   delete env.NO_COLOR;
   return env;
 }
@@ -123,7 +124,7 @@ async function run(req, res, cors) {
     : `stty cols ${cols} rows ${rows} 2>/dev/null; tty > "$BOARD_RUN_DIR/tty" 2>/dev/null\n${command}\n__board_status=$?; pwd > "$BOARD_RUN_DIR/cwd" 2>/dev/null; exit $__board_status`;
   const [file, args] = WINDOWS ? [SHELL, ['/d', '/s', '/c', script]] : ptyArgs(script);
   const started = performance.now();
-  const child = spawn(file, args, { cwd, detached: !WINDOWS, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...commandEnv(dir), BOARD_SCRIPT: script } });
+  const child = spawn(file, args, { cwd, detached: !WINDOWS, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...commandEnv(dir, body.theme), BOARD_SCRIPT: script } });
   const run = { child, dir };
   running.set(child.pid, run);
   log.info(`started pid ${child.pid} in ${cwd} (${running.size} running)`);

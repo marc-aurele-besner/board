@@ -2342,9 +2342,9 @@ button.sum-line:hover { background: var(--surface-2); }
 .ide { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: 12px; align-items: start; }
 .ide-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .ide-explorer { padding: 8px; display: flex; flex-direction: column; gap: 6px; position: sticky; top: 12px; max-height: calc(100vh - 140px); min-height: 0; }
-.ide-explorer-head { display: flex; gap: 6px; align-items: center; }
+.ide-explorer-head { display: flex; gap: 6px; align-items: center; flex: none; }
 .ide-workspace { flex: 1; min-width: 0; font-size: 0.85rem; padding: 4px 8px; }
-.tree-root { padding: 2px 6px; font-weight: 600; letter-spacing: 0.04em; font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-root { flex: none; padding: 2px 6px; font-weight: 600; letter-spacing: 0.04em; font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree { overflow: auto; min-height: 0; font-size: 0.85rem; }
 .tree-row { display: flex; align-items: center; border-radius: 6px; }
 .tree-row:hover { background: var(--surface-2); }
@@ -2428,7 +2428,8 @@ button.sum-line:hover { background: var(--surface-2); }
 .term-prompt { font: 600 1rem ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); }
 .term-input { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 16px; }
 .term-form .btn-small { min-height: 36px; padding: 4px 12px; }
-.term-status { gap: 8px; }
+.term-status { gap: 8px; flex-wrap: nowrap; }
+.term-state { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .term-recent { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
 .term-chip { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; min-height: 26px; padding: 2px 10px; }
 .term-runner input { flex: 1; min-width: 0; font-size: 16px; }
