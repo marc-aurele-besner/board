@@ -89,6 +89,7 @@ Nothing runs on a server, and everything automatic runs only while the board is 
 | Liquidity Pools fee collects (optional) | `api.etherscan.io` (Etherscan), only with a key set in Settings, and not for ZKsync Era, which Etherscan does not cover | your wallet addresses, the key, and the collect transactions and pools it reads |
 | Liquidity Pools prices | `coins.llama.fi` (DefiLlama) | the token addresses in your positions, and the time of each fee collect read from the chain |
 | Liquidity Pools logos | `raw.githubusercontent.com` (Uniswap's token lists, Trust Wallet's chain logos) | nothing but the request itself |
+| GitHub organization logos | `github.com` (each `<org>.png` avatar) | the organization or repo owner name |
 | Inbox | Resend API, through `tools/resend-relay.js` on your machine (Resend does not answer web pages directly) | each project's Resend API key, to list and read its emails |
 | Bing search data | Bing Webmaster API, through `tools/bing-relay.js` on your machine (Bing does not answer web pages directly) | your API key and the site address |
 

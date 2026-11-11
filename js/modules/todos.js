@@ -4,7 +4,7 @@ import { AUTO_SOURCES } from '../automations.js';
 import { toast } from '../toast.js';
 import { createProject, projectIcon, labelsOf, projectTree, moveProject, labelColor } from './projects.js';
 import { editText, pickChip } from '../inline.js';
-import { repoStats, createIssue, getIssue } from '../github.js';
+import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
 import { openDialog } from '../modal.js';
 import { ask, parseJson } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
@@ -819,14 +819,14 @@ function projectDetails(store, p) {
         ? h('div', null, h('strong', null, labelsFor(store, p).map((l) => l.name).join(', ')), h('span', { class: 'muted' }, 'labels'))
         : null),
     p.website ? h('p', null, h('a', { href: p.website, target: '_blank', rel: 'noopener' }, p.website)) : null,
-    p.github.org ? h('p', null, 'GitHub: ', h('a', { href: `https://github.com/${p.github.org}`, target: '_blank', rel: 'noopener' }, p.github.org)) : null,
+    p.github.org ? h('p', null, 'GitHub: ', githubLink(p.github.org)) : null,
     p.github.repos.length
       ? h('ul', { class: 'repo-summary' },
           p.github.repos.map((r) => {
             const s = repoStats(r, onLoad);
             const text = s.status === 'ok' ? `${s.issues} issues · ${s.prs} PRs` : s.status === 'loading' ? 'loading…' : s.error;
             return h('li', null,
-              h('a', { href: `https://github.com/${r}`, target: '_blank', rel: 'noopener' }, r),
+              githubLink(r),
               h('span', { class: 'muted' }, text));
           }))
       : null);
