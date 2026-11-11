@@ -6,6 +6,7 @@ import { createProject, projectIcon, labelsOf, projectTree, moveProject, labelCo
 import { editText, pickChip, pickButton, pickMulti, pill } from '../inline.js';
 import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
 import { openDialog } from '../modal.js';
+import { startClaudeSession } from './dev.js';
 import { ask, parseJson } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
@@ -436,6 +437,26 @@ function copyButton(store, item) {
   }, icon('copy'));
 }
 
+// Hands tasks to claude in a new Dev terminal, in the folder of the first task's project that has one.
+function devTasks(store, items) {
+  if (!items.length) return;
+  const projects = projectsOf(store);
+  const list = items.map((i) => taskMarkdown(store, i, projects)).join('\n');
+  const folder = items.map((i) => projects.find((p) => p.id === i.projectId)).find((p) => p?.localPath);
+  for (const i of items) view.selected.delete(i.id);
+  startClaudeSession({ prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}`, projectId: folder?.id });
+}
+
+function devButton(store, item) {
+  return h('button', {
+    type: 'button',
+    class: 'icon-btn copy-btn',
+    title: 'Start a Dev session on this task',
+    'aria-label': `Start a Dev session on "${item.text}"`,
+    onclick: () => devTasks(store, [item]),
+  }, icon('terminal'));
+}
+
 // Marks a task done, or back to "To do" when it already is.
 function doneButton(store, item) {
   const done = statusOf(item) === 'done';
@@ -531,6 +552,7 @@ function batchBar(store, visible, projects, categories) {
       }, icon('calendar'), 'Deadline'),
       deadline),
     h('span', { class: 'grow' }),
+    h('button', { type: 'button', class: 'btn-small', title: 'Start one Dev session on the selected tasks', onclick: () => devTasks(store, items) }, icon('terminal'), 'Dev'),
     h('button', { type: 'button', class: 'btn-small', title: 'Copy the selected tasks as a Markdown list', onclick: () => copyTasks(store, items) }, icon('copy'), 'Copy'),
     h('button', { type: 'button', class: 'btn-small danger', onclick: () => removeItems(store, ids) }, icon('trash'), 'Delete'));
 }
@@ -662,6 +684,7 @@ function todoRow(store, item, ctx) {
       h('div', { class: 'todo-actions' },
         ctx.showDue ? null : dueControl(store, item),
         repos.length || item.issue ? issueControl(store, item, repos) : null,
+        devButton(store, item),
         item.email
           ? h('a', { href: `#/inbox?email=${encodeURIComponent(item.email.id)}`, class: 'icon-btn', title: 'Open the email', 'aria-label': 'Open the email this task came from' }, icon('mail'))
           : null,
@@ -737,6 +760,7 @@ function boardCard(store, item, projects, order) {
         doneButton(store, item)),
       h('div', { class: 'row kanban-actions' },
         item.description ? h('span', { class: 'desc-indicator', title: 'Has a description', 'aria-label': 'Has a description' }, icon('align-left')) : null,
+        devButton(store, item),
         copyButton(store, item),
         h('button', {
           type: 'button',
