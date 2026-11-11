@@ -90,7 +90,8 @@ export function watchCommits(root, onSettle) {
   }, true);
   root.addEventListener('click', (e) => {
     const button = e.target.closest?.('button, [role=button]');
-    if (button) commit((button.closest('form') ?? button.parentElement ?? button).querySelectorAll(FIELDS));
+    // A button that opens a picker submits nothing; the text typed beside it is still unsent.
+    if (button && !button.hasAttribute('aria-haspopup')) commit((button.closest('form') ?? button.parentElement ?? button).querySelectorAll(FIELDS));
   }, true);
   // Typing again after a submit that did not go through makes the field worth keeping again.
   root.addEventListener('input', (e) => committed.delete(e.target), true);
