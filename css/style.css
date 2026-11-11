@@ -2043,12 +2043,14 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .gcal-swatch { flex: none; width: 10px; height: 10px; border-radius: 3px; background: var(--c, var(--accent)); }
 .gcal-row .resend-name { cursor: pointer; }
 .gcal-row .resend-actions { justify-content: stretch; min-width: 0; }
-.gcal-defaults { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
-.gcal-default { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
-.gcal-default .project-field-pick { width: auto; max-width: 16rem; }
+/* Project and label get equal columns, the same in the header, the account row and each calendar. */
+.resend-row.gcal-row { grid-template-columns: minmax(0, 300px) repeat(2, minmax(0, 1fr)); }
+.resend-row.gcal-account-row { padding-left: 8px; padding-right: 8px; background: var(--surface-2); border-radius: 8px; }
+.gcal-account-row .resend-name { cursor: default; }
+.gcal-account-row .resend-name > .icon { flex: none; color: var(--muted); }
 .gmail-picks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 @media (max-width: 720px) {
-  .gcal-row { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "name name" "key actions"; }
+  .resend-row.gcal-row { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "name name" "key actions"; }
   .gcal-row .resend-key { padding-left: 0; }
 }
 .chip-pick.project-field-pick { justify-content: flex-start; }
