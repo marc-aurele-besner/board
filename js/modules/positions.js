@@ -540,7 +540,7 @@ async function loadHistory(store) {
     const { node } = chainSettings(cfg, chain);
     for (const r of rows) {
       try {
-        const s = await positionHistory(chain, node, r.tokenId, r.liq, store.get(COLLECTION)?.history?.[r.ref]);
+        const s = await positionHistory(chain, node, { version: 'v3', tokenId: r.tokenId, liquidity: r.liq }, store.get(COLLECTION)?.history?.[r.ref]);
         const saved = store.get(COLLECTION) ?? {};
         const known = new Set([...(saved.collected ?? []).map((c) => c.id), ...(saved.hidden ?? [])]);
         const found = [];
