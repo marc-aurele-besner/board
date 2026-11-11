@@ -630,6 +630,7 @@ textarea.editable-field { resize: vertical; }
 .pop-list { max-height: 300px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
 .pop-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: transparent; border: none; text-align: left; width: 100%; padding: 6px 8px; min-height: 32px; }
 .pop-item:hover { background: var(--surface-2); }
+.pop-item.cursor { background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
 .pop-item.create { color: var(--accent); justify-content: flex-start; }
 .pop-item .icon { width: 14px; height: 14px; }
 .pop-empty { color: var(--muted); padding: 6px; margin: 0; font-size: 0.9rem; }
