@@ -2319,7 +2319,7 @@ function detailView(store, ref) {
   const collects = collectedOf(store).filter((c) => c.ref === ref).sort((a, b) => b.at.localeCompare(a.at));
   const known = r ?? collects[0];
   const back = h('button', { type: 'button', class: 'btn-small lp-back', onclick: () => closeDetail(store) },
-    icon('arrow-left'), view.detailFrom === 'fees' ? 'Fees Collected' : 'Positions');
+    icon('arrow-left'), view.detailFrom === 'fees' ? 'LP Fees Collected' : 'LP Positions');
   if (!known) {
     return h('div', { class: 'stack-lg lp' }, back,
       notice({ tone: 'info', text: loading ? 'Reading the positions…' : 'This position is not among those read, and the fee log has nothing for it.' }));
@@ -2392,7 +2392,7 @@ const FEES_SUBTITLE = 'Fees collected from your positions: read from the chain, 
 // The tab's two views: the positions, and the fees collected from them. Sub-tabs, as in Monitoring and Tools.
 function tabs(store) {
   return h('nav', { class: 'sub-tabs lp-tabs', role: 'tablist', 'aria-label': 'Liquidity Pools view' },
-    [['positions', 'Positions', 'droplet'], ['fees', 'Fees Collected', 'coins']].map(([key, label, iconName]) =>
+    [['positions', 'LP Positions', 'droplet'], ['fees', 'LP Fees Collected', 'coins']].map(([key, label, iconName]) =>
       h('button', {
         type: 'button',
         role: 'tab',
@@ -2622,7 +2622,7 @@ function draw(root, store) {
 export default {
   id: 'positions',
   title: 'Liquidity Pools',
-  short: 'Pools',
+  short: 'DeFi',
   icon: 'droplet',
   collection: COLLECTION,
   defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [], history: {}, hidden: [], etherscan: {}, flip: {}, insights: [] },
