@@ -2042,6 +2042,8 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 /* Calendar. Each calendar's own colour comes in as --c, from Google; everything else uses the theme. */
 .gcal-swatch { flex: none; width: 10px; height: 10px; border-radius: 3px; background: var(--c, var(--accent)); }
 .gcal-row .resend-name { cursor: pointer; }
+.gcal-row .gcal-project-pick { width: 100%; justify-content: flex-start; }
+.gcal-row .gcal-project-pick .opt-plain { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .calendar .cal-modes { margin-bottom: 0; min-width: 220px; }
 .cal-toolbar .cal-title { margin: 0 0 0 6px; font-family: var(--display); font-size: 1.1rem; }
 .cal-toolbar select { width: auto; }

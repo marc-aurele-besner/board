@@ -1,6 +1,6 @@
 // Settings sections for Google Calendar accounts, Telegram, Google Analytics, the search consoles, Resend, Gmail, notifications and automations.
 import { h, icon, empty, notice, statusOf, copyable } from '../ui.js';
-import { editText } from '../inline.js';
+import { editText, pickChip } from '../inline.js';
 import { connect, isConnected } from '../google.js';
 import { checkBot, findChat, pollTelegram, hasTelegram } from '../telegram.js';
 import { propertyName, checkBing, BING_RELAY } from '../webstats.js';
@@ -39,9 +39,15 @@ function calendarRow(store, account, cal, projects) {
       h('span', { class: 'gcal-swatch', style: { '--c': cal.color || 'var(--accent)' } }),
       h('strong', { title: cal.id }, cal.name)),
     h('div', { class: 'resend-key' },
-      h('select', { 'aria-label': `Project of ${cal.name}`, onchange: (e) => setCalendar(store, account.email, cal.id, { projectId: e.target.value || null }) },
-        h('option', { value: '', selected: !cal.projectId }, 'No project'),
-        projects.map((p) => h('option', { value: p.id, selected: p.id === cal.projectId }, p.name)))),
+      // Searchable, with each project's icon, since the project list can grow long.
+      pickChip({
+        value: cal.projectId ?? null,
+        options: projects.map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
+        nullable: true,
+        nullLabel: 'No project',
+        className: 'field-pick gcal-project-pick',
+        onPick: (v) => setCalendar(store, account.email, cal.id, { projectId: v ?? null }),
+      })),
     h('div', { class: 'resend-actions' }));
 }
 
