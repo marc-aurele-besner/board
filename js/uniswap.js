@@ -123,7 +123,7 @@ export function chainSettings(cfg, chain) {
 
 // One JSON-RPC request to a chain's node.
 // A node that says "too many requests" is asked once more after a pause.
-async function rpc(node, method, params, retry = true) {
+export async function rpc(node, method, params, retry = true) {
   const res = await fetch(node, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
