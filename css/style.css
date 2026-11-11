@@ -209,7 +209,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .status.saving { animation: pulse 1.1s ease-in-out infinite; }
 .dropzone { transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.2s ease; }
 .dropzone.over { transform: scale(1.01); }
-.notice { animation: fadeIn 0.2s ease both; }
+/* Entrance motion plays when a section opens, not on each redraw, or every save makes the page flash. */
+.view.enter .notice { animation: fadeIn 0.2s ease both; }
 .todo-desc { animation: fadeIn 0.18s ease both; }
 .todo-item input[type='checkbox'] { transition: transform 0.15s ease; }
 .todo-item input[type='checkbox']:active { transform: scale(0.85); }
@@ -964,7 +965,8 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .lp-chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 0.85rem; cursor: pointer; }
 .lp-chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 /* Liquidity Pools: cards, logos and motion */
-.lp-stat { position: relative; overflow: hidden; gap: 2px; padding: 14px 16px; animation: fadeUp 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.lp-stat { position: relative; overflow: hidden; gap: 2px; padding: 14px 16px; }
+.view.enter .lp-stat { animation: fadeUp 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 .lp-stat::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent); opacity: 0.55; }
 .lp-stats > :nth-child(2) { animation-delay: 0.06s; }
 .lp-stats > :nth-child(3) { animation-delay: 0.12s; }
@@ -998,7 +1000,8 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .logo.token { width: 36px; height: 36px; }
 .logo.xs { width: 16px; height: 16px; box-shadow: none; }
 .logo img, .logo .mono { display: block; width: 100%; height: 100%; }
-.logo img { object-fit: cover; animation: fadeIn 0.3s ease both; }
+.logo img { object-fit: cover; }
+.logo img.fresh { animation: fadeIn 0.3s ease both; }
 .logo .mono { display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em; color: #fff; background: hsl(var(--hue) 52% 42%); }
 .logo.xs .mono { font-size: 0.45rem; }
 
@@ -1024,7 +1027,8 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 
 .range { display: flex; flex-direction: column; gap: 8px; }
 .range-track { position: relative; height: 10px; border-radius: 999px; background: var(--surface-2); }
-.range-band { position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 30%, transparent), color-mix(in srgb, var(--accent) 65%, transparent)); transform-origin: left center; animation: growX 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.range-band { position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 30%, transparent), color-mix(in srgb, var(--accent) 65%, transparent)); transform-origin: left center; }
+:is(.view.enter, .pool-card.enter) .range-band { animation: growX 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 .range-track.full .range-band { background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 70%, var(--income))); }
 .range-marker { position: absolute; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: var(--surface); border: 3px solid var(--accent); transition: left 0.9s cubic-bezier(0.2, 0.7, 0.2, 1); animation: markerPulse 2.2s ease-out infinite; }
 .range-marker.out { border-color: var(--expense); }
@@ -1040,7 +1044,8 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 
 .dist { display: flex; flex-direction: column; gap: 6px; font-variant-numeric: tabular-nums; }
 .dist-bar { display: flex; height: 6px; border-radius: 999px; overflow: hidden; background: var(--surface-2); }
-.dist-a, .dist-b { height: 100%; transform-origin: left center; animation: growX 0.9s 0.15s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.dist-a, .dist-b { height: 100%; transform-origin: left center; }
+:is(.view.enter, .pool-card.enter) :is(.dist-a, .dist-b) { animation: growX 0.9s 0.15s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 .dist-a { background: var(--accent); }
 .dist-b { background: var(--muted); opacity: 0.45; }
 
@@ -1062,7 +1067,8 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes growX { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
-.lp-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 36px 16px; text-align: center; color: var(--muted); border: 1px dashed var(--border); border-radius: 14px; animation: fadeUp 0.4s ease both; }
+.lp-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 36px 16px; text-align: center; color: var(--muted); border: 1px dashed var(--border); border-radius: 14px; }
+.view.enter .lp-empty { animation: fadeUp 0.4s ease both; }
 .lp-empty p { margin: 0; }
 .lp-empty .float { display: inline-flex; color: var(--accent); animation: floaty 3s ease-in-out infinite; }
 .lp-empty .float .icon { width: 28px; height: 28px; }
@@ -1571,7 +1577,8 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 
 .rv { position: relative; padding: 34px 0 22px; }
 .rv-track { position: relative; height: 12px; border-radius: 999px; background: repeating-linear-gradient(90deg, var(--surface-2) 0 6px, color-mix(in srgb, var(--border) 60%, var(--surface-2)) 6px 7px); }
-.rv-band { position: absolute; top: 0; bottom: 0; border-radius: 999px; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 35%, transparent), color-mix(in srgb, var(--accent) 75%, transparent)); transform-origin: left center; animation: growX 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.rv-band { position: absolute; top: 0; bottom: 0; border-radius: 999px; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 35%, transparent), color-mix(in srgb, var(--accent) 75%, transparent)); transform-origin: left center; }
+.view.enter .rv-band { animation: growX 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 .rv-closed .rv-band { background: color-mix(in srgb, var(--muted) 35%, transparent); }
 .rv-edge { position: absolute; top: -6px; bottom: -6px; width: 2px; margin-left: -1px; border-radius: 2px; background: var(--accent); }
 .rv-closed .rv-edge { background: var(--muted); }

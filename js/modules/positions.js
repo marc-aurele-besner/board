@@ -879,11 +879,21 @@ function hueOf(text) {
 }
 
 // A logo image, or a monogram when there is no image or it fails to load.
+// Logos already shown once are drawn at once on a redraw: no lazy load and no fade, which made them blink.
+const shownLogos = new Set();
 function logo(src, label, cls = '') {
   const monogram = () => h('span', { class: 'mono', style: { '--hue': hueOf(label) }, 'aria-hidden': 'true' }, String(label).slice(0, 2).toUpperCase());
   if (!src) return h('span', { class: `logo ${cls}`, title: label }, monogram());
+  const known = shownLogos.has(src);
   return h('span', { class: `logo ${cls}`, title: label },
-    h('img', { src, alt: '', loading: 'lazy', onerror: (e) => e.currentTarget.replaceWith(monogram()) }));
+    h('img', {
+      src,
+      alt: '',
+      class: known ? null : 'fresh',
+      loading: known ? null : 'lazy',
+      onload: () => shownLogos.add(src),
+      onerror: (e) => e.currentTarget.replaceWith(monogram()),
+    }));
 }
 
 const tokenLogoOf = (row, address) => logoMap.get(`${row.chainId}:${address.toLowerCase()}`) ?? null;
@@ -1670,9 +1680,12 @@ function feesView(store) {
 
 // ---- One position in detail: opened from a card, a list row, or a collection in the fee log ----
 
+// The detail page plays its entrance motion once when it opens, not on each redraw while it is shown.
+let detailEnter = false;
 function openDetail(store, ref) {
   view.detailFrom = view.tab === 'fees' ? 'fees' : 'positions';
   view.detail = ref;
+  detailEnter = true;
   if (picker.open) closePicker(store);
   store.refresh();
   window.scrollTo({ top: 0 });
@@ -2003,6 +2016,12 @@ function tabs(store) {
       }, icon(iconName), label)));
 }
 
+function showDetail(root, store) {
+  if (detailEnter) root.classList.add('enter');
+  detailEnter = false;
+  root.replaceChildren(detailView(store, view.detail));
+}
+
 function draw(root, store) {
   keepAddFocus();
   const cfg = store.get('settings').uniswap ?? {};
@@ -2012,7 +2031,7 @@ function draw(root, store) {
     const logged = collectedOf(store).length > 0;
     if (!logged) view.tab = 'positions';
     if (view.detail && logged) {
-      root.replaceChildren(detailView(store, view.detail));
+      showDetail(root, store);
       return;
     }
     root.replaceChildren(h('div', { class: 'stack-lg lp' },
@@ -2036,7 +2055,7 @@ function draw(root, store) {
   }
   askLogos(store);
   if (view.detail) {
-    root.replaceChildren(detailView(store, view.detail));
+    showDetail(root, store);
     return;
   }
 
