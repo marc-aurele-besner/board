@@ -3,12 +3,13 @@
 import { h, icon, empty, notice, copyable } from '../ui.js';
 import { chainById, explorerUrl } from '../chains.js';
 import { readsOf, writesOf, parseInput, parseUnits, show, signature, isPayable } from '../abi.js';
-import { contractsOf, readFunction, sendFunction, waitForReceipt, hasWallet, walletAccount, connectWallet, disconnectWallet } from '../contracts.js';
+import { contractsOf, readFunction, sendFunction, waitForReceipt, wallets, walletAccount, connectedWallet, connectWallet, disconnectWallet, onWalletChange } from '../contracts.js';
 import { logo } from './positions.js';
 
 // contract: the one shown. results: "contractId:signature" -> { busy, ok, value | error | hash, receipt }.
 // inputs: what was typed in each function's fields when it was last run, so a failed call keeps them.
-const view = { contract: '', results: {}, inputs: {}, walletError: '' };
+// picking: the wallet list is open, when several wallets are installed.
+const view = { contract: '', results: {}, inputs: {}, walletError: '', picking: false };
 
 const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const keyOf = (c, fn) => `${c.id}:${signature(fn)}`;
@@ -115,12 +116,26 @@ function fnCard(store, settings, c, chain, fn, write) {
       resultView(chain, fn, r))));
 }
 
+// Wallet extensions announce themselves after the page loads, and an account can change in the wallet, so the
+// tab redraws on either while its writes are shown.
+let watching = false;
+function watchWallets(store) {
+  if (watching) return;
+  watching = true;
+  onWalletChange(() => {
+    if (document.querySelector('.fn-writes')) store.refresh();
+  });
+}
+
 function walletBar(store, chain) {
-  if (!hasWallet()) return notice({ tone: 'info', text: 'Writes need a browser wallet, such as MetaMask or Rabby. Reads work without one.' });
+  watchWallets(store);
+  const list = wallets();
+  if (!list.length) return notice({ tone: 'info', text: 'Writes need a browser wallet, such as MetaMask, Rabby, Coinbase Wallet or Brave Wallet. Reads work without one.' });
   const account = walletAccount();
-  const connect = async () => {
+  const connect = async (uuid) => {
+    view.picking = false;
     try {
-      await connectWallet();
+      await connectWallet(uuid);
       view.walletError = '';
     } catch (err) {
       view.walletError = err?.code === 4001 ? 'Connection rejected in the wallet.' : err.message;
@@ -131,15 +146,25 @@ function walletBar(store, chain) {
     disconnectWallet();
     store.refresh();
   };
-  return h('div', { class: 'row wallet-connect' },
-    icon('wallet'),
-    account
-      ? h('span', { class: 'small' }, 'Wallet ', copyable(account, { label: short(account) }), ` · writes are sent on ${chain?.name ?? 'the contract\'s chain'}, and the wallet asks before each one.`)
-      : h('span', { class: 'small muted' }, 'Connect a wallet to send writes.'),
-    account
-      ? h('button', { type: 'button', class: 'btn-small', onclick: disconnect }, 'Disconnect')
-      : h('button', { type: 'button', class: 'btn-small primary', onclick: connect }, 'Connect wallet'),
-    view.walletError ? h('span', { class: 'small bad' }, view.walletError) : null);
+  const pick = () => {
+    view.picking = !view.picking;
+    view.walletError = '';
+    store.refresh();
+  };
+  const info = connectedWallet();
+  return h('div', { class: 'stack' },
+    h('div', { class: 'row wallet-connect' },
+      info ? logo(info.icon, info.name, 'xs') : icon('wallet'),
+      account
+        ? h('span', { class: 'small' }, `${info.name} `, copyable(account, { label: short(account) }), ` · writes are sent on ${chain?.name ?? 'the contract\'s chain'}, and the wallet asks before each one.`)
+        : h('span', { class: 'small muted' }, 'Connect a wallet to send writes.'),
+      account
+        ? h('button', { type: 'button', class: 'btn-small', onclick: disconnect }, 'Disconnect')
+        : h('button', { type: 'button', class: 'btn-small primary', 'aria-expanded': list.length > 1 ? String(Boolean(view.picking)) : null, onclick: () => (list.length > 1 ? pick() : connect(list[0].info.uuid)) }, view.picking ? 'Cancel' : 'Connect wallet'),
+      view.walletError ? h('span', { class: 'small bad' }, view.walletError) : null),
+    !account && view.picking
+      ? h('div', { class: 'chips wallet-pick', role: 'group', 'aria-label': 'Wallet' }, list.map((w) => h('button', { type: 'button', class: 'chip', onclick: () => connect(w.info.uuid) }, logo(w.info.icon, w.info.name, 'xs'), w.info.name)))
+      : null);
 }
 
 export function contractsTab(store) {
