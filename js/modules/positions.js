@@ -6,7 +6,7 @@ import { setupBanner } from '../integrations.js';
 import { positionFields, positionError } from '../position-input.js';
 import { poolsChanged } from '../automations.js';
 import { insightsPanel } from '../pool-insights.js';
-import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs } from '../uniswap.js';
+import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey } from '../uniswap.js';
 import { EXPLORERS } from '../chains.js';
 
 const STALE_MS = 10 * 60 * 1000;
@@ -661,7 +661,7 @@ async function nodeCollects(store, chain, node, r, step) {
     }
   } else {
     // Transactions read before and found to collect nothing are not read again.
-    const checked = new Set(prev?.node === node ? prev.checked ?? [] : []);
+    const checked = new Set(nodeKey(prev?.node) === nodeKey(node) ? prev.checked ?? [] : []);
     const txs = [...new Map(s.events.filter((e) => e.kind !== 'add' && e.time).map((e) => [e.tx, e.time]))]
       .filter(([tx]) => !checked.has(tx) && wanted(store, r.ref, tx, 3));
     for (const [i, [tx, time]] of txs.entries()) {
