@@ -752,14 +752,14 @@ export async function poolSwaps(chain, node, version, pool, from, head) {
   return c;
 }
 
-// The fees a position earned from swaps since a block, in raw token units: each swap that ended inside its range
+// The fees a position earned from swaps since a block (and before toBlock), in raw token units: each swap that ended inside its range
 // pays it the fee times its share of the active liquidity. An estimate: a swap that crosses ticks is counted at
 // where it ended, and a hook can change what is paid.
-export function swapFees(swaps, fromBlock, p) {
+export function swapFees(swaps, fromBlock, p, toBlock = Infinity) {
   let e0 = 0n;
   let e1 = 0n;
   for (const s of swaps) {
-    if (s.block < fromBlock) continue;
+    if (s.block < fromBlock || s.block >= toBlock) continue;
     const [f0, f1] = swapEarn(s, p);
     e0 += f0;
     e1 += f1;

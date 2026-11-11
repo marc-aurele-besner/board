@@ -21,7 +21,7 @@ const MAX_TICK = 887272; // the widest possible range: a "full range" position
 // adding: the form to add a position by hand is open.
 // window: the WINDOWS key fee APR is read over.
 // feeSort, feeDir: the Fees collected table's sort. feeChain, feeToken, feeSource: its filters.
-const view = { filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, window: '24h', feeSort: 'date', feeDir: -1, feeChain: 'all', feeToken: 'all', feeSource: 'all' };
+const view = { filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, window: '24h', feeSort: 'date', feeDir: -1, feeChain: 'all', feeToken: 'all', feeSource: 'all', coverageOpen: false };
 // Loaded positions and the state of the last load. shallow: chains whose node would not search back to v4's start.
 // stale: chains shown from the last good read because this one failed, with when that read was.
 // pending: chains still being read in the current load.
@@ -202,10 +202,11 @@ const SORTS = {
   chain: { value: (r) => r.chain, dir: 1 },
   range: { value: rangeRoom, dir: -1 },
   split: { value: (r) => r.share0, dir: -1 },
+  move: { value: (r) => r.move, dir: -1 },
 };
 // The choices in the Sort menu. Sorting by a table column that is not here adds it to the menu as it is.
 const PRESETS = [['value', -1, 'Value'], ['fees', -1, 'Unclaimed fees'], ['apr', -1, 'Fee APR'], ['number', -1, 'Newest'], ['number', 1, 'Oldest']];
-const SORT_NAMES = { pool: 'Pool', chain: 'Chain', range: 'Price range', split: 'Distribution', value: 'Value', fees: 'Unclaimed fees', apr: 'Fee APR', number: 'Number' };
+const SORT_NAMES = { pool: 'Pool', chain: 'Chain', range: 'Price range', split: 'Distribution', move: 'Movement', value: 'Value', fees: 'Unclaimed fees', apr: 'Fee APR', number: 'Number' };
 
 // Rows without the value sorted on go last, whatever the direction. Ties fall back to the newest first.
 function sortRows(rows, key, dir) {
@@ -488,13 +489,16 @@ async function loadAprs(store) {
     } catch {
       return;
     }
-    const from = clock.head - Math.ceil(secs / clock.perBlock);
+    // Two windows are read: the chosen one, and the one before it, for the APR's movement.
+    const curFrom = clock.head - Math.ceil(secs / clock.perBlock);
+    const from = clock.head - Math.ceil((2 * secs) / clock.perBlock);
     const pools = new Map();
     for (const r of rows) pools.set(`${r.version}:${r.pool}`, [...(pools.get(`${r.version}:${r.pool}`) ?? []), r]);
     for (const list of pools.values()) {
       try {
         const c = await poolSwaps(chain, node, list[0].version, list[0].pool, from, clock.head);
-        const start = Math.max(from, c.from);
+        const start = Math.max(curFrom, c.from);
+        const prevStart = Math.max(from, c.from);
         // Swaps read now cover start..head. Older parts of the window come from the hours saved by earlier loads.
         const readFrom = clock.time - (clock.head - c.from) * clock.perBlock;
         const winFrom = clock.time - secs;
@@ -517,8 +521,34 @@ async function loadAprs(store) {
             }
           }
           if (!(covered > 0)) continue;
-          const earned = (Number(e0) / 10 ** r.dec0) * r.p0 + (Number(e1) / 10 ** r.dec1) * r.p1;
-          aprs.set(`${win}|${r.ref}`, { apr: (earned / r.value) * (YEAR_MS / (covered * 1000)), secs: covered, full: covered >= secs * 0.95 });
+          const usd = (a, b) => (Number(a) / 10 ** r.dec0) * r.p0 + (Number(b) / 10 ** r.dec1) * r.p1;
+          const rate = (earned, over) => (earned / r.value) * (YEAR_MS / (over * 1000));
+          // The window before, valued at today's prices and value too, so the movement is the fee rate alone.
+          let p0 = 0n;
+          let p1 = 0n;
+          let prevCovered = 0;
+          if (c.from < curFrom && c.from <= clock.head) {
+            const e = swapFees(c.swaps, prevStart, pos, curFrom);
+            p0 = e.e0;
+            p1 = e.e1;
+            prevCovered = (curFrom - prevStart) * clock.perBlock;
+          }
+          for (const [hour, [h0, h1]] of Object.entries(hours)) {
+            const t = Number(hour) * HOUR;
+            if (t >= winFrom - secs && t + HOUR <= Math.min(readFrom, winFrom)) {
+              p0 += BigInt(h0);
+              p1 += BigInt(h1);
+              prevCovered += HOUR;
+            }
+          }
+          prevCovered = Math.min(secs, prevCovered);
+          aprs.set(`${win}|${r.ref}`, {
+            apr: rate(usd(e0, e1), covered),
+            secs: covered,
+            full: covered >= secs * 0.95,
+            prev: prevCovered > 0 ? rate(usd(p0, p1), prevCovered) : null,
+            prevSecs: prevCovered,
+          });
         }
         store.update(COLLECTION, (d) => {
           d.earned = { ...d.earned, ...kept };
@@ -573,7 +603,7 @@ async function collectEntry(chain, r, tx, time, f0, f1, level, source) {
   } catch {
     // Logged without a value; the totals leave it out and say so.
   }
-  return { id: `chain:${r.ref}:${tx}`, at: new Date(time * 1000).toISOString(), source, level, tx, ref: r.ref, pair: r.pair, chain: r.chain, tokenId: r.tokenId, a0, a1, sym0: r.sym0, sym1: r.sym1, usd };
+  return { id: `chain:${r.ref}:${tx}`, at: new Date(time * 1000).toISOString(), source, level, tx, ref: r.ref, pair: r.pair, chain: r.chain, chainId: r.chainId, tokenId: r.tokenId, a0, a1, sym0: r.sym0, sym1: r.sym1, addr0: r.addr0, addr1: r.addr1, usd };
 }
 
 function mergeCollects(d, found) {
@@ -750,6 +780,70 @@ const price = (n) => (n === Infinity ? '∞' : n === 0 ? '0' : amount(n));
 const usdOrDash = (n) => (n === null ? '—' : money(n, 'USD'));
 const pct = (n) => `${(n * 100).toFixed(n < 0.1 ? 2 : 1)}%`;
 const span = (secs) => (secs >= 2 * 86400 ? `${(secs / 86400).toFixed(1)} days` : secs >= 2 * 3600 ? `${(secs / 3600).toFixed(1)} hours` : `${Math.round(secs / 60)} min`);
+// A row with its fee APR over the chosen window, and its movement from the window before when both cover at
+// least half of it. From the counter where swaps could not be read, which has no movement.
+function aprOf(store) {
+  const baselines = store.get(COLLECTION)?.fees ?? {};
+  const secs = WINDOWS[view.window][0];
+  return (r) => {
+    const s = aprs.get(`${view.window}|${r.ref}`);
+    if (!s) return { ...r, apr: feeApr(r, baselines), aprLeft: counterLeft(r, baselines), move: null };
+    const move = s.prev != null && s.prevSecs >= secs / 2 && s.secs >= secs / 2 ? s.apr - s.prev : null;
+    return { ...r, apr: s.apr, aprSecs: s.secs, aprFull: s.full, aprPrev: s.prev, move };
+  };
+}
+
+// The APR's movement in percentage points, with an arrow.
+function moveView(r) {
+  if (r.closed) return h('span', { class: 'muted' }, '—');
+  if (r.move == null) return h('span', { class: 'muted', title: moveTitle(r) }, aprBusy ? '…' : '—');
+  const pts = r.move * 100;
+  const flat = Math.abs(pts) < 0.005;
+  const kind = flat ? 'flat' : pts > 0 ? 'up' : 'down';
+  return h('span', { class: `apr-move ${kind}`, title: moveTitle(r) },
+    flat ? null : icon(pts > 0 ? 'chevron-up' : 'chevron-down'),
+    `${pts > 0 && !flat ? '+' : ''}${pts.toFixed(2)} pts`);
+}
+function moveTitle(r) {
+  const win = WINDOWS[view.window][1];
+  if (r.move == null) return `Needs fee APR over the last ${win} and the ${win} before it. Swaps or saved hours do not cover both yet.`;
+  return `Fee APR over the last ${win} (${pct(r.apr)}) minus the ${win} before it (${pct(r.aprPrev)}), in percentage points. Both at today's value and prices.`;
+}
+
+// Prices are shown in token1 per token0 unless the pair is flipped. The choice is saved per pair, so it is the
+// default everywhere the pair shows.
+const flipKey = (r) => `${r.sym0}/${r.sym1}`;
+const isFlipped = (store, r) => Boolean(store.get(COLLECTION)?.flip?.[flipKey(r)]);
+function sideOf(r, flip) {
+  if (!flip) return { min: r.min, max: r.max, current: r.current, marker: r.marker, unit: r.sym1, base: r.sym0 };
+  return {
+    min: r.max === Infinity ? 0 : 1 / r.max,
+    max: r.min > 0 ? 1 / r.min : Infinity,
+    current: r.current > 0 ? 1 / r.current : 0,
+    marker: r.marker == null ? null : 100 - r.marker,
+    unit: r.sym0,
+    base: r.sym1,
+  };
+}
+function flipButton(store, r, flip) {
+  const other = flip ? r.sym1 : r.sym0;
+  return h('button', {
+    type: 'button',
+    class: 'icon-btn flip-btn',
+    title: `Show prices in ${other}`,
+    'aria-label': `Show ${r.pair} prices in ${other}`,
+    onclick: (e) => {
+      e.stopPropagation();
+      store.update(COLLECTION, (d) => {
+        const next = { ...d.flip };
+        if (flip) delete next[flipKey(r)];
+        else next[flipKey(r)] = true;
+        d.flip = next;
+      });
+    },
+  }, icon('arrow-left-right'));
+}
+
 // Fee APR as shown: from swaps, else from the counter, else how long the counter still needs.
 function aprText(r) {
   if (r.apr != null && r.aprSecs != null && !r.aprFull) return `${pct(r.apr)} · ${span(r.aprSecs).replace(/ (days|hours)$/, (m) => (m === ' days' ? ' d' : ' h'))}`;
@@ -785,15 +879,20 @@ const tokenLogoOf = (row, address) => logoMap.get(`${row.chainId}:${address.toLo
 const chainOf = (chainId) => CHAINS.find((c) => c.id === chainId);
 
 // The price range as a track: the band is the position's range and the dot is the current price.
-function rangeView(r) {
+function rangeView(r, store) {
+  const flip = isFlipped(store, r);
+  const p = sideOf(r, flip);
   return h('div', { class: 'range' },
+    h('div', { class: 'range-head' },
+      h('span', { class: 'muted small' }, r.full ? 'Price range' : `${p.unit} per ${p.base}`),
+      r.full ? null : flipButton(store, r, flip)),
     h('div', { class: r.full ? 'range-track full' : 'range-track' },
       h('span', { class: 'range-band' }),
-      r.full ? null : h('span', { class: `range-marker ${r.inRange ? 'in' : 'out'}`, style: { left: `${r.marker}%` } })),
+      r.full ? null : h('span', { class: `range-marker ${r.inRange ? 'in' : 'out'}`, style: { left: `${p.marker}%` } })),
     h('div', { class: 'range-foot' },
-      h('span', null, r.full ? 'Full range' : `${price(r.min)} ${r.sym1}`),
-      h('span', { class: 'now' }, r.full ? '' : `now ${price(r.current)}`),
-      h('span', null, r.full ? '' : `${price(r.max)} ${r.sym1}`)));
+      h('span', null, r.full ? 'Full range' : `${price(p.min)} ${p.unit}`),
+      h('span', { class: 'now' }, r.full ? '' : `now ${price(p.current)}`),
+      h('span', null, r.full ? '' : `${price(p.max)} ${p.unit}`)));
 }
 
 // The token split as a bar: the share of value in each token.
@@ -844,15 +943,21 @@ function poolStat(label, value, title = null) {
 }
 
 // One position as a card: the pair, its chain and fee, the range, the value and the token split.
-function poolCard(r, i, collected) {
+function poolCard(r, i, collected, store) {
   const chain = chainOf(r.chainId);
-  return h('article', { class: `pool-card ${r.closed ? 'is-closed' : r.inRange ? 'is-in' : 'is-out'}${i === null ? '' : ' enter'}`, style: { '--i': i ?? 0 } },
+  return h('article', {
+    class: `pool-card clickable ${r.closed ? 'is-closed' : r.inRange ? 'is-in' : 'is-out'}${i === null ? '' : ' enter'}`,
+    style: { '--i': i ?? 0 },
+    onclick: (e) => {
+      if (!e.target.closest('a, button, select, input')) openDetail(store, r.ref);
+    },
+  },
     h('header', { class: 'pool-head' },
       h('div', { class: 'pair' },
         logo(tokenLogoOf(r, r.addr0), r.sym0, 'token'),
         logo(tokenLogoOf(r, r.addr1), r.sym1, 'token second')),
       h('div', { class: 'pool-title' },
-        h('strong', null, r.pair),
+        h('button', { type: 'button', class: 'link-btn pool-name', title: 'See this position', onclick: () => openDetail(store, r.ref) }, r.pair),
         h('div', { class: 'pool-meta' },
           h('span', { class: 'chain-chip' }, logo(chain?.logo, r.chain, 'xs'), r.chain),
           h('span', { class: 'version-pill', title: `Uniswap ${r.version}` }, r.version),
@@ -860,13 +965,14 @@ function poolCard(r, i, collected) {
           statusPill(r),
           outdatedPill(r))),
       r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn pool-open', title: 'Open on Uniswap', 'aria-label': `Open position ${r.tokenId} on Uniswap` }, icon('link')) : null),
-    rangeView(r),
-    h('div', { class: 'pool-stats' },
+    rangeView(r, store),
+    h('div', { class: r.closed ? 'pool-stats' : 'pool-stats four' },
       poolStat('Value', usdOrDash(r.value)),
       poolStat('Unclaimed fees', usdOrDash(r.fees)),
       r.closed
         ? poolStat('Fees collected', collected.has(r.ref) ? money(collected.get(r.ref), 'USD') : '—', 'The collections of this position in the fee log')
-        : poolStat(`Fee APR · ${WINDOWS[view.window][1]}`, aprText(r), aprTitle(r))),
+        : [poolStat(`Fee APR · ${WINDOWS[view.window][1]}`, aprText(r), aprTitle(r)),
+            poolStat(`Movement · ${WINDOWS[view.window][1]}`, moveView(r), moveTitle(r))]),
     distribution(r),
     h('footer', { class: 'pool-foot muted small' },
       h('span', null, r.owner),
@@ -902,6 +1008,20 @@ function updatedText() {
   return mins < 1 ? 'Updated just now' : `Updated ${mins} min ago`;
 }
 
+// The list's price range cell: the range in the pair's chosen currency, with the switch to the other.
+function rangeCell(r, store) {
+  const flip = isFlipped(store, r);
+  const p = sideOf(r, flip);
+  return [
+    h('div', { class: 'range-cell' },
+      h('span', null, r.full ? 'Full range' : `${price(p.min)} → ${price(p.max)} ${p.unit}`),
+      r.full ? null : flipButton(store, r, flip)),
+    h('div', { class: 'row' },
+      statusPill(r),
+      r.full || r.closed ? null : h('span', { class: 'muted small' }, `now ${price(p.current)}`)),
+  ];
+}
+
 // The same positions as a table, for comparing many at once.
 function poolTable(rows, store) {
   return h('div', { class: 'card mon-scroll' },
@@ -914,22 +1034,25 @@ function poolTable(rows, store) {
         sortHead(store, 'value', 'Value', { class: 'num' }),
         sortHead(store, 'fees', 'Unclaimed fees', { class: 'num' }),
         sortHead(store, 'apr', 'Fee APR', { class: 'num', title: APR_TITLE }),
+        sortHead(store, 'move', 'Movement', { class: 'num', title: 'The change in fee APR from the window before, in percentage points' }),
         h('th', null, ''))),
       h('tbody', null, rows.map((r) =>
-        h('tr', null,
+        h('tr', {
+          class: 'clickable',
+          onclick: (e) => {
+            if (!e.target.closest('a, button, select, input')) openDetail(store, r.ref);
+          },
+        },
           h('td', null, h('div', { class: 'row' },
             h('div', { class: 'pair' }, logo(tokenLogoOf(r, r.addr0), r.sym0, 'token'), logo(tokenLogoOf(r, r.addr1), r.sym1, 'token second')),
-            h('div', null, h('strong', null, r.pair), ' ', h('span', { class: 'version-pill', title: `Uniswap ${r.version}` }, r.version), outdatedPill(r), h('div', { class: 'muted small' }, `${r.owner} · #${r.tokenId}`)))),
+            h('div', null, h('button', { type: 'button', class: 'link-btn', title: 'See this position', onclick: () => openDetail(store, r.ref) }, r.pair), ' ', h('span', { class: 'version-pill', title: `Uniswap ${r.version}` }, r.version), outdatedPill(r), h('div', { class: 'muted small' }, `${r.owner} · #${r.tokenId}`)))),
           h('td', null, h('span', { class: 'chain-chip' }, logo(chainOf(r.chainId)?.logo, r.chain, 'xs'), r.chain), h('div', { class: 'muted small' }, `${r.feePct}% fee`)),
-          h('td', null,
-            h('div', null, r.full ? 'Full range' : `${price(r.min)} → ${price(r.max)} ${r.sym1}`),
-            h('div', { class: 'row' },
-              statusPill(r),
-              r.full || r.closed ? null : h('span', { class: 'muted small' }, `now ${price(r.current)}`))),
+          h('td', null, rangeCell(r, store)),
           h('td', null, distribution(r)),
           h('td', { class: 'num' }, usdOrDash(r.value)),
           h('td', { class: 'num' }, usdOrDash(r.fees)),
           h('td', { class: 'num', title: aprTitle(r) }, aprText(r)),
+          h('td', { class: 'num' }, moveView(r)),
           h('td', null, r.url
             ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn', title: 'Open on Uniswap', 'aria-label': `Open position ${r.tokenId} on Uniswap` }, icon('link'))
             : null))))));
@@ -1034,6 +1157,31 @@ const bucketLabel = (key, group) => (group === 'month'
   ? new Date(`${key}-01T00:00`).toLocaleDateString(undefined, { month: 'short', year: '2-digit' })
   : new Date(`${key}T00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
 
+// The full name of a bucket, for the chart's tooltip.
+function bucketName(key, group) {
+  if (group === 'month') return new Date(`${key}-01T00:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const date = new Date(`${key}T00:00`).toLocaleDateString(undefined, { weekday: group === 'day' ? 'short' : undefined, month: 'short', day: 'numeric', year: 'numeric' });
+  return group === 'week' ? `Week of ${date}` : date;
+}
+
+// One bar's tooltip: its total, how many collections, and the positions that gave the most.
+function bucketTip(key, group, list) {
+  const total = list.reduce((s, c) => s + (c.usd ?? 0), 0);
+  const byPos = new Map();
+  for (const c of list) {
+    const name = c.pair ? `${c.pair}${c.tokenId ? ` #${c.tokenId}` : ''}` : 'No position';
+    byPos.set(name, (byPos.get(name) ?? 0) + (c.usd ?? 0));
+  }
+  const top = [...byPos].sort((a, b) => b[1] - a[1]);
+  return [
+    h('span', { class: 'muted' }, bucketName(key, group)),
+    h('strong', null, money(total, 'USD')),
+    h('span', { class: 'muted' }, list.length ? plural(list.length, 'collection') : 'No collections'),
+    top.slice(0, 3).map(([name, usd]) => h('span', { class: 'tip-row' }, h('span', null, name), h('span', null, money(usd, 'USD')))),
+    top.length > 3 ? h('span', { class: 'muted' }, `and ${plural(top.length - 3, 'more position')}`) : null,
+  ];
+}
+
 const collectedOf = (store) => store.get(COLLECTION)?.collected ?? [];
 
 // What the log holds per position, in USD, for the closed cards.
@@ -1098,8 +1246,153 @@ function logForm(store) {
     view.logMessage ? notice({ text: view.logMessage }) : null);
 }
 
+// A token's logo for a collection: from its position, or the addresses it saved, or any position with the symbol.
+function collectLogo(c, sym) {
+  const row = state.rows.find((r) => r.ref === c.ref);
+  const i = c.sym0 === sym ? 0 : c.sym1 === sym ? 1 : -1;
+  if (row && i >= 0) return tokenLogoOf(row, i ? row.addr1 : row.addr0);
+  const addr = i === 0 ? c.addr0 : i === 1 ? c.addr1 : null;
+  if (addr && c.chainId) return logoMap.get(`${c.chainId}:${addr.toLowerCase()}`) ?? null;
+  return symbolLogo(sym);
+}
+function symbolLogo(sym) {
+  for (const r of state.rows) {
+    if (r.sym0 === sym && tokenLogoOf(r, r.addr0)) return tokenLogoOf(r, r.addr0);
+    if (r.sym1 === sym && tokenLogoOf(r, r.addr1)) return tokenLogoOf(r, r.addr1);
+  }
+  return null;
+}
+
+// The tokens of a collection, one per line with its logo.
+function tokenCell(c) {
+  if (c.a0 == null) {
+    const syms = tokensOf(c);
+    return syms.length ? h('div', { class: 'lp-tokens muted' }, syms.map((t) => h('span', { class: 'lp-token' }, logo(symbolLogo(t), t, 'xs'), t))) : '';
+  }
+  return h('div', { class: 'lp-tokens' },
+    [[c.a0, c.sym0], [c.a1, c.sym1]].map(([n, sym]) => h('span', { class: n ? 'lp-token' : 'lp-token muted' }, logo(collectLogo(c, sym), sym, 'xs'), `${amount(n)} ${sym}`)));
+}
+
+// Whether a collection's position is still open: a dot on the log, so closed positions stand out.
+function positionDot(c) {
+  if (!c.ref) return null;
+  const row = state.rows.find((r) => r.ref === c.ref);
+  const kind = !row ? 'gone' : row.closed ? 'closed' : row.inRange ? 'in' : 'out';
+  const title = {
+    in: 'Open position, in range',
+    out: 'Open position, out of range',
+    closed: 'Closed position: no liquidity left',
+    gone: 'Not among the positions read: burned, moved, or not read yet',
+  }[kind];
+  return h('span', { class: `pos-dot ${kind}`, title, role: 'img', 'aria-label': title });
+}
+
+// The searchable token filter: logo, symbol and count per token. Typing filters the list in place, without a
+// re-render, so the field keeps its focus.
+const picker = { open: false, query: '' };
+let pickerOutside = null;
+function closePicker(store) {
+  picker.open = false;
+  picker.query = '';
+  if (pickerOutside) document.removeEventListener('pointerdown', pickerOutside, true);
+  pickerOutside = null;
+  store.refresh();
+}
+function tokenPicker(store, options) {
+  const current = options.find((o) => o.value === view.feeToken) ?? options[0];
+  const choose = (value) => {
+    view.feeToken = value;
+    closePicker(store);
+  };
+  const item = (o) => h('li', { role: 'option', 'aria-selected': String(o.value === view.feeToken) },
+    h('button', { type: 'button', class: o.value === view.feeToken ? 'lp-picker-item active' : 'lp-picker-item', 'data-value': o.value, onclick: () => choose(o.value) },
+      o.value === 'all' ? h('span', { class: 'logo xs lp-picker-all' }, icon('coins')) : logo(o.logo, o.label, 'xs'),
+      h('span', { class: 'lp-picker-name' }, o.label),
+      h('span', { class: 'chip-count' }, o.count)));
+  const list = h('ul', { class: 'lp-picker-list', role: 'listbox', 'aria-label': 'Tokens' });
+  const fill = () => {
+    const q = picker.query.trim().toLowerCase();
+    const shown = options.filter((o) => !q || o.value === 'all' || o.label.toLowerCase().includes(q));
+    list.replaceChildren(...shown.map(item), ...(shown.length <= 1 && q ? [h('li', { class: 'muted small lp-picker-none' }, 'No token matches.')] : []));
+  };
+  const move = (step) => {
+    const items = [...list.querySelectorAll('.lp-picker-item')];
+    const at = items.indexOf(document.activeElement);
+    items[Math.max(0, Math.min(items.length - 1, at + step))]?.focus();
+  };
+  const search = h('input', {
+    type: 'search',
+    class: 'lp-picker-search',
+    placeholder: 'Search tokens',
+    'aria-label': 'Search tokens',
+    value: picker.query,
+    autocomplete: 'off',
+    oninput: (e) => {
+      picker.query = e.currentTarget.value;
+      fill();
+    },
+    onkeydown: (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        list.querySelector('.lp-picker-item')?.focus();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const first = [...list.querySelectorAll('.lp-picker-item')].find((b) => b.dataset.value !== 'all' || !picker.query.trim());
+        if (first) choose(first.dataset.value);
+      }
+    },
+  });
+  fill();
+  const wrap = h('div', {
+    class: picker.open ? 'lp-picker open' : 'lp-picker',
+    onkeydown: (e) => {
+      if (e.key === 'Escape' && picker.open) {
+        e.stopPropagation();
+        closePicker(store);
+      } else if (picker.open && e.target !== search && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+        e.preventDefault();
+        move(e.key === 'ArrowDown' ? 1 : -1);
+      }
+    },
+  },
+    h('button', {
+      type: 'button',
+      class: 'lp-picker-btn',
+      'aria-haspopup': 'listbox',
+      'aria-expanded': String(picker.open),
+      onclick: () => {
+        if (picker.open) return closePicker(store);
+        picker.open = true;
+        pickerOutside = (e) => {
+          if (!e.target.closest?.('.lp-picker')) closePicker(store);
+        };
+        document.addEventListener('pointerdown', pickerOutside, true);
+        store.refresh();
+      },
+    },
+      current.value === 'all' ? icon('coins') : logo(current.logo, current.label, 'xs'),
+      current.value === 'all' ? 'All tokens' : current.label,
+      h('span', { class: 'sort-mark' }, icon(picker.open ? 'chevron-up' : 'chevron-down'))),
+    picker.open ? h('div', { class: 'lp-picker-pop' }, search, list) : null);
+  return wrap;
+}
+
+// A re-render while the picker is open builds a new search field; this gives it the focus once the page is on
+// screen, unless the focus was elsewhere on the page.
+function keepPickerFocus(root) {
+  if (!picker.open) return;
+  const input = root.querySelector('.lp-picker-search');
+  const active = document.activeElement;
+  if (!input || (active && active !== document.body && !active.closest?.('.lp-picker'))) return;
+  queueMicrotask(() => {
+    if (!input.isConnected) return;
+    input.focus({ preventScroll: true });
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
+  });
+}
+
 const COLLECT_TITLE = 'The fees in this collect, without the liquidity it paid out, at the token prices of that day.';
-const tokenAmounts = (c) => (c.a0 != null ? `${amount(c.a0)} ${c.sym0} · ${amount(c.a1)} ${c.sym1}` : '');
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 const SOURCE_NAMES = { chain: 'From the chain', etherscan: 'From Etherscan', auto: 'Seen by the board', manual: 'Logged by hand' };
@@ -1144,6 +1437,17 @@ function feeSortHead(store, key, label, attrs = {}) {
     }, label, h('span', { class: 'sort-mark' }, icon(on && view.feeDir > 0 ? 'chevron-up' : 'chevron-down'))));
 }
 
+// A token's logo from the collections that hold it, for the token picker.
+function tokenLogoIn(list, sym) {
+  for (const c of list) {
+    if (c.sym0 === sym || c.sym1 === sym) {
+      const src = collectLogo(c, sym);
+      if (src) return src;
+    }
+  }
+  return symbolLogo(sym);
+}
+
 // The chain, token and source filters, each read from the log so only choices with collections show.
 function feeFilters(store, inRange) {
   const count = (pred) => inRange.filter(pred).length;
@@ -1169,7 +1473,10 @@ function feeFilters(store, inRange) {
       chip(view.feeChain === 'all', 'All chains', inRange.length, set('feeChain', 'all')),
       chains.map((name) => chip(view.feeChain === name, name, count((c) => c.chain === name), set('feeChain', name), CHAINS.find((x) => x.name === name)?.logo)),
     ] : null,
-    tokens.length > 1 ? select('feeToken', 'Token', [['all', 'All tokens'], ...tokens.map((t) => [t, `${t} (${count((c) => tokensOf(c).includes(t))})`])]) : null,
+    tokens.length > 1 ? tokenPicker(store, [
+      { value: 'all', label: 'All tokens', count: inRange.length, logo: null },
+      ...tokens.map((t) => ({ value: t, label: t, count: count((c) => tokensOf(c).includes(t)), logo: tokenLogoIn(inRange, t) })),
+    ]) : null,
     sources.length > 1 ? select('feeSource', 'Source', [['all', 'All sources'], ...sources.map((k) => [k, `${SOURCE_NAMES[k]} (${count((c) => sourceOf(c) === k)})`])]) : null);
 }
 
@@ -1183,10 +1490,24 @@ function coverageCard(store) {
   if (!cov.total) return null;
   const busy = historyBusy || loading;
   const meter = (x) => h('div', { class: 'meter', role: 'presentation' }, h('span', { style: { width: `${x * 100}%` } }));
+  const status = busy ? 'Searching…' : cov.pct >= 1 ? 'Every collect found' : 'Searches further on each load';
+  // Collapsed by default to a one-line recap; the per-chain detail opens on demand.
+  const toggle = h('button', {
+    type: 'button',
+    class: 'lp-coverage-toggle',
+    'aria-expanded': String(Boolean(view.coverageOpen)),
+    onclick: () => {
+      view.coverageOpen = !view.coverageOpen;
+      store.refresh();
+    },
+  },
+    h('h3', null, 'Search coverage'),
+    view.coverageOpen ? null : [h('strong', { class: 'lp-coverage-pct' }, coveragePct(cov.pct)), meter(cov.pct)],
+    h('span', { class: 'muted small lp-coverage-recap' }, view.coverageOpen ? status : `${cov.done}/${cov.total} positions · ${status}`),
+    h('span', { class: 'sort-mark' }, icon(view.coverageOpen ? 'chevron-up' : 'chevron-down')));
+  if (!view.coverageOpen) return h('section', { class: 'card lp-coverage collapsed', title: COVERAGE_TITLE }, toggle);
   return h('section', { class: 'card stack lp-coverage', title: COVERAGE_TITLE },
-    h('div', { class: 'row between' },
-      h('h3', null, 'Search coverage'),
-      h('span', { class: 'muted small' }, busy ? 'Searching…' : cov.pct >= 1 ? 'Every collect found' : 'Searches further on each load')),
+    toggle,
     h('div', { class: 'lp-coverage-all' },
       h('strong', null, coveragePct(cov.pct)),
       meter(cov.pct),
@@ -1237,12 +1558,17 @@ function feesView(store) {
   let chart = null;
   if (list.length) {
     const sums = new Map();
+    const groups = new Map();
     for (const c of list) {
       const key = bucketOf(new Date(c.at), view.feeGroup);
       sums.set(key, (sums.get(key) ?? 0) + (c.usd ?? 0));
+      groups.set(key, [...(groups.get(key) ?? []), c]);
     }
     const keys = bucketsBetween(new Date(start), new Date(nowMs), view.feeGroup);
-    chart = barChart(keys.map((k) => bucketLabel(k, view.feeGroup)), [{ name: 'Collected', color: 'var(--accent)', values: keys.map((k) => sums.get(k) ?? 0) }], { format: (v) => money(v, 'USD') });
+    chart = barChart(keys.map((k) => bucketLabel(k, view.feeGroup)), [{ name: 'Collected', color: 'var(--accent)', values: keys.map((k) => sums.get(k) ?? 0) }], {
+      format: (v) => money(v, 'USD'),
+      tip: (i) => bucketTip(keys[i], view.feeGroup, groups.get(keys[i]) ?? []),
+    });
   }
 
   const table = h('div', { class: 'card mon-scroll' },
@@ -1263,9 +1589,15 @@ function feesView(store) {
           ? h('span', { class: 'chain-chip' }, logo(CHAINS.find((x) => x.name === c.chain)?.logo, c.chain, 'xs'), c.chain)
           : h('span', { class: 'muted' }, '—')),
         h('td', null,
-          c.pair ? h('strong', null, c.pair) : h('span', { class: 'muted' }, '—'),
+          c.pair
+            ? h('div', { class: 'lp-pos' },
+                positionDot(c),
+                c.ref
+                  ? h('button', { type: 'button', class: 'link-btn', title: 'See this position', onclick: () => openDetail(store, c.ref) }, c.pair)
+                  : h('strong', null, c.pair))
+            : h('span', { class: 'muted' }, '—'),
           h('div', { class: 'muted small' }, [c.tokenId ? `#${c.tokenId}` : '', c.note].filter(Boolean).join(' · '))),
-        h('td', { class: 'small' }, tokenAmounts(c)),
+        h('td', { class: 'small' }, tokenCell(c)),
         h('td', { class: 'small muted', title: c.tx ?? null }, SOURCE_NAMES[sourceOf(c)]),
         h('td', { class: 'num', title: { auto: 'The unclaimed fees at the read before the collect. Fees earned after that read are not counted.', chain: COLLECT_TITLE, etherscan: COLLECT_TITLE }[c.source] ?? null }, usdOrDash(c.usd ?? null)),
         h('td', null, h('button', {
@@ -1313,14 +1645,187 @@ function feesView(store) {
           h('p', null, filtered ? 'No collections match these filters.' : all.length ? 'No collections in this range.' : 'No collections yet. Collects are read from the chain, and from Etherscan when its key is set in Settings. Between two reads, a drop in unclaimed fees is logged too. You can also log one by hand.')));
 }
 
-// The tab's two views: the positions, and the fees collected from them.
+// ---- One position in detail: opened from a card, a list row, or a collection in the fee log ----
+
+function openDetail(store, ref) {
+  view.detailFrom = view.tab === 'fees' ? 'fees' : 'positions';
+  view.detail = ref;
+  if (picker.open) closePicker(store);
+  store.refresh();
+  window.scrollTo({ top: 0 });
+}
+function closeDetail(store) {
+  view.detail = null;
+  view.tab = view.detailFrom ?? view.tab;
+  store.refresh();
+}
+
+// What a position earned per day over the last 30 days, from the hours saved for fee APR, at today's prices.
+function earnedChart(store, r) {
+  const hours = store.get(COLLECTION)?.earned?.[r.ref];
+  if (!hours || r.p0 == null || r.p1 == null) return null;
+  const days = new Map();
+  const since = Date.now() - 30 * DAY_MS;
+  for (const [hour, [h0, h1]] of Object.entries(hours)) {
+    const t = Number(hour) * HOUR * 1000;
+    if (t < since) continue;
+    const key = localDay(new Date(t));
+    const a0 = Number(h0) / 10 ** r.dec0;
+    const a1 = Number(h1) / 10 ** r.dec1;
+    const d = days.get(key) ?? { a0: 0, a1: 0, hours: 0 };
+    days.set(key, { a0: d.a0 + a0, a1: d.a1 + a1, hours: d.hours + 1 });
+  }
+  if (!days.size) return null;
+  const first = [...days.keys()].sort()[0];
+  const keys = bucketsBetween(new Date(`${first}T00:00`), new Date(), 'day');
+  const usd = (d) => (d ? d.a0 * r.p0 + d.a1 * r.p1 : 0);
+  return barChart(keys.map((k) => bucketLabel(k, 'day')), [{ name: 'Earned', color: 'var(--income)', values: keys.map((k) => usd(days.get(k))) }], {
+    format: (v) => money(v, 'USD'),
+    tip: (i) => {
+      const d = days.get(keys[i]);
+      return [
+        h('span', { class: 'muted' }, bucketName(keys[i], 'day')),
+        h('strong', null, money(usd(d), 'USD')),
+        d ? h('span', { class: 'tip-row' }, h('span', null, r.sym0), h('span', null, amount(d.a0))) : h('span', { class: 'muted' }, 'No hours saved'),
+        d ? h('span', { class: 'tip-row' }, h('span', null, r.sym1), h('span', null, amount(d.a1))) : null,
+        d && d.hours < 24 ? h('span', { class: 'muted' }, `${plural(d.hours, 'hour')} saved`) : null,
+      ];
+    },
+  });
+}
+
+// The position's range: the track, its bounds and how far the price is from each edge.
+function detailRange(store, r) {
+  const flip = isFlipped(store, r);
+  const p = sideOf(r, flip);
+  const room = (edge) => (edge > 0 && Number.isFinite(edge) && p.current > 0 ? `${(Math.abs(edge / p.current - 1) * 100).toFixed(1)}%` : '—');
+  return h('section', { class: 'card stack' },
+    h('h3', null, 'Price range'),
+    rangeView(r, store),
+    r.full
+      ? h('p', { class: 'muted small' }, 'Full range: the position earns at every price.')
+      : h('div', { class: 'mini-stats' },
+          h('div', { class: 'mini' }, h('span', { class: 'muted small' }, 'Min'), h('strong', null, price(p.min)), h('span', { class: 'muted small' }, `${room(p.min)} below`)),
+          h('div', { class: 'mini' }, h('span', { class: 'muted small' }, 'Current'), h('strong', null, price(p.current)), h('span', { class: 'muted small' }, p.unit)),
+          h('div', { class: 'mini' }, h('span', { class: 'muted small' }, 'Max'), h('strong', null, price(p.max)), h('span', { class: 'muted small' }, `${room(p.max)} above`))));
+}
+
+// What the position holds and owes: each token's amount and value, the split, and the unclaimed fees.
+function detailHoldings(r) {
+  const line = (addr, sym, n, px) => h('li', null,
+    h('span', { class: 'lp-token' }, logo(tokenLogoOf(r, addr), sym, 'xs'), h('strong', null, sym)),
+    h('span', null, amount(n)),
+    h('span', { class: 'muted' }, px == null ? '—' : money(n * px, 'USD')));
+  return h('section', { class: 'card stack' },
+    h('h3', null, 'Holdings'),
+    h('ul', { class: 'lp-holdings' }, line(r.addr0, r.sym0, r.a0, r.p0), line(r.addr1, r.sym1, r.a1, r.p1)),
+    distribution(r),
+    h('h3', null, 'Unclaimed fees'),
+    typeof r.fee0 === 'number'
+      ? h('ul', { class: 'lp-holdings' }, line(r.addr0, r.sym0, r.fee0, r.p0), line(r.addr1, r.sym1, r.fee1, r.p1))
+      : h('p', { class: 'muted small' }, 'Not read.'));
+}
+
+// Everything the board knows about one position. A position no longer read (burned, or its wallet removed) shows
+// what the fee log holds for it.
+function detailView(store, ref) {
+  const raw = state.rows.find((r) => r.ref === ref);
+  const r = raw ? aprOf(store)(raw) : null;
+  const collects = collectedOf(store).filter((c) => c.ref === ref).sort((a, b) => b.at.localeCompare(a.at));
+  const known = r ?? collects[0];
+  const back = h('button', { type: 'button', class: 'btn-small lp-back', onclick: () => closeDetail(store) },
+    icon('arrow-left'), view.detailFrom === 'fees' ? 'Fees Collected' : 'Positions');
+  if (!known) {
+    return h('div', { class: 'stack-lg lp' }, back,
+      notice({ tone: 'info', text: loading ? 'Reading the positions…' : 'This position is not among those read, and the fee log has nothing for it.' }));
+  }
+  const chain = r ? chainOf(r.chainId) : CHAINS.find((x) => x.name === known.chain);
+  const collectedUsd = collects.reduce((s, c) => s + (c.usd ?? 0), 0);
+  const stat = (label, value, hint = null, title = null) => h('div', { class: 'card lp-stat', title },
+    h('span', { class: 'muted' }, label), h('strong', null, value), hint ? h('span', { class: 'muted small' }, hint) : null);
+  const win = WINDOWS[view.window][1];
+  const d = store.get(COLLECTION) ?? {};
+  const cfg = store.get('settings').uniswap ?? {};
+  const earned = r ? earnedChart(store, r) : null;
+  const facts = r ? [
+    ['Position', `#${r.tokenId} · Uniswap ${r.version}`],
+    ['Owner', r.owner],
+    ['Wallet', shortAddress(r.wallet), r.wallet],
+    ['Pool', shortAddress(r.pool ?? ''), r.pool],
+    ['Fee tier', `${r.feePct}%`],
+    ['Ticks', `${r.tickLower} → ${r.tickUpper}`],
+    ['Collect search', coveragePct(searchShare(r, d, cfg)), COVERAGE_TITLE],
+  ] : [];
+
+  return h('div', { class: 'stack-lg lp lp-detail' },
+    back,
+    h('header', { class: 'lp-detail-head' },
+      h('div', { class: 'pair' },
+        r ? logo(tokenLogoOf(r, r.addr0), r.sym0, 'token') : logo(symbolLogo(tokensOf(known)[0]), tokensOf(known)[0] ?? '?', 'token'),
+        r ? logo(tokenLogoOf(r, r.addr1), r.sym1, 'token second') : logo(symbolLogo(tokensOf(known)[1]), tokensOf(known)[1] ?? '?', 'token second')),
+      h('div', { class: 'pool-title' },
+        h('h2', null, known.pair ?? 'Position'),
+        h('div', { class: 'pool-meta' },
+          known.chain ? h('span', { class: 'chain-chip' }, logo(chain?.logo, known.chain, 'xs'), known.chain) : null,
+          r ? h('span', { class: 'version-pill', title: `Uniswap ${r.version}` }, r.version) : null,
+          r ? h('span', { class: 'fee-pill' }, `${r.feePct}%`) : null,
+          r ? statusPill(r) : h('span', { class: 'status-pill closed' }, h('span', { class: 'dot' }), 'Not read'),
+          r ? outdatedPill(r) : null,
+          h('span', { class: 'muted small' }, `#${known.tokenId ?? '—'}`))),
+      r?.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'btn-small', title: 'Open on Uniswap' }, icon('link'), 'Uniswap') : null),
+    r ? null : notice({ tone: 'info', text: 'This position is not among those read now: it was burned or moved, or its wallet was removed. Below is what the fee log holds for it.' }),
+    h('div', { class: 'lp-stats' },
+      r ? stat('Value', usdOrDash(r.value)) : null,
+      r ? stat('Unclaimed fees', usdOrDash(r.fees)) : null,
+      r && !r.closed ? stat(`Fee APR · ${win}`, aprText(r), null, aprTitle(r)) : null,
+      r && !r.closed ? stat(`Movement · ${win}`, moveView(r), r.aprPrev != null ? `from ${pct(r.aprPrev)}` : null, moveTitle(r)) : null,
+      stat('Fees collected', money(collectedUsd, 'USD'), plural(collects.length, 'collection')),
+      r && r.fees != null ? stat('Total earned', money(collectedUsd + r.fees, 'USD'), 'collected and unclaimed') : null),
+    r && !r.closed
+      ? h('label', { class: 'inline lp-sort', title: 'The time fee APR is read over' }, 'APR window',
+          h('select', {
+            'aria-label': 'Fee APR window',
+            onchange: (e) => {
+              view.window = e.target.value;
+              store.refresh();
+              loadAprs(store);
+            },
+          }, Object.entries(WINDOWS).map(([key, [, label]]) => h('option', { value: key, selected: key === view.window }, label))))
+      : null,
+    r && !r.closed ? h('div', { class: 'lp-detail-grid' }, detailRange(store, r), detailHoldings(r)) : null,
+    earned
+      ? h('section', { class: 'card stack' },
+          h('div', { class: 'row between' }, h('h3', null, 'Fees earned per day'), h('span', { class: 'muted small' }, 'From the swaps, at today\'s prices')),
+          earned)
+      : null,
+    h('section', { class: 'card stack' },
+      h('div', { class: 'row between' }, h('h3', null, 'Collections'), h('span', { class: 'muted small' }, money(collectedUsd, 'USD'))),
+      collects.length
+        ? h('div', { class: 'mon-scroll' }, h('table', { class: 'mon-table' },
+            h('thead', null, h('tr', null, h('th', null, 'Date'), h('th', null, 'Tokens'), h('th', null, 'Source'), h('th', { class: 'num' }, 'Value'))),
+            h('tbody', null, collects.map((c) => h('tr', null,
+              h('td', null, new Date(c.at).toLocaleDateString()),
+              h('td', { class: 'small' }, tokenCell(c)),
+              h('td', { class: 'small muted', title: c.tx ?? null }, SOURCE_NAMES[sourceOf(c)]),
+              h('td', { class: 'num' }, usdOrDash(c.usd ?? null)))))))
+        : h('p', { class: 'muted small' }, 'No collections logged for this position.')),
+    facts.length
+      ? h('section', { class: 'card stack' },
+          h('h3', null, 'Details'),
+          h('dl', { class: 'lp-facts' }, facts.map(([k, v, title]) => [h('dt', { class: 'muted' }, k), h('dd', { title: title ?? null }, v)])))
+      : null);
+}
+
+const FEES_SUBTITLE ='Fees collected from your positions: read from the chain, from Etherscan when its key is set, and logged by hand.';
+
+// The tab's two views: the positions, and the fees collected from them. Sub-tabs, as in Monitoring and Tools.
 function tabs(store) {
-  return h('div', { class: 'segmented lp-tabs', role: 'tablist', 'aria-label': 'Liquidity Pools view' },
-    [['positions', 'Positions', 'droplet'], ['fees', 'Fees collected', 'coins']].map(([key, label, iconName]) =>
+  return h('nav', { class: 'sub-tabs lp-tabs', role: 'tablist', 'aria-label': 'Liquidity Pools view' },
+    [['positions', 'Positions', 'droplet'], ['fees', 'Fees Collected', 'coins']].map(([key, label, iconName]) =>
       h('button', {
         type: 'button',
         role: 'tab',
-        class: view.tab === key ? 'seg active' : 'seg',
+        class: view.tab === key ? 'sub-tab active' : 'sub-tab',
         'aria-selected': String(view.tab === key),
         onclick: () => {
           view.tab = key;
@@ -1337,13 +1842,21 @@ function draw(root, store) {
     // The log of collections stays reachable once there is one, even with no wallet left.
     const logged = collectedOf(store).length > 0;
     if (!logged) view.tab = 'positions';
-    return root.replaceChildren(h('div', { class: 'stack-lg' },
-      h('h2', null, 'Liquidity Pools'),
+    if (view.detail && logged) {
+      root.replaceChildren(detailView(store, view.detail));
+      return;
+    }
+    root.replaceChildren(h('div', { class: 'stack-lg lp' },
+      h('header', null,
+        h('h2', null, 'Liquidity Pools'),
+        logged && view.tab === 'fees' ? h('p', { class: 'muted small' }, FEES_SUBTITLE) : null),
       logged ? tabs(store) : null,
       view.tab === 'fees'
         ? feesView(store)
         : [setupBanner('uniswap', 'Add a wallet address in Settings to see its Uniswap positions.'),
             view.adding ? addForm(store) : h('button', { type: 'button', class: 'btn-small', onclick: () => openAdd(store) }, icon('plus'), 'Add a position by link or number')]));
+    keepPickerFocus(root);
+    return;
   }
   // Until the first read lands, show what the last one saved.
   if (state.status === 'idle' && !state.rows.length) {
@@ -1353,6 +1866,10 @@ function draw(root, store) {
     setTimeout(() => load(store), 0);
   }
   askLogos(store);
+  if (view.detail) {
+    root.replaceChildren(detailView(store, view.detail));
+    return;
+  }
 
   const chainCount = enabledChains(cfg).length;
   const all = state.rows;
@@ -1365,14 +1882,8 @@ function draw(root, store) {
   const closedRows = inChain.filter((r) => r.closed);
   const showClosed = view.filter === 'closed';
   const inRange = byChain.filter((r) => r.inRange).length;
-  const baselines = store.get(COLLECTION)?.fees ?? {};
   const pick = { in: byChain.filter((r) => r.inRange), out: byChain.filter((r) => !r.inRange), closed: closedRows }[view.filter] ?? byChain;
-  const withApr = (r) => {
-    const s = aprs.get(`${view.window}|${r.ref}`);
-    return s
-      ? { ...r, apr: s.apr, aprSecs: s.secs, aprFull: s.full }
-      : { ...r, apr: feeApr(r, baselines), aprLeft: counterLeft(r, baselines) };
-  };
+  const withApr = aprOf(store);
   const shown = sortRows(pick.map(withApr), view.sort, view.dir);
   const totalValue = byChain.reduce((s, r) => s + (r.value ?? 0), 0);
   const totalFees = byChain.reduce((s, r) => s + (r.fees ?? 0), 0);
@@ -1426,7 +1937,7 @@ function draw(root, store) {
     const collected = collectedByRef(store);
     body = view.layout === 'list'
       ? poolTable(shown, store)
-      : h('div', { class: 'lp-grid' }, shown.map((r) => poolCard(r, seen.has(r.ref) ? null : order++, collected)));
+      : h('div', { class: 'lp-grid' }, shown.map((r) => poolCard(r, seen.has(r.ref) ? null : order++, collected, store)));
     shown.forEach((r) => seen.add(r.ref));
   } else {
     const filtered = view.filter !== 'all' || view.chain !== 'all';
@@ -1440,15 +1951,18 @@ function draw(root, store) {
       h('div', null,
         h('h2', null, 'Liquidity Pools'),
         h('p', { class: 'muted small' },
-          `Uniswap v3 and v4 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`,
+          view.tab === 'fees'
+            ? FEES_SUBTITLE
+            : `Uniswap v3 and v4 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`,
           state.pending.length ? ` Reading ${state.pending.join(', ')}…` : state.at ? ` ${updatedText()}.` : '')),
       h('div', { class: 'row' },
-        h('button', { type: 'button', class: 'btn-small', onclick: () => openAdd(store), title: 'Add a position the board did not find' }, icon('plus'), 'Add position'),
+        view.tab === 'fees' ? null : h('button', { type: 'button', class: 'btn-small', onclick: () => openAdd(store), title: 'Add a position the board did not find' }, icon('plus'), 'Add position'),
         h('button', { type: 'button', class: 'btn-small', disabled: reading || chainCount === 0, onclick: () => load(store) },
         refreshIcon(reading),
           reading ? 'Reading…' : 'Refresh'))),
 
-    view.adding ? addForm(store) : null,
+    tabs(store),
+    view.adding && view.tab !== 'fees' ? addForm(store) : null,
     state.shallow.length
       ? notice({ tone: 'info', text: `The node for ${state.shallow.join(', ')} keeps only recent history, so older v4 positions there are not found. Add them with Add position, or set a node that keeps full history in Settings.` })
       : null,
@@ -1458,7 +1972,6 @@ function draw(root, store) {
     state.status === 'error' ? notice({ text: `The positions could not be read: ${state.error}` }) : null,
     chainCount === 0 ? notice({ tone: 'info', text: 'No chains are selected. Pick the chains to read in Settings.' }) : null,
 
-    tabs(store),
     view.tab === 'fees' ? feesView(store) : [
     h('div', { class: 'lp-stats' },
       h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Total liquidity'), valueEl),
@@ -1512,6 +2025,7 @@ function draw(root, store) {
     body]));
 
   for (const run of counters) run();
+  keepPickerFocus(root);
 }
 
 export default {
@@ -1520,7 +2034,7 @@ export default {
   short: 'Pools',
   icon: 'droplet',
   collection: COLLECTION,
-  defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [], history: {}, hidden: [], etherscan: {} },
+  defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [], history: {}, hidden: [], etherscan: {}, flip: {} },
   render: draw,
   serialize: () => ({
     filter: view.filter === 'all' ? '' : view.filter,
@@ -1535,6 +2049,8 @@ export default {
     fchain: view.feeChain === 'all' ? '' : view.feeChain,
     ftoken: view.feeToken === 'all' ? '' : view.feeToken,
     fsource: view.feeSource === 'all' ? '' : view.feeSource,
+    pos: view.detail ?? '',
+    from: view.detail && view.detailFrom === 'fees' ? 'fees' : '',
   }),
   restore: (p = {}) => {
     view.filter = ['in', 'out', 'closed'].includes(p.filter) ? p.filter : 'all';
@@ -1552,5 +2068,8 @@ export default {
     view.feeChain = p.fchain || 'all';
     view.feeToken = p.ftoken || 'all';
     view.feeSource = Object.hasOwn(SOURCE_NAMES, p.fsource) ? p.fsource : 'all';
+    // The position shown in detail, checked against the rows and the log when it is drawn.
+    view.detail = typeof p.pos === 'string' && p.pos ? p.pos : null;
+    view.detailFrom = p.from === 'fees' ? 'fees' : view.tab;
   },
 };
