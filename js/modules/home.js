@@ -2,6 +2,7 @@ import { h, icon, money, monthKey, todayISO, statusOf, empty, notice } from '../
 import { projectIcon, labelsOf, labelColor } from './projects.js';
 import { repoStats } from '../github.js';
 import { ask } from '../ai.js';
+import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { connect, isConnected, upcomingEvents } from '../google.js';
 import { makeTask } from '../capture.js';
@@ -27,7 +28,7 @@ async function runPlan(store) {
     plan.text = (await ask(store, 'task-plan', [
       {
         role: 'system',
-        content: 'You plan a personal day. Given open tasks as JSON, reply in plain text with three short sections titled Now, Next and Later, each with up to four bullet points. Name the project in brackets when it helps. Be concise.',
+        content: systemPrompt(store, 'plan'),
       },
       {
         role: 'user',

@@ -1,6 +1,7 @@
 import { h, uid, now, icon, refreshIcon, empty, statusOf, notice } from '../ui.js';
 import { repoStats, refreshRepo, openItems } from '../github.js';
 import { ask } from '../ai.js';
+import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { richText } from '../rich.js';
 import { editText, pickChip } from '../inline.js';
@@ -487,7 +488,7 @@ async function runTriage(store, p) {
       triage.text = (await ask(store, 'task-review', [
         {
           role: 'system',
-          content: 'You triage GitHub issues and pull requests. Given the open items as JSON, reply in plain text: first what needs attention now, then what looks stale (no update in 30 days or more), then one suggested next action per item in a single line. Be concise.',
+          content: systemPrompt(store, 'triage'),
         },
         { role: 'user', content: JSON.stringify(all) },
       ])).trim();
@@ -537,7 +538,7 @@ async function explainRepo(store, repo, entry) {
     const text = await ask(store, 'task-summary', [
       {
         role: 'system',
-        content: 'You help a developer understand a code repository. From the description, topics, languages, file list and README, reply in plain text: what the project does in two sentences, its main parts (from the files), how to work on it, and anything unclear. Do not invent features.',
+        content: systemPrompt(store, 'repo-summary'),
       },
       {
         role: 'user',

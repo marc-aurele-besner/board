@@ -1,6 +1,7 @@
 // AI insights on the Liquidity Pools tab: a read of the open positions, in range and out, with what to adjust.
 import { h, icon, money, notice } from './ui.js';
 import { ask, parseJson } from './ai.js';
+import { systemPrompt } from './prompts.js';
 import { setupBanner, hasOpenRouter } from './integrations.js';
 
 // key: the positions the read was asked for, so a changed set is flagged instead of shown as current.
@@ -55,19 +56,6 @@ function factsOf(r) {
   };
 }
 
-const PROMPT = `You review Uniswap v3 and v4 concentrated liquidity positions for their owner.
-A position earns fees only while the pool price is inside its range. Out of range it holds a single token and earns nothing.
-A narrow range earns more per dollar but leaves the range sooner; a wide range is safer but earns less.
-For each position, pick one action: keep, watch, recenter, widen, narrow, collect, withdraw.
-- Out of range: say which token it now holds and the move needed to get back in, then say whether to wait, re-center around the current price, or withdraw.
-- In range near an edge: watch, or widen or re-center before it leaves.
-- In range with room: keep, or narrow when the range is very wide and the fee APR is low.
-- collect only when the unclaimed fees are large next to the value.
-When you suggest a new range, give min and max in the position's price unit, around the current price.
-Use only the numbers given. Do not invent prices, volumes or forecasts. This is not financial advice; keep the tone plain and practical.
-Reply with JSON only:
-{"summary": "two or three sentences on the whole set", "positions": [{"id": "the id given", "action": "one of the actions", "headline": "at most 8 words", "reason": "one or two sentences", "range": {"min": number, "max": number} or null}]}`;
-
 // Keeps only what the board can show: known ids and actions, and a range with min below max.
 function cleanReply(data, rows) {
   const known = new Set(rows.map((r) => r.ref));
@@ -96,7 +84,7 @@ async function run(store, rows) {
   store.refresh();
   try {
     const reply = await ask(store, 'task-pools', [
-      { role: 'system', content: PROMPT },
+      { role: 'system', content: systemPrompt(store, 'pools') },
       { role: 'user', content: JSON.stringify({ positions: rows.map(factsOf) }) },
     ]);
     Object.assign(insight, cleanReply(parseJson(reply), rows), { status: 'ok', at: Date.now() });

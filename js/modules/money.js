@@ -1,6 +1,7 @@
 import { h, uid, now, todayISO, money, empty, icon, notice, progress, CURRENCIES } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { ask, parseJson } from '../ai.js';
+import { systemPrompt } from '../prompts.js';
 import { readPdf } from '../pdf-reader.js';
 import { knownRate, fetchDayRate, fetchRateRange, manualRate, setManualRate, convert } from '../fx.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
@@ -295,19 +296,6 @@ const readAsDataUrl = (file) =>
     reader.readAsDataURL(file);
   });
 
-const receiptPrompt = (categories) => [
-  'You read bills, invoices and receipts. Reply with JSON only, in this shape:',
-  '{"vendor": string, "date": "YYYY-MM-DD", "currency": "USD" or "CAD" or the ISO code on the document, "items": [{"date": "YYYY-MM-DD", "description": string, "amount": number, "tax": number, "category": string}], "taxes": [{"name": string, "amount": number}], "total": number}.',
-  'Rules:',
-  '- items: one object per charge line on the document, across every page. Amounts are positive numbers with cents, like 19.99.',
-  '- "amount" is the price before tax. "tax" is the tax printed on that same line (0 if none).',
-  '- Taxes printed only as document totals (for example GST and QST lines under the subtotal) go in "taxes", with their name and amount.',
-  '- Do NOT list subtotals, totals, balances, credits or payments as items. Put the amount due on the document in "total".',
-  '- If a line has no date of its own, use the document date.',
-  `- category: pick from ${categories.join(', ') || 'none yet'} when one fits, otherwise a short new name.`,
-  '- Do not summarize or group lines. Every charge line gets its own item.',
-].join('\n');
-
 async function readReceipt(store, file, categories) {
   receipt.status = 'loading';
   receipt.error = '';
@@ -325,7 +313,7 @@ async function readReceipt(store, file, categories) {
     const content = await documentContent(file, say);
     say('Asking the model to read the charges…');
     const reply = await ask(store, 'task-receipt', [
-      { role: 'system', content: receiptPrompt(categories) },
+      { role: 'system', content: systemPrompt(store, 'receipt', { categories: categories.join(', ') || 'none yet' }) },
       { role: 'user', content },
     ]);
     say('Checking the charges against the total…');
@@ -685,7 +673,7 @@ async function reviewSpending(store, range, periodEntries) {
     spend.text = (await ask(store, 'task-budget', [
       {
         role: 'system',
-        content: `You review a personal budget. Amounts are in ${view.currency}. Given the totals, totals by category and the entries as JSON, reply in plain text: the overall picture in two sentences, then the three things worth a second look, then one practical suggestion. Be concise and do not invent figures.`,
+        content: systemPrompt(store, 'budget', { currency: view.currency }),
       },
       {
         role: 'user',

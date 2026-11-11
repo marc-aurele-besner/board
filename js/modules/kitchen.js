@@ -1,6 +1,7 @@
 import { h, uid, now, todayISO, empty, icon, notice } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { ask, parseJson } from '../ai.js';
+import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { makeTask } from '../capture.js';
 import { toast } from '../toast.js';
@@ -101,7 +102,7 @@ async function runIdeas(store, r) {
     ideas.text = (await ask(store, 'task-recipe', [
       {
         role: 'system',
-        content: 'You help a home cook improve a recipe. Given the recipe and its past attempts as JSON, suggest three concrete variations to test next. For each, give the change and a one-line reason. Plain text, concise.',
+        content: systemPrompt(store, 'recipe-ideas'),
       },
       {
         role: 'user',
@@ -180,7 +181,7 @@ async function importFromText(store, text, url) {
     const reply = await ask(store, 'task-recipe', [
       {
         role: 'system',
-        content: `You extract a recipe from web page text. Reply with JSON only: {"title": string, "tags": string[], "ingredients": string[], "steps": string[], "notes": string, "images": string[]}. Ingredients one per item, with quantities. Steps in order. Tags: a few short words such as cuisine or kind of dish. Notes: a short summary of anything special (serves, time, tips). Images: up to ${MAX_RECIPE_IMAGES} URLs copied exactly from the "Image URLs" list that show the finished dish or the recipe's method; leave out logos, icons, ads and author photos. Leave out page menus, ads and comments.`,
+        content: systemPrompt(store, 'recipe-import', { maxImages: MAX_RECIPE_IMAGES }),
       },
       { role: 'user', content: `${text.slice(0, 40000)}\n\nImage URLs:\n${candidates.join('\n') || '(none)'}` },
     ]);
