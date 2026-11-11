@@ -2,6 +2,9 @@
 // Settings → Blockchains. Built-in nodes stay saved under settings.uniswap.chains, where they were first kept.
 import { CHAINS, chainSettings, savedNode, rpc, nodeUrls } from './uniswap.js';
 
+// The Etherscan API key, set in Settings → Blockchains. Keys saved before then sit under settings.uniswap.
+export const etherscanKey = (settings) => String(settings?.blockchains?.etherscan ?? settings?.uniswap?.etherscan ?? '').trim();
+
 // Block explorers of the built-in chains. A chain without one gets no links.
 export const EXPLORERS = {
   1: 'https://etherscan.io',

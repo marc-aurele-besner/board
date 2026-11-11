@@ -7,7 +7,7 @@ import { positionFields, positionError } from '../position-input.js';
 import { poolsChanged } from '../automations.js';
 import { insightsPanel } from '../pool-insights.js';
 import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey } from '../uniswap.js';
-import { chainById, explorerUrl } from '../chains.js';
+import { chainById, explorerUrl, etherscanKey } from '../chains.js';
 
 const STALE_MS = 10 * 60 * 1000;
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
@@ -738,7 +738,7 @@ const searching = new Set();
 // chain, for the Search further button. A chain already searching is left to finish.
 async function loadHistory(store, only = null) {
   const cfg = store.get('settings').uniswap ?? {};
-  const key = String(cfg.etherscan ?? '').trim();
+  const key = etherscanKey(store.get('settings'));
   const wallets = (cfg.wallets ?? []).filter((w) => isAddress(w.address)).map((w) => w.address.toLowerCase());
   const byChain = new Map();
   for (const r of state.rows.filter((x) => !x.staleAt && x.liq != null && (x.version === 'v3' || x.pool) && (only === null || x.chainId === only))) {
@@ -783,8 +783,8 @@ async function loadHistory(store, only = null) {
 // event search reached its opening, or once Etherscan read every transaction of its wallet. Until then, the
 // share of blocks searched back toward the earliest block it could have opened at (v4's start, or for v3 the
 // chain's first block, so a v3 search that has not found its opening reads low).
-function searchShare(r, d, cfg) {
-  const ether = String(cfg.etherscan ?? '').trim() && chainOf(r.chainId)?.etherscan !== false;
+function searchShare(r, d, key) {
+  const ether = key && chainOf(r.chainId)?.etherscan !== false;
   if (ether && d.etherscan?.[r.chainId]?.[r.wallet]?.caughtUp) return 1;
   const s = d.history?.[r.ref];
   if (!s) return 0;
@@ -798,11 +798,10 @@ function searchShare(r, d, cfg) {
 // The search coverage of every position shown, open and closed: per chain and for all of them.
 function collectCoverage(store) {
   const d = store.get(COLLECTION) ?? {};
-  const cfg = store.get('settings').uniswap ?? {};
   const chains = new Map();
   for (const r of state.rows) {
     const c = chains.get(r.chain) ?? { name: r.chain, chainId: r.chainId, sum: 0, done: 0, total: 0 };
-    const share = searchShare(r, d, cfg);
+    const share = searchShare(r, d, etherscanKey(store.get('settings')));
     c.sum += share;
     c.done += share >= 1 ? 1 : 0;
     c.total += 1;
@@ -2274,11 +2273,10 @@ function detailEarnings(store, r) {
 // The facts: chain, numbers, addresses with explorer links, and how fresh the read is.
 function detailFacts(store, r) {
   const d = store.get(COLLECTION) ?? {};
-  const cfg = store.get('settings').uniswap ?? {};
   const address = (kind, id, label = shortAddress(id)) => h('span', { class: 'row lp-addr' },
     copyable(id, { label }),
     explorerLink(store, r.chainId, kind, id) ? h('a', { href: explorerLink(store, r.chainId, kind, id), target: '_blank', rel: 'noopener', class: 'icon-btn', title: 'Open in the block explorer', 'aria-label': `Open ${label} in the block explorer` }, icon('link')) : null);
-  const share = searchShare(r, d, cfg);
+  const share = searchShare(r, d, etherscanKey(store.get('settings')));
   const facts = [
     ['Chain', h('span', { class: 'chain-chip' }, logo(chainOf(r.chainId)?.logo, r.chain, 'xs'), r.chain)],
     ['Protocol', `Uniswap ${r.version} · ${r.feePct}% fee tier`],

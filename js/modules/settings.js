@@ -590,14 +590,6 @@ function uniswapCard(store) {
     const list = addedListOf(x.version);
     save({ [list]: (cfg[list] ?? []).filter((y) => !(y.chainId === x.chainId && String(y.tokenId) === String(x.tokenId))) });
   };
-  const saveEtherscan = (e) => {
-    e.preventDefault();
-    const key = String(new FormData(e.currentTarget).get('etherscan') ?? '').trim();
-    save({ etherscan: key });
-    uniswapView.ok = true;
-    uniswapView.message = key ? 'Etherscan key saved. Fees collected reads it on the next refresh.' : 'Etherscan key removed.';
-    store.refresh();
-  };
 
   return h('section', { class: 'card panel' },
     h('h2', null, 'Uniswap'),
@@ -619,13 +611,8 @@ function uniswapCard(store) {
         h('div', { class: 'row' }, f.input, f.pickers, h('button', { type: 'submit', class: 'btn-small' }, 'Add position')),
         f.hint);
     })(),
-    h('p', { class: 'muted small' }, 'The chains the LP tab reads, and the node each is read from, are set in ',
+    h('p', { class: 'muted small' }, 'The chains the LP tab reads, the node each is read from, and the Etherscan API key are set in ',
       h('button', { type: 'button', class: 'btn-link-inline', onclick: () => { view.section = 'blockchains'; store.refresh(); } }, 'Blockchains'), '.'),
-    h('form', { class: 'stack', onsubmit: saveEtherscan },
-      h('p', { class: 'muted small' }, 'Etherscan API key (optional, free at etherscan.io). With it, Fees collected also reads each wallet\'s collect transactions from Etherscan, which keeps every block, where public nodes keep only recent ones. Your wallet addresses and the key are sent to Etherscan.'),
-      h('div', { class: 'row' },
-        h('input', { name: 'etherscan', type: 'password', value: cfg.etherscan ?? '', placeholder: 'Etherscan API key', autocomplete: 'off', spellcheck: false, 'aria-label': 'Etherscan API key' }),
-        h('button', { type: 'submit', class: 'btn-small' }, 'Save key'))),
     uniswapView.message ? notice({ tone: uniswapView.ok ? 'info' : 'error', text: uniswapView.message }) : null);
 }
 
