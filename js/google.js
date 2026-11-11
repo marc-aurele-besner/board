@@ -76,6 +76,52 @@ export async function googleFetch(service, name, url, options = {}) {
   return res.json();
 }
 
+// --- Per-account tokens (Gmail, Calendar) ---
+// Each token is also kept in this browser (localStorage) until it expires, so a reload or a new tab stays connected
+// for the hour Google granted instead of asking to connect again. Only read-only scopes are ever stored.
+const TOKEN_PREFIX = 'board:google-token:';
+
+// A Map-like store of address -> { value, expiresAt, scope } for one service ('gmail' or 'gcal').
+export function accountTokens(service) {
+  const key = (address) => `${TOKEN_PREFIX}${service}:${address}`;
+  const memory = new Map();
+  const forget = (address) => {
+    memory.delete(address);
+    try {
+      localStorage.removeItem(key(address));
+    } catch {
+      /* storage blocked */
+    }
+  };
+  return {
+    get(address) {
+      let token = memory.get(address);
+      if (!token) {
+        try {
+          token = JSON.parse(localStorage.getItem(key(address)) ?? 'null') ?? undefined;
+        } catch {
+          token = undefined;
+        }
+        if (token) memory.set(address, token);
+      }
+      if (token && !(token.expiresAt > Date.now())) {
+        forget(address);
+        return undefined;
+      }
+      return token;
+    },
+    set(address, token) {
+      memory.set(address, token);
+      try {
+        localStorage.setItem(key(address), JSON.stringify(token));
+      } catch {
+        /* kept for this page only */
+      }
+    },
+    delete: forget,
+  };
+}
+
 // --- Account pictures ---
 // Gmail and Calendar also ask for the basic profile, only to show each account's Google picture. The picture's URL is
 // kept in this browser (localStorage), so it shows before the account signs in again this session.
