@@ -19,7 +19,8 @@ const MAX_TICK = 887272; // the widest possible range: a "full range" position
 // layout: 'cards' or 'list'. sort: one of the SORTS keys; dir: 1 low to high, -1 high to low.
 // adding: the form to add a position by hand is open.
 // window: the WINDOWS key fee APR is read over.
-const view = { filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, window: '24h' };
+// feeSort, feeDir: the Fees collected table's sort. feeChain, feeToken, feeSource: its filters.
+const view = { filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, window: '24h', feeSort: 'date', feeDir: -1, feeChain: 'all', feeToken: 'all', feeSource: 'all' };
 // Loaded positions and the state of the last load. shallow: chains whose node would not search back to v4's start.
 // stale: chains shown from the last good read because this one failed, with when that read was.
 // pending: chains still being read in the current load.
@@ -1057,11 +1058,90 @@ const COLLECT_TITLE = 'The fees in this collect, without the liquidity it paid o
 const tokenAmounts = (c) => (c.a0 != null ? `${amount(c.a0)} ${c.sym0} · ${amount(c.a1)} ${c.sym1}` : '');
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+const SOURCE_NAMES = { chain: 'From the chain', etherscan: 'From Etherscan', auto: 'Seen by the board', manual: 'Logged by hand' };
+const sourceOf = (c) => (Object.hasOwn(SOURCE_NAMES, c.source) ? c.source : 'auto');
+// The tokens of a collection: its symbols, or the pair's for one logged by hand.
+const tokensOf = (c) => [...new Set(c.sym0 ? [c.sym0, c.sym1] : String(c.pair ?? '').split('/').map((t) => t.trim()).filter(Boolean))];
+
+// What each column of the log sorts by, and the direction it starts in.
+const FEE_SORTS = {
+  date: { value: (c) => c.at, dir: -1 },
+  chain: { value: (c) => c.chain || null, dir: 1 },
+  position: { value: (c) => c.pair || null, dir: 1 },
+  tokens: { value: (c) => (c.a0 != null ? tokensOf(c).join(' / ') : null), dir: 1 },
+  source: { value: (c) => SOURCE_NAMES[sourceOf(c)], dir: 1 },
+  value: { value: (c) => c.usd ?? null, dir: -1 },
+};
+
+// Rows without the value sorted on go last; ties fall back to the newest first.
+function sortCollects(list, key, dir) {
+  const read = FEE_SORTS[key].value;
+  const cmp = (a, b) => (typeof a === 'string' ? a.localeCompare(b) : a < b ? -1 : a > b ? 1 : 0);
+  return list.sort((x, y) => {
+    const a = read(x);
+    const b = read(y);
+    const missing = (a == null ? 1 : 0) - (b == null ? 1 : 0);
+    if (missing) return missing;
+    return (a == null ? 0 : dir * cmp(a, b)) || y.at.localeCompare(x.at);
+  });
+}
+
+function feeSortHead(store, key, label, attrs = {}) {
+  const on = view.feeSort === key;
+  return h('th', { ...attrs, 'aria-sort': on ? (view.feeDir > 0 ? 'ascending' : 'descending') : null },
+    h('button', {
+      type: 'button',
+      class: 'mon-sort',
+      onclick: () => {
+        view.feeDir = on ? -view.feeDir : FEE_SORTS[key].dir;
+        view.feeSort = key;
+        store.refresh();
+      },
+    }, label, h('span', { class: 'sort-mark' }, icon(on && view.feeDir > 0 ? 'chevron-up' : 'chevron-down'))));
+}
+
+// The chain, token and source filters, each read from the log so only choices with collections show.
+function feeFilters(store, inRange) {
+  const count = (pred) => inRange.filter(pred).length;
+  const chip = (active, label, n, onclick, logoSrc = null) => h('button', {
+    type: 'button',
+    class: active ? 'lp-chip chain active' : 'lp-chip chain',
+    'aria-pressed': String(active),
+    onclick,
+  }, logoSrc ? logo(logoSrc, label, 'xs') : null, label, h('span', { class: 'chip-count' }, n));
+  const set = (key, value) => () => {
+    view[key] = value;
+    store.refresh();
+  };
+  const chains = [...new Set(inRange.map((c) => c.chain).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const tokens = [...new Set(inRange.flatMap(tokensOf))].sort((a, b) => a.localeCompare(b));
+  const sources = Object.keys(SOURCE_NAMES).filter((k) => inRange.some((c) => sourceOf(c) === k));
+  const select = (key, label, options) => h('select', {
+    'aria-label': label,
+    onchange: (e) => set(key, e.currentTarget.value)(),
+  }, options.map(([value, text]) => h('option', { value, selected: view[key] === value }, text)));
+  return h('div', { class: 'row lp-filters' },
+    chains.length > 1 ? [
+      chip(view.feeChain === 'all', 'All chains', inRange.length, set('feeChain', 'all')),
+      chains.map((name) => chip(view.feeChain === name, name, count((c) => c.chain === name), set('feeChain', name), CHAINS.find((x) => x.name === name)?.logo)),
+    ] : null,
+    tokens.length > 1 ? select('feeToken', 'Token', [['all', 'All tokens'], ...tokens.map((t) => [t, `${t} (${count((c) => tokensOf(c).includes(t))})`])]) : null,
+    sources.length > 1 ? select('feeSource', 'Source', [['all', 'All sources'], ...sources.map((k) => [k, `${SOURCE_NAMES[k]} (${count((c) => sourceOf(c) === k)})`])]) : null);
+}
+
 function feesView(store) {
   const all = [...collectedOf(store)].sort((a, b) => b.at.localeCompare(a.at));
   const nowMs = Date.now();
   const days = FEE_RANGES[view.feeRange][0];
-  const list = days ? all.filter((c) => Date.parse(c.at) >= nowMs - days * DAY_MS) : all;
+  const inRange = days ? all.filter((c) => Date.parse(c.at) >= nowMs - days * DAY_MS) : all;
+  // A choice with nothing left in the range falls back to all, so the log never sits empty behind a hidden filter.
+  if (!inRange.some((c) => c.chain === view.feeChain)) view.feeChain = 'all';
+  if (!inRange.some((c) => tokensOf(c).includes(view.feeToken))) view.feeToken = 'all';
+  if (!inRange.some((c) => sourceOf(c) === view.feeSource)) view.feeSource = 'all';
+  const list = inRange.filter((c) => (view.feeChain === 'all' || c.chain === view.feeChain)
+    && (view.feeToken === 'all' || tokensOf(c).includes(view.feeToken))
+    && (view.feeSource === 'all' || sourceOf(c) === view.feeSource));
+  const filtered = list.length !== inRange.length;
   const total = list.reduce((s, c) => s + (c.usd ?? 0), 0);
   const unpriced = list.filter((c) => c.usd == null).length;
   // Averages run from the first collection, or the start of the range, to now, so quiet days count too.
@@ -1096,16 +1176,26 @@ function feesView(store) {
 
   const table = h('div', { class: 'card mon-scroll' },
     h('table', { class: 'mon-table' },
-      h('thead', null, h('tr', null, h('th', null, 'Date'), h('th', null, 'Position'), h('th', null, 'Tokens'), h('th', { class: 'num' }, 'Value'), h('th', null, ''))),
-      h('tbody', null, list.map((c) => h('tr', null,
+      h('thead', null, h('tr', null,
+        feeSortHead(store, 'date', 'Date'),
+        feeSortHead(store, 'chain', 'Chain'),
+        feeSortHead(store, 'position', 'Position'),
+        feeSortHead(store, 'tokens', 'Tokens'),
+        feeSortHead(store, 'source', 'Source'),
+        feeSortHead(store, 'value', 'Value', { class: 'num' }),
+        h('th', null, ''))),
+      h('tbody', null, sortCollects([...list], view.feeSort, view.feeDir).map((c) => h('tr', null,
         h('td', { title: c.since ? `Collected between ${new Date(c.since).toLocaleString()} and ${new Date(c.at).toLocaleString()}` : null },
           new Date(c.at).toLocaleDateString(),
-          h('div', { class: 'muted small', title: c.tx ?? null }, { manual: 'Logged by hand', chain: 'From the chain', etherscan: 'From Etherscan' }[c.source] ?? 'Seen by the board'),
           c.level === 1 ? h('div', { class: 'muted small' }, `The ${c.sym0} part could not be read`) : null),
+        h('td', null, c.chain
+          ? h('span', { class: 'chain-chip' }, logo(CHAINS.find((x) => x.name === c.chain)?.logo, c.chain, 'xs'), c.chain)
+          : h('span', { class: 'muted' }, '—')),
         h('td', null,
           c.pair ? h('strong', null, c.pair) : h('span', { class: 'muted' }, '—'),
-          h('div', { class: 'muted small' }, [c.chain, c.tokenId ? `#${c.tokenId}` : '', c.note].filter(Boolean).join(' · '))),
+          h('div', { class: 'muted small' }, [c.tokenId ? `#${c.tokenId}` : '', c.note].filter(Boolean).join(' · '))),
         h('td', { class: 'small' }, tokenAmounts(c)),
+        h('td', { class: 'small muted', title: c.tx ?? null }, SOURCE_NAMES[sourceOf(c)]),
         h('td', { class: 'num', title: { auto: 'The unclaimed fees at the read before the collect. Fees earned after that read are not counted.', chain: COLLECT_TITLE, etherscan: COLLECT_TITLE }[c.source] ?? null }, usdOrDash(c.usd ?? null)),
         h('td', null, h('button', {
           type: 'button',
@@ -1128,6 +1218,7 @@ function feesView(store) {
         },
       }, icon('plus'), 'Log a collection')),
     view.logging ? logForm(store) : null,
+    feeFilters(store, inRange),
     h('div', { class: 'lp-stats' },
       stat('Collected', money(total, 'USD'), plural(list.length, 'collection')),
       stat('Per day', money(perDay, 'USD'), `over ${plural(Math.round(spanDays), 'day')}`),
@@ -1147,7 +1238,7 @@ function feesView(store) {
       ? table
       : h('div', { class: 'lp-empty' },
           h('span', { class: 'float' }, icon('coins')),
-          h('p', null, all.length ? 'No collections in this range.' : 'No collections yet. Collects are read from the chain, and from Etherscan when its key is set in Settings. Between two reads, a drop in unclaimed fees is logged too. You can also log one by hand.')));
+          h('p', null, filtered ? 'No collections match these filters.' : all.length ? 'No collections in this range.' : 'No collections yet. Collects are read from the chain, and from Etherscan when its key is set in Settings. Between two reads, a drop in unclaimed fees is logged too. You can also log one by hand.')));
 }
 
 // The tab's two views: the positions, and the fees collected from them.
@@ -1366,6 +1457,10 @@ export default {
     tab: view.tab === 'fees' ? 'fees' : '',
     range: view.feeRange === 'all' ? '' : view.feeRange,
     by: view.feeGroup === 'month' ? '' : view.feeGroup,
+    fsort: view.feeSort === 'date' && view.feeDir === -1 ? '' : sortName(view.feeSort, view.feeDir),
+    fchain: view.feeChain === 'all' ? '' : view.feeChain,
+    ftoken: view.feeToken === 'all' ? '' : view.feeToken,
+    fsource: view.feeSource === 'all' ? '' : view.feeSource,
   }),
   restore: (p = {}) => {
     view.filter = ['in', 'out', 'closed'].includes(p.filter) ? p.filter : 'all';
@@ -1377,5 +1472,11 @@ export default {
     view.tab = p.tab === 'fees' ? 'fees' : 'positions';
     view.feeRange = Object.hasOwn(FEE_RANGES, p.range) ? p.range : 'all';
     view.feeGroup = ['day', 'week'].includes(p.by) ? p.by : 'month';
+    const [fkey, fdir] = String(p.fsort ?? '').split('-');
+    [view.feeSort, view.feeDir] = Object.hasOwn(FEE_SORTS, fkey) ? [fkey, fdir === 'asc' ? 1 : -1] : ['date', -1];
+    // Chain and token names are checked against the log when it is drawn.
+    view.feeChain = p.fchain || 'all';
+    view.feeToken = p.ftoken || 'all';
+    view.feeSource = Object.hasOwn(SOURCE_NAMES, p.fsource) ? p.fsource : 'all';
   },
 };
