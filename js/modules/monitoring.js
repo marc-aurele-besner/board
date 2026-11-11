@@ -1,4 +1,7 @@
-import { h, money, empty, notice } from '../ui.js';
+import { h, icon, money, empty, notice } from '../ui.js';
+import { openDialog } from '../modal.js';
+import { barChart, legend } from '../chart.js';
+import { LOG_LIMIT } from '../ai.js';
 import { getCatalog } from '../model-picker.js';
 import { fetchActivity } from '../github.js';
 import { setupBanner } from '../integrations.js';
@@ -66,40 +69,6 @@ const hoursLabel = (hours) => {
   if (hours < 48) return `${hours.toFixed(1)} h`;
   return `${(hours / 24).toFixed(1)} days`;
 };
-
-// --- Charts: plain SVG bars, drawn from numbers and our own labels only ---
-
-export function barChart(labels, series) {
-  const W = Math.max(360, labels.length * 24);
-  const H = 160;
-  const PAD = 22;
-  const totals = labels.map((_, i) => series.reduce((s, sr) => s + (sr.values[i] || 0), 0));
-  const max = Math.max(1, ...totals);
-  const slot = W / labels.length;
-  const bw = Math.max(4, slot * 0.6);
-  let body = '';
-  labels.forEach((label, i) => {
-    const x = i * slot + (slot - bw) / 2;
-    let y = H - PAD;
-    for (const sr of series) {
-      const v = sr.values[i] || 0;
-      const height = (v / max) * (H - PAD - 8);
-      y -= height;
-      body += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${height.toFixed(1)}" rx="3" style="fill:${sr.color}"><title>${label} · ${sr.name}: ${v}</title></rect>`;
-    }
-    if (labels.length <= 12 || i % Math.ceil(labels.length / 10) === 0) {
-      body += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="axis">${label}</text>`;
-    }
-  });
-  const wrap = h('div', { class: 'chart' });
-  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Chart">${body}</svg>`;
-  return wrap;
-}
-
-export function legend(series) {
-  return h('div', { class: 'legend' }, series.map((sr) =>
-    h('span', { class: 'legend-item' }, h('span', { class: 'legend-swatch', style: { background: sr.color } }), sr.name)));
-}
 
 export function stat(label, value, hint) {
   return h('div', { class: 'card stat' },
@@ -170,6 +139,85 @@ function groupCalls(entries, keyOf, labelOf) {
     .sort((a, b) => (b.cost ?? 0) - (a.cost ?? 0) || b.calls - a.calls);
 }
 
+// Features send their data as compact JSON; indent it so it can be read.
+function pretty(text) {
+  if (!/^\s*[[{]/.test(text)) return text;
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}
+
+// One message's content as text. Parts that are not text (images, files) show as a short placeholder.
+function contentText(content) {
+  if (typeof content === 'string') return pretty(content);
+  if (!Array.isArray(content)) return JSON.stringify(content, null, 2);
+  return content.map((part) => {
+    if (part?.type === 'text') return part.text;
+    if (part?.type === 'image_url') return `[image: ${part.image_url?.url ?? ''}]`;
+    if (part?.type === 'file') return `[file: ${part.file?.filename ?? ''} ${part.file?.file_data ?? ''}]`;
+    return JSON.stringify(part, null, 2);
+  }).join('\n\n');
+}
+
+async function copyText(btn, text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    btn.lastChild.textContent = 'Copied';
+  } catch {
+    // Clipboard blocked: select the text so Cmd/Ctrl+C still works.
+    getSelection()?.selectAllChildren(btn.closest('.call-block').querySelector('pre'));
+  }
+}
+
+const block = (title, text) =>
+  h('section', { class: 'call-block' },
+    h('header', { class: 'row' },
+      h('strong', { class: 'grow' }, title),
+      h('button', { type: 'button', class: 'btn-small', onclick: (e) => copyText(e.currentTarget, text) }, icon('copy'), h('span', null, 'Copy'))),
+    h('pre', { class: 'call-pre' }, text || '(empty)'));
+
+// The call's details: what was sent, what came back, and how.
+function showCall(e, task) {
+  const c = costOf(e);
+  const m = e.meta ?? {};
+  const facts = [
+    ['Time', new Date(e.at).toLocaleString()],
+    ['Task', task],
+    ['Model asked', e.model],
+    m.servedModel && m.servedModel !== e.model ? ['Model served', m.servedModel] : null,
+    m.provider ? ['Provider', m.provider] : null,
+    m.overridden ? ['Model source', 'Picked by the caller (a Cron step)'] : null,
+    ['Input tokens', String(e.promptTokens)],
+    ['Output tokens', String(e.completionTokens)],
+    m.usage?.completion_tokens_details?.reasoning_tokens ? ['Reasoning tokens', String(m.usage.completion_tokens_details.reasoning_tokens)] : null,
+    m.usage?.prompt_tokens_details?.cached_tokens ? ['Cached tokens', String(m.usage.prompt_tokens_details.cached_tokens)] : null,
+    ['Cost', c ? `${c.estimated ? '≈ ' : ''}${usdPrecise(c.value)}${c.estimated ? ' (estimated from the model price)' : ''}` : '—'],
+    m.ms !== undefined ? ['Duration', m.ms >= 1000 ? `${(m.ms / 1000).toFixed(1)} s` : `${m.ms} ms`] : null,
+    m.status ? ['HTTP status', String(m.status)] : null,
+    m.finishReason ? ['Finish reason', m.finishReason] : null,
+    m.generationId ? ['Generation id', m.generationId] : null,
+  ].filter(Boolean);
+  const messages = Array.isArray(e.input) ? e.input : [];
+  openDialog({
+    title: `${task} · ${new Date(e.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`,
+    wide: true,
+    body: h('div', { class: 'stack call-detail' },
+      e.error ? notice({ text: e.error }) : null,
+      h('dl', { class: 'call-facts' }, facts.flatMap(([k, v]) => [h('dt', null, k), h('dd', null, v)])),
+      'input' in e
+        ? [
+            h('h3', null, `Input · ${messages.length} message${messages.length === 1 ? '' : 's'}`),
+            messages.map((msg, i) => block(`${i + 1}. ${msg.role}`, contentText(msg.content))),
+            h('h3', null, 'Output'),
+            block('Reply', pretty(e.output ?? '')),
+            m.usage ? block('Usage as reported', JSON.stringify(m.usage, null, 2)) : null,
+          ]
+        : notice({ tone: 'info', text: `The full input and output are not kept for this call. They are kept for the latest ${LOG_LIMIT} calls made since call logging was added.` })),
+  });
+}
+
 function aiTab(store, w) {
   const all = store.get(COLLECTION).entries;
   const entries = all.filter((e) => inWindow(parseTime(e.at), w));
@@ -206,7 +254,7 @@ function aiTab(store, w) {
       stat('Tokens', fmtTokens(tokens), 'input + output')),
     h('section', { class: 'card stack' },
       h('h3', null, 'Cost over time'),
-      entries.length ? barChart(w.items.map((b) => b.label), series) : empty('No AI calls in this period.'),
+      entries.length ? barChart(w.items.map((b) => b.label), series, { format: usdPrecise }) : empty('No AI calls in this period.'),
       entries.length ? legend(series) : null),
     h('div', { class: 'split-2' },
       groupTable('By model', groupCalls(entries, (e) => e.model, (e) => e.model), 'Model'),
@@ -214,15 +262,18 @@ function aiTab(store, w) {
     h('section', { class: 'card stack' },
       h('h3', null, 'Recent calls'),
       recent.length
-        ? h('ul', { class: 'mon-recent' }, recent.map((e) => {
+        ? h('ul', { class: 'mon-recent mon-calls' }, recent.map((e) => {
             const c = costOf(e);
             return h('li', null,
-              h('span', { class: 'muted small time' }, e.at.slice(0, 16).replace('T', ' ')),
-              h('span', { class: 'grow' }, taskName(e.task), h('span', { class: 'muted small' }, ` · ${e.model}`)),
-              h('span', { class: 'muted small' }, `${fmtTokens(e.promptTokens + e.completionTokens)} tokens`),
-              h('span', { class: 'num' }, c ? `${c.estimated ? '≈ ' : ''}${usdPrecise(c.value)}` : '—'));
+              h('button', { type: 'button', class: 'call-row', title: 'Show this call', onclick: () => showCall(e, taskName(e.task)) },
+                h('span', { class: 'muted small time' }, e.at.slice(0, 16).replace('T', ' ')),
+                h('span', { class: 'grow' }, taskName(e.task), h('span', { class: 'muted small' }, ` · ${e.model}`)),
+                e.error ? h('span', { class: 'pill tone-failed' }, 'Failed') : null,
+                h('span', { class: 'muted small' }, `${fmtTokens(e.promptTokens + e.completionTokens)} tokens`),
+                h('span', { class: 'num' }, c ? `${c.estimated ? '≈ ' : ''}${usdPrecise(c.value)}` : '—')));
           }))
-        : empty('No AI calls yet. Calls appear here after you use a feature such as Tidy with AI or reading a bill.')));
+        : empty('No AI calls yet. Calls appear here after you use a feature such as Tidy with AI or reading a bill.'),
+      recent.length ? h('p', { class: 'muted small' }, 'Select a call to see what was sent, the full reply and its details.') : null));
 }
 
 // --- GitHub activity ---

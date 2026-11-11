@@ -29,6 +29,9 @@ js/notifications.js   the bell, its drawer, and notify(); saved in notifications
 js/automations.js     site checks and the rules that turn their results into tasks
 js/sitecheck.js       the lookups behind Tools (health, domain, certificate, share tags)
 js/telegram.js        tasks from Telegram messages, read while the board is open
+js/ai.js              the one OpenRouter call; logs each call's input, output and details to usage.json
+js/prompts.js         the system prompt of every AI feature; Settings → Prompts overrides them
+js/chart.js           SVG bar charts with a hover tooltip
 js/pool-insights.js   the Liquidity Pools AI insights: in and out of range positions, and what to adjust
 js/resend.js          the Inbox's Resend reads: email lists per project key, and one email's body
 js/background.js      timers for the above; started once the data folder is open
@@ -50,6 +53,7 @@ tools/resend-relay.js optional local relay for Resend's API (Inbox), which sends
 - **Data changes go through the store.** Call `store.update(collection, mutate)` to save and re-render. Call `store.refresh()` for view-only state such as filters and tabs. Keep view state in a module-level object so it survives re-renders.
 - **Re-rendering replaces the DOM.** Do not re-render on every keystroke in a field the user is typing in, or focus is lost. Update only the affected list, as the kitchen search does.
 - **New tasks.** Create a task with `makeTask()` from `js/capture.js`, so every task has the same fields. A task the board makes by itself sets `auto` and `autoRef`.
+- **AI prompts.** A new AI feature adds its system prompt to `PROMPTS` in `js/prompts.js` and reads it with `systemPrompt(store, id, vars)`, so it can be edited in Settings.
 - **Outside services.** A new lookup that leaves the browser is listed in the README under "Outside services", with what it sends.
 - **Cross-section data.** A section may read another section's collection through the store (todos read projects). Write to the other collection with its own `store.update` call.
 - **Theme.** Use the CSS variables in `:root`. Never hard-code colors in components. Dark values appear in two places (the `prefers-color-scheme` block and `:root[data-theme="dark"]`); update both when you change a token.

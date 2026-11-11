@@ -5,7 +5,8 @@ import { isConnected } from '../google.js';
 import { analyticsReport, searchReport, bingReport } from '../webstats.js';
 import { sitesOf } from '../automations.js';
 import { hostOf } from '../sitecheck.js';
-import { barChart, legend, stat } from './monitoring.js';
+import { barChart, legend } from '../chart.js';
+import { stat } from './monitoring.js';
 
 const ymd = (ms) => {
   const d = new Date(ms);

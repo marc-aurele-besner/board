@@ -1,14 +1,24 @@
-// Plain SVG bar charts. Only numbers and labels from the app go into the markup.
+// Plain SVG bar charts with a tooltip. Only numbers and escaped labels go into the markup.
 import { h } from './ui.js';
 
+const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+
 // Bars per label. With several series the bars stack; `grouped` puts them side by side instead.
-// tip(i): what to show for label i on hover, focus or tap, as a node or text. Without it, bars keep a plain title.
-export function barChart(labels, series, { grouped = false, format = (v) => String(v), tip = null } = {}) {
+// tip(i): what to show for label i on hover, focus or tap, as a node or text. Without it, the tooltip lists each series' value.
+export function barChart(labels, series, { grouped = false, format = (v) => v.toLocaleString(), tip = null } = {}) {
   const W = Math.max(360, labels.length * (grouped ? 30 : 24));
   const H = 180;
   const PAD = 24;
   const totals = labels.map((_, i) => (grouped ? Math.max(0, ...series.map((s) => s.values[i] || 0)) : series.reduce((s, sr) => s + (sr.values[i] || 0), 0)));
-  const max = Math.max(1, ...totals);
+  // Scale to the tallest bar, so small amounts such as a few cents of AI cost still show.
+  const max = Math.max(...totals) || 1;
+  tip ??= (i) => [
+    h('span', { class: 'muted' }, labels[i]),
+    series.map((sr) => h('span', { class: 'tip-row' },
+      h('span', null, h('span', { class: 'legend-swatch', style: { background: sr.color } }), ` ${sr.name}`),
+      h('strong', null, format(sr.values[i] || 0)))),
+    series.length > 1 && !grouped ? h('span', { class: 'tip-row' }, h('span', null, 'Total'), h('strong', null, format(totals[i]))) : null,
+  ];
   const slot = W / labels.length;
   const barWidth = grouped ? Math.max(4, (slot * 0.8) / series.length) : Math.max(4, slot * 0.6);
   let body = '';
@@ -20,19 +30,18 @@ export function barChart(labels, series, { grouped = false, format = (v) => Stri
       const height = (v / max) * (H - PAD - 8);
       const x = grouped ? x0 + k * barWidth : x0;
       const top = grouped ? H - PAD - height : (y -= height);
-      const title = tip ? '' : `<title>${label} · ${sr.name}: ${format(v)}</title>`;
-      body += `<rect class="bar" data-i="${i}" x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${height.toFixed(1)}" rx="3" style="fill:${sr.color}">${title}</rect>`;
+      body += `<rect class="bar" data-i="${i}" x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${height.toFixed(1)}" rx="3" style="fill:${esc(sr.color)}"/>`;
     });
     if (labels.length <= 14 || i % Math.ceil(labels.length / 12) === 0) {
-      body += `<text x="${(i * slot + slot / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="axis">${label}</text>`;
+      body += `<text x="${(i * slot + slot / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="axis">${esc(label)}</text>`;
     }
   });
   body += `<line x1="0" x2="${W}" y1="${H - PAD}" y2="${H - PAD}" class="baseline"/>`;
   // Full-height targets over each slot, so a short bar is as easy to hover as a tall one.
-  if (tip) labels.forEach((_, i) => { body += `<rect class="hit" data-i="${i}" x="${(i * slot).toFixed(1)}" y="0" width="${slot.toFixed(1)}" height="${H - PAD}"/>`; });
-  const wrap = h('div', { class: tip ? 'chart interactive' : 'chart' });
+  labels.forEach((_, i) => { body += `<rect class="hit" data-i="${i}" x="${(i * slot).toFixed(1)}" y="0" width="${slot.toFixed(1)}" height="${H - PAD}"/>`; });
+  const wrap = h('div', { class: 'chart interactive' });
   wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Chart">${body}</svg>`;
-  if (tip) hoverable(wrap, labels.length, totals, tip);
+  hoverable(wrap, labels.length, totals, tip);
   return wrap;
 }
 

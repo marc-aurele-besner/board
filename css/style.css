@@ -1557,3 +1557,28 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .lp-holdings li > :not(:first-child) { text-align: right; }
 .lp-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; }
 .lp-facts dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+
+/* Settings → Prompts */
+.prompt-list { display: flex; flex-direction: column; }
+.prompt-list > li { border-bottom: 1px solid var(--border); }
+.prompt-item summary { display: flex; align-items: center; gap: 10px; padding: 10px 0; cursor: pointer; flex-wrap: wrap; }
+.prompt-item summary .icon { width: 13px; height: 13px; vertical-align: -2px; }
+.prompt-item[open] { padding-bottom: 14px; }
+.prompt-item > p { margin: 0 0 8px; }
+.prompt-text { width: 100%; font-size: 16px; line-height: 1.45; }
+@media (min-width: 700px) { .prompt-text { font-size: 0.88rem; } }
+
+/* Monitoring → AI usage: recent calls open their full log */
+.mon-calls li { padding: 0; }
+.call-row { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: calc(100% + 12px); padding: 7px 6px; margin: 0 -6px; border-radius: 6px; cursor: pointer; }
+.call-row:hover { background: var(--surface-2); }
+.call-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pill.tone-failed { --c: var(--danger); }
+.call-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: 0.9rem; }
+.call-facts dt { color: var(--muted); }
+.call-facts dd { margin: 0; overflow-wrap: anywhere; }
+.call-detail h3 { margin: 8px 0 0; }
+.call-block { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.call-block > header { padding: 6px 10px; background: var(--surface-2); gap: 8px; }
+.call-block .btn-small .icon { width: 13px; height: 13px; }
+.call-pre { margin: 0; padding: 10px; max-height: 420px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 0.85rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
