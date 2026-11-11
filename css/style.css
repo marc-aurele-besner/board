@@ -1184,6 +1184,8 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .label-list li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .label-list .label-name { min-width: 0; flex: 0 1 220px; font-weight: 500; }
 .label-list .pill { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.label-list select { width: auto; max-width: 14rem; }
+.label-list li.is-hidden .pill { opacity: 0.5; }
 .label-add { margin-bottom: 4px; }
 .label-add input { font-size: 16px; }
 

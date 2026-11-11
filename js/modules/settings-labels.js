@@ -1,10 +1,11 @@
-// Settings → Labels: project labels and Money categories in one place. Each can be recoloured, renamed and
-// deleted; deleting one that is in use moves what uses it to another label or category first.
-import { h, icon, empty, notice, uid } from '../ui.js';
+// Settings → Labels: task statuses and categories, project labels and Money categories in one place. Each can be
+// recoloured and renamed; deleting one that is in use moves what uses it to another label or category first.
+import { h, icon, empty, notice, uid, statusOf } from '../ui.js';
 import { editText, pill } from '../inline.js';
 import { openDialog } from '../modal.js';
 import { colorPicker, SWATCHES } from '../color-picker.js';
 import { labelsOf, labelColor } from './projects.js';
+import { taskStatuses, statusLook, ALWAYS_SHOWN } from '../task-labels.js';
 
 const UNCATEGORIZED = 'Uncategorized';
 const sameName = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -12,7 +13,155 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const list = (parts) => (parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0] ?? '');
 
 // The last error per section, shown above its list.
-const labelsView = { projects: '', money: '' };
+const labelsView = { tasks: '', projects: '', money: '' };
+
+// --- Task statuses ---
+
+// Saves one status's override, and drops it once it is back to the defaults so todos.json stays small.
+function setStatus(store, key, patch) {
+  store.update('todos', (d) => {
+    const next = { ...(d.statuses?.[key] ?? {}), ...patch };
+    for (const k of Object.keys(next)) if (!next[k]) delete next[k];
+    d.statuses = { ...(d.statuses ?? {}) };
+    if (Object.keys(next).length) d.statuses[key] = next;
+    else delete d.statuses[key];
+  });
+}
+
+function taskStatusesSection(store) {
+  const items = store.get('todos').items;
+  return h('div', { class: 'svc-section' },
+    h('h3', null, 'Task statuses'),
+    h('p', { class: 'muted small' }, 'The seven statuses are fixed, so search (is:doing), the board and automations keep working, but each can be renamed and recoloured. Clear a name to go back to the original. A hidden status leaves the pickers and the board; tasks already in it keep it.'),
+    h('ul', { class: 'label-list' }, taskStatuses(store).map((st) => {
+      const count = items.filter((i) => statusOf(i) === st.key).length;
+      const fixed = ALWAYS_SHOWN.includes(st.key);
+      return h('li', { class: st.hidden ? 'is-hidden' : '' },
+        colorPicker({ value: st.color, name: st.name, onPick: (color) => setStatus(store, st.key, { color }), onClear: () => setStatus(store, st.key, { color: '' }) }),
+        editText({
+          value: st.name === st.defaultName ? '' : st.name,
+          placeholder: st.defaultName,
+          className: 'label-name',
+          allowEmpty: true,
+          onSave: (name) => setStatus(store, st.key, { name: name.trim() === st.defaultName ? '' : name.trim() }),
+        }),
+        pill(st.name, statusLook(st)),
+        h('span', { class: 'grow' }),
+        h('span', { class: 'muted small' }, plural(count, 'task')),
+        h('label', { class: 'row check small', title: fixed ? 'New tasks start here, or the done button moves them here' : '' },
+          h('input', {
+            type: 'checkbox',
+            checked: !st.hidden,
+            disabled: fixed,
+            'aria-label': `Offer ${st.name} in pickers`,
+            onchange: (e) => setStatus(store, st.key, { hidden: !e.target.checked }),
+          }),
+          'In pickers'));
+    })));
+}
+
+// --- Task categories ---
+
+// Tasks store a category by name, so renaming or deleting one also rewrites the tasks that carry it.
+const taskCategories = (store) => store.get('todos').categories ?? [];
+const taskCategoryUse = (store, name) => store.get('todos').items.filter((i) => i.category && sameName(i.category, name)).length;
+
+// Select values: "all", "project:<id>", "category:<project label id>".
+function parseScope(value) {
+  if (value.startsWith('project:')) return { scope: 'project', projectId: value.slice(8), projectCategoryId: null };
+  if (value.startsWith('category:')) return { scope: 'projectCategory', projectId: null, projectCategoryId: value.slice(9) };
+  return { scope: 'all', projectId: null, projectCategoryId: null };
+}
+function scopeValue(c) {
+  if (c.scope === 'project') return `project:${c.projectId}`;
+  if (c.scope === 'projectCategory') return `category:${c.projectCategoryId}`;
+  return 'all';
+}
+
+function scopeOptions(store) {
+  const { projects, categories } = store.get('projects');
+  return [
+    h('option', { value: 'all' }, 'All projects'),
+    projects.length
+      ? h('optgroup', { label: 'One project' },
+          [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => h('option', { value: `project:${p.id}` }, p.name)))
+      : null,
+    categories.length
+      ? h('optgroup', { label: 'Projects with a label' }, categories.map((c) => h('option', { value: `category:${c.id}` }, c.name)))
+      : null,
+  ];
+}
+
+function addTaskCategory(store, name, scope) {
+  if (taskCategories(store).some((c) => sameName(c.name, name))) {
+    labelsView.tasks = `"${name}" already exists.`;
+    return store.refresh();
+  }
+  labelsView.tasks = '';
+  store.update('todos', (d) => {
+    d.categories = [...(d.categories ?? []), { id: uid(), name, ...parseScope(scope) }];
+  });
+}
+
+function editTaskCategory(store, cat, patch) {
+  const name = patch.name ?? cat.name;
+  if (!name) return;
+  if (taskCategories(store).some((c) => c.id !== cat.id && sameName(c.name, name))) {
+    labelsView.tasks = `"${name}" already exists. Delete "${cat.name}" and move its tasks there to merge them.`;
+    return store.refresh();
+  }
+  labelsView.tasks = '';
+  // `cat` may be the stored object itself, so its old name is read before the patch changes it.
+  const oldName = cat.name;
+  store.update('todos', (d) => {
+    const c = d.categories.find((x) => x.id === cat.id);
+    if (!c) return;
+    Object.assign(c, patch);
+    if (!c.color) delete c.color;
+    if (name !== oldName) for (const i of d.items) if (i.category && sameName(i.category, oldName)) i.category = name;
+  });
+}
+
+function confirmDeleteTaskCategory(store, cat) {
+  const count = taskCategoryUse(store, cat.name);
+  const others = taskCategories(store).filter((c) => c.id !== cat.id).sort((a, b) => a.name.localeCompare(b.name));
+  const target = h('select', { 'aria-label': 'Move to' },
+    h('option', { value: '' }, 'No category'),
+    others.map((c) => h('option', { value: c.name }, c.name)));
+  deleteDialog({
+    title: `Delete “${cat.name}”`,
+    text: count
+      ? `${plural(count, 'task')} ${count === 1 ? 'uses' : 'use'} this category. ${count === 1 ? 'It moves' : 'They move'} to the category you pick.`
+      : 'No task uses this category.',
+    target: count ? target : null,
+    onDelete: () => store.update('todos', (d) => {
+      d.categories = d.categories.filter((c) => c.id !== cat.id);
+      for (const i of d.items) if (i.category && sameName(i.category, cat.name)) i.category = target.value;
+    }),
+  });
+}
+
+function taskCategoriesSection(store) {
+  const cats = [...taskCategories(store)].sort((a, b) => a.name.localeCompare(b.name));
+  const scopeSelect = (attrs) => h('select', attrs, scopeOptions(store));
+  return h('div', { class: 'svc-section' },
+    h('h3', null, 'Task categories'),
+    h('p', { class: 'muted small' }, 'Categories sort tasks within a project (errands, bugs, ideas…). A general one applies to every project; scope one to a single project, or to every project with a label. Renaming one renames it on its tasks.'),
+    labelsView.tasks ? notice({ tone: 'error', text: labelsView.tasks }) : null,
+    cats.length
+      ? h('ul', { class: 'label-list' }, cats.map((c) =>
+          h('li', null,
+            colorPicker({ value: c.color ?? '', name: c.name, onPick: (color) => editTaskCategory(store, c, { color }), onClear: () => editTaskCategory(store, c, { color: '' }) }),
+            editText({ value: c.name, placeholder: 'Name', className: 'label-name', onSave: (name) => editTaskCategory(store, c, { name: name.trim() }) }),
+            pill(c.name, { color: c.color }),
+            scopeSelect({ value: scopeValue(c), 'aria-label': `Where ${c.name} applies`, onchange: (e) => editTaskCategory(store, c, parseScope(e.target.value)) }),
+            h('span', { class: 'grow' }),
+            h('span', { class: 'muted small' }, plural(taskCategoryUse(store, c.name), 'task')),
+            h('button', { type: 'button', class: 'btn-small danger', 'aria-label': `Delete ${c.name}`, onclick: () => confirmDeleteTaskCategory(store, c) }, icon('x'), 'Delete'))))
+      : empty('No task categories yet.'),
+    addForm('New task category, e.g. Errands', (name, form) => addTaskCategory(store, name, form.elements.scope.value),
+      scopeSelect({ name: 'scope', 'aria-label': 'Where it applies' })));
+}
 
 // --- Project labels ---
 
@@ -220,17 +369,19 @@ function moneyCategoriesSection(store) {
 
 // --- Shared pieces ---
 
-function addForm(placeholder, onAdd) {
+// `extra` is any other field the form needs, such as a task category's scope; onAdd gets the form to read it.
+function addForm(placeholder, onAdd, extra = null) {
   return h('form', {
     class: 'row label-add',
     onsubmit: (e) => {
       e.preventDefault();
       const input = e.currentTarget.elements.name;
       const name = input.value.trim();
-      if (name) onAdd(name);
+      if (name) onAdd(name, e.currentTarget);
     },
   },
     h('input', { name: 'name', placeholder, 'aria-label': placeholder, class: 'grow', autocomplete: 'off' }),
+    extra,
     h('button', { class: 'primary', type: 'submit' }, icon('plus'), 'Add'));
 }
 
@@ -260,6 +411,8 @@ export function labelsCard(store) {
       h('div', null,
         h('h2', null, 'Labels'),
         h('p', { class: 'muted' }, 'Every label and category the board uses, by section. Click a name to rename it, the swatch to change its colour. Deleting one that is in use moves what uses it first.'))),
+    taskStatusesSection(store),
+    taskCategoriesSection(store),
     projectLabelsSection(store),
     moneyCategoriesSection(store));
 }
