@@ -787,35 +787,50 @@ function poolTable(rows, store) {
             : null))))));
 }
 
+// The add form is built once and kept while it is open. A load re-renders the section each time a chain lands, and
+// a new form each time would drop what was typed, the focus and the last message.
+let addEl = null;
+
 function openAdd(store) {
   view.adding = true;
-  view.addMessage = '';
+  store.refresh();
+  // Ready to paste: focused, and any text left in it selected so a paste replaces it.
+  addEl?.elements.position.focus();
+  addEl?.elements.position.select();
+}
+
+function closeAdd(store) {
+  view.adding = false;
+  addEl = null;
   store.refresh();
 }
 
-// Adds one position the board did not find: a link copied from the Uniswap app, or a number with its chain and
-// version. It is saved in Settings, where it can be removed, and read straight away.
+// Adds positions the board did not find: a link copied from the Uniswap app, or a number with its chain and
+// version. Each is saved in Settings, where it can be removed, and read straight away. The form stays open and
+// empty after each one, so several can be pasted in a row.
 function addForm(store) {
+  if (addEl) return addEl;
+  const message = h('div', { 'aria-live': 'polite' });
+  const say = (tone, text) => message.replaceChildren(notice({ tone, text }));
+  const f = positionFields({ placeholder: 'https://app.uniswap.org/positions/v3/base/556505 or 556505' });
   const submit = (e) => {
     e.preventDefault();
-    const form = new FormData(e.currentTarget);
-    const entry = parsePosition(form.get('position'), Number(form.get('chain')), String(form.get('version')));
-    if (!entry) {
-      view.addMessage = positionError(form.get('position'));
-      return store.refresh();
-    }
-    const error = addPosition(store, entry);
+    const form = e.currentTarget;
+    const text = form.elements.position.value;
+    const entry = parsePosition(text, Number(form.elements.chain.value), String(form.elements.version.value));
+    const error = entry ? addPosition(store, entry) : positionError(text);
     if (error) {
-      view.addMessage = error;
-      return store.refresh();
+      say('error', error);
+      return form.elements.position.focus();
     }
-    view.adding = false;
-    view.addMessage = '';
-    store.refresh();
-    load(store);
+    const chain = chainOf(entry.chainId)?.name ?? `Chain ${entry.chainId}`;
+    say('ok', `Added ${chain} ${entry.version} #${entry.tokenId}. It shows here once it is read.`);
+    form.elements.position.value = '';
+    form.elements.position.dispatchEvent(new Event('input'));
+    form.elements.position.focus();
+    load(store, { again: true });
   };
-  const f = positionFields({ placeholder: 'https://app.uniswap.org/positions/v3/base/556505 or 556505', autofocus: true });
-  return h('form', { class: 'card panel stack lp-add', onsubmit: submit },
+  addEl = h('form', { class: 'card panel stack lp-add', onsubmit: submit },
     h('h3', null, 'Add a position'),
     h('p', { class: 'muted small' }, 'For a position the board does not find: a v3 position held by an address not in your wallets, or a v4 position older than the node keeps. Paste its link from app.uniswap.org and the chain and version are read from it. A plain number needs both picked.'),
     f.input,
@@ -823,8 +838,23 @@ function addForm(store) {
     h('div', { class: 'row' },
       f.pickers,
       h('button', { type: 'submit', class: 'btn-small' }, 'Add'),
-      h('button', { type: 'button', class: 'btn-small', onclick: () => { view.adding = false; store.refresh(); } }, 'Cancel')),
-    view.addMessage ? notice({ text: view.addMessage }) : null);
+      h('button', { type: 'button', class: 'btn-small', onclick: () => closeAdd(store) }, 'Done')),
+    message);
+  return addEl;
+}
+
+// A re-render moves the kept add form into the new page, which takes the focus away from it. This puts the focus
+// and the caret back once the new page is on screen.
+function keepAddFocus() {
+  const el = document.activeElement;
+  if (!addEl || !el || !addEl.contains(el)) return;
+  const caret = el.tagName === 'INPUT' ? [el.selectionStart, el.selectionEnd] : null;
+  queueMicrotask(() => {
+    // Something else may have taken the focus in between, such as the form after an add.
+    if (!el.isConnected || (document.activeElement && document.activeElement !== document.body)) return;
+    el.focus({ preventScroll: true });
+    if (caret) el.setSelectionRange(...caret);
+  });
 }
 
 // ---- Fees collected: the log of collections, its averages and a chart over time ----
@@ -1029,6 +1059,7 @@ function tabs(store) {
 }
 
 function draw(root, store) {
+  keepAddFocus();
   const cfg = store.get('settings').uniswap ?? {};
   const wallets = (cfg.wallets ?? []).filter((w) => isAddress(w.address));
   if (!wallets.length && !addedPositions(cfg).length) {
