@@ -974,6 +974,8 @@ button.danger { color: var(--danger); }
 .brand-mark .g-red { fill: var(--google-red); }
 .brand-mark .g-yellow { fill: var(--google-yellow); }
 .brand-mark .g-green { fill: var(--google-green); }
+.brand-mark .r-tile { fill: var(--text); }
+.brand-mark .r-letter { fill: none; stroke: var(--surface); stroke-width: 2.2; }
 .list-scroll { max-height: 60vh; overflow: auto; }
 .links li { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 .links a { color: var(--accent); word-break: break-all; }
