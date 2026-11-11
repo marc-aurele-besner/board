@@ -1202,8 +1202,8 @@ function feeRangeBounds(key, nowMs) {
   return [days ? nowMs - days * DAY_MS : null, null];
 }
 const FEE_GROUPS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month']];
-// Days by default; a year of days is too many bars, so the 1 year range starts on months.
-const defaultFeeGroup = (range) => (range === '365' ? 'month' : 'day');
+// Days by default; a year or more of days is too many bars, so 1 year and All time start on months.
+const defaultFeeGroup = (range) => (range === '365' || range === 'all' ? 'month' : 'day');
 
 // Local calendar keys, so a collect late in the evening counts on its own day.
 const localDay = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
