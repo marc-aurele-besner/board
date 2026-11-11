@@ -205,7 +205,7 @@ const SORTS = {
   move: { value: (r) => r.move, dir: -1 },
 };
 // The choices in the Sort menu. Sorting by a table column that is not here adds it to the menu as it is.
-const PRESETS = [['value', -1, 'Value'], ['fees', -1, 'Unclaimed fees'], ['apr', -1, 'Fee APR'], ['number', -1, 'Newest'], ['number', 1, 'Oldest']];
+const PRESETS = [['value', -1, 'Value'], ['fees', -1, 'Unclaimed fees'], ['apr', -1, 'Fee APR'], ['move', -1, 'Movement'], ['number', -1, 'Newest'], ['number', 1, 'Oldest']];
 const SORT_NAMES = { pool: 'Pool', chain: 'Chain', range: 'Price range', split: 'Distribution', move: 'Movement', value: 'Value', fees: 'Unclaimed fees', apr: 'Fee APR', number: 'Number' };
 
 // Rows without the value sorted on go last, whatever the direction. Ties fall back to the newest first.
@@ -2222,7 +2222,10 @@ function draw(root, store) {
       h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Unclaimed fees'), feesEl),
       h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Positions'), h('strong', null, `${byChain.length} · ${inRange} in range`))),
 
-    firstRead ? null : insightsPanel(store, byChain.map(withApr)),
+    firstRead ? null : insightsPanel(store, byChain.map(withApr), {
+      sideOf: (r) => sideOf(r, isFlipped(store, r)),
+      isFlipped: (pair) => isFlipped(store, pair),
+    }),
 
     chainsWithRows.length > 1
       ? h('div', { class: 'row lp-filters lp-chains' },
@@ -2278,7 +2281,7 @@ export default {
   short: 'Pools',
   icon: 'droplet',
   collection: COLLECTION,
-  defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [], history: {}, hidden: [], etherscan: {}, flip: {} },
+  defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [], history: {}, hidden: [], etherscan: {}, flip: {}, insights: [] },
   render: draw,
   serialize: () => ({
     filter: view.filter === 'all' ? '' : view.filter,
