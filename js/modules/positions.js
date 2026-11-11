@@ -17,9 +17,9 @@ const MAX_TICK = 887272; // the widest possible range: a "full range" position
 
 // View state: which rows are shown.
 // layout: 'cards' or 'list'. sort: one of the SORTS keys; dir: 1 low to high, -1 high to low.
-// adding: the form to add a position by hand is open; addMessage is its last error.
+// adding: the form to add a position by hand is open.
 // window: the WINDOWS key fee APR is read over.
-const view = { filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, addMessage: '', window: '24h' };
+const view = { filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, window: '24h' };
 // Loaded positions and the state of the last load. shallow: chains whose node would not search back to v4's start.
 // stale: chains shown from the last good read because this one failed, with when that read was.
 // pending: chains still being read in the current load.
@@ -29,6 +29,7 @@ const state = { status: 'idle', rows: [], error: '', warning: '', at: 0, shallow
 const COLLECTION = 'pools';
 const tokenInfo = new Map(); // "chainId:token address" -> { symbol, decimals }
 let loading = false;
+let readAgain = false; // a position was added during a load, so read once more when it ends
 const aprs = new Map(); // "window|ref" -> { apr, secs }: fee APR from the swaps in that window, and the time covered
 let aprBusy = ''; // the window whose swaps are being read
 let aprAgain = false; // read again when done: the rows changed meanwhile
@@ -331,8 +332,12 @@ export function outOfRange(store) {
 
 // Reads every enabled chain in parallel, and v3 and v4 side by side on each. Each part shows as soon as it is read,
 // replacing what was on screen for it; until then the earlier rows stay. A part that fails shows its last good read.
-async function load(store) {
-  if (loading) return;
+// again: a load already running reads once more when it ends, as it took the settings before the change.
+async function load(store, { again = false } = {}) {
+  if (loading) {
+    if (again) readAgain = true;
+    return;
+  }
   loading = true;
   state.status = 'loading';
   state.error = '';
@@ -421,6 +426,10 @@ async function load(store) {
     loading = false;
     state.pending = [];
     store.refresh();
+  }
+  if (readAgain) {
+    readAgain = false;
+    return load(store);
   }
   if (state.status === 'ok') {
     loadAprs(store);
