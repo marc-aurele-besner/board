@@ -31,7 +31,7 @@ function savedRows(store, chains, wallets) {
 }
 
 // Reads every chain with Aave at once; each lands as soon as it is read and is saved as its last good read.
-async function load(store) {
+export async function load(store) {
   if (loading) return;
   loading = true;
   const cfg = store.get('settings').uniswap ?? {};
@@ -117,6 +117,45 @@ function accountCard(r, ui, i) {
       assetList('Borrowed', borrowed, ui, (a) => a.borrowed, (a) => a.borrowedUsd, (a) => a.borrowApy)));
 }
 
+// The accounts to show, read again when stale; until the first read lands, what the last one saved.
+function currentRows(store, chains, wallets) {
+  if (state.status === 'idle' && !state.rows.length) state.rows = savedRows(store, chains, wallets);
+  if (state.status === 'idle' || (state.status === 'ok' && Date.now() - state.at > STALE_MS)) setTimeout(() => load(store), 0);
+  const names = new Map(wallets.map((w) => [w.address.toLowerCase(), w.label || shortAddress(w.address)]));
+  const chainIds = new Set(chains.map((c) => c.id));
+  return state.rows
+    .filter((r) => chainIds.has(r.chainId) && names.has(r.wallet))
+    .map((r) => {
+      const chain = CHAINS.find((c) => c.id === r.chainId);
+      return { ...r, chainName: chain?.name ?? String(r.chainId), chainLogo: chain?.logo, walletName: names.get(r.wallet) };
+    });
+}
+
+// For DeFi → Summary: every Aave account, unfiltered, riskiest first. null when no wallet or chain has Aave.
+export function lendingSummary(store) {
+  const wallets = walletsOf(store);
+  const chains = aaveChains(store.get('settings').uniswap ?? {});
+  if (!wallets.length || !chains.length) return null;
+  const all = currentRows(store, chains, wallets)
+    .sort((a, b) => (a.health ?? Infinity) - (b.health ?? Infinity) || b.collateral - a.collateral);
+  const supplied = all.reduce((s, r) => s + r.collateral, 0);
+  const borrowed = all.reduce((s, r) => s + r.debt, 0);
+  return {
+    supplied,
+    borrowed,
+    net: supplied - borrowed,
+    netApy: netApy(all.flatMap((r) => r.assets)),
+    accounts: all,
+    lowest: all.find((r) => r.health != null) ?? null,
+    atRisk: all.filter((r) => r.health != null && r.health < RISK),
+    reading: state.status === 'loading',
+    firstRead: state.status === 'loading' && !all.length,
+    failed: state.failed.map((f) => f.name),
+  };
+}
+
+export { healthTone, healthText, RISK };
+
 // The list layout: one row per account, in the same order as the cards.
 function accountTable(rows, ui) {
   const symbols = (r, key) => r.assets.filter((a) => a[key] > 0).map((a) => a.symbol).join(', ');
@@ -165,17 +204,8 @@ export function lendingTab(store, ui) {
   if (!wallets.length) {
     return { subtitle: 'Aave lending and borrowing positions of your wallets.', actions: [], body: setupBanner('wallets', 'Add a wallet address in Settings to see its Aave positions.') };
   }
-  if (state.status === 'idle' && !state.rows.length) state.rows = savedRows(store, chains, wallets);
-  if (state.status === 'idle' || (state.status === 'ok' && Date.now() - state.at > STALE_MS)) setTimeout(() => load(store), 0);
-
+  const all = currentRows(store, chains, wallets);
   const names = new Map(wallets.map((w) => [w.address.toLowerCase(), w.label || shortAddress(w.address)]));
-  const chainIds = new Set(chains.map((c) => c.id));
-  const all = state.rows
-    .filter((r) => chainIds.has(r.chainId) && names.has(r.wallet))
-    .map((r) => {
-      const chain = CHAINS.find((c) => c.id === r.chainId);
-      return { ...r, chainName: chain?.name ?? String(r.chainId), chainLogo: chain?.logo, walletName: names.get(r.wallet) };
-    });
   if (lendingView.chain !== 'all' && !all.some((r) => r.chainId === lendingView.chain)) lendingView.chain = 'all';
   if (lendingView.wallet !== 'all' && !names.has(lendingView.wallet)) lendingView.wallet = 'all';
   const inWallet = lendingView.wallet === 'all' ? all : all.filter((r) => r.wallet === lendingView.wallet);
