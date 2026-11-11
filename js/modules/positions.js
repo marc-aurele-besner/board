@@ -1191,7 +1191,7 @@ function keepAddFocus() {
 
 const DAY_MS = 86400000;
 const FEE_RANGES = { all: [0, 'All time'], 7: [7, '7 days'], 30: [30, '30 days'], 90: [90, '90 days'], 365: [365, '1 year'], month: [0, 'This month'], lastmonth: [0, 'Last month'] };
-const FEE_RANGE_ORDER = ['all', '7', '30', '90', '365', 'month', 'lastmonth'];
+const FEE_RANGE_ORDER = ['7', '30', '90', '365', 'month', 'lastmonth', 'all'];
 // A range's start and its end (excluded) in ms; null for no bound. Months are calendar months in local time.
 function feeRangeBounds(key, nowMs) {
   const now = new Date(nowMs);
@@ -2292,7 +2292,7 @@ export default {
     sort: view.sort === 'value' && view.dir === -1 ? '' : sortName(view.sort, view.dir),
     apr: view.window === '24h' ? '' : view.window,
     tab: view.tab === 'fees' ? 'fees' : '',
-    range: view.feeRange === 'all' ? '' : view.feeRange,
+    range: view.feeRange === '7' ? '' : view.feeRange,
     by: view.feeGroup === defaultFeeGroup(view.feeRange) ? '' : view.feeGroup,
     fsort: view.feeSort === 'date' && view.feeDir === -1 ? '' : sortName(view.feeSort, view.feeDir),
     fchain: view.feeChain === 'all' ? '' : view.feeChain,
@@ -2309,7 +2309,7 @@ export default {
     const id = Number(p.chain);
     view.chain = CHAINS.some((c) => c.id === id) ? id : 'all';
     view.tab = p.tab === 'fees' ? 'fees' : 'positions';
-    view.feeRange = Object.hasOwn(FEE_RANGES, p.range) ? p.range : 'all';
+    view.feeRange = Object.hasOwn(FEE_RANGES, p.range) ? p.range : '7';
     view.feeGroup = FEE_GROUPS.some(([k]) => k === p.by) ? p.by : defaultFeeGroup(view.feeRange);
     const [fkey, fdir] = String(p.fsort ?? '').split('-');
     [view.feeSort, view.feeDir] = Object.hasOwn(FEE_SORTS, fkey) ? [fkey, fdir === 'asc' ? 1 : -1] : ['date', -1];
