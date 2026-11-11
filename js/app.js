@@ -12,6 +12,7 @@ import { startBackground } from './background.js';
 import { JUMPS, openShortcuts } from './shortcuts.js';
 import { sampleFolder } from './sample.js';
 import { toast } from './toast.js';
+import { markDrawn, snapshot, restore, holding, watchCommits } from './keep-fields.js';
 
 const app = document.getElementById('app');
 const STATUS_LABELS = { saved: 'Saved', saving: 'Saving…', error: 'Save failed' };
@@ -23,6 +24,7 @@ let sample = false; // exploring with sample data, kept in memory only
 let lastSection = null;
 let pendingHandle = null; // remembered folder that still needs permission
 let connectError = '';
+let held = false; // a rebuild is waiting for the user to leave the field they are typing in
 
 const THEME_KEY = 'board:theme';
 
@@ -63,12 +65,17 @@ function syncUrl(mod) {
   if (location.hash !== hash) history.replaceState(null, '', hash);
 }
 
-function render() {
+// `user` is false for a render no click or key asked for, which must not move the focus.
+function render({ user = true } = {}) {
   if (!store) return renderConnect();
   const mod = currentModule();
   // An address that names no section opens Home. Say so once; syncUrl below then corrects the address.
   const asked = readRoute().id;
   if (asked !== mod.id) toast(`There is no page at “${asked}”. Showing ${mod.title}.`);
+  held = false;
+  const before = app.querySelector('main.view');
+  // Unsubmitted fields are carried over within a section; a new section starts clean.
+  const kept = before && mod.id === lastSection ? snapshot(before) : [];
   const main = h('main', { class: 'view' });
   // Only a change of section plays the entrance animation; edits within a section re-render silently.
   if (mod.id !== lastSection) {
@@ -115,7 +122,22 @@ function render() {
       : null,
     main,
   ].filter(Boolean));
-  main.querySelector('[data-autofocus]')?.focus();
+  markDrawn(main);
+  if (user) main.querySelector('[data-autofocus]')?.focus();
+  restore(main, kept);
+}
+
+// Saves from timers and loads wait while the user is typing in a changed field; the user's own saves render at once.
+function onData({ user }) {
+  if (!user && holding(app.querySelector('main.view'))) {
+    held = true;
+    return;
+  }
+  render({ user });
+}
+
+function settle() {
+  if (held && store && !holding(app.querySelector('main.view'))) render({ user: false });
 }
 
 function updateStatus(status) {
@@ -170,7 +192,7 @@ async function open(handle) {
   migrateLegacyProjects(store);
   migrateProjectShape(store);
   ensureTasks(store);
-  store.subscribe(render);
+  store.subscribe(onData);
   store.onStatus(updateStatus);
   connectError = '';
   currentModule().restore?.(readRoute().params);
@@ -240,6 +262,7 @@ async function boot() {
   });
   window.addEventListener('beforeunload', () => store?.flush());
   document.addEventListener('keydown', onShortcut);
+  watchCommits(app, settle);
   // Settings › Data folder asks for another folder.
   // The page reloads on the new folder, so timers and caches that belong to the old one are dropped with it.
   window.addEventListener('board:pick-folder', async () => {
