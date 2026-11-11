@@ -743,6 +743,23 @@ select { width: auto; min-width: 0; }
 }
 .chain-row input:not([type]) { flex: 1; min-width: 0; }
 
+/* Settings → Blockchains: one row per chain, its node and its tools; the test result wraps under it. */
+.chain-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.chain-item { display: grid; grid-template-columns: 13rem minmax(0, 1fr) auto; align-items: center; gap: 6px 12px; padding: 8px 12px; }
+.chain-item:nth-child(even) { background: var(--surface-2); }
+.chain-who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.chain-label { display: flex; flex-direction: column; min-width: 0; }
+.chain-label strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chain-tools { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 10rem; }
+.chain-test { grid-column: 2 / -1; }
+.chain-test.ok { color: var(--income); }
+.chain-test.bad { color: var(--danger); }
+@media (max-width: 720px) {
+  .chain-item { grid-template-columns: minmax(0, 1fr) auto; }
+  .chain-item > input { grid-column: 1 / -1; grid-row: 2; }
+  .chain-test { grid-column: 1 / -1; }
+}
+
 button {
   padding: 5px 10px;
   background: var(--surface-2);

@@ -4,11 +4,12 @@ import { manualRate, setManualRate, clearCachedRates, PROVIDERS, providerId, set
 import { configure, checkGithubToken, orgAvatar } from '../github.js';
 import { editText } from '../inline.js';
 import { modelChip } from '../model-picker.js';
-import { isAddress, CHAINS, chainSettings, savedNode, parsePosition, addPosition, addedPositions, addedListOf, tokenLogos } from '../uniswap.js';
+import { isAddress, CHAINS, parsePosition, addPosition, addedPositions, addedListOf, tokenLogos } from '../uniswap.js';
 import { positionFields, positionError } from '../position-input.js';
 import { calendarAccountsCard, telegramCard, analyticsCard, searchCard, resendCard, gmailCard, notificationsCard, automationsCard, dataCard } from './settings-more.js';
 import { promptsCard } from './settings-prompts.js';
 import { labelsCard } from './settings-labels.js';
+import { chainsCard } from './settings-chains.js';
 import { logo } from './positions.js';
 
 const COLLECTION = 'settings';
@@ -48,6 +49,7 @@ const SECTION_GROUPS = [
       ['openrouter', 'OpenRouter', 'key'],
       ['google', 'Google Calendar', 'calendar'],
       ['uniswap', 'Uniswap', 'wallet'],
+      ['blockchains', 'Blockchains', 'cube'],
       ['telegram', 'Telegram', 'send'],
       ['analytics', 'Google Analytics', 'activity'],
       ['search', 'Search consoles', 'search'],
@@ -586,28 +588,6 @@ function uniswapCard(store) {
     const list = addedListOf(x.version);
     save({ [list]: (cfg[list] ?? []).filter((y) => !(y.chainId === x.chainId && String(y.tokenId) === String(x.tokenId))) });
   };
-  const saveChains = (e) => {
-    e.preventDefault();
-    const form = new FormData(e.currentTarget);
-    const chains = {};
-    const bad = [];
-    for (const chain of CHAINS) {
-      const node = String(form.get(`node-${chain.id}`) ?? '').trim();
-      if (node && !/^https?:\/\//i.test(node)) bad.push(chain.name);
-      chains[chain.id] = { enabled: form.get(`on-${chain.id}`) === 'on', node };
-    }
-    if (bad.length) {
-      uniswapView.ok = false;
-      uniswapView.message = `Node addresses start with https://. Check: ${bad.join(', ')}.`;
-    } else {
-      // node: '' drops the Ethereum-only field kept from before the chains list.
-      save({ chains, node: '' });
-      uniswapView.ok = true;
-      uniswapView.message = 'Chains saved.';
-    }
-    store.refresh();
-  };
-
   const saveEtherscan = (e) => {
     e.preventDefault();
     const key = String(new FormData(e.currentTarget).get('etherscan') ?? '').trim();
@@ -637,17 +617,8 @@ function uniswapCard(store) {
         h('div', { class: 'row' }, f.input, f.pickers, h('button', { type: 'submit', class: 'btn-small' }, 'Add position')),
         f.hint);
     })(),
-    h('form', { class: 'stack', onsubmit: saveChains },
-      h('p', { class: 'muted small' }, 'Chains: the networks the LP tab reads. A node is the JSON-RPC address to read from. Leave it empty to use the public node shown as the placeholder.'),
-      CHAINS.map((chain) => {
-        const s = chainSettings(cfg, chain);
-        return h('div', { class: 'row chain-row' },
-          h('label', { class: 'row chain-name' },
-            h('input', { type: 'checkbox', name: `on-${chain.id}`, checked: s.enabled }),
-            h('span', null, chain.name)),
-          h('input', { name: `node-${chain.id}`, value: savedNode(cfg, chain), placeholder: chain.rpc, spellcheck: false, 'aria-label': `${chain.name} node URL` }));
-      }),
-      h('button', { type: 'submit', class: 'btn-small' }, 'Save chains')),
+    h('p', { class: 'muted small' }, 'The chains the LP tab reads, and the node each is read from, are set in ',
+      h('button', { type: 'button', class: 'btn-link-inline', onclick: () => { view.section = 'blockchains'; store.refresh(); } }, 'Blockchains'), '.'),
     h('form', { class: 'stack', onsubmit: saveEtherscan },
       h('p', { class: 'muted small' }, 'Etherscan API key (optional, free at etherscan.io). With it, Fees collected also reads each wallet\'s collect transactions from Etherscan, which keeps every block, where public nodes keep only recent ones. Your wallet addresses and the key are sent to Etherscan.'),
       h('div', { class: 'row' },
@@ -911,6 +882,7 @@ function draw(root, store) {
         : view.section === 'exchange' ? exchangeCard(store)
         : view.section === 'appearance' ? appearanceCard(store)
         : view.section === 'uniswap' ? uniswapCard(store)
+        : view.section === 'blockchains' ? chainsCard(store)
         : view.section === 'categories' ? labelsCard(store)
         : view.section === 'telegram' ? telegramCard(store)
         : view.section === 'analytics' ? analyticsCard(store)
@@ -952,7 +924,7 @@ export default {
   icon: 'settings',
   hidden: true, // opened from the gear in the top bar
   collection: COLLECTION,
-  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '', relay: '' }, resend: { relay: '', keys: {} }, gmail: { accounts: [] }, gcal: { accounts: [] }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) }, prompts: {} },
+  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, blockchains: { custom: [] }, telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '', relay: '' }, resend: { relay: '', keys: {} }, gmail: { accounts: [] }, gcal: { accounts: [] }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) }, prompts: {} },
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),
   restore: (p = {}) => {
