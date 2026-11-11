@@ -261,3 +261,77 @@ export function pickMulti({ key, values = [], options, anyLabel = 'Any', ariaLab
   }, h('span', { class: 'pick-multi-text' }, text), icon('chevron-down'));
   return button;
 }
+
+// A filter button that opens a searchable list laid out as a tree, with a box to tick on each row: an account with its
+// calendars, say. getOptions() is called on every paint, so ticks read the saved state after each change.
+// options: [{ value, label, depth, checked, mixed?, lead?: () => Node }]. A search keeps the parents of what matches,
+// and the children of a parent that matches.
+export function pickTree({ key, label, title, ariaLabel, getOptions, onToggle }) {
+  const button = h('button', {
+    type: 'button',
+    class: 'pick-multi pick-tree-btn',
+    title: title ?? label,
+    'aria-label': ariaLabel,
+    'aria-haspopup': 'listbox',
+    'data-pick-key': key,
+    onclick: (e) => {
+      e.stopPropagation();
+      if (openPicker && openPicker.key === key) return closePicker();
+      showTree(button, { key, getOptions, onToggle });
+    },
+  }, h('span', { class: 'pick-multi-text' }, label), icon('chevron-down'));
+  return button;
+}
+
+function showTree(anchor, { key, getOptions, onToggle }) {
+  closePicker();
+  const search = h('input', { class: 'pop-search', placeholder: 'Search…', autocomplete: 'off', 'aria-label': 'Search options' });
+  const list = h('div', { class: 'pop-list pick-tree', role: 'listbox', 'aria-multiselectable': 'true' });
+  const paint = () => {
+    const q = search.value.trim().toLowerCase();
+    const options = getOptions();
+    const hit = (o) => o.label.toLowerCase().includes(q);
+    const keep = new Set();
+    const trail = []; // index of the current row's parents, by depth
+    let under = Infinity; // depth of the nearest parent that matched
+    options.forEach((o, i) => {
+      trail.length = o.depth;
+      trail[o.depth] = i;
+      if (o.depth <= under) under = Infinity;
+      if (!q || o.depth > under || hit(o)) {
+        for (const j of trail) keep.add(j);
+        if (q && hit(o)) under = Math.min(under, o.depth);
+      }
+    });
+    const rows = options.filter((_, i) => keep.has(i)).map((o) =>
+      h('button', {
+        type: 'button',
+        class: `pop-item pick-tree-item${o.checked ? ' selected' : ''}`,
+        role: 'option',
+        'aria-selected': String(o.checked),
+        style: { '--depth': o.depth },
+        onclick: () => {
+          onToggle(o.value, !o.checked);
+          // The page redraws on the next frame; paint again from the saved state and keep the focus here.
+          requestAnimationFrame(() => {
+            if (openPicker?.el !== el) return;
+            paint();
+            search.focus();
+          });
+        },
+      },
+        h('span', { class: `pick-tree-box${o.checked ? ' on' : o.mixed ? ' mixed' : ''}`, 'aria-hidden': 'true' }, o.checked ? icon('check') : null),
+        o.lead ? o.lead() : null,
+        h('span', { class: 'pick-tree-label' }, o.label)));
+    list.replaceChildren(...(rows.length ? rows : [h('p', { class: 'pop-empty' }, 'Nothing to pick')]));
+  };
+  search.addEventListener('input', paint);
+  const el = h('div', { class: 'popover', role: 'dialog', 'aria-label': 'Choose options' }, search, list);
+  document.body.append(el);
+  openPicker = { el, anchor, key };
+  paint();
+  positionPopover(el, anchor);
+  search.focus();
+  document.addEventListener('pointerdown', onOutside, true);
+  document.addEventListener('keydown', onKey, true);
+}
