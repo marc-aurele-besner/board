@@ -31,7 +31,7 @@ function savedRows(store, chains, wallets) {
 
 // Reads every chosen chain at once. Each chain lands on screen as soon as it is read, and is saved as its last
 // good read; a chain that fails keeps showing that read, marked.
-async function load(store) {
+export async function load(store) {
   if (loading) return;
   loading = true;
   const cfg = store.get('settings').uniswap ?? {};
@@ -202,6 +202,44 @@ function balanceTable(store, rows, ui, multiWallet) {
         h('td', null, h('button', { type: 'button', class: 'icon-btn', title: 'Hide this token', 'aria-label': `Hide ${r.symbol} on ${r.chainName}`, onclick: () => hideToken(store, r.ref) }, icon('x'))))))));
 }
 
+// The balances to show, read again when stale; until the first read lands, what the last one saved.
+function currentRows(store, chains, wallets) {
+  if (state.status === 'idle' && !state.rows.length) state.rows = savedRows(store, chains, wallets);
+  if (state.status === 'idle' || (state.status === 'ok' && Date.now() - state.at > STALE_MS)) setTimeout(() => load(store), 0);
+  const names = new Map(wallets.map((w) => [w.address.toLowerCase(), w.label || shortAddress(w.address)]));
+  const chainIds = new Set(chains.map((c) => c.id));
+  const hidden = hiddenOf(store);
+  return state.rows
+    .filter((r) => chainIds.has(r.chainId) && names.has(r.wallet) && !hidden.has(r.ref))
+    .map((r) => {
+      const chain = CHAINS.find((c) => c.id === r.chainId);
+      return { ...r, chainName: chain?.name ?? String(r.chainId), chainLogo: chain?.logo, walletName: names.get(r.wallet) };
+    });
+}
+
+// For DeFi → Summary: every wallet on every chain, unfiltered. null when no wallet is set.
+export function walletsSummary(store) {
+  const wallets = walletsOf(store);
+  if (!wallets.length) return null;
+  const all = currentRows(store, enabledChains(store.get('settings').uniswap ?? {}), wallets);
+  const tokens = new Map();
+  for (const r of all) {
+    if (!(r.value > 0)) continue;
+    const t = tokens.get(r.symbol) ?? { symbol: r.symbol, chainId: r.chainId, token: r.token, logo: r.logo, value: 0 };
+    t.value += r.value;
+    tokens.set(r.symbol, t);
+  }
+  return {
+    total: all.reduce((s, r) => s + (r.value ?? 0), 0),
+    count: all.length,
+    chains: new Set(all.filter((r) => r.value > 0).map((r) => r.chainId)).size,
+    tokens: [...tokens.values()].sort((a, b) => b.value - a.value),
+    reading: state.status === 'loading',
+    firstRead: state.status === 'loading' && !all.length,
+    failed: state.failed.map((f) => f.name),
+  };
+}
+
 // The tab: { subtitle, actions, body }. ui carries the section's helpers: cash, logo, logoOf and refresh.
 export function walletsTab(store, ui) {
   const cfg = store.get('settings').uniswap ?? {};
@@ -210,19 +248,8 @@ export function walletsTab(store, ui) {
   if (!wallets.length) {
     return { subtitle: 'Native coins and tokens held by your wallets.', actions: [], body: setupBanner('wallets', 'Add a wallet address in Settings to see what it holds.') };
   }
-  // Until the first read lands, show what the last one saved.
-  if (state.status === 'idle' && !state.rows.length) state.rows = savedRows(store, chains, wallets);
-  if (state.status === 'idle' || (state.status === 'ok' && Date.now() - state.at > STALE_MS)) setTimeout(() => load(store), 0);
-
+  const all = currentRows(store, chains, wallets);
   const names = new Map(wallets.map((w) => [w.address.toLowerCase(), w.label || shortAddress(w.address)]));
-  const chainIds = new Set(chains.map((c) => c.id));
-  const hidden = hiddenOf(store);
-  const all = state.rows
-    .filter((r) => chainIds.has(r.chainId) && names.has(r.wallet) && !hidden.has(r.ref))
-    .map((r) => {
-      const chain = CHAINS.find((c) => c.id === r.chainId);
-      return { ...r, chainName: chain?.name ?? String(r.chainId), chainLogo: chain?.logo, walletName: names.get(r.wallet) };
-    });
   if (walletsView.chain !== 'all' && !all.some((r) => r.chainId === walletsView.chain)) walletsView.chain = 'all';
   if (walletsView.wallet !== 'all' && !names.has(walletsView.wallet)) walletsView.wallet = 'all';
   const inWallet = walletsView.wallet === 'all' ? all : all.filter((r) => r.wallet === walletsView.wallet);

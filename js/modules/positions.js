@@ -10,6 +10,7 @@ import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceA
 import { chainById, explorerUrl, etherscanKey } from '../chains.js';
 import { walletsTab, walletsView } from './defi-wallets.js';
 import { lendingTab, lendingView } from './defi-lending.js';
+import { summaryTab } from './defi-summary.js';
 
 const STALE_MS = 10 * 60 * 1000;
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
@@ -2389,11 +2390,11 @@ function detailView(store, ref) {
 
 const FEES_SUBTITLE = 'Fees collected from your positions: read from the chain, from Etherscan when its key is set, and logged by hand.';
 
-// The DeFi section's views: the LP positions, the fees collected from them, the wallets' balances, and Aave.
-// Sub-tabs, as in Monitoring and Tools.
-const TABS = [['positions', 'LP Positions', 'droplet'], ['fees', 'LP Fees Collected', 'coins'], ['wallets', 'Wallets', 'wallet'], ['lending', 'Lending / Borrowing', 'landmark']];
+// The DeFi section's views: a summary of the rest, the LP positions, the fees collected from them, the wallets'
+// balances, and Aave. Sub-tabs, as in Monitoring and Tools.
+const TABS = [['summary', 'Summary', 'activity'], ['positions', 'LP Positions', 'droplet'], ['fees', 'LP Fees Collected', 'coins'], ['wallets', 'Wallets', 'wallet'], ['lending', 'Lending / Borrowing', 'landmark']];
 // Tabs drawn by their own module, not by the LP views: their title and how to draw them.
-const OWN_TABS = { wallets: ['Wallets', walletsTab], lending: ['Lending / Borrowing', lendingTab] };
+const OWN_TABS = { summary: ['Summary', summaryTab], wallets: ['Wallets', walletsTab], lending: ['Lending / Borrowing', lendingTab] };
 
 function tabs(store) {
   return h('nav', { class: 'sub-tabs lp-tabs', role: 'tablist', 'aria-label': 'DeFi view' },
@@ -2416,11 +2417,58 @@ function showDetail(root, store) {
   root.replaceChildren(detailView(store, view.detail));
 }
 
+// Until the first read lands, show what the last one saved; read again when stale.
+function ensureRows(store, cfg) {
+  if (state.status === 'idle' && !state.rows.length) {
+    state.rows = savedRows(store, cfg, cacheKeys(enabledChains(cfg))).sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+  }
+  if (state.status === 'idle' || (state.status === 'ok' && Date.now() - state.at > STALE_MS)) {
+    setTimeout(() => load(store), 0);
+  }
+}
+
+// The LP totals for the Summary tab: open positions only, as in the LP view. null when there is nothing to read.
+function lpSummary(store) {
+  const cfg = store.get('settings').uniswap ?? {};
+  const wallets = (cfg.wallets ?? []).filter((w) => isAddress(w.address));
+  if (!wallets.length && !addedPositions(cfg).length) return null;
+  ensureRows(store, cfg);
+  const open = state.rows.filter((r) => !r.closed);
+  const since = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  return {
+    value: open.reduce((s, r) => s + (r.value ?? 0), 0),
+    fees: open.reduce((s, r) => s + (r.fees ?? 0), 0),
+    count: open.length,
+    inRange: open.filter((r) => r.inRange).length,
+    out: open.filter((r) => !r.inRange).sort((a, b) => (b.value ?? 0) - (a.value ?? 0)),
+    top: [...open].sort((a, b) => (b.value ?? 0) - (a.value ?? 0)),
+    collected30: collectedOf(store).filter((c) => Date.parse(c.at) >= since).reduce((s, c) => s + (c.usd ?? 0), 0),
+    reading: state.status === 'loading',
+    firstRead: state.status === 'loading' && !state.rows.length,
+    failed: state.stale.map((x) => x.name),
+  };
+}
+
 // A tab drawn by its own module, inside the section's header, tab bar and currency switch.
 function drawOwnTab(root, store) {
   askLogos(store);
   askRate(store);
-  const ui = { cash, logo, logoOf: (chainId, address) => logoMap.get(`${chainId}:${String(address).toLowerCase()}`) ?? null, refresh: () => store.refresh() };
+  const ui = {
+    cash,
+    logo,
+    logoOf: (chainId, address) => logoMap.get(`${chainId}:${String(address).toLowerCase()}`) ?? null,
+    refresh: () => store.refresh(),
+    // For the Summary tab.
+    lp: () => lpSummary(store),
+    loadLp: () => load(store),
+    go: (tab, filter) => {
+      view.tab = tab;
+      if (filter) view.filter = filter;
+      store.refresh();
+      window.scrollTo({ top: 0 });
+    },
+    openPosition: (ref) => openDetail(store, ref),
+  };
   const [title, drawTab] = OWN_TABS[view.tab];
   const { subtitle, actions, body } = drawTab(store, ui);
   root.replaceChildren(h('div', { class: 'stack-lg lp' },
@@ -2464,13 +2512,7 @@ function draw(root, store) {
     keepPickerFocus(root);
     return;
   }
-  // Until the first read lands, show what the last one saved.
-  if (state.status === 'idle' && !state.rows.length) {
-    state.rows = savedRows(store, cfg, cacheKeys(enabledChains(cfg))).sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
-  }
-  if (state.status === 'idle' || (state.status === 'ok' && Date.now() - state.at > STALE_MS)) {
-    setTimeout(() => load(store), 0);
-  }
+  ensureRows(store, cfg);
   askLogos(store);
   askRate(store);
   if (view.detail) {
@@ -2659,11 +2701,12 @@ export default {
     view: view.layout === 'list' ? 'list' : '',
     sort: view.sort === 'value' && view.dir === -1 ? '' : sortName(view.sort, view.dir),
     apr: view.window === '24h' ? '' : view.window,
-    tab: view.tab === 'positions' ? '' : view.tab,
+    tab: view.tab === 'summary' ? '' : view.tab,
     wchain: view.tab === 'wallets' && walletsView.chain !== 'all' ? String(walletsView.chain) : '',
     wallet: view.tab === 'wallets' && walletsView.wallet !== 'all' ? walletsView.wallet : '',
     lchain: view.tab === 'lending' && lendingView.chain !== 'all' ? String(lendingView.chain) : '',
     lwallet: view.tab === 'lending' && lendingView.wallet !== 'all' ? lendingView.wallet : '',
+    lview: view.tab === 'lending' && lendingView.layout === 'list' ? 'list' : '',
     range: view.feeAuto ? '' : view.feeRange,
     by: view.feeGroup === defaultFeeGroup(view.feeRange) ? '' : view.feeGroup,
     fsort: view.feeSort === 'date' && view.feeDir === -1 ? '' : sortName(view.feeSort, view.feeDir),
@@ -2681,12 +2724,13 @@ export default {
     view.window = Object.hasOwn(WINDOWS, p.apr) ? p.apr : '24h';
     const id = Number(p.chain);
     view.chain = CHAINS.some((c) => c.id === id) ? id : 'all';
-    view.tab = TABS.some(([k]) => k === p.tab) ? p.tab : 'positions';
+    view.tab = TABS.some(([k]) => k === p.tab) ? p.tab : 'summary';
     // Checked against the rows when the tab is drawn.
     walletsView.chain = Number(p.wchain) || 'all';
     walletsView.wallet = isAddress(p.wallet) ? p.wallet.toLowerCase() : 'all';
     lendingView.chain = Number(p.lchain) || 'all';
     lendingView.wallet = isAddress(p.lwallet) ? p.lwallet.toLowerCase() : 'all';
+    lendingView.layout = p.lview === 'list' ? 'list' : 'cards';
     view.feeAuto = !Object.hasOwn(FEE_RANGES, p.range);
     view.feeRange = view.feeAuto ? '7' : p.range;
     view.feeGroup = FEE_GROUPS.some(([k]) => k === p.by) ? p.by : defaultFeeGroup(view.feeRange);
