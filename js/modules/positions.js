@@ -94,21 +94,29 @@ function buildRow(p, pool, prices, chain, pricesAt = null) {
 const shortAddress = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const hasValue = (p) => p.liquidity > 0n || p.owed0 > 0n || p.owed1 > 0n;
 
+// v3 baselines saved before v3 fees were read in full hold stale amounts, and would count every fee since the
+// last collect as earned at once, so they start again.
+const BASELINE_V = 2;
+const baselineOf = (baselines, r) => {
+  const b = baselines?.[r.ref];
+  return b && (r.version !== 'v3' || b.v === BASELINE_V) ? b : null;
+};
+
 // The fee baseline of each position: its unclaimed fees in tokens when the board started counting. It restarts
 // when the fees drop, which means they were collected. Rows from an earlier read keep their baseline as is.
 function nextBaselines(old = {}, rows, now) {
   const out = { ...old };
   for (const r of rows) {
     if (typeof r.fee0 !== 'number' || typeof r.fee1 !== 'number') continue;
-    const b = old[r.ref];
-    if (!b || r.fee0 < b.f0 || r.fee1 < b.f1) out[r.ref] = { at: now, f0: r.fee0, f1: r.fee1 };
+    const b = baselineOf(old, r);
+    if (!b || r.fee0 < b.f0 || r.fee1 < b.f1) out[r.ref] = { at: now, f0: r.fee0, f1: r.fee1, v: BASELINE_V };
   }
   return out;
 }
 
 // Yearly fee rate from the fees earned since the baseline, at today's prices. null until enough time has passed.
 function feeApr(r, baselines) {
-  const b = baselines?.[r.ref];
+  const b = baselineOf(baselines, r);
   const elapsed = Date.now() - (b?.at ?? Date.now());
   if (!b || elapsed < APR_MIN_MS || !(r.value > 0) || r.p0 == null || r.p1 == null || typeof r.fee0 !== 'number') return null;
   const earned = Math.max(0, r.fee0 - b.f0) * r.p0 + Math.max(0, r.fee1 - b.f1) * r.p1;

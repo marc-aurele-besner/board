@@ -29,7 +29,7 @@ export const CHAINS = [
     v4: { positions: '0xb74b1f14d2754acfcbbe1a221023a5cf50ab8acd', stateView: '0xc3c9e198c735a4b97e3e683f391ccbdd60b69286', start: 56203165, span: 50000 } },
   { id: 130, name: 'Unichain', rpc: 'https://unichain-rpc.publicnode.com', prices: 'unichain', app: 'unichain', logo: ETH_LOGO, native: ETH, factory: '0x1f98400000000000000000000000000000000003', positions: '0x943e6e07a7e8e791dafc44083e54041d743c46e9',
     v4: { positions: '0x4529a01c7a0410167c5740c487a8de60232617bf', stateView: '0x86e8631a016f9068c3f085faf484ee3f5fdee8f2', start: 6819679, span: 10000 } },
-  { id: 4663, name: 'Robinhood Chain', rpc: 'https://rpc.mainnet.chain.robinhood.com', prices: 'robinhood', app: null, logo: ETH_LOGO, native: ETH, factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa', positions: '0x73991a25c818bf1f1128deaab1492d45638de0d3',
+  { id: 4663, name: 'Robinhood Chain', rpc: 'https://rpc.mainnet.chain.robinhood.com', prices: 'robinhood', app: 'robinhood', logo: ETH_LOGO, native: ETH, factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa', positions: '0x73991a25c818bf1f1128deaab1492d45638de0d3',
     v4: { positions: '0x58daec3116aae6d93017baaea7749052e8a04fa7', stateView: '0xf3334192d15450cdd385c8b70e03f9a6bd9e673b', start: 9506, span: 10000000 } },
 ];
 
@@ -71,6 +71,7 @@ const SEL = {
   getSlot0: '0xc815641c',
   getFeeGrowthInside: '0x53e9c1fb',
   getPositionInfo: '0xdacf1d2f',
+  collect: '0xfc6f7865',
 };
 const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const MAX_POSITIONS = 40;
@@ -135,9 +136,22 @@ async function rpc(node, method, params, retry = true) {
   return json.result;
 }
 
-// One read-only call to a contract.
-export async function rpcCall(node, to, data) {
-  return (await rpc(node, 'eth_call', [{ to, data }, 'latest'])) ?? '0x';
+// One read-only call to a contract. from: the caller, for a call that checks who sends it.
+export async function rpcCall(node, to, data, from) {
+  return (await rpc(node, 'eth_call', [from ? { from, to, data } : { to, data }, 'latest'])) ?? '0x';
+}
+
+// A v3 position's unclaimed fees. positions() only holds the fees credited at the last poke or collect, so a
+// collect of everything is simulated as the owner, which credits the fees earned since. Falls back to the
+// stored amounts when the node refuses the call.
+const MAX_U128 = (2n ** 128n - 1n).toString(16);
+async function withFees(chain, node, p) {
+  try {
+    const call = SEL.collect + pad(BigInt(p.tokenId).toString(16)) + pad(p.owner) + pad(MAX_U128) + pad(MAX_U128);
+    const w = words(await rpcCall(node, chain.positions, call, p.owner));
+    if (w.length >= 2) return { ...p, owed0: big(w[0]), owed1: big(w[1]) };
+  } catch {}
+  return p;
 }
 
 // Decodes a string returned by a contract. Some tokens return the symbol as a bytes32 instead.
@@ -157,9 +171,10 @@ export async function readPositions(chain, node, owner) {
   const indexes = Array.from({ length: Math.min(count, MAX_POSITIONS) }, (_, i) => i);
   const ids = await Promise.all(indexes.map(async (i) => big(words(await rpcCall(node, chain.positions, SEL.tokenOfOwnerByIndex + ownerWord + pad(i.toString(16))))[0])));
   const raw = await Promise.all(ids.map((id) => rpcCall(node, chain.positions, SEL.positions + pad(id.toString(16)))));
-  return raw
+  const live = raw
     .map((hex, i) => decodeV3(chain, ids[i].toString(), owner, hex))
     .filter((p) => p.liquidity > 0n || p.owed0 > 0n || p.owed1 > 0n);
+  return Promise.all(live.map((p) => withFees(chain, node, p)));
 }
 
 // A v3 position as the position manager returns it.
@@ -189,7 +204,7 @@ export async function readV3Position(chain, node, tokenId) {
       rpcCall(node, chain.positions, SEL.ownerOf + id),
       rpcCall(node, chain.positions, SEL.positions + id),
     ]);
-    return decodeV3(chain, String(tokenId), addressOf(words(owner)[0]), hex);
+    return withFees(chain, node, decodeV3(chain, String(tokenId), addressOf(words(owner)[0]), hex));
   } catch (err) {
     if (err.refused) return null; // both calls revert for a burned token
     throw err;
