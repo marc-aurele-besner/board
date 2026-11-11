@@ -93,7 +93,7 @@ async function bing(method, key, website, relay) {
   try {
     res = await fetch(`${base}${BING_PATH}/${method}?siteUrl=${encodeURIComponent(website)}&apikey=${encodeURIComponent(key)}`);
   } catch {
-    throw new Error(`Could not reach the Bing relay at ${base}. Start it with: bun tools/start.js`);
+    throw new Error(`Could not reach the Bing relay at ${base}. Start it with: bun start`);
   }
   // Bing answers a bad key with 400 and ErrorCode 3 (InvalidApiKey).
   const body = await res.json().catch(() => null);

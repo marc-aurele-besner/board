@@ -186,7 +186,7 @@ export function searchCard(store) {
           steps([
             ['Add and verify each website in ', link('https://www.bing.com/webmasters', 'Bing Webmaster Tools'), '. You can import them from Search Console.'],
             'Open Settings → API access → API key, and generate a key.',
-            ['In the board folder, run ', h('code', null, 'bun tools/start.js'), ' (or node), which starts the board with its relays, and keep it open while you use Bing data.'],
+            ['In the board folder, run ', h('code', null, 'bun start'), ', which starts the board with its relays, and keep it open while you use Bing data.'],
             'Paste the key here, save, and test it.',
           ]),
           notice({ tone: 'info', text: 'Bing’s API does not let a web page read its answers, so the board asks a small relay on this machine to fetch them. The relay only forwards to Bing and only answers pages served from this machine.' })),
@@ -310,7 +310,7 @@ export function resendCard(store) {
           h('h3', null, 'Setup'),
           steps([
             ['In each Resend account, open ', link('https://resend.com/api-keys', 'API Keys'), ' and create a key with Full access. A sending-only key cannot read emails.'],
-            ['In the board folder, run ', h('code', null, 'bun tools/start.js'), ' (or node), which starts the board with its relays, and keep it open while you use the Inbox.'],
+            ['In the board folder, run ', h('code', null, 'bun start'), ', which starts the board with its relays, and keep it open while you use the Inbox.'],
             'Add each key to its project below, then test it.',
           ])),
         h('form', {

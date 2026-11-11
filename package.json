@@ -1,0 +1,10 @@
+{
+  "name": "board",
+  "private": true,
+  "description": "Scripts only: the board has no dependencies and no build step.",
+  "scripts": {
+    "start": "bun tools/start.js",
+    "serve": "bun tools/serve.js",
+    "relays": "bun tools/relays.js"
+  }
+}
