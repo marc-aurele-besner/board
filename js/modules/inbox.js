@@ -1,9 +1,10 @@
-// Inbox: every email sent and received through Resend, for every project that has a key.
+// Inbox: every email sent and received through Resend and Gmail, for every project that has a key or an account.
 // Laid out like a mail client: received mail lands in the Inbox; sent, starred and archived mail have their own folders.
 import { h, icon, refreshIcon, notice, statusOf } from '../ui.js';
 import { projectIcon, projectTree } from './projects.js';
-import { setupBanner } from '../integrations.js';
+import { setupBanner, settingsHref } from '../integrations.js';
 import { syncInbox, readEmail, keyedProjects } from '../resend.js';
+import { syncGmail, readGmail, gmailAccounts, gmailProjects, connectGmail, isGmailConnected } from '../gmail.js';
 import { makeTask } from '../capture.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
@@ -41,9 +42,14 @@ const STATUS = {
 };
 
 // View state. open: an email to open once it is on screen (from a link in a task).
-const view = { folder: 'inbox', project: 'all', status: 'all', flagged: false, query: '', limit: STEP, open: '' };
-// The last read: whether one runs now, and what failed.
-const read = { busy: false, errors: [], asked: false };
+const view = { folder: 'inbox', project: 'all', mailbox: 'all', status: 'all', flagged: false, query: '', limit: STEP, open: '' };
+// The last read: whether one runs now, what failed, and which Gmail accounts need a sign-in first.
+const read = { busy: false, errors: [], waiting: [], asked: false };
+
+// The body of an email, from the service it came through.
+const readBody = (store, e) => (e.source === 'gmail' ? readGmail(e) : readEmail(store, e));
+// "resend" or a Gmail address: the mailbox an email was read from.
+const mailboxOf = (e) => (e.source === 'gmail' ? e.account : 'resend');
 
 const statusLabel = (s) => STATUS[s]?.[0] ?? s.replace(/_/g, ' ');
 const nameOf = (address) => address.replace(/\s*<[^>]*>\s*$/, '').replace(/^"|"$/g, '').trim() || address.replace(/[<>]/g, '');
@@ -103,9 +109,15 @@ function refresh(store) {
   read.busy = true;
   read.asked = true;
   store.refresh();
-  syncInbox(store)
-    .then(({ added, errors }) => {
+  const both = async () => {
+    const resend = keyedProjects(store).length ? await syncInbox(store) : { added: 0, errors: [] };
+    const gmail = gmailAccounts(store).length ? await syncGmail(store) : { added: 0, errors: [], waiting: [] };
+    return { added: resend.added + gmail.added, errors: [...resend.errors, ...gmail.errors], waiting: gmail.waiting };
+  };
+  both()
+    .then(({ added, errors, waiting }) => {
       read.errors = errors;
+      read.waiting = waiting;
       if (added) toast(`${added} new email${added === 1 ? '' : 's'}`);
     })
     .catch((err) => {
@@ -115,6 +127,14 @@ function refresh(store) {
       read.busy = false;
       store.refresh();
     });
+}
+
+// Signs in to a Gmail account from a click, then reads the mail again.
+function connectAndRead(store, address, after = () => refresh(store)) {
+  const clientId = store.get('settings').google?.clientId ?? '';
+  connectGmail(clientId, address)
+    .then(after)
+    .catch((err) => toast(err.message));
 }
 
 // Text for a task description: the plain part of the email, or its HTML read as text.
@@ -134,7 +154,7 @@ function openTaskDialog(store, e) {
     edited = true;
   });
   // The body arrives after the dialog opens; it is added unless the description was already changed.
-  readEmail(store, e)
+  readBody(store, e)
     .then((body) => {
       const text = plainText(body);
       if (!edited && text) description.value = `${head}\n\n${text}`;
@@ -272,6 +292,7 @@ function openReader(store, e) {
         meta('Cc', e.cc.join(', ')),
         meta('Date', fullDate(e.at)),
         meta('Project', project?.name),
+        e.source === 'gmail' ? meta('Account', `${e.account} (Gmail)`) : null,
         e.status ? meta('Status', statusLabel(e.status)) : null),
       actions,
       content,
@@ -295,12 +316,19 @@ function openReader(store, e) {
         : null),
   });
   paintActions();
-  readEmail(store, e)
+  const load = () => readBody(store, e)
     .then((body) => {
       content.className = 'mail-body';
       content.replaceChildren(body.html ? htmlFrame(body.html) : body.text ? h('pre', { class: 'mail-text' }, body.text) : h('p', { class: 'muted' }, 'This email has no content.'));
     })
-    .catch((err) => content.replaceChildren(notice({ text: `The email could not be read: ${err.message}` })));
+    .catch((err) => content.replaceChildren(notice({
+      text: `The email could not be read: ${err.message}`,
+      // A Gmail account signs in again from here, then the email loads.
+      actions: e.source === 'gmail' && !isGmailConnected(e.account)
+        ? [h('button', { type: 'button', class: 'btn-small', onclick: () => connectAndRead(store, e.account, load) }, `Connect ${e.account}`)]
+        : [],
+    })));
+  load();
 }
 
 function matches(e, q) {
@@ -339,14 +367,20 @@ function rowEl(store, e, projects, threadSize) {
 }
 
 function draw(root, store) {
-  const keyed = keyedProjects(store);
+  const accounts = gmailAccounts(store);
+  const resendKeyed = keyedProjects(store);
+  // Projects with a Resend key or a Gmail account, in project order.
+  const withMail = new Set([...resendKeyed, ...gmailProjects(store)].map((p) => p.id));
+  const keyed = store.get('projects').projects.filter((p) => withMail.has(p.id));
   const projects = new Map(store.get('projects').projects.map((p) => [p.id, p]));
   const { emails, syncedAt } = store.get(COLLECTION);
   // Read once on the first visit of the session; afterwards only when asked.
   if (keyed.length && !read.asked) setTimeout(() => refresh(store), 0);
 
   const folder = FOLDERS.find(([key]) => key === view.folder) ?? FOLDERS[0];
-  const byProject = emails.filter((e) => view.project === 'all' || e.projectId === view.project);
+  const mailboxes = [...(resendKeyed.length || emails.some((e) => !e.source) ? [['resend', 'Resend']] : []), ...accounts.map((a) => [a.email, a.email])];
+  if (!mailboxes.some(([key]) => key === view.mailbox)) view.mailbox = 'all';
+  const byProject = emails.filter((e) => (view.project === 'all' || e.projectId === view.project) && (view.mailbox === 'all' || mailboxOf(e) === view.mailbox));
   const threads = threadsOf(byProject);
   const inFolder = byProject.filter(folder[3]);
   const statuses = [...new Set(inFolder.map((e) => e.status).filter(Boolean))];
@@ -400,12 +434,23 @@ function draw(root, store) {
       h('div', null,
         h('h2', null, 'Inbox'),
         h('p', { class: 'muted small' },
-          `Emails sent and received through Resend, for ${keyed.length} project${keyed.length === 1 ? '' : 's'}.`,
+          `Emails sent and received through ${[resendKeyed.length ? 'Resend' : '', accounts.length ? 'Gmail' : ''].filter(Boolean).join(' and ') || 'Resend or Gmail'}, for ${keyed.length} project${keyed.length === 1 ? '' : 's'}.`,
           syncedAt ? ` Read ${dateOf(syncedAt)}.` : '')),
       h('button', { type: 'button', class: 'btn-small', disabled: read.busy || !keyed.length, onclick: () => refresh(store) },
         refreshIcon(read.busy), read.busy ? 'Reading…' : 'Refresh')),
 
-    keyed.length ? null : setupBanner('resend', 'Add a Resend API key to a project to see its emails here.'),
+    keyed.length ? null : setupBanner('resend', 'Add a Resend API key or a Gmail account to a project to see its emails here.', {
+      actions: [h('a', { href: settingsHref('gmail'), class: 'btn-small' }, 'Add a Gmail account')],
+    }),
+    // Gmail sign-ins last about an hour; an account not signed in this session waits for a click.
+    read.waiting.filter((a) => !isGmailConnected(a)).length
+      ? notice({
+          tone: 'info',
+          text: 'Connect these Gmail accounts to read their new mail. Mail read before stays here.',
+          actions: read.waiting.filter((a) => !isGmailConnected(a)).map((a) =>
+            h('button', { type: 'button', class: 'btn-small', onclick: () => connectAndRead(store, a) }, icon('mail'), a)),
+        })
+      : null,
     read.errors.map((err) => notice({
       text: err.projectIds.length ? `${err.projectIds.map(nameOfProject).join(', ')}: ${err.text}` : err.text,
     })),
@@ -429,6 +474,11 @@ function draw(root, store) {
                 ? h('select', { 'aria-label': 'Project', onchange: (ev) => set({ project: ev.target.value }) },
                     h('option', { value: 'all' }, 'All projects'),
                     keyed.map((p) => h('option', { value: p.id, selected: view.project === p.id }, p.name)))
+                : null,
+              accounts.length && mailboxes.length > 1
+                ? h('select', { 'aria-label': 'Mailbox', onchange: (ev) => set({ mailbox: ev.target.value }) },
+                    h('option', { value: 'all' }, 'All mailboxes'),
+                    mailboxes.map(([key, label]) => h('option', { value: key, selected: view.mailbox === key }, label)))
                 : null,
               statuses.length
                 ? h('select', { 'aria-label': 'Status', onchange: (ev) => set({ status: ev.target.value }) },
@@ -466,6 +516,7 @@ export default {
   serialize: () => ({
     folder: view.folder === 'inbox' ? '' : view.folder,
     project: view.project === 'all' ? '' : view.project,
+    mailbox: view.mailbox === 'all' ? '' : view.mailbox,
     status: view.status === 'all' ? '' : view.status,
     flagged: view.flagged ? '1' : '',
     email: view.open,
@@ -474,6 +525,7 @@ export default {
     // Older links used dir=sent|received.
     view.folder = FOLDERS.some(([k]) => k === p.folder) ? p.folder : p.dir === 'sent' ? 'sent' : 'inbox';
     view.project = p.project || 'all';
+    view.mailbox = p.mailbox || 'all';
     view.status = p.status || 'all';
     view.flagged = p.flagged === '1';
     view.open = p.email || '';
