@@ -26,6 +26,7 @@ const say = (store, key, text, ok = true) => {
   store.refresh();
 };
 const result = (key) => (messages[key] ? h('p', { class: `test-result ${messages[key].ok ? 'ok' : 'error'}`, role: 'status' }, messages[key].text) : null);
+const byName = (a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), undefined, { sensitivity: 'base' });
 
 // --- Telegram ---
 
@@ -119,7 +120,7 @@ function googleConnect(store, service, name, key) {
 
 export function analyticsCard(store) {
   const props = store.get('settings').analytics?.properties ?? {};
-  const sites = sitesOf(store);
+  const sites = [...sitesOf(store)].sort(byName);
   const setProp = (id, value) => store.update('settings', (d) => {
     d.analytics = { ...d.analytics, properties: { ...(d.analytics?.properties ?? {}), [id]: value } };
   });
@@ -283,8 +284,8 @@ export function resendCard(store) {
     d.resend = { relay: '', keys: {}, ...d.resend, ...patch };
   });
   const setKey = (id, key) => save({ keys: Object.fromEntries(Object.entries({ ...keys, [id]: key }).filter(([, v]) => v)) });
-  // Projects with a key first, each group in project order.
-  const all = projectTree(store.get('projects').projects).map(({ project }) => project);
+  // Projects with a key first, each group by name.
+  const all = projectTree(store.get('projects').projects).map(({ project }) => project).sort(byName);
   const projects = [...all.filter((p) => keys[p.id]), ...all.filter((p) => !keys[p.id])];
   const count = all.filter((p) => keys[p.id]).length;
 
