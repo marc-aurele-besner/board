@@ -39,6 +39,7 @@ js/contracts.js       saved smart contracts: reads through the node, writes thro
 js/pool-insights.js   the Liquidity Pools AI insights: in and out of range positions, and what to adjust
 js/multicall.js       Multicall3: many read-only calls in one request
 js/balances.js        native and token balances of the DeFi wallets (DeFi → Wallets)
+js/aave.js            Aave v3 supply, debt and health factor of the DeFi wallets (DeFi → Lending / Borrowing)
 js/resend.js          the Inbox's Resend reads: email lists per project key, and one email's body
 js/gmail.js           the Inbox's Gmail reads: one sign-in per account, its email list, and one email's body
 js/gcal.js            Calendar's Google reads: one sign-in per account, its calendar list, and the events of a range
