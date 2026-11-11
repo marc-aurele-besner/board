@@ -7,9 +7,9 @@ import { addEntries } from './modules/money.js';
 import { importFromUrl } from './modules/kitchen.js';
 import { toast } from './toast.js';
 import { openShortcuts } from './shortcuts.js';
+import { SETTINGS } from './search.js';
 
 const MAX_ROWS = 12;
-const SETTINGS = [['github', 'GitHub'], ['openrouter', 'OpenRouter'], ['google', 'Google Calendar'], ['uniswap', 'Uniswap'], ['telegram', 'Telegram'], ['analytics', 'Google Analytics'], ['search', 'Search consoles'], ['appearance', 'Appearance'], ['models', 'Models & tasks'], ['categories', 'Categories'], ['exchange', 'Exchange rates'], ['notifications', 'Notifications'], ['automations', 'Automations'], ['data', 'Data folder']];
 
 let overlay = null;
 
@@ -74,7 +74,7 @@ function itemsFor(store, modules, query) {
       });
     }
   }
-  for (const m of modules) add(m.title, 'Go to', m.icon, go(`#/${m.id}`));
+  for (const m of modules.filter((x) => x.id !== 'search')) add(m.title, 'Go to', m.icon, go(`#/${m.id}`));
   add('Tasks due today', 'Go to', 'clock', go('#/todos?filter=today'));
   add('Tasks to organize', 'Go to', 'inbox', go('#/todos?filter=organize'));
   add('Keyboard shortcuts', 'Help', 'info', openShortcuts);
@@ -86,7 +86,20 @@ function itemsFor(store, modules, query) {
       if (statusOf(t) !== 'done') add(t.text, 'Task', 'check-square', go(`#/todos?filter=${t.projectId ?? 'personal'}`));
     }
   }
-  return out.slice(0, MAX_ROWS);
+  const rows = out.slice(0, MAX_ROWS);
+  // The last row always opens every match on its own page, with a tab per kind.
+  if (q) {
+    rows.push({
+      label: `See all results for “${query.trim()}”`,
+      hint: 'Search page',
+      iconName: 'search',
+      more: true,
+      run: () => {
+        location.hash = `#/search?${new URLSearchParams({ q: query.trim() })}`;
+      },
+    });
+  }
+  return rows;
 }
 
 export function openPalette(store, modules) {
@@ -104,7 +117,7 @@ export function openPalette(store, modules) {
     active = Math.min(active, Math.max(0, items.length - 1));
     list.replaceChildren(...(items.length
       ? items.map((item, i) =>
-          h('li', { role: 'option', 'aria-selected': String(i === active), class: i === active ? 'active' : '', onclick: () => run(item) },
+          h('li', { role: 'option', 'aria-selected': String(i === active), class: [i === active ? 'active' : '', item.more ? 'palette-more' : ''].filter(Boolean).join(' '), onclick: () => run(item) },
             icon(item.iconName), h('span', { class: 'grow' }, item.label), h('span', { class: 'muted small' }, item.hint)))
       : [h('li', { class: 'muted' }, 'Nothing matches.')]));
   };
