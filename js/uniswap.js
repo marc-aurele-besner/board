@@ -508,7 +508,7 @@ export const nodeSource = (node) => ({ kind: 'node', call: (method, params) => r
 const ETHERSCAN = 'https://api.etherscan.io/v2/api';
 let etherscanQueue = Promise.resolve();
 // Etherscan's free plan takes about 5 calls a second, so calls go one at a time with a short pause.
-function etherscan(key, chainId, params) {
+export function etherscan(key, chainId, params) {
   const run = async () => {
     const res = await fetch(`${ETHERSCAN}?${new URLSearchParams({ chainid: String(chainId), ...params, apikey: key })}`);
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -523,6 +523,7 @@ function etherscan(key, chainId, params) {
     if (json.status === '0' && !/no (transactions|records) found/i.test(`${json.message} ${json.result}`)) {
       throw fail(typeof json.result === 'string' ? json.result : json.message);
     }
+    if (params.module === 'contract') return json.result; // getabi answers with the ABI as a JSON string
     return Array.isArray(json.result) ? json.result : [];
   };
   const p = etherscanQueue.then(run, run);
