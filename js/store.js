@@ -103,6 +103,11 @@ export function createStore(dir, collections) {
       schedule(name);
       notify();
     },
+    // Save without re-rendering, for caches and renewed tokens that change nothing on screen.
+    save(name, mutate) {
+      mutate(data[name]);
+      schedule(name);
+    },
     // Re-render without saving (for view-state changes such as filters and tabs).
     refresh: notify,
     subscribe(fn) {
