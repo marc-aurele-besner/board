@@ -13,7 +13,8 @@ import { withoutLabel } from '../task-labels.js';
 import { connectedGmailOf } from '../gmail.js';
 import { connectedCalendarsOf } from '../gcal.js';
 import { resendSettings } from '../resend.js';
-import { DEFAULT_DEV_COMMAND } from './dev.js';
+import { DEFAULT_DEV_COMMAND, runnerOf } from './dev.js';
+import { pickFolder } from '../folder-picker.js';
 
 const COLLECTION = 'projects';
 const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
@@ -801,12 +802,18 @@ function projectView(store, p, items, categories) {
         p.website ? h('a', { href: p.website, target: '_blank', rel: 'noopener', class: 'muted small' }, p.website) : null),
       h('section', { class: 'pp-block' },
         h('h3', null, 'Local folder'),
-        editText({
-          value: p.localPath ?? '',
-          placeholder: '~/code/my-app',
-          allowEmpty: true,
-          onSave: (localPath) => updateProject(store, p.id, { localPath }),
-        }),
+        h('div', { class: 'pp-icon-row' },
+          editText({
+            value: p.localPath ?? '',
+            placeholder: '~/code/my-app',
+            allowEmpty: true,
+            onSave: (localPath) => updateProject(store, p.id, { localPath }),
+          }),
+          h('button', {
+            type: 'button',
+            title: 'Find the folder on this machine',
+            onclick: () => pickFolder({ base: runnerOf(store), start: p.localPath, onPick: (localPath) => updateProject(store, p.id, { localPath }) }),
+          }, icon('folder'), 'Browse')),
         p.localPath ? h('a', { href: `#/dev?project=${p.id}`, class: 'muted small' }, 'Open a terminal here') : null),
       h('section', { class: 'pp-block' },
         h('h3', null, 'Dev command'),

@@ -22,7 +22,7 @@ const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 const view = { workspace: 'board', sessions: [], active: '', info: null, infoError: '', checking: false, count: 0, pending: null, queued: null };
 let currentStore = null;
 
-const runnerOf = (store) => store.get(COLLECTION).runner || TERMINAL_RUNNER;
+export const runnerOf = (store) => store.get(COLLECTION).runner || TERMINAL_RUNNER;
 const maxSessions = () => view.info?.max ?? 12;
 const activeSession = () => view.sessions.find((s) => s.id === view.active) ?? view.sessions[0];
 const projectsWithFolder = (store) => store.get('projects').projects.filter((p) => p.localPath);
