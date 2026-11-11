@@ -1,5 +1,6 @@
 // Settings → Labels: task statuses and categories, project labels and Money categories in one place. Each can be
-// recoloured and renamed; deleting one that is in use moves what uses it to another label or category first.
+// recoloured, renamed and reordered (the order is the one every picker shows); deleting one that is in use moves
+// what uses it to another label or category first.
 import { h, icon, empty, notice, uid, statusOf } from '../ui.js';
 import { editText, pill, pickChip, pickButton } from '../inline.js';
 import { openDialog } from '../modal.js';
@@ -17,6 +18,87 @@ const labelsView = { tasks: '', projects: '', money: '' };
 // Where a new task category applies, picked beside the add form. Kept here so a re-render does not reset it.
 let newTaskCategoryScope = 'all';
 
+// --- Reordering ---
+
+// The row being dragged, and its list, so a row of another list is not a drop target.
+let drag = null;
+
+// `keys` with `from` moved before or after `to`.
+function moveKey(keys, from, to, after) {
+  const rest = keys.filter((k) => k !== from);
+  const at = rest.indexOf(to);
+  if (at < 0 || !keys.includes(from)) return keys;
+  rest.splice(after ? at + 1 : at, 0, from);
+  return rest;
+}
+
+const dropAfter = (e) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  return e.clientY > r.top + r.height / 2;
+};
+const clearDrop = (el) => el.classList.remove('drop-before', 'drop-after');
+
+// Row props and grip for a reorderable list. `keys` is the list's order; `save(nextKeys)` stores a new one.
+// The grip also moves its row with the up and down arrow keys, and keeps focus after the re-render.
+function sortable(list, keys, save) {
+  const move = (from, to, after) => {
+    const next = moveKey(keys, from, to, after);
+    if (next.some((k, i) => k !== keys[i])) save(next);
+  };
+  const row = (key) => ({
+    ondragstart: (e) => {
+      drag = { list, key };
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', key); // Firefox needs data to start a drag
+      e.currentTarget.classList.add('dragging');
+    },
+    ondragend: (e) => {
+      drag = null;
+      e.currentTarget.draggable = false;
+      e.currentTarget.classList.remove('dragging');
+    },
+    ondragover: (e) => {
+      if (drag?.list !== list || drag.key === key) return;
+      e.preventDefault();
+      const after = dropAfter(e);
+      e.currentTarget.classList.toggle('drop-before', !after);
+      e.currentTarget.classList.toggle('drop-after', after);
+    },
+    ondragleave: (e) => clearDrop(e.currentTarget),
+    ondrop: (e) => {
+      if (drag?.list !== list) return;
+      e.preventDefault();
+      clearDrop(e.currentTarget);
+      move(drag.key, key, dropAfter(e));
+      drag = null;
+    },
+  });
+  const grip = (key, name) => h('button', {
+    type: 'button',
+    class: 'grip',
+    'data-grip': `${list}:${key}`,
+    title: 'Drag to reorder, or press the up and down arrows',
+    'aria-label': `Move ${name}`,
+    // Only the grip makes the row draggable, so the name field stays editable.
+    onpointerdown: (e) => { e.currentTarget.closest('li').draggable = true; },
+    onpointerup: (e) => { e.currentTarget.closest('li').draggable = false; },
+    onkeydown: (e) => {
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      e.preventDefault();
+      const to = keys[keys.indexOf(key) + (e.key === 'ArrowUp' ? -1 : 1)];
+      if (to === undefined) return;
+      move(key, to, e.key === 'ArrowDown');
+      // The store re-renders on the next frame; this callback runs after it.
+      requestAnimationFrame(() => document.querySelector(`[data-grip="${CSS.escape(`${list}:${key}`)}"]`)?.focus());
+    },
+  }, icon('grip'));
+  return { row, grip };
+}
+
+// A section title with an optional button beside it, such as "Sort A–Z".
+const sectionHead = (title, action) => h('div', { class: 'row label-head' }, h('h3', null, title), h('span', { class: 'grow' }), action);
+const sortButton = (label, title, onclick) => h('button', { type: 'button', class: 'btn-small', title, onclick }, label);
+
 // --- Task statuses ---
 
 // Saves one status's override, and drops it once it is back to the defaults so todos.json stays small.
@@ -31,14 +113,19 @@ function setStatus(store, key, patch) {
 }
 
 function taskStatusesSection(store) {
-  const items = store.get('todos').items;
+  const { items, statusOrder } = store.get('todos');
+  const statuses = taskStatuses(store);
+  const order = sortable('statuses', statuses.map((s) => s.key), (keys) => store.update('todos', (d) => { d.statusOrder = keys; }));
   return h('div', { class: 'svc-section' },
-    h('h3', null, 'Task statuses'),
-    h('p', { class: 'muted small' }, 'The seven statuses are fixed, so search (is:doing), the board and automations keep working, but each can be renamed and recoloured. Clear a name to go back to the original. A hidden status leaves the pickers and the board; tasks already in it keep it.'),
-    h('ul', { class: 'label-list' }, taskStatuses(store).map((st) => {
+    sectionHead('Task statuses', statusOrder?.length
+      ? sortButton('Reset order', 'Put the statuses back in their original order', () => store.update('todos', (d) => { delete d.statusOrder; }))
+      : null),
+    h('p', { class: 'muted small' }, 'The seven statuses are fixed, so search (is:doing), the board and automations keep working, but each can be renamed, recoloured and dragged into another order; the pickers and the board columns follow it. Clear a name to go back to the original. A hidden status leaves the pickers and the board; tasks already in it keep it.'),
+    h('ul', { class: 'label-list' }, statuses.map((st) => {
       const count = items.filter((i) => statusOf(i) === st.key).length;
       const fixed = ALWAYS_SHOWN.includes(st.key);
-      return h('li', { class: st.hidden ? 'is-hidden' : '' },
+      return h('li', { class: st.hidden ? 'is-hidden' : '', ...order.row(st.key) },
+        order.grip(st.key, st.name),
         colorPicker({ value: st.color, name: st.name, onPick: (color) => setStatus(store, st.key, { color }), onClear: () => setStatus(store, st.key, { color: '' }) }),
         editText({
           value: st.name === st.defaultName ? '' : st.name,
@@ -85,8 +172,7 @@ function scopeOptions(store) {
   const { projects, categories } = store.get('projects');
   return [
     { value: 'all', label: 'All projects', plainIcon: () => icon('globe') },
-    ...[...categories].sort((a, b) => a.name.localeCompare(b.name))
-      .map((c) => ({ value: `category:${c.id}`, label: c.name, color: labelColor(c) })),
+    ...categories.map((c) => ({ value: `category:${c.id}`, label: c.name, color: labelColor(c) })),
     ...[...projects].sort((a, b) => a.name.localeCompare(b.name))
       .map((p) => ({ value: `project:${p.id}`, label: p.name, plainIcon: () => projectIcon(p) })),
   ];
@@ -158,7 +244,7 @@ function editTaskCategory(store, cat, patch) {
 
 function confirmDeleteTaskCategory(store, cat) {
   const count = taskCategoryUse(store, cat.name);
-  const others = taskCategories(store).filter((c) => c.id !== cat.id).sort((a, b) => a.name.localeCompare(b.name));
+  const others = taskCategories(store).filter((c) => c.id !== cat.id);
   const target = h('select', { 'aria-label': 'Move to' },
     h('option', { value: '' }, 'No category'),
     others.map((c) => h('option', { value: c.name }, c.name)));
@@ -175,15 +261,23 @@ function confirmDeleteTaskCategory(store, cat) {
   });
 }
 
+// Task categories and project labels are both `{ id, name }` objects, saved in the order of `ids`.
+const byIds = (list, ids) => ids.map((id) => list.find((c) => c.id === id)).filter(Boolean);
+const byName = (a, b) => a.name.localeCompare(b.name);
+
 function taskCategoriesSection(store) {
-  const cats = [...taskCategories(store)].sort((a, b) => a.name.localeCompare(b.name));
+  const cats = taskCategories(store);
+  const order = sortable('task-categories', cats.map((c) => c.id), (ids) => store.update('todos', (d) => { d.categories = byIds(d.categories, ids); }));
   return h('div', { class: 'svc-section' },
-    h('h3', null, 'Task categories'),
-    h('p', { class: 'muted small' }, 'Categories sort tasks within a project (errands, bugs, ideas…). A general one applies to every project; scope one to a single project, or to every project with a label. Promote one to widen it, from a project to that project’s label or to all projects. Renaming one renames it on its tasks.'),
+    sectionHead('Task categories', cats.length > 1
+      ? sortButton('Sort A–Z', 'Put the task categories in alphabetical order', () => store.update('todos', (d) => { d.categories = [...d.categories].sort(byName); }))
+      : null),
+    h('p', { class: 'muted small' }, 'Categories sort tasks within a project (errands, bugs, ideas…). A general one applies to every project; scope one to a single project, or to every project with a label. Promote one to widen it, from a project to that project’s label or to all projects. Renaming one renames it on its tasks. Drag the grip to reorder them; the category pickers and filters follow this order.'),
     labelsView.tasks ? notice({ tone: 'error', text: labelsView.tasks }) : null,
     cats.length
       ? h('ul', { class: 'label-list' }, cats.map((c) =>
-          h('li', null,
+          h('li', order.row(c.id),
+            order.grip(c.id, c.name),
             colorPicker({ value: c.color ?? '', name: c.name, onPick: (color) => editTaskCategory(store, c, { color }), onClear: () => editTaskCategory(store, c, { color: '' }) }),
             editText({ value: c.name, placeholder: 'Name', className: 'label-name', onSave: (name) => editTaskCategory(store, c, { name: name.trim() }) }),
             pill(c.name, { color: c.color }),
@@ -273,20 +367,24 @@ function confirmDeleteProjectLabel(store, label) {
 }
 
 function projectLabelsSection(store) {
-  const labels = [...(store.get('projects').categories ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  const labels = store.get('projects').categories ?? [];
+  const order = sortable('project-labels', labels.map((l) => l.id), (ids) => store.update('projects', (d) => { d.categories = byIds(d.categories, ids); }));
   const setColor = (id, color) => store.update('projects', (d) => {
     const c = d.categories.find((x) => x.id === id);
     if (c) c.color = color;
   });
 
   return h('div', { class: 'svc-section' },
-    h('h3', null, 'Project labels'),
-    h('p', { class: 'muted small' }, 'Labels group projects (Personal, Web, Crypto…). The colour shows on projects, tasks, the project tiles and in the label picker.'),
+    sectionHead('Project labels', labels.length > 1
+      ? sortButton('Sort A–Z', 'Put the project labels in alphabetical order', () => store.update('projects', (d) => { d.categories = [...d.categories].sort(byName); }))
+      : null),
+    h('p', { class: 'muted small' }, 'Labels group projects (Personal, Web, Crypto…). The colour shows on projects, tasks, the project tiles and in the label picker. Drag the grip to reorder them; the label pickers and filters follow this order.'),
     labelsView.projects ? notice({ tone: 'error', text: labelsView.projects }) : null,
     labels.length
       ? h('ul', { class: 'label-list' }, labels.map((l) => {
           const use = projectLabelUse(store, l.id);
-          return h('li', null,
+          return h('li', order.row(l.id),
+            order.grip(l.id, l.name),
             colorPicker({ value: labelColor(l), name: l.name, onPick: (c) => setColor(l.id, c) }),
             editText({ value: l.name, placeholder: 'Name', className: 'label-name', onSave: (name) => renameProjectLabel(store, l, name.trim()) }),
             pill(l.name, { color: labelColor(l) }),
@@ -300,13 +398,12 @@ function projectLabelsSection(store) {
 
 // --- Money categories ---
 
-// Every Money category: the saved list plus any name an entry or a recurring item uses.
+// Every Money category: the saved list in its order, then any other name an entry or a recurring item uses, A to Z.
 function moneyCategories(store) {
   const fin = store.get('finance');
-  const names = [...fin.categories, ...fin.entries.map((e) => e.category), ...(fin.recurring ?? []).map((r) => r.category)].filter(Boolean);
-  const out = [];
-  for (const n of names) if (!out.some((x) => x === n)) out.push(n);
-  return out.sort((a, b) => a.localeCompare(b));
+  const used = [...fin.entries.map((e) => e.category), ...(fin.recurring ?? []).map((r) => r.category)];
+  const extra = [...new Set(used.filter((n) => n && !fin.categories.includes(n)))].sort((a, b) => a.localeCompare(b));
+  return [...fin.categories, ...extra];
 }
 
 function moneyCategoryUse(store, name) {
@@ -385,14 +482,20 @@ function moneyCategoriesSection(store) {
     d.categoryColors = next;
   });
 
+  // Reordering saves every name shown, so one only an entry used joins the saved list in its new place.
+  const order = sortable('money', names, (next) => store.update('finance', (d) => { d.categories = next; }));
+
   return h('div', { class: 'svc-section' },
-    h('h3', null, 'Money categories'),
-    h('p', { class: 'muted small' }, 'Categories file Money entries, recurring items and budgets. The colour shows on the category wherever it appears, and in the category breakdown.'),
+    sectionHead('Money categories', names.length > 1
+      ? sortButton('Sort A–Z', 'Put the Money categories in alphabetical order', () => store.update('finance', (d) => { d.categories = [...names].sort((a, b) => a.localeCompare(b)); }))
+      : null),
+    h('p', { class: 'muted small' }, 'Categories file Money entries, recurring items and budgets. The colour shows on the category wherever it appears, and in the category breakdown. Drag the grip to reorder them; the category pickers follow this order.'),
     labelsView.money ? notice({ tone: 'error', text: labelsView.money }) : null,
     names.length
       ? h('ul', { class: 'label-list' }, names.map((name) => {
           const use = moneyCategoryUse(store, name);
-          return h('li', null,
+          return h('li', order.row(name),
+            order.grip(name, name),
             colorPicker({ value: colors[name] ?? '', name, onPick: (c) => setColor(name, c), onClear: () => clearColor(name) }),
             editText({ value: name, placeholder: 'Name', className: 'label-name', onSave: (next) => renameMoneyCategory(store, name, next.trim()) }),
             pill(name, { color: colors[name] }),
