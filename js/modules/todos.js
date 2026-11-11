@@ -560,7 +560,7 @@ function batchBar(store, visible, projects, categories) {
     select('Priority', PRIORITIES.map(([v, l]) => ({ value: v, label: l, tone: v === 'none' ? 'plain' : v })), (v) => apply({ priority: v })),
     select('Project', [
       { value: '__personal', label: 'Personal' },
-      ...[...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, color: p.color })),
+      ...[...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
     ], (v) => apply({ projectId: v === '__personal' ? null : v })),
     select('Category', [{ value: NO_CATEGORY, label: 'No category' }, ...categories.map((c) => ({ value: c, label: c }))],
       (v) => apply({ category: v === NO_CATEGORY ? '' : v })),
@@ -607,7 +607,7 @@ function todoRow(store, item, ctx) {
   const hasDescription = Boolean(item.description);
   const repos = ctx.projects.find((p) => p.id === item.projectId)?.github?.repos ?? [];
   const projectOptions = [...ctx.projects].sort((a, b) => a.name.localeCompare(b.name))
-    .map((p) => ({ value: p.id, label: p.name, color: p.color }));
+    .map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) }));
   const categoryNames = categoriesFor(store, item.projectId);
   if (item.category && !categoryNames.includes(item.category)) categoryNames.push(item.category);
 
