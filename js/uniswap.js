@@ -413,7 +413,7 @@ function reachedMint(events, liquidity) {
 }
 
 // Extends a position's saved history. pos: { version, tokenId, liquidity, pool (v4: the pool id) }. prev is what
-// the last load saved: { node, from, to, span, done, events }. Like the v4 search: new blocks first, then back
+// the last load saved: { node, from, to, span, done, reached, floor, events }. Like the v4 search: new blocks first, then back
 // toward the opening while the node keeps the blocks. done means the opening was reached, or the node will not
 // search further back. Collects get their block's time.
 export async function positionHistory(chain, node, pos, prev) {
@@ -459,6 +459,11 @@ export async function positionHistory(chain, node, pos, prev) {
     s.span = r.span;
     s.from = r.from;
   }
+
+  // reached: every block back to the opening (or v4's start) was searched, so no collect can be missing. done
+  // alone also holds when the node refused to go further back.
+  s.reached = s.from <= floor || reachedMint(s.events, pos.liquidity);
+  s.floor = floor;
 
   const blocks = [...new Set(s.events.filter((e) => e.kind !== 'add' && !e.time).map((e) => e.block))];
   const times = new Map(await Promise.all(blocks.map(async (b) => [b, await blockTime(nodeSource(node), b)])));
