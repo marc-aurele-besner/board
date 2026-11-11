@@ -7,6 +7,7 @@ import { positionFields, positionError } from '../position-input.js';
 import { poolsChanged } from '../automations.js';
 import { insightsPanel } from '../pool-insights.js';
 import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs } from '../uniswap.js';
+import { EXPLORERS } from '../chains.js';
 
 const STALE_MS = 10 * 60 * 1000;
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
@@ -2096,18 +2097,6 @@ function closeDetail(store) {
   store.refresh();
 }
 
-// Block explorers, for the wallet, pool and token links. A chain without one gets no links.
-const EXPLORERS = {
-  1: 'https://etherscan.io',
-  8453: 'https://basescan.org',
-  42161: 'https://arbiscan.io',
-  10: 'https://optimistic.etherscan.io',
-  137: 'https://polygonscan.com',
-  56: 'https://bscscan.com',
-  43114: 'https://snowtrace.io',
-  130: 'https://uniscan.xyz',
-  324: 'https://era.zksync.network',
-};
 const explorerLink = (chainId, kind, id) => (EXPLORERS[chainId] && /^0x[0-9a-fA-F]{40}$/.test(id ?? '') ? `${EXPLORERS[chainId]}/${kind}/${id}` : null);
 
 // The row for a position: as read now, or from any saved read, so a position whose wallet was removed still
