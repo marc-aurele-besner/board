@@ -22,20 +22,77 @@ export async function readFunction(settings, contract, fn, args) {
   return decodeArgs(fn.outputs ?? [], out);
 }
 
-// --- Browser wallet (EIP-1193) ---
+// --- Browser wallets (EIP-1193, found through EIP-6963) ---
 
-const wallet = () => globalThis.ethereum ?? null;
-export const hasWallet = () => Boolean(wallet());
+// Each wallet extension announces itself (EIP-6963), so several can sit side by side. A wallet that only sets
+// window.ethereum is kept as a fallback. uuid -> { info: { uuid, name, icon, rdns }, provider }.
+const found = new Map();
+const listeners = new Set();
+const changed = () => listeners.forEach((fn) => fn());
 
-// The account the wallet already shares with the page, without asking.
-export async function walletAccount() {
-  if (!wallet()) return '';
-  return (await wallet().request({ method: 'eth_accounts' }))?.[0] ?? '';
+function legacyName(p) {
+  if (p.isRabby) return 'Rabby';
+  if (p.isCoinbaseWallet) return 'Coinbase Wallet';
+  if (p.isBraveWallet) return 'Brave Wallet';
+  if (p.isMetaMask) return 'MetaMask';
+  return 'Browser wallet';
 }
 
-export async function connectWallet() {
-  if (!wallet()) throw new Error('No browser wallet found. Install one, such as MetaMask or Rabby, and reload.');
-  return (await wallet().request({ method: 'eth_requestAccounts' }))?.[0] ?? '';
+if (globalThis.window?.addEventListener) {
+  window.addEventListener('eip6963:announceProvider', (e) => {
+    const { info, provider } = e.detail ?? {};
+    if (!info?.uuid || !provider?.request) return;
+    found.set(info.uuid, { info, provider });
+    changed();
+  });
+  window.dispatchEvent(new Event('eip6963:requestProvider'));
+}
+
+export function wallets() {
+  const list = [...found.values()];
+  const legacy = globalThis.ethereum;
+  if (legacy?.request && !list.some((w) => w.provider === legacy)) {
+    list.push({ info: { uuid: 'injected', name: legacyName(legacy), icon: '', rdns: '' }, provider: legacy });
+  }
+  return list;
+}
+
+// Calls fn when a wallet is found or the connection changes. Returns the unsubscribe.
+export function onWalletChange(fn) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+// The wallet and account connected with the button, for this page load. Nothing asks a wallet before that click.
+let current = null; // { info, provider, account }
+export const walletAccount = () => current?.account ?? '';
+export const connectedWallet = () => current?.info ?? null;
+const wallet = () => current?.provider ?? null;
+
+function onAccounts(accounts) {
+  if (!current) return;
+  if (accounts?.[0]) current.account = accounts[0];
+  else disconnectWallet();
+  changed();
+}
+
+export async function connectWallet(uuid) {
+  const list = wallets();
+  const w = list.find((x) => x.info.uuid === uuid) ?? (list.length === 1 ? list[0] : null);
+  if (!w) throw new Error(list.length ? 'Pick a wallet to connect.' : 'No browser wallet found. Install one, such as MetaMask or Rabby, and reload.');
+  const account = (await w.provider.request({ method: 'eth_requestAccounts' }))?.[0] ?? '';
+  if (!account) throw new Error(`${w.info.name} shared no account.`);
+  disconnectWallet();
+  current = { info: w.info, provider: w.provider, account };
+  w.provider.on?.('accountsChanged', onAccounts);
+  changed();
+  return account;
+}
+
+// Forgets the connection on the board's side; the wallet keeps its own permission until it is revoked there.
+export function disconnectWallet() {
+  current?.provider.removeListener?.('accountsChanged', onAccounts);
+  current = null;
 }
 
 // Moves the wallet to the contract's chain, and adds the chain to it when it does not know it.
@@ -57,7 +114,8 @@ async function onChain(chain) {
 export async function sendFunction(settings, contract, fn, args, value = 0n) {
   const chain = chainById(settings, contract.chainId);
   if (!chain) throw new Error(`Chain ${contract.chainId} is not in Settings → Blockchains.`);
-  const from = await connectWallet();
+  if (!wallet()) throw new Error('Connect a wallet first.');
+  const from = walletAccount();
   await onChain(chain);
   const tx = { from, to: contract.address, data: encodeCall(fn, args) };
   if (value) tx.value = `0x${value.toString(16)}`;
