@@ -10,7 +10,7 @@ import { ask, parseJson } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { taskMatcher, QUERY_HINT } from '../task-query.js';
-import { taskStatuses, statusName, statusOptions, statusLook, categoryColor } from '../task-labels.js';
+import { taskStatuses, statusName, statusOptions, statusLook, categoryColor, taskCategoryNames } from '../task-labels.js';
 
 const COLLECTION = 'todos';
 const PRIORITIES = [
@@ -1040,8 +1040,8 @@ function draw(root, store) {
   const { items } = store.get(COLLECTION);
   if (isProjectFilter(view.filter) && !projects.some((p) => p.id === view.filter)) view.filter = 'all';
 
-  const categories = [...new Set([...todoCategories(store).map((c) => c.name), ...items.map((i) => i.category).filter(Boolean)])]
-    .sort((a, b) => a.localeCompare(b));
+  // Settings → Labels sets the order.
+  const categories = taskCategoryNames(store);
   if (view.category && !categories.includes(view.category)) view.category = '';
 
   const openCount = (pred) => items.filter((i) => statusOf(i) !== 'done' && pred(i)).length;

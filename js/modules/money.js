@@ -742,8 +742,9 @@ function removeBill(store, billId) {
 // Every known category: the saved list plus any an entry uses, so none is missing from the picker.
 function categoryOptions(store) {
   const { entries, categories, categoryColors = {} } = store.get(COLLECTION);
-  const names = new Set([...categories, ...entries.map((e) => e.category).filter(Boolean)]);
-  return [...names].sort((a, b) => a.localeCompare(b)).map((c) => ({ value: c, label: c, color: categoryColors[c] }));
+  // The saved list is in the order set in Settings → Labels; names only an entry uses follow, A to Z.
+  const extra = [...new Set(entries.map((e) => e.category).filter((c) => c && !categories.includes(c)))].sort((a, b) => a.localeCompare(b));
+  return [...categories, ...extra].map((c) => ({ value: c, label: c, color: categoryColors[c] }));
 }
 
 // Category picker: a searchable list of categories, with “Create” for a new one.
