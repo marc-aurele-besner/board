@@ -21,6 +21,9 @@ export const gmailProjects = (store) => {
   const ids = new Set(gmailAccounts(store).map((a) => a.projectId));
   return store.get('projects').projects.filter((p) => ids.has(p.id));
 };
+// The connected Gmail addresses that belong to a project.
+export const connectedGmailOf = (store, projectId) =>
+  gmailAccounts(store).filter((a) => a.projectId === projectId && isGmailConnected(a.email)).map((a) => a.email);
 
 async function call(value, path) {
   const res = await fetch(API + path, { headers: { Authorization: `Bearer ${value}` } });

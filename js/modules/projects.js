@@ -10,6 +10,8 @@ import { siteIcon, clearFaviconCache } from '../favicon.js';
 import { fetchRepoOverview } from '../github.js';
 import { makeTask } from '../capture.js';
 import { withoutLabel } from '../task-labels.js';
+import { connectedGmailOf } from '../gmail.js';
+import { connectedCalendarsOf } from '../gcal.js';
 
 const COLLECTION = 'projects';
 const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
@@ -451,8 +453,19 @@ function projectList(store, projects, items, categories) {
         h('div', { class: 'grow' },
           h('strong', null, p.name),
           h('div', { class: 'muted small' }, [labels.map((l) => l.name).join(', '), githubLine(p)].filter(Boolean).join(' · '))),
+        googleBadges(store, p),
         h('span', { class: 'count', title: 'Open tasks' }, String(open)));
     }));
+}
+
+// Gmail and Google Calendar marks for the accounts connected to a project; nothing when none are.
+function googleBadges(store, p) {
+  const badges = [
+    ['gmail', 'Gmail', connectedGmailOf(store, p.id)],
+    ['gcal', 'Google Calendar', connectedCalendarsOf(store, p.id)],
+  ].filter(([, , emails]) => emails.length)
+    .map(([name, label, emails]) => h('span', { class: 'service-badge', title: `${label}: ${emails.join(', ')}`, 'aria-label': `${label} connected` }, icon(name)));
+  return badges.length ? h('span', { class: 'service-badges' }, badges) : null;
 }
 
 function repoTable(store, p) {
