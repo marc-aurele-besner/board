@@ -35,6 +35,22 @@ export const CHAINS = [
   { id: 324, name: 'ZKsync Era', rpc: 'https://mainnet.era.zksync.io', span: 50000, prices: 'era', app: 'zksync', logo: trustLogo('zksync'), native: ETH, factory: '0x8FdA5a7a8dCA67BBcDd10F02Fa0649A937215422', positions: '0x0616e5762c1E7Dc3723c50663dF10a162D690a86', etherscan: false },
 ];
 
+// More public nodes per chain, each checked to answer browser calls. With no node saved in Settings, a chain is
+// read from its own node above plus these, which share the load and stand in when one stops answering.
+const MORE_NODES = {
+  1: ['https://eth.drpc.org', 'https://1rpc.io/eth', 'https://rpc.mevblocker.io'],
+  8453: ['https://mainnet.base.org', 'https://base.drpc.org', 'https://1rpc.io/base'],
+  42161: ['https://arb1.arbitrum.io/rpc', 'https://arbitrum.drpc.org', 'https://1rpc.io/arb'],
+  10: ['https://mainnet.optimism.io', 'https://optimism.drpc.org', 'https://1rpc.io/op'],
+  137: ['https://polygon.drpc.org', 'https://1rpc.io/matic'],
+  56: ['https://bsc-dataseed.bnbchain.org', 'https://1rpc.io/bnb'],
+  43114: ['https://api.avax.network/ext/bc/C/rpc', 'https://avalanche.drpc.org', 'https://1rpc.io/avax/c'],
+  130: ['https://mainnet.unichain.org', 'https://unichain.drpc.org'],
+  4663: ['https://robinhood.drpc.org'],
+  324: ['https://zksync.drpc.org', 'https://1rpc.io/zksync2-era'],
+};
+for (const c of CHAINS) c.rpc = [c.rpc, ...(MORE_NODES[c.id] ?? [])].join(' ');
+
 // v4 pools hold the chain's native coin directly, as the zero address.
 export const NATIVE = '0x0000000000000000000000000000000000000000';
 export const isNative = (address) => String(address).toLowerCase() === NATIVE;

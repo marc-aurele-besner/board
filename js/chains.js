@@ -12,6 +12,7 @@ export const EXPLORERS = {
   56: 'https://bscscan.com',
   43114: 'https://snowtrace.io',
   130: 'https://uniscan.xyz',
+  4663: 'https://robinhoodchain.blockscout.com',
   324: 'https://era.zksync.network',
 };
 
