@@ -756,8 +756,8 @@ select { width: auto; min-width: 0; }
 .fn-outputs { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; margin: 0; }
 .fn-outputs dt { font-size: 0.85rem; }
 .fn-outputs dd { margin: 0; }
-.wallet-bar { align-items: center; gap: 8px; flex-wrap: wrap; }
-.wallet-bar .bad { color: var(--danger); }
+.wallet-connect { align-items: center; gap: 8px; flex-wrap: wrap; }
+.wallet-connect .bad { color: var(--danger); }
 
 /* Settings → Smart contracts: same row look as the chains, with the address between. */
 .contract-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }

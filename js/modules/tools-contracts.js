@@ -135,7 +135,7 @@ function walletBar(store, chain) {
     }
     store.refresh();
   };
-  return h('div', { class: 'row wallet-bar' },
+  return h('div', { class: 'row wallet-connect' },
     icon('wallet'),
     view.account
       ? h('span', { class: 'small' }, 'Wallet ', copyable(view.account, { label: short(view.account) }), ` · writes are sent on ${chain?.name ?? 'the contract\'s chain'}, and the wallet asks before each one.`)
