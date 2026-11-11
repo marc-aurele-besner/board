@@ -8,7 +8,7 @@ A personal command center that runs locally. It is plain HTML, CSS and JavaScrip
 
 ## Run and verify
 
-- Start the board with `bun start` (or `node tools/start.js`): it runs the static server and the API relays together, each logging with its name as prefix. `bun run serve` alone serves the folder. Then open `http://localhost:8000` in Chrome or Edge. The File System Access API needs a secure context (`localhost` counts) and does not work in Firefox or Safari.
+- Start the board with `bun start` (or `node tools/start.js`): it runs the static server and the API relays together, each logging with its name as prefix. `bun dev` runs the same and restarts them when a file in `tools/` changes. `bun run serve` alone serves the folder. Then open `http://localhost:8000` in Chrome or Edge. The File System Access API needs a secure context (`localhost` counts) and does not work in Firefox or Safari.
 - A changed module is not always picked up: `python3 -m http.server` sends no cache headers, so the browser reuses the module it cached and keeps running the old code. `tools/serve.js` marks every file `no-cache`, so a reload runs the new code. With the Python server, ask the user for a hard reload (Cmd+Shift+R) before checking a change in the browser.
 - Syntax check every module before committing:
   `for f in js/*.js js/modules/*.js; do node --experimental-default-type=module --check "$f" || echo "FAIL $f"; done`

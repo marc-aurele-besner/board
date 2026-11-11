@@ -51,6 +51,8 @@ This starts the board's static server and the local relays for Resend (Inbox) an
 
 `tools/serve.js` has no dependencies and marks every file `no-cache`, so the browser always runs the code you just edited. Any other static server works too, but `python3 -m http.server` sends no cache headers, so Chrome reuses the modules it cached earlier and keeps running the old code after a reload: with that server, hard reload the page (Cmd+Shift+R) after every change.
 
+While working on the board itself, run `bun dev` instead of `bun start`: it starts the same services and restarts them all when a file under `tools/` changes. The page's own files (`index.html`, `js/`, `css/`) need no restart, as the server reads them fresh on every request; reload the page to run them. `bun start` never restarts.
+
 On first launch, choose a data folder. Pick a folder **outside this repo** (for example `~/Documents/board-data`). The app writes `todos.json`, `recipes.json` and `finance.json` there. On later visits, click **Reconnect** once to re-grant permission.
 
 To look around first, click **Explore with sample data**. It opens the board on placeholder content kept in memory: nothing is written to disk, the automatic checks stay off, and a reload brings back the folder screen. It also works in Firefox and Safari.
