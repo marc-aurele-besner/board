@@ -1,18 +1,22 @@
 import { h, icon, refreshIcon, money, empty, notice } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { poolsChanged } from '../automations.js';
-import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition } from '../uniswap.js';
+import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn } from '../uniswap.js';
 
 const STALE_MS = 10 * 60 * 1000;
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
-// Fee APR needs some time between two reads, or a few cents of fees turn into a wild yearly rate.
-const APR_MIN_MS = 6 * 60 * 60 * 1000;
+// The fee counter, used where swaps cannot be read, needs some time between two reads, or a few cents of fees
+// turn into a wild yearly rate.
+const APR_MIN_MS = 60 * 60 * 1000;
+// The windows fee APR can be read over, in seconds, with their labels.
+const WINDOWS = { '15m': [15 * 60, '15 min'], '1h': [3600, '1 h'], '3h': [3 * 3600, '3 h'], '6h': [6 * 3600, '6 h'], '24h': [86400, '24 h'], '7d': [7 * 86400, '7 d'], '30d': [30 * 86400, '30 d'] };
 const MAX_TICK = 887272; // the widest possible range: a "full range" position
 
 // View state: which rows are shown.
 // layout: 'cards' or 'list'. sort: one of the SORTS keys; dir: 1 low to high, -1 high to low.
 // adding: the form to add a position by hand is open; addMessage is its last error.
-const view = { filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, addMessage: '' };
+// window: the WINDOWS key fee APR is read over.
+const view = { filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, addMessage: '', window: '24h' };
 // Loaded positions and the state of the last load. shallow: chains whose node would not search back to v4's start.
 // stale: chains shown from the last good read because this one failed, with when that read was.
 // pending: chains still being read in the current load.
@@ -22,6 +26,9 @@ const state = { status: 'idle', rows: [], error: '', warning: '', at: 0, shallow
 const COLLECTION = 'pools';
 const tokenInfo = new Map(); // "chainId:token address" -> { symbol, decimals }
 let loading = false;
+const aprs = new Map(); // "window|ref" -> { apr, secs }: fee APR from the swaps in that window, and the time covered
+let aprBusy = ''; // the window whose swaps are being read
+let aprAgain = false; // read again when done: the rows changed meanwhile
 let logoMap = new Map(); // "chainId:token address" -> logo URL, from the token list
 let logosAsked = false;
 const seen = new Set(); // rows already on screen: only new ones animate in
@@ -88,6 +95,14 @@ function buildRow(p, pool, prices, chain, pricesAt = null) {
     fees,
     share0: value ? (a0 * p0) / value : null,
     url: chain.app ? `https://app.uniswap.org/positions/${p.version}/${chain.app}/${p.tokenId}` : null,
+    // What fee APR from swaps needs: the range, the liquidity (as text, for JSON), the pool and the decimals.
+    tickLower: p.tickLower,
+    tickUpper: p.tickUpper,
+    liq: p.liquidity.toString(),
+    pool: pool.pool,
+    feePips: p.fee,
+    dec0: m0.decimals,
+    dec1: m1.decimals,
   };
 }
 
@@ -112,6 +127,12 @@ function nextBaselines(old = {}, rows, now) {
     if (!b || r.fee0 < b.f0 || r.fee1 < b.f1) out[r.ref] = { at: now, f0: r.fee0, f1: r.fee1, v: BASELINE_V };
   }
   return out;
+}
+
+// Time left before the counter shows a fee APR, or null when it has no baseline yet.
+function counterLeft(r, baselines) {
+  const b = baselineOf(baselines, r);
+  return b ? Math.max(0, b.at + APR_MIN_MS - Date.now()) : null;
 }
 
 // Yearly fee rate from the fees earned since the baseline, at today's prices. null until enough time has passed.
@@ -356,6 +377,104 @@ async function load(store) {
     state.pending = [];
     store.refresh();
   }
+  if (state.status === 'ok') loadAprs(store);
+}
+
+// Public nodes keep about a day of logs, so what each position earned is also saved per hour (unix hour ->
+// [raw token0, raw token1], as text), for the 7 and 30 day windows. Only hours the swaps read cover in full are
+// saved, an hour already saved is kept, and hours older than 31 days are dropped.
+const HOUR = 3600;
+function keepHours(old = {}, c, pos, clock, readFrom) {
+  const out = {};
+  const oldest = Math.floor(clock.time / HOUR) - 31 * 24;
+  for (const [hour, v] of Object.entries(old)) if (Number(hour) >= oldest) out[hour] = v;
+  if (c.from > clock.head) return out;
+  const first = Math.ceil(readFrom / HOUR);
+  const last = Math.floor(clock.time / HOUR) - 1; // the last hour that has ended
+  const sums = new Map();
+  for (const s of c.swaps) {
+    const hour = Math.floor((clock.time - (clock.head - s.block) * clock.perBlock) / HOUR);
+    if (hour < first || hour > last || out[hour]) continue;
+    const [f0, f1] = swapEarn(s, pos);
+    const sum = sums.get(hour) ?? [0n, 0n];
+    sums.set(hour, [sum[0] + f0, sum[1] + f1]);
+  }
+  for (let hour = first; hour <= last; hour++) {
+    if (out[hour]) continue;
+    const [e0, e1] = sums.get(hour) ?? [0n, 0n];
+    out[hour] = [e0.toString(), e1.toString()];
+  }
+  return out;
+}
+
+// Fee APR over the chosen window, from each pool's swaps in it. One pool at a time per chain, as public nodes limit
+// bursts; each pool's APR shows as soon as it is read.
+async function loadAprs(store) {
+  if (aprBusy) {
+    aprAgain = true;
+    return;
+  }
+  const win = view.window;
+  aprBusy = win;
+  const secs = WINDOWS[win][0];
+  const cfg = store.get('settings').uniswap ?? {};
+  const byChain = new Map();
+  for (const r of state.rows.filter((x) => x.liq != null && x.pool)) byChain.set(r.chainId, [...(byChain.get(r.chainId) ?? []), r]);
+  await Promise.all([...byChain].map(async ([chainId, rows]) => {
+    const chain = chainOf(chainId);
+    const { node } = chainSettings(cfg, chain);
+    let clock;
+    try {
+      clock = await chainClock(node);
+    } catch {
+      return;
+    }
+    const from = clock.head - Math.ceil(secs / clock.perBlock);
+    const pools = new Map();
+    for (const r of rows) pools.set(`${r.version}:${r.pool}`, [...(pools.get(`${r.version}:${r.pool}`) ?? []), r]);
+    for (const list of pools.values()) {
+      try {
+        const c = await poolSwaps(chain, node, list[0].version, list[0].pool, from, clock.head);
+        const start = Math.max(from, c.from);
+        // Swaps read now cover start..head. Older parts of the window come from the hours saved by earlier loads.
+        const readFrom = clock.time - (clock.head - c.from) * clock.perBlock;
+        const winFrom = clock.time - secs;
+        const kept = {};
+        for (const r of list) {
+          const pos = { tickLower: r.tickLower, tickUpper: r.tickUpper, liquidity: r.liq, fee: r.feePips };
+          const hours = keepHours(store.get(COLLECTION)?.earned?.[r.ref], c, pos, clock, readFrom);
+          kept[r.ref] = hours;
+          if (!(r.value > 0) || r.p0 == null || r.p1 == null) continue;
+          const e = swapFees(c.swaps, start, pos);
+          let e0 = c.from <= clock.head ? e.e0 : 0n;
+          let e1 = c.from <= clock.head ? e.e1 : 0n;
+          let covered = Math.max(0, Math.min(secs, (clock.head - start + 1) * clock.perBlock));
+          for (const [hour, [h0, h1]] of Object.entries(hours)) {
+            const t = Number(hour) * HOUR;
+            if (t >= winFrom && t + HOUR <= Math.min(readFrom, clock.time)) {
+              e0 += BigInt(h0);
+              e1 += BigInt(h1);
+              covered += HOUR;
+            }
+          }
+          if (!(covered > 0)) continue;
+          const earned = (Number(e0) / 10 ** r.dec0) * r.p0 + (Number(e1) / 10 ** r.dec1) * r.p1;
+          aprs.set(`${win}|${r.ref}`, { apr: (earned / r.value) * (YEAR_MS / (covered * 1000)), secs: covered, full: covered >= secs * 0.95 });
+        }
+        store.update(COLLECTION, (d) => {
+          d.earned = { ...d.earned, ...kept };
+        });
+      } catch {
+        // This pool keeps the counter's APR.
+      }
+    }
+  }));
+  aprBusy = '';
+  store.refresh();
+  if (aprAgain || view.window !== win) {
+    aprAgain = false;
+    loadAprs(store);
+  }
 }
 
 // Token logos arrive once, from the token list. The page redraws when they do.
@@ -371,7 +490,23 @@ function askLogos(store) {
 const amount = (n) => (n >= 1000 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toFixed(2) : n.toPrecision(4));
 const price = (n) => (n === Infinity ? '∞' : n === 0 ? '0' : amount(n));
 const usdOrDash = (n) => (n === null ? '—' : money(n, 'USD'));
-const aprText = (n) => (n == null ? '—' : `${(n * 100).toFixed(n < 0.1 ? 2 : 1)}%`);
+const pct = (n) => `${(n * 100).toFixed(n < 0.1 ? 2 : 1)}%`;
+const span = (secs) => (secs >= 2 * 86400 ? `${(secs / 86400).toFixed(1)} days` : secs >= 2 * 3600 ? `${(secs / 3600).toFixed(1)} hours` : `${Math.round(secs / 60)} min`);
+// Fee APR as shown: from swaps, else from the counter, else how long the counter still needs.
+function aprText(r) {
+  if (r.apr != null && r.aprSecs != null && !r.aprFull) return `${pct(r.apr)} · ${span(r.aprSecs).replace(/ (days|hours)$/, (m) => (m === ' days' ? ' d' : ' h'))}`;
+  if (r.apr != null) return pct(r.apr);
+  if (r.aprLeft > 0) return `counting · ${Math.ceil(r.aprLeft / 60000)} min`;
+  return aprBusy ? '…' : '—';
+}
+function aprTitle(r) {
+  if (r.aprSecs != null) {
+    return r.aprFull
+      ? `Fees from the swaps in the last ${WINDOWS[view.window][1]}, as a yearly rate of the value. An estimate.`
+      : `Fees from the swaps in the last ${span(r.aprSecs)} only, as a yearly rate: the node gave no more history in this load.`;
+  }
+  return 'The swaps could not be read, so this counts the fees earned since the board started counting, as a yearly rate. Shown after an hour.';
+}
 
 // A short, stable colour for a symbol, so a missing logo still looks like it belongs to its token.
 function hueOf(text) {
@@ -439,10 +574,10 @@ function sortOptions() {
   return options.map(([name, label]) => h('option', { value: name, selected: name === current }, label));
 }
 
-const APR_TITLE = 'Fees earned since the board started counting, as a yearly rate of the value. Shown after 6 hours, and counted again from zero when fees are collected.';
+const APR_TITLE = 'Fees from the pool\'s swaps in the chosen window, as a yearly rate of the value. Where swaps cannot be read, the fees earned since the board started counting.';
 
-function poolStat(label, value) {
-  return h('div', { class: 'pool-stat', title: label === 'Fee APR' ? APR_TITLE : null }, h('span', null, label), h('strong', null, value));
+function poolStat(label, value, title = null) {
+  return h('div', { class: 'pool-stat', title }, h('span', null, label), h('strong', null, value));
 }
 
 // One position as a card: the pair, its chain and fee, the range, the value and the token split.
@@ -468,7 +603,7 @@ function poolCard(r, i) {
     h('div', { class: 'pool-stats' },
       poolStat('Value', usdOrDash(r.value)),
       poolStat('Unclaimed fees', usdOrDash(r.fees)),
-      poolStat('Fee APR', aprText(r.apr))),
+      poolStat(`Fee APR · ${WINDOWS[view.window][1]}`, aprText(r), aprTitle(r))),
     distribution(r),
     h('footer', { class: 'pool-foot muted small' },
       h('span', null, r.owner),
@@ -531,7 +666,7 @@ function poolTable(rows, store) {
           h('td', null, distribution(r)),
           h('td', { class: 'num' }, usdOrDash(r.value)),
           h('td', { class: 'num' }, usdOrDash(r.fees)),
-          h('td', { class: 'num' }, aprText(r.apr)),
+          h('td', { class: 'num', title: aprTitle(r) }, aprText(r)),
           h('td', null, r.url
             ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn', title: 'Open on Uniswap', 'aria-label': `Open position ${r.tokenId} on Uniswap` }, icon('link'))
             : null))))));
@@ -603,7 +738,12 @@ function draw(root, store) {
   const inRange = byChain.filter((r) => r.inRange).length;
   const baselines = store.get(COLLECTION)?.fees ?? {};
   const shown = sortRows((view.filter === 'in' ? byChain.filter((r) => r.inRange) : view.filter === 'out' ? byChain.filter((r) => !r.inRange) : byChain)
-    .map((r) => ({ ...r, apr: feeApr(r, baselines) })), view.sort, view.dir);
+    .map((r) => {
+      const s = aprs.get(`${view.window}|${r.ref}`);
+      return s
+        ? { ...r, apr: s.apr, aprSecs: s.secs, aprFull: s.full }
+        : { ...r, apr: feeApr(r, baselines), aprLeft: counterLeft(r, baselines) };
+    }), view.sort, view.dir);
   const totalValue = byChain.reduce((s, r) => s + (r.value ?? 0), 0);
   const totalFees = byChain.reduce((s, r) => s + (r.fees ?? 0), 0);
   const totalValueKnown = byChain.some((r) => r.value !== null);
@@ -704,6 +844,15 @@ function draw(root, store) {
         chip('in', 'In range', inRange),
         chip('out', 'Out of range', byChain.length - inRange)),
       h('div', { class: 'row lp-tools' },
+      h('label', { class: 'inline lp-sort', title: 'The time fee APR is read over' }, 'APR',
+        h('select', {
+          'aria-label': 'Fee APR window',
+          onchange: (e) => {
+            view.window = e.target.value;
+            store.refresh();
+            loadAprs(store);
+          },
+        }, Object.entries(WINDOWS).map(([key, [, label]]) => h('option', { value: key, selected: key === view.window }, label)))),
       h('label', { class: 'inline lp-sort' }, 'Sort',
         h('select', {
           'aria-label': 'Sort positions',
@@ -735,18 +884,20 @@ export default {
   short: 'Pools',
   icon: 'droplet',
   collection: COLLECTION,
-  defaults: { cache: {}, prices: {}, scan: {}, fees: {} },
+  defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {} },
   render: draw,
   serialize: () => ({
     filter: view.filter === 'all' ? '' : view.filter,
     chain: view.chain === 'all' ? '' : String(view.chain),
     view: view.layout === 'list' ? 'list' : '',
     sort: view.sort === 'value' && view.dir === -1 ? '' : sortName(view.sort, view.dir),
+    apr: view.window === '24h' ? '' : view.window,
   }),
   restore: (p = {}) => {
     view.filter = ['in', 'out'].includes(p.filter) ? p.filter : 'all';
     view.layout = p.view === 'list' ? 'list' : 'cards';
     [view.sort, view.dir] = parseSort(p.sort);
+    view.window = Object.hasOwn(WINDOWS, p.apr) ? p.apr : '24h';
     const id = Number(p.chain);
     view.chain = CHAINS.some((c) => c.id === id) ? id : 'all';
   },
