@@ -1237,6 +1237,35 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .wallet-add { flex-wrap: wrap; }
 .wallet-add select { width: auto; }
 .wallet-add input { flex: 1 1 220px; min-width: 0; }
+
+/* DeFi → Lending / Borrowing */
+.lend-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr)); gap: var(--gap); }
+.lend-card { display: flex; flex-direction: column; gap: 14px; border-top: 3px solid var(--income); animation: fadeUp 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: calc(var(--i, 0) * 0.05s); }
+.lend-card.watch { border-top-color: var(--warn); }
+.lend-card.risk { border-top-color: var(--danger); }
+.lend-head { align-items: flex-start; gap: 10px; }
+.lend-head .logo.token { width: 32px; height: 32px; }
+.lend-hf { display: flex; flex-direction: column; align-items: flex-end; }
+.lend-hf strong, .lend-hf-text { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.lend-hf.safe strong, .lend-hf-text.safe { color: var(--income); }
+.lend-hf.watch strong, .lend-hf-text.watch { color: var(--warn); }
+.lend-hf.risk strong, .lend-hf-text.risk { color: var(--danger); }
+.lend-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 10px; }
+.lend-stats > div { display: flex; flex-direction: column; gap: 2px; }
+.lend-stats strong { font-variant-numeric: tabular-nums; }
+.lend-usage { display: flex; flex-direction: column; gap: 6px; }
+.lend-usage .row { flex-wrap: wrap; gap: 4px 10px; }
+.lend-bar { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.lend-bar span { display: block; height: 100%; border-radius: inherit; background: var(--income); transform-origin: left; animation: growX 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.lend-bar span.watch { background: var(--warn); }
+.lend-bar span.risk { background: var(--danger); }
+.lend-sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 14px; }
+.lend-side { display: flex; flex-direction: column; gap: 6px; }
+.lend-assets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.lend-assets li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; align-items: baseline; }
+.lend-asset { gap: 6px; min-width: 0; flex-wrap: nowrap; }
+.lend-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lend-assets li > .lend-num:last-child { grid-column: 2; }
 @media (max-width: 720px) {
   .lp-stat strong { font-size: 1.2rem; }
   .lp-stats > :last-child:nth-child(odd) { grid-column: 1 / -1; }

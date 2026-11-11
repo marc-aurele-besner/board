@@ -9,6 +9,7 @@ import { insightsPanel } from '../pool-insights.js';
 import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey } from '../uniswap.js';
 import { chainById, explorerUrl, etherscanKey } from '../chains.js';
 import { walletsTab, walletsView } from './defi-wallets.js';
+import { lendingTab, lendingView } from './defi-lending.js';
 
 const STALE_MS = 10 * 60 * 1000;
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
@@ -2388,10 +2389,11 @@ function detailView(store, ref) {
 
 const FEES_SUBTITLE = 'Fees collected from your positions: read from the chain, from Etherscan when its key is set, and logged by hand.';
 
-// The DeFi section's views: the LP positions, the fees collected from them, and the wallets' balances.
+// The DeFi section's views: the LP positions, the fees collected from them, the wallets' balances, and Aave.
 // Sub-tabs, as in Monitoring and Tools.
-const TABS = [['positions', 'LP Positions', 'droplet'], ['fees', 'LP Fees Collected', 'coins'], ['wallets', 'Wallets', 'wallet']];
-const OWN_TABS = ['wallets']; // drawn by their own module, not by the LP views
+const TABS = [['positions', 'LP Positions', 'droplet'], ['fees', 'LP Fees Collected', 'coins'], ['wallets', 'Wallets', 'wallet'], ['lending', 'Lending / Borrowing', 'landmark']];
+// Tabs drawn by their own module, not by the LP views: their title and how to draw them.
+const OWN_TABS = { wallets: ['Wallets', walletsTab], lending: ['Lending / Borrowing', lendingTab] };
 
 function tabs(store) {
   return h('nav', { class: 'sub-tabs lp-tabs', role: 'tablist', 'aria-label': 'DeFi view' },
@@ -2419,10 +2421,11 @@ function drawOwnTab(root, store) {
   askLogos(store);
   askRate(store);
   const ui = { cash, logo, logoOf: (chainId, address) => logoMap.get(`${chainId}:${String(address).toLowerCase()}`) ?? null, refresh: () => store.refresh() };
-  const { subtitle, actions, body } = walletsTab(store, ui);
+  const [title, drawTab] = OWN_TABS[view.tab];
+  const { subtitle, actions, body } = drawTab(store, ui);
   root.replaceChildren(h('div', { class: 'stack-lg lp' },
     h('div', { class: 'row between lp-head' },
-      h('div', null, h('h2', null, 'Wallets'), h('p', { class: 'muted small' }, subtitle)),
+      h('div', null, h('h2', null, title), h('p', { class: 'muted small' }, subtitle)),
       h('div', { class: 'row' }, currencySwitch(store), actions)),
     tabs(store),
     rateNotice(),
@@ -2430,7 +2433,7 @@ function drawOwnTab(root, store) {
 }
 
 function draw(root, store) {
-  if (OWN_TABS.includes(view.tab) && !view.detail) {
+  if (Object.hasOwn(OWN_TABS, view.tab) && !view.detail) {
     drawOwnTab(root, store);
     return;
   }
@@ -2647,7 +2650,7 @@ export default {
   short: 'DeFi',
   icon: 'droplet',
   collection: COLLECTION,
-  defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [], history: {}, hidden: [], etherscan: {}, flip: {}, insights: [], balances: {}, tokens: [], hiddenTokens: [] },
+  defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [], history: {}, hidden: [], etherscan: {}, flip: {}, insights: [], balances: {}, tokens: [], hiddenTokens: [], lending: {} },
   render: draw,
   serialize: () => ({
     cur: view.currency === 'USD' ? '' : view.currency,
@@ -2659,6 +2662,8 @@ export default {
     tab: view.tab === 'positions' ? '' : view.tab,
     wchain: view.tab === 'wallets' && walletsView.chain !== 'all' ? String(walletsView.chain) : '',
     wallet: view.tab === 'wallets' && walletsView.wallet !== 'all' ? walletsView.wallet : '',
+    lchain: view.tab === 'lending' && lendingView.chain !== 'all' ? String(lendingView.chain) : '',
+    lwallet: view.tab === 'lending' && lendingView.wallet !== 'all' ? lendingView.wallet : '',
     range: view.feeAuto ? '' : view.feeRange,
     by: view.feeGroup === defaultFeeGroup(view.feeRange) ? '' : view.feeGroup,
     fsort: view.feeSort === 'date' && view.feeDir === -1 ? '' : sortName(view.feeSort, view.feeDir),
@@ -2680,6 +2685,8 @@ export default {
     // Checked against the rows when the tab is drawn.
     walletsView.chain = Number(p.wchain) || 'all';
     walletsView.wallet = isAddress(p.wallet) ? p.wallet.toLowerCase() : 'all';
+    lendingView.chain = Number(p.lchain) || 'all';
+    lendingView.wallet = isAddress(p.lwallet) ? p.lwallet.toLowerCase() : 'all';
     view.feeAuto = !Object.hasOwn(FEE_RANGES, p.range);
     view.feeRange = view.feeAuto ? '7' : p.range;
     view.feeGroup = FEE_GROUPS.some(([k]) => k === p.by) ? p.by : defaultFeeGroup(view.feeRange);
