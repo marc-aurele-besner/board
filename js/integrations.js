@@ -6,7 +6,7 @@ const SECTIONS = {
   google: ['google', 'Google Calendar'],
   github: ['github', 'GitHub'],
   exchange: ['exchange', 'Exchange rates'],
-  uniswap: ['uniswap', 'Uniswap'],
+  uniswap: ['uniswap', 'DeFi wallets'],
   telegram: ['telegram', 'Telegram'],
   analytics: ['analytics', 'Google Analytics'],
   search: ['search', 'Search consoles'],
