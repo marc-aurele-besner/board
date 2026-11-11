@@ -60,8 +60,9 @@ function taskCell(store, p, kind, text, due) {
     : h('button', { type: 'button', class: 'btn-small', onclick: () => addTask(store, p, kind, text, due) }, 'Create task');
 }
 
-// A task for something a check found missing, filled in for the site's project and editable before it is added.
-function openTaskDialog(store, p, { text, description = '', priority = 'low' }) {
+// A task for something a check found, filled in for the site's project and editable before it is added.
+// `comment` adds a field for what to change, put at the top of the description.
+function openTaskDialog(store, p, { text, description = '', priority = 'low', comment = '' }) {
   const projects = projectTree(store.get('projects').projects).map(({ project }) => project);
   const dialog = openDialog({
     title: 'Create a task',
@@ -75,7 +76,7 @@ function openTaskDialog(store, p, { text, description = '', priority = 'low' }) 
         const projectId = f.get('project') || null;
         store.update('todos', (d) => d.items.push(makeTask({
           text: title,
-          description: String(f.get('description') ?? '').trim(),
+          description: [f.get('comment'), f.get('description')].map((x) => String(x ?? '').trim()).filter(Boolean).join('\n\n'),
           projectId,
           priority: String(f.get('priority')),
           due: String(f.get('due') ?? ''),
@@ -85,7 +86,8 @@ function openTaskDialog(store, p, { text, description = '', priority = 'low' }) 
       },
     },
       h('label', null, 'Task', h('input', { name: 'text', value: text, required: true, autocomplete: 'off' })),
-      h('label', null, 'Description', h('textarea', { name: 'description', rows: 3 }, description)),
+      comment ? h('label', null, 'What to change', h('textarea', { name: 'comment', rows: 3, placeholder: comment, autofocus: true })) : null,
+      h('label', null, comment ? 'Found by the check' : 'Description', h('textarea', { name: 'description', rows: 3 }, description)),
       h('div', { class: 'row' },
         h('label', null, 'Project', h('select', { name: 'project' },
           h('option', { value: '' }, 'Personal'),
@@ -489,9 +491,41 @@ const readAll = (store, part, label) =>
 const againButton = (store, p, part, busy) =>
   h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Read again', 'aria-label': `Read ${hostOf(p.website)} again`, onclick: () => check(store, p, [part]) }, refreshIcon(busy));
 
-// What a task for a missing share tag says.
-const metaTask = (store, p, tag) => () =>
-  openTaskDialog(store, p, { text: `Add ${tag} to ${hostOf(p.website)}`, description: 'A share tag the metadata preview found missing.' });
+// What is off with a tag that is there: a length search results or previews cut, an address that is not full.
+function tagHint(tag, v) {
+  if (!v) return '';
+  const len = v.length;
+  const long = (max, where) => (len > max ? `${len} characters; ${where} show about ${max}.` : '');
+  if (tag === '<title>') return len < 15 ? `Only ${len} characters; a title of 30 to 60 says more.` : long(60, 'search results');
+  if (tag === 'meta description') return len < 50 ? `Only ${len} characters; 70 to 160 reads better in search results.` : long(160, 'search results');
+  if (tag === 'og:title') return long(90, 'most networks');
+  if (tag === 'og:description') return len < 30 ? `Only ${len} characters.` : long(200, 'most networks');
+  if (tag === 'og:image' || tag === 'twitter:image') return /^https:\/\//i.test(v) ? '' : 'Not served over https, so some networks skip it.';
+  if (tag === 'og:url') return /^https?:\/\//i.test(v) ? '' : 'Should be a full address with https://.';
+  if (tag === 'twitter:card') return ['summary', 'summary_large_image', 'app', 'player'].includes(v) ? '' : `“${v}” is not a card type X knows.`;
+  return '';
+}
+
+// A task about one tag: add it when missing, fix it when the hint found something, or improve it otherwise.
+const metaTask = (store, p, tag, value = '') => () => {
+  const host = hostOf(p.website);
+  const hint = tagHint(tag, value);
+  const image = /image/.test(tag);
+  openTaskDialog(store, p, {
+    text: !value ? `Add ${tag} to ${host}` : hint ? `Fix ${tag} on ${host}` : `Improve ${tag} on ${host}`,
+    description: [!value ? 'A share tag the metadata preview found missing.' : `Now: ${value}`, hint].filter(Boolean).join('\n'),
+    comment: image ? 'For example: use a brighter banner with the logo and a short tagline' : 'For example: make it shorter and name what the site does',
+    priority: !value || hint ? 'medium' : 'low',
+  });
+};
+
+// A task about the whole preview on one network, with a comment on what to change.
+const previewTask = (store, p, label, m) => () =>
+  openTaskDialog(store, p, {
+    text: `Improve how ${hostOf(p.website)} looks when shared on ${label}`,
+    description: [`Title: ${m.ogTitle || m.title || 'none'}`, `Description: ${m.ogDescription || m.description || 'none'}`, `Image: ${m.ogImage || 'none'}`].join('\n'),
+    comment: 'For example: the banner is cropped, the text is too long',
+  });
 
 function metaAll(store, sites) {
   const TAGS = ['title', 'description', 'ogTitle', 'ogDescription', 'ogImage', 'ogUrl', 'twitterCard', 'twitterImage'];
@@ -532,31 +566,49 @@ function metaTab(store, sites) {
   const tags = [['<title>', m.title], ['meta description', m.description], ['og:title', m.ogTitle], ['og:description', m.ogDescription], ['og:image', m.ogImage], ['og:url', m.ogUrl], ['twitter:card', m.twitterCard], ['twitter:image', m.twitterImage]];
   const present = tags.filter(([, v]) => v).length;
   const missing = tags.filter(([, v]) => !v).map(([k]) => k);
+  const weak = tags.filter(([k, v]) => tagHint(k, v)).map(([k, v]) => `${k}: ${tagHint(k, v)}`);
   return h('div', { class: 'stack-lg' }, chips,
     h('div', { class: 'meta-grid' },
       h('section', { class: 'card stack' },
         h('div', { class: 'row between' }, h('h3', null, `Tags found on ${hostOf(p.website)}`), read),
         h('div', { class: 'meter' }, h('span', { style: { width: `${(present / tags.length) * 100}%` } })),
         h('p', { class: 'muted small' }, `${present} of ${tags.length} tags present · read ${timeOf(m.at)}`),
-        h('ul', { class: 'tag-rows' }, tags.map(([k, v]) =>
-          h('li', null,
-            tick(Boolean(v), `${k} ${v ? 'found' : 'missing'}`, metaTask(store, p, k)),
+        h('ul', { class: 'tag-rows' }, tags.map(([k, v]) => {
+          const hint = tagHint(k, v);
+          return h('li', null,
+            v && hint ? h('span', { class: 'tick warn', title: `${k}: ${hint}` }, icon('alert')) : tick(Boolean(v), `${k} ${v ? 'found' : 'missing'}`, metaTask(store, p, k)),
             h('code', null, k),
-            h('span', { class: v ? 'grow' : 'grow muted' }, v || 'Missing')))),
-        missing.length
+            h('div', { class: 'grow tag-value' },
+              /image/.test(k) && v ? h('img', { class: 'tag-thumb', src: v, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' }) : null,
+              h('span', { class: v ? '' : 'muted' }, v || 'Missing'),
+              hint ? h('span', { class: 'tag-hint small' }, hint) : null),
+            h('button', {
+              type: 'button',
+              class: v && !hint ? 'icon-btn tag-task' : 'btn-small tag-task',
+              title: !v ? `Create a task to add ${k}` : hint ? `Create a task to fix ${k}` : `Create a task to improve ${k}, with a comment`,
+              'aria-label': `Create a task about ${k}`,
+              onclick: metaTask(store, p, k, v),
+            }, icon(v && !hint ? 'pencil' : 'plus'), v && !hint ? null : 'Task'));
+        })),
+        missing.length || weak.length
           ? h('div', null, h('button', {
               type: 'button',
               class: 'btn-small',
-              onclick: () => {
-                store.update('todos', (d) => d.items.push(makeTask({ text: `Add the missing share tags on ${hostOf(p.website)}`, description: `Missing: ${missing.join(', ')}`, projectId: p.id, priority: 'low' })));
-                toast(`Task added to ${p.name}`);
-              },
-            }, 'Create a task for the missing tags'))
+              onclick: () => openTaskDialog(store, p, {
+                text: `${missing.length ? 'Add the missing' : 'Fix the'} share tags on ${hostOf(p.website)}`,
+                description: [missing.length ? `Missing: ${missing.join(', ')}` : '', ...weak.map((w) => `- ${w}`)].filter(Boolean).join('\n'),
+                comment: 'Anything else to change',
+              }),
+            }, `Create a task for the ${[missing.length ? 'missing' : '', weak.length ? 'incomplete' : ''].filter(Boolean).join(' and ')} tags`))
           : null),
       h('section', { class: 'stack' },
         h('h3', null, 'How a shared link looks'),
         h('div', { class: 'shares' }, [['x', 'X'], ['linkedin', 'LinkedIn'], ['slack', 'Slack'], ['discord', 'Discord'], ['imessage', 'iMessage']].map(([k, label]) =>
-          h('figure', null, h('figcaption', { class: 'muted small' }, label), shareCard(k, p, m)))))));
+          h('figure', null,
+            h('figcaption', { class: 'row between' },
+              h('span', { class: 'muted small' }, label),
+              h('button', { type: 'button', class: 'btn-link-inline', onclick: previewTask(store, p, label, m) }, 'Comment as a task')),
+            shareCard(k, p, m)))))));
 }
 
 // --- Provider status ---
