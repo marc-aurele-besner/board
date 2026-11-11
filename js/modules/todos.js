@@ -3,7 +3,7 @@ import { makeTask } from '../capture.js';
 import { AUTO_SOURCES } from '../automations.js';
 import { toast } from '../toast.js';
 import { createProject, projectIcon, labelsOf, projectTree, moveProject, labelColor } from './projects.js';
-import { editText, pickChip, pickButton, pill } from '../inline.js';
+import { editText, pickChip, pickButton, pickMulti, pill } from '../inline.js';
 import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
 import { openDialog } from '../modal.js';
 import { ask, parseJson } from '../ai.js';
@@ -36,7 +36,7 @@ const isDefaultSort = (s) => s.key === DEFAULT_SORT.key && s.dir === DEFAULT_SOR
 
 // View state lives here so it survives re-renders.
 // filter: one of SMART_LISTS, or a project id. status: a statusFilters key. category: '' means any.
-// sort: { key, dir }. colFilter: per-column filters. An empty value means "any".
+// sort: { key, dir }. colFilter: the title filter, and a list of picked values per column. Empty means "any".
 // query: the search box, read by taskMatcher (words plus #project, !priority, is:status, cat:, due: tokens).
 const view = {
   layout: 'table',
@@ -54,10 +54,13 @@ const view = {
   creatingProject: false,
   showProject: false,
   sort: { ...DEFAULT_SORT },
-  colFilter: { text: '', status: '', priority: '', project: '', category: '' },
+  colFilter: emptyColFilter(),
   tidy: { status: 'idle', items: [] },
 };
 
+function emptyColFilter() {
+  return { text: '', status: [], priority: [], project: [], category: [] };
+}
 const isProjectFilter = (f) => !SMART_LISTS.includes(f);
 const matchesFilter = (item) => {
   const f = view.filter;
@@ -77,10 +80,10 @@ const matchesCategory = (item) => !view.category || item.category === view.categ
 const matchesColumns = (item) => {
   const f = view.colFilter;
   if (f.text && !item.text.toLowerCase().includes(f.text.toLowerCase())) return false;
-  if (f.status && statusOf(item) !== f.status) return false;
-  if (f.priority && (item.priority ?? 'none') !== f.priority) return false;
-  if (f.project && (f.project === 'none' ? item.projectId !== null : item.projectId !== f.project)) return false;
-  if (f.category && (f.category === NO_CATEGORY ? Boolean(item.category) : item.category !== f.category)) return false;
+  if (f.status.length && !f.status.includes(statusOf(item))) return false;
+  if (f.priority.length && !f.priority.includes(item.priority ?? 'none')) return false;
+  if (f.project.length && !f.project.includes(item.projectId ?? 'none')) return false;
+  if (f.category.length && !f.category.includes(item.category || NO_CATEGORY)) return false;
   return true;
 };
 const projectsOf = (store) => store.get('projects').projects;
@@ -841,10 +844,18 @@ function columnFilters(store, projects, categories, showDue) {
     view.colFilter = { ...view.colFilter, [key]: e.target.value };
     store.refresh();
   };
+  // Searchable, and several values can be picked; a task matching any of them is shown.
   const select = (key, options) =>
-    h('select', { value: f[key], 'aria-label': `Filter ${key}`, onchange: set(key) },
-      h('option', { value: '' }, 'Any'),
-      options.map(([v, l]) => h('option', { value: v }, l)));
+    pickMulti({
+      key: `todo-filter-${key}`,
+      values: f[key],
+      options,
+      ariaLabel: `Filter ${key}`,
+      onChange: (values) => {
+        view.colFilter = { ...view.colFilter, [key]: values };
+        store.refresh();
+      },
+    });
   return h('div', { class: 'todo-row todo-filters' },
     h('span'), h('span'),
     h('input', {
@@ -854,17 +865,18 @@ function columnFilters(store, projects, categories, showDue) {
       'aria-label': 'Filter titles',
       onchange: set('text'),
     }),
-    select('status', taskStatuses(store).map((s) => [s.key, s.name])),
-    select('priority', PRIORITIES),
-    select('project', [['none', 'Personal'], ...projects.map((p) => [p.id, p.name])]),
-    select('category', [[NO_CATEGORY, 'No category'], ...categories.map((c) => [c, c])]),
+    select('status', taskStatuses(store).map((s) => ({ value: s.key, label: s.name, ...statusLook(s) }))),
+    select('priority', PRIORITIES.map(([v, l]) => ({ value: v, label: l, tone: v === 'none' ? 'plain' : v }))),
+    select('project', [{ value: 'none', label: 'Personal' },
+      ...[...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) }))]),
+    select('category', [{ value: NO_CATEGORY, label: 'No category' }, ...categories.map((c) => ({ value: c, label: c, color: categoryColor(store, c) }))]),
     showDue ? h('span') : null,
-    h('span', null, Object.values(f).some(Boolean) || !isDefaultSort(view.sort)
+    h('span', null, Object.values(f).some((v) => v.length) || !isDefaultSort(view.sort)
       ? h('button', {
           type: 'button',
           class: 'btn-small',
           onclick: () => {
-            view.colFilter = { text: '', status: '', priority: '', project: '', category: '' };
+            view.colFilter = emptyColFilter();
             view.sort = { ...DEFAULT_SORT };
             store.refresh();
           },
@@ -1084,7 +1096,7 @@ function draw(root, store) {
     items.filter((i) => matchesFilter(i) && (matchesQuery.hasStatus || matchesStatus(i)) && matchesCategory(i) && matchesColumns(i) && matchesQuery(i)),
     projects,
   );
-  const columnsActive = Object.values(view.colFilter).some(Boolean);
+  const columnsActive = Object.values(view.colFilter).some((v) => v.length);
 
   // The selection only holds tasks on screen, so a batch never touches one hidden by a filter or deleted elsewhere.
   const order = visible.map((i) => i.id);
