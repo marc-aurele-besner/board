@@ -6,7 +6,7 @@ import { setupBanner } from '../integrations.js';
 import { positionFields, positionError } from '../position-input.js';
 import { poolsChanged } from '../automations.js';
 import { insightsPanel } from '../pool-insights.js';
-import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey } from '../uniswap.js';
+import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey, nodeUrls } from '../uniswap.js';
 import { chainById, explorerUrl, etherscanKey } from '../chains.js';
 import { walletsTab, walletsView } from './defi-wallets.js';
 import { lendingTab, lendingView } from './defi-lending.js';
@@ -582,7 +582,9 @@ async function loadAprs(store) {
 //   wallet's first one, however little history the node keeps.
 // A collect is one transaction for one position. When two ways read it, the surer one (higher level) stays. Each
 // replaces the fee counter's entry for the same collect; one the user removed is remembered in `hidden`.
-// One position or transaction at a time per chain, as public nodes and Etherscan limit bursts.
+// Public nodes and Etherscan limit bursts, so a chain with one node reads one position or transaction at a time.
+// A chain with several nodes reads as many at once as it has nodes, each call going to the node expected to answer
+// first. Etherscan is still read one transaction at a time.
 const ETHERSCAN_TXS = 40; // transactions read from Etherscan per chain and load
 const collectKey = (c) => (c.tx && c.ref ? `${c.ref}|${String(c.tx).toLowerCase()}` : c.id);
 // Entries from the v3 events came before levels, and are the surest.
@@ -630,12 +632,28 @@ function mergeCollects(d, found) {
 // What a row needs for reading its collect transactions.
 const posOf = (r) => ({ version: r.version, tokenId: r.tokenId, owner: r.wallet, token0: r.addr0, token1: r.addr1 });
 
-// What each chain's search is doing right now, said under Search coverage: chainId -> text.
+// What each chain's search is doing right now, said under Search coverage: chainId -> (lane -> text). A chain
+// reading several positions at once has one line per position.
 const activity = new Map();
 const clocks = new Map(); // chainId -> the chain's clock, to put dates on the block ranges searched
-function tell(store, chainId, text) {
-  activity.set(chainId, text);
+function tell(store, chainId, text, lane = '') {
+  if (!activity.has(chainId)) activity.set(chainId, new Map());
+  if (text == null) activity.get(chainId).delete(lane);
+  else activity.get(chainId).set(lane, text);
   store.refresh();
+}
+const activityLines = (chainId) => [...(activity.get(chainId)?.values() ?? [])];
+
+// Runs fn on every item, at most `width` at a time.
+async function eachLimit(items, width, fn) {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(width, items.length)) }, worker));
 }
 
 // A block range as dates, from the chain's clock, with the blocks. Dates are estimated from the block time, so a
@@ -651,13 +669,15 @@ function blockSpan(chainId, from, to) {
   return `${a.toLocaleString(undefined, opts)} – ${b.toLocaleString(undefined, opts)} (${blocks})`;
 }
 
-// One position's collects from the node. step names it among the chain's positions ("2 of 7").
-async function nodeCollects(store, chain, node, r, step) {
+// One position's collects from the node. step names it among the chain's positions ("2 of 7"). lanes: how many
+// block ranges or transactions it reads at once.
+async function nodeCollects(store, chain, node, r, step, lanes = 1) {
   const label = `Position ${step}: ${r.pair} #${r.tokenId} (${r.version})`;
+  const say = (text) => tell(store, chain.id, text, r.ref);
   const prev = store.get(COLLECTION)?.history?.[r.ref];
-  tell(store, chain.id, `${label} · reading new blocks`);
+  say(`${label} · reading new blocks`);
   const s = await positionHistory(chain, node, { version: r.version, tokenId: r.tokenId, liquidity: r.liq, pool: r.pool }, prev,
-    ({ dir, from, to }) => tell(store, chain.id, `${label} · ${dir === 'new' ? 'new blocks' : 'searching back'}, ${blockSpan(chain.id, from, to)}`));
+    ({ dir, from, to }) => say(`${label} · ${dir === 'new' ? 'new blocks' : 'searching back'}, ${blockSpan(chain.id, from, to)}`), lanes);
   const found = [];
   if (r.version === 'v3') {
     for (const e of collectFees(s.events)) {
@@ -669,12 +689,13 @@ async function nodeCollects(store, chain, node, r, step) {
     const checked = new Set(nodeKey(prev?.node) === nodeKey(node) ? prev.checked ?? [] : []);
     const txs = [...new Map(s.events.filter((e) => e.kind !== 'add' && e.time).map((e) => [e.tx, e.time]))]
       .filter(([tx]) => !checked.has(tx) && wanted(store, r.ref, tx, 3));
-    for (const [i, [tx, time]] of txs.entries()) {
-      tell(store, chain.id, `${label} · reading what transaction ${i + 1} of ${txs.length} collected (${new Date(time * 1000).toLocaleString()})`);
+    let read = 0;
+    await eachLimit(txs, lanes, async ([tx, time]) => {
+      say(`${label} · reading what transaction ${++read} of ${txs.length} collected (${new Date(time * 1000).toLocaleString()})`);
       const res = await collectTx(chain, nodeSource(node), node, tx, posOf(r));
       if (!res || res.level > 1) checked.add(tx);
       if (res && (res.f0 > 0 || res.f1 > 0) && wanted(store, r.ref, tx, res.level)) found.push(await collectEntry(chain, r, tx, time, res.f0, res.f1, res.level, 'chain'));
-    }
+    });
     s.checked = [...checked];
   }
   store.update(COLLECTION, (d) => {
@@ -762,13 +783,20 @@ async function loadHistory(store, only = null) {
       } catch {
         // Without the clock, the ranges are said in blocks only.
       }
-      for (const [i, r] of rows.entries()) {
+      // One lane per node: positions read side by side, and when there are fewer positions than nodes, each one
+      // searches several block ranges at once.
+      const nodes = nodeUrls(node).length;
+      const side = Math.max(1, Math.min(nodes, rows.length));
+      const lanes = Math.max(1, Math.floor(nodes / side));
+      await eachLimit(rows, side, async (r, i) => {
         try {
-          await nodeCollects(store, chain, node, r, `${i + 1} of ${rows.length}`);
+          await nodeCollects(store, chain, node, r, `${i + 1} of ${rows.length}`, lanes);
         } catch {
           // This position keeps the other readings until its history can be read.
+        } finally {
+          tell(store, chainId, null, r.ref);
         }
-      }
+      });
       if (!key || chain.etherscan === false) return;
       try {
         await etherscanCollects(store, chain, node, key, wallets, rows);
@@ -1625,12 +1653,12 @@ function coverageCard(store) {
     view.coverageOpen ? null : [h('strong', { class: 'lp-coverage-pct' }, coveragePct(cov.pct)), meter(cov.pct)],
     h('span', { class: 'muted small lp-coverage-recap' }, view.coverageOpen ? status : `${cov.done}/${cov.total} positions · ${status}`),
     h('span', { class: 'sort-mark' }, icon(view.coverageOpen ? 'chevron-up' : 'chevron-down')));
-  // What each chain is searching now, one line per chain.
-  const now = (chainId) => (activity.has(chainId) ? h('p', { class: 'muted small lp-coverage-now' }, activity.get(chainId)) : null);
+  // What each chain is searching now: one line per position read at the same time.
+  const now = (chainId) => activityLines(chainId).map((text) => h('p', { class: 'muted small lp-coverage-now' }, text));
   if (!view.coverageOpen) {
     return h('section', { class: 'card lp-coverage collapsed', title: COVERAGE_TITLE },
       toggle,
-      [...activity.keys()].map((id) => h('p', { class: 'muted small lp-coverage-now' }, h('strong', null, `${chainOf(id)?.name ?? id}: `), activity.get(id))));
+      [...activity.keys()].flatMap((id) => activityLines(id).map((text) => h('p', { class: 'muted small lp-coverage-now' }, h('strong', null, `${chainOf(id)?.name ?? id}: `), text))));
   }
   return h('section', { class: 'card stack lp-coverage', title: COVERAGE_TITLE },
     toggle,
