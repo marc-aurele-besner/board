@@ -67,10 +67,13 @@ export function restore(root, kept) {
   }
 }
 
+// A pointer is down. A rebuild between press and release would drop the click, since they land on different elements.
+let pressed = false;
+
 // True while a rebuild would get in the way: a field the user changed has focus, a field drawn after the render
-// (an inline editor) has focus, or a picker is open.
+// (an inline editor) has focus, a picker is open, or a button is being pressed.
 export function holding(root) {
-  if (document.querySelector('.popover')) return true;
+  if (pressed || document.querySelector('.popover')) return true;
   const el = document.activeElement;
   if (!root || !isField(el) || !root.contains(el) || committed.has(el)) return false;
   return !drawn.has(el) || dirty(el);
@@ -91,7 +94,13 @@ export function watchCommits(root, onSettle) {
   }, true);
   // Typing again after a submit that did not go through makes the field worth keeping again.
   root.addEventListener('input', (e) => committed.delete(e.target), true);
+  document.addEventListener('pointerdown', () => (pressed = true), true);
+  const release = () => (pressed = false);
+  for (const type of ['pointerup', 'pointercancel']) document.addEventListener(type, release, true);
+  // A release outside the window never reaches the page; leaving the window ends the press instead.
+  window.addEventListener('blur', release);
   // Focus leaving a field, a click or a key can end a hold; the check runs once the event is done.
   const settle = () => setTimeout(onSettle, 0);
-  for (const type of ['focusout', 'pointerup', 'keyup']) document.addEventListener(type, settle, true);
+  for (const type of ['focusout', 'pointerup', 'pointercancel', 'keyup']) document.addEventListener(type, settle, true);
+  window.addEventListener('blur', settle);
 }

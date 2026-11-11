@@ -73,6 +73,7 @@ function render({ user = true } = {}) {
   const asked = readRoute().id;
   if (asked !== mod.id) toast(`There is no page at “${asked}”. Showing ${mod.title}.`);
   held = false;
+  lastRender = performance.now();
   const before = app.querySelector('main.view');
   // Unsubmitted fields are carried over within a section; a new section starts clean.
   const kept = before && mod.id === lastSection ? snapshot(before) : [];
@@ -127,17 +128,31 @@ function render({ user = true } = {}) {
   restore(main, kept);
 }
 
-// Saves from timers and loads wait while the user is typing in a changed field; the user's own saves render at once.
+// The user's own saves render at once. Saves from timers and loads (a pools search reports every block range it
+// reads) render at most once per gap: rebuilding the page every frame kept the main thread busy and swallowed
+// clicks whose press and release landed on two different pages. They also wait while the user is typing in a
+// changed field or holding a button down, and while the tab is hidden.
+const BACKGROUND_GAP_MS = 1000;
+let lastRender = 0;
+let gapTimer = 0;
+
 function onData({ user }) {
-  if (!user && holding(app.querySelector('main.view'))) {
-    held = true;
-    return;
-  }
-  render({ user });
+  if (user) return render({ user });
+  held = true;
+  settle();
 }
 
 function settle() {
-  if (held && store && !holding(app.querySelector('main.view'))) render({ user: false });
+  if (!held || !store || document.hidden || holding(app.querySelector('main.view'))) return;
+  const wait = lastRender + BACKGROUND_GAP_MS - performance.now();
+  if (wait > 0) {
+    gapTimer ||= setTimeout(() => {
+      gapTimer = 0;
+      settle();
+    }, wait);
+    return;
+  }
+  render({ user: false });
 }
 
 function updateStatus(status) {
@@ -263,6 +278,8 @@ async function boot() {
   window.addEventListener('beforeunload', () => store?.flush());
   document.addEventListener('keydown', onShortcut);
   watchCommits(app, settle);
+  // Background renders skipped while the tab was hidden are drawn once it shows again.
+  document.addEventListener('visibilitychange', settle);
   // Settings › Data folder asks for another folder.
   // The page reloads on the new folder, so timers and caches that belong to the old one are dropped with it.
   window.addEventListener('board:pick-folder', async () => {
