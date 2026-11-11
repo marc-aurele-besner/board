@@ -1,4 +1,4 @@
-import { h, icon, refreshIcon, money, empty, notice, uid, todayISO } from '../ui.js';
+import { h, icon, refreshIcon, money, empty, notice, uid, todayISO, copyable } from '../ui.js';
 import { barChart } from '../chart.js';
 import { toast } from '../toast.js';
 import { setupBanner } from '../integrations.js';
@@ -1660,7 +1660,53 @@ function closeDetail(store) {
   store.refresh();
 }
 
-// What a position earned per day over the last 30 days, from the hours saved for fee APR, at today's prices.
+// Block explorers, for the wallet, pool and token links. A chain without one gets no links.
+const EXPLORERS = {
+  1: 'https://etherscan.io',
+  8453: 'https://basescan.org',
+  42161: 'https://arbiscan.io',
+  10: 'https://optimistic.etherscan.io',
+  137: 'https://polygonscan.com',
+  56: 'https://bscscan.com',
+  43114: 'https://snowtrace.io',
+  130: 'https://uniscan.xyz',
+  324: 'https://era.zksync.network',
+};
+const explorerLink = (chainId, kind, id) => (EXPLORERS[chainId] && /^0x[0-9a-fA-F]{40}$/.test(id ?? '') ? `${EXPLORERS[chainId]}/${kind}/${id}` : null);
+
+// The row for a position: as read now, or from any saved read, so a position whose wallet was removed still
+// shows its range and holdings, marked as from that read.
+function detailRow(store, ref) {
+  const now = state.rows.find((r) => r.ref === ref);
+  if (now) return now;
+  for (const part of Object.values(store.get(COLLECTION)?.cache ?? {})) {
+    const r = part?.rows?.find((x) => x.ref === ref);
+    if (r) return { ...r, max: r.max ?? Infinity, staleAt: part.at };
+  }
+  return null;
+}
+
+// What a position earned over the last secs seconds, from the hours saved for fee APR, at today's prices.
+// covered: the seconds those hours span, so a part-covered window is said as such.
+function earnedOver(store, r, secs) {
+  const hours = store.get(COLLECTION)?.earned?.[r.ref];
+  if (!hours || r.p0 == null || r.p1 == null) return null;
+  const last = Math.floor(Date.now() / 1000 / HOUR) - 1;
+  const first = last - Math.round(secs / HOUR) + 1;
+  let usd = 0;
+  let n = 0;
+  for (const [hour, [h0, h1]] of Object.entries(hours)) {
+    const k = Number(hour);
+    if (k < first || k > last) continue;
+    usd += (Number(h0) / 10 ** r.dec0) * r.p0 + (Number(h1) / 10 ** r.dec1) * r.p1;
+    n++;
+  }
+  if (!n) return null;
+  const covered = n * HOUR;
+  return { usd, covered, apr: r.value > 0 ? (usd / r.value) * (YEAR_MS / (covered * 1000)) : null };
+}
+
+// What a position earned per day over the last 30 days, from the saved hours, at today's prices.
 function earnedChart(store, r) {
   const hours = store.get(COLLECTION)?.earned?.[r.ref];
   if (!hours || r.p0 == null || r.p1 == null) return null;
@@ -1670,16 +1716,15 @@ function earnedChart(store, r) {
     const t = Number(hour) * HOUR * 1000;
     if (t < since) continue;
     const key = localDay(new Date(t));
-    const a0 = Number(h0) / 10 ** r.dec0;
-    const a1 = Number(h1) / 10 ** r.dec1;
     const d = days.get(key) ?? { a0: 0, a1: 0, hours: 0 };
-    days.set(key, { a0: d.a0 + a0, a1: d.a1 + a1, hours: d.hours + 1 });
+    days.set(key, { a0: d.a0 + Number(h0) / 10 ** r.dec0, a1: d.a1 + Number(h1) / 10 ** r.dec1, hours: d.hours + 1 });
   }
   if (!days.size) return null;
   const first = [...days.keys()].sort()[0];
   const keys = bucketsBetween(new Date(`${first}T00:00`), new Date(), 'day');
   const usd = (d) => (d ? d.a0 * r.p0 + d.a1 * r.p1 : 0);
-  return barChart(keys.map((k) => bucketLabel(k, 'day')), [{ name: 'Earned', color: 'var(--income)', values: keys.map((k) => usd(days.get(k))) }], {
+  const total = [...days.values()].reduce((s, d) => s + usd(d), 0);
+  const chart = barChart(keys.map((k) => bucketLabel(k, 'day')), [{ name: 'Earned', color: 'var(--income)', values: keys.map((k) => usd(days.get(k))) }], {
     format: (v) => money(v, 'USD'),
     tip: (i) => {
       const d = days.get(keys[i]);
@@ -1692,44 +1737,159 @@ function earnedChart(store, r) {
       ];
     },
   });
+  return { chart, total, days: keys.length };
 }
 
-// The position's range: the track, its bounds and how far the price is from each edge.
+// A section card with a title, an optional note on the right, and its content.
+function panel(title, note, ...children) {
+  return h('section', { class: 'card stack lp-panel' },
+    h('div', { class: 'lp-panel-head' }, h('h3', null, title), note ? h('span', { class: 'muted small' }, note) : null),
+    ...children);
+}
+
+// How far the price moves, as a percent, to reach a price.
+const moveTo = (from, to) => (from > 0 && to > 0 && Number.isFinite(to) ? (to / from - 1) * 100 : null);
+const signedPct = (x) => (x == null ? '—' : `${x > 0 ? '+' : ''}${Math.abs(x) >= 100 ? x.toFixed(0) : x.toFixed(1)}%`);
+
+// The range on a price scale wider than it, so the price shows where it sits even out of range. Log scale:
+// prices move in ratios.
+function rangeScale(r, p) {
+  const lo = Math.log(p.min);
+  const hi = Math.log(p.max);
+  const cur = Math.log(p.current);
+  const pad = Math.max((hi - lo) * 0.45, 0.02);
+  const from = Math.min(lo - pad, cur - pad / 2);
+  const to = Math.max(hi + pad, cur + pad / 2);
+  const at = (x) => ((x - from) / (to - from)) * 100;
+  const kind = r.closed ? 'closed' : r.inRange ? 'in' : 'out';
+  return h('div', { class: `rv rv-${kind}`, role: 'img', 'aria-label': `Range ${price(p.min)} to ${price(p.max)} ${p.unit}, price now ${price(p.current)}` },
+    h('div', { class: 'rv-now', style: { left: `${Math.min(92, Math.max(8, at(cur)))}%` } }, h('span', null, 'Now'), h('strong', null, price(p.current))),
+    h('div', { class: 'rv-track' },
+      h('span', { class: 'rv-band', style: { left: `${at(lo)}%`, width: `${at(hi) - at(lo)}%` } }),
+      h('span', { class: 'rv-edge', style: { left: `${at(lo)}%` } }),
+      h('span', { class: 'rv-edge', style: { left: `${at(hi)}%` } }),
+      h('span', { class: 'rv-marker', style: { left: `${at(cur)}%` } })),
+    h('div', { class: 'rv-labels' },
+      h('span', { class: 'rv-min', style: { left: `${at(lo)}%` } }, price(p.min)),
+      h('span', { class: 'rv-max', style: { left: `${at(hi)}%` } }, price(p.max))));
+}
+
+// The price range: the scale, the bounds, the room to each edge, the width and the ticks.
 function detailRange(store, r) {
   const flip = isFlipped(store, r);
   const p = sideOf(r, flip);
-  const room = (edge) => (edge > 0 && Number.isFinite(edge) && p.current > 0 ? `${(Math.abs(edge / p.current - 1) * 100).toFixed(1)}%` : '—');
-  return h('section', { class: 'card stack' },
+  const head = (note) => h('div', { class: 'lp-panel-head' },
     h('h3', null, 'Price range'),
-    rangeView(r, store),
-    r.full
-      ? h('p', { class: 'muted small' }, 'Full range: the position earns at every price.')
-      : h('div', { class: 'mini-stats' },
-          h('div', { class: 'mini' }, h('span', { class: 'muted small' }, 'Min'), h('strong', null, price(p.min)), h('span', { class: 'muted small' }, `${room(p.min)} below`)),
-          h('div', { class: 'mini' }, h('span', { class: 'muted small' }, 'Current'), h('strong', null, price(p.current)), h('span', { class: 'muted small' }, p.unit)),
-          h('div', { class: 'mini' }, h('span', { class: 'muted small' }, 'Max'), h('strong', null, price(p.max)), h('span', { class: 'muted small' }, `${room(p.max)} above`))));
+    h('span', { class: 'row muted small' }, note, r.full ? null : flipButton(store, r, flip)));
+  if (r.full || !(p.min > 0) || !Number.isFinite(p.max) || !(p.current > 0)) {
+    return h('section', { class: 'card stack lp-panel' },
+      head(`${p.unit} per ${p.base}`),
+      h('div', { class: 'lp-range-full' },
+        h('strong', null, 'Full range'),
+        h('span', { class: 'muted' }, `The position earns at every price. Now ${price(p.current)} ${p.unit} per ${p.base}.`)));
+  }
+  const down = moveTo(p.current, p.min);
+  const up = moveTo(p.current, p.max);
+  const width = moveTo(p.min, p.max);
+  const where = r.closed
+    ? 'Closed: no liquidity in this range.'
+    : r.inRange
+      ? `In range. The price can move ${signedPct(down)} or ${signedPct(up)} before it leaves.`
+      : p.current < p.min
+        ? `Out of range, below. The price needs ${signedPct(down)} to reach it again.`
+        : `Out of range, above. The price needs ${signedPct(up)} to reach it again.`;
+  const box = (label, value, hint, cls = '') => h('div', { class: `mini ${cls}` }, h('span', { class: 'muted small' }, label), h('strong', null, value), h('span', { class: 'muted small' }, hint));
+  return h('section', { class: 'card stack lp-panel' },
+    head(`${p.unit} per ${p.base}`),
+    rangeScale(r, p),
+    h('p', { class: `lp-range-where ${r.closed ? 'closed' : r.inRange ? 'in' : 'out'}` }, where),
+    h('div', { class: 'mini-stats' },
+      box('Min price', price(p.min), `${signedPct(down)} from now`),
+      box('Current', price(p.current), `${p.unit} per ${p.base}`),
+      box('Max price', price(p.max), `${signedPct(up)} from now`),
+      box('Width', signedPct(width), 'max over min')),
+    h('p', { class: 'muted small' },
+      `1 ${r.sym0} = ${price(r.current)} ${r.sym1} · 1 ${r.sym1} = ${price(r.current > 0 ? 1 / r.current : 0)} ${r.sym0} · ticks ${r.tickLower} → ${r.tickUpper}`));
 }
 
-// What the position holds and owes: each token's amount and value, the split, and the unclaimed fees.
+// What the position holds: each token's amount, value and share, then the unclaimed fees.
 function detailHoldings(r) {
-  const line = (addr, sym, n, px) => h('li', null,
+  const total = r.value > 0 ? r.value : null;
+  const line = (addr, sym, n, px, share = null) => h('li', null,
     h('span', { class: 'lp-token' }, logo(tokenLogoOf(r, addr), sym, 'xs'), h('strong', null, sym)),
-    h('span', null, amount(n)),
-    h('span', { class: 'muted' }, px == null ? '—' : money(n * px, 'USD')));
-  return h('section', { class: 'card stack' },
-    h('h3', null, 'Holdings'),
-    h('ul', { class: 'lp-holdings' }, line(r.addr0, r.sym0, r.a0, r.p0), line(r.addr1, r.sym1, r.a1, r.p1)),
-    distribution(r),
-    h('h3', null, 'Unclaimed fees'),
-    typeof r.fee0 === 'number'
+    h('span', { class: 'num' }, amount(n)),
+    h('span', { class: 'num muted' }, px == null ? '—' : money(n * px, 'USD')),
+    share == null ? null : h('span', { class: 'lp-share', title: `${Math.round(share * 100)}% of the value`, style: { '--w': `${Math.round(share * 100)}%` } }),
+    share == null ? null : h('span', { class: 'lp-share-pct muted small' }, `${Math.round(share * 100)}%`));
+  const fees = typeof r.fee0 === 'number';
+  return panel('Holdings', total ? money(total, 'USD') : null,
+    h('ul', { class: 'lp-holdings' },
+      line(r.addr0, r.sym0, r.a0, r.p0, total ? (r.a0 * r.p0) / total : null),
+      line(r.addr1, r.sym1, r.a1, r.p1, total ? (r.a1 * r.p1) / total : null)),
+    h('div', { class: 'lp-panel-head' }, h('h3', null, 'Unclaimed fees'), h('span', { class: 'muted small' }, usdOrDash(r.fees))),
+    fees
       ? h('ul', { class: 'lp-holdings' }, line(r.addr0, r.sym0, r.fee0, r.p0), line(r.addr1, r.sym1, r.fee1, r.p1))
       : h('p', { class: 'muted small' }, 'Not read.'));
 }
 
-// Everything the board knows about one position. A position no longer read (burned, or its wallet removed) shows
-// what the fee log holds for it.
+// Fees earned over the last day, week and month, from the saved hours, with the yearly rate each makes.
+function detailEarnings(store, r) {
+  const rows = [['24 h', 86400], ['7 days', 7 * 86400], ['30 days', 30 * 86400]].map(([label, secs]) => [label, secs, earnedOver(store, r, secs)]);
+  if (!rows.some(([, , e]) => e)) return null;
+  return panel('Earnings', 'From the swaps, at today\'s prices',
+    h('table', { class: 'mon-table lp-earn' },
+      h('thead', null, h('tr', null, h('th', null, 'Over'), h('th', { class: 'num' }, 'Earned'), h('th', { class: 'num' }, 'Fee APR'), h('th', { class: 'num' }, 'Covered'))),
+      h('tbody', null, rows.map(([label, secs, e]) => h('tr', null,
+        h('td', null, label),
+        h('td', { class: 'num' }, e ? money(e.usd, 'USD') : '—'),
+        h('td', { class: 'num' }, e?.apr != null ? pct(e.apr) : '—'),
+        h('td', { class: 'num muted' }, e ? (e.covered >= secs * 0.95 ? 'full' : span(e.covered)) : '—'))))));
+}
+
+// The facts: chain, numbers, addresses with explorer links, and how fresh the read is.
+function detailFacts(store, r) {
+  const d = store.get(COLLECTION) ?? {};
+  const cfg = store.get('settings').uniswap ?? {};
+  const address = (kind, id, label = shortAddress(id)) => h('span', { class: 'row lp-addr' },
+    copyable(id, { label }),
+    explorerLink(r.chainId, kind, id) ? h('a', { href: explorerLink(r.chainId, kind, id), target: '_blank', rel: 'noopener', class: 'icon-btn', title: 'Open in the block explorer', 'aria-label': `Open ${label} in the block explorer` }, icon('link')) : null);
+  const share = searchShare(r, d, cfg);
+  const facts = [
+    ['Chain', h('span', { class: 'chain-chip' }, logo(chainOf(r.chainId)?.logo, r.chain, 'xs'), r.chain)],
+    ['Protocol', `Uniswap ${r.version} · ${r.feePct}% fee tier`],
+    ['Position', r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener' }, `#${r.tokenId}`) : `#${r.tokenId}`],
+    ['Owner', r.owner],
+    ['Wallet', address('address', r.wallet)],
+    [r.version === 'v4' ? 'Pool ID' : 'Pool', r.pool ? (r.version === 'v4' ? copyable(r.pool, { label: `${r.pool.slice(0, 10)}…${r.pool.slice(-6)}` }) : address('address', r.pool)) : '—'],
+    [r.sym0, address('token', r.addr0)],
+    [r.sym1, address('token', r.addr1)],
+    ['Liquidity', BigInt(r.liq ?? '0').toLocaleString()],
+    ['Read', r.staleAt ? `${ago(r.staleAt)} (outdated)` : state.at ? ago(state.at) : '—'],
+    ['Prices', r.pricesAt ? `from ${ago(r.pricesAt)}` : 'Current'],
+    ['Collect search', h('span', { class: 'row lp-search', title: COVERAGE_TITLE }, h('div', { class: 'meter', role: 'presentation' }, h('span', { style: { width: `${share * 100}%` } })), coveragePct(share))],
+  ];
+  return panel('Details', null,
+    h('dl', { class: 'lp-facts' }, facts.map(([k, v]) => h('div', null, h('dt', { class: 'muted small' }, k), h('dd', null, v)))));
+}
+
+// The position's collections, newest first, with their total.
+function detailCollections(collects) {
+  const total = collects.reduce((s, c) => s + (c.usd ?? 0), 0);
+  return panel('Collections', collects.length ? `${plural(collects.length, 'collection')} · ${money(total, 'USD')}` : null,
+    collects.length
+      ? h('div', { class: 'mon-scroll' }, h('table', { class: 'mon-table' },
+          h('thead', null, h('tr', null, h('th', null, 'Date'), h('th', null, 'Tokens'), h('th', null, 'Source'), h('th', { class: 'num' }, 'Value'))),
+          h('tbody', null, collects.map((c) => h('tr', null,
+            h('td', null, new Date(c.at).toLocaleDateString()),
+            h('td', { class: 'small' }, tokenCell(c)),
+            h('td', { class: 'small muted', title: c.tx ?? null }, SOURCE_NAMES[sourceOf(c)]),
+            h('td', { class: 'num' }, usdOrDash(c.usd ?? null)))))))
+      : h('p', { class: 'muted small' }, 'No collections logged for this position.'));
+}
+
+// Everything the board knows about one position. One no longer read anywhere shows what the fee log holds.
 function detailView(store, ref) {
-  const raw = state.rows.find((r) => r.ref === ref);
+  const raw = detailRow(store, ref);
   const r = raw ? aprOf(store)(raw) : null;
   const collects = collectedOf(store).filter((c) => c.ref === ref).sort((a, b) => b.at.localeCompare(a.at));
   const known = r ?? collects[0];
@@ -1740,29 +1900,19 @@ function detailView(store, ref) {
       notice({ tone: 'info', text: loading ? 'Reading the positions…' : 'This position is not among those read, and the fee log has nothing for it.' }));
   }
   const chain = r ? chainOf(r.chainId) : CHAINS.find((x) => x.name === known.chain);
+  const syms = r ? [r.sym0, r.sym1] : tokensOf(known);
   const collectedUsd = collects.reduce((s, c) => s + (c.usd ?? 0), 0);
+  const win = WINDOWS[view.window][1];
   const stat = (label, value, hint = null, title = null) => h('div', { class: 'card lp-stat', title },
     h('span', { class: 'muted' }, label), h('strong', null, value), hint ? h('span', { class: 'muted small' }, hint) : null);
-  const win = WINDOWS[view.window][1];
-  const d = store.get(COLLECTION) ?? {};
-  const cfg = store.get('settings').uniswap ?? {};
   const earned = r ? earnedChart(store, r) : null;
-  const facts = r ? [
-    ['Position', `#${r.tokenId} · Uniswap ${r.version}`],
-    ['Owner', r.owner],
-    ['Wallet', shortAddress(r.wallet), r.wallet],
-    ['Pool', shortAddress(r.pool ?? ''), r.pool],
-    ['Fee tier', `${r.feePct}%`],
-    ['Ticks', `${r.tickLower} → ${r.tickUpper}`],
-    ['Collect search', coveragePct(searchShare(r, d, cfg)), COVERAGE_TITLE],
-  ] : [];
+  const kind = !r ? 'gone' : r.closed ? 'closed' : r.inRange ? 'in' : 'out';
 
-  return h('div', { class: 'stack-lg lp lp-detail' },
-    back,
-    h('header', { class: 'lp-detail-head' },
-      h('div', { class: 'pair' },
-        r ? logo(tokenLogoOf(r, r.addr0), r.sym0, 'token') : logo(symbolLogo(tokensOf(known)[0]), tokensOf(known)[0] ?? '?', 'token'),
-        r ? logo(tokenLogoOf(r, r.addr1), r.sym1, 'token second') : logo(symbolLogo(tokensOf(known)[1]), tokensOf(known)[1] ?? '?', 'token second')),
+  const hero = h('header', { class: `card lp-hero is-${kind}` },
+    h('div', { class: 'lp-hero-main' },
+      h('div', { class: 'pair lp-hero-pair' },
+        r ? logo(tokenLogoOf(r, r.addr0), r.sym0, 'token') : logo(symbolLogo(syms[0]), syms[0] ?? '?', 'token'),
+        r ? logo(tokenLogoOf(r, r.addr1), r.sym1, 'token second') : logo(symbolLogo(syms[1]), syms[1] ?? '?', 'token second')),
       h('div', { class: 'pool-title' },
         h('h2', null, known.pair ?? 'Position'),
         h('div', { class: 'pool-meta' },
@@ -1771,11 +1921,21 @@ function detailView(store, ref) {
           r ? h('span', { class: 'fee-pill' }, `${r.feePct}%`) : null,
           r ? statusPill(r) : h('span', { class: 'status-pill closed' }, h('span', { class: 'dot' }), 'Not read'),
           r ? outdatedPill(r) : null,
-          h('span', { class: 'muted small' }, `#${known.tokenId ?? '—'}`))),
-      r?.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'btn-small', title: 'Open on Uniswap' }, icon('link'), 'Uniswap') : null),
-    r ? null : notice({ tone: 'info', text: 'This position is not among those read now: it was burned or moved, or its wallet was removed. Below is what the fee log holds for it.' }),
+          h('span', { class: 'muted small' }, `#${known.tokenId ?? '—'}${r ? ` · ${r.owner}` : ''}`)))),
+    h('div', { class: 'lp-hero-side' },
+      r ? h('div', { class: 'lp-hero-value' }, h('span', { class: 'muted small' }, 'Value'), h('strong', null, usdOrDash(r.value))) : null,
+      h('div', { class: 'row' },
+        r?.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'btn-small' }, icon('link'), 'Uniswap') : null,
+        r && explorerLink(r.chainId, 'address', r.wallet)
+          ? h('a', { href: explorerLink(r.chainId, 'address', r.wallet), target: '_blank', rel: 'noopener', class: 'btn-small', title: 'Open the wallet in the block explorer' }, icon('globe'), 'Wallet')
+          : null)));
+
+  return h('div', { class: 'stack-lg lp lp-detail' },
+    back,
+    hero,
+    !r ? notice({ tone: 'info', text: 'This position is not among those read, and no saved read has it: it was burned, or its wallet was removed before it was read. Below is what the fee log holds for it.' }) : null,
+    r?.closed ? notice({ tone: 'info', text: 'Closed: this position holds no liquidity now. Its range, its last prices and its fee history are shown as read.' }) : null,
     h('div', { class: 'lp-stats' },
-      r ? stat('Value', usdOrDash(r.value)) : null,
       r ? stat('Unclaimed fees', usdOrDash(r.fees)) : null,
       r && !r.closed ? stat(`Fee APR · ${win}`, aprText(r), null, aprTitle(r)) : null,
       r && !r.closed ? stat(`Movement · ${win}`, moveView(r), r.aprPrev != null ? `from ${pct(r.aprPrev)}` : null, moveTitle(r)) : null,
@@ -1792,31 +1952,17 @@ function detailView(store, ref) {
             },
           }, Object.entries(WINDOWS).map(([key, [, label]]) => h('option', { value: key, selected: key === view.window }, label))))
       : null,
-    r && !r.closed ? h('div', { class: 'lp-detail-grid' }, detailRange(store, r), detailHoldings(r)) : null,
+    r ? detailRange(store, r) : null,
+    // A closed position holds nothing, so its holdings are left out unless fees are still owed.
+    r ? h('div', { class: 'lp-detail-grid' }, r.closed && !(r.a0 || r.a1 || r.fee0 || r.fee1) ? null : detailHoldings(r), detailEarnings(store, r)) : null,
     earned
-      ? h('section', { class: 'card stack' },
-          h('div', { class: 'row between' }, h('h3', null, 'Fees earned per day'), h('span', { class: 'muted small' }, 'From the swaps, at today\'s prices')),
-          earned)
+      ? panel('Fees earned per day', `${money(earned.total, 'USD')} over ${plural(earned.days, 'day')} · ${money(earned.total / earned.days, 'USD')} a day`, earned.chart)
       : null,
-    h('section', { class: 'card stack' },
-      h('div', { class: 'row between' }, h('h3', null, 'Collections'), h('span', { class: 'muted small' }, money(collectedUsd, 'USD'))),
-      collects.length
-        ? h('div', { class: 'mon-scroll' }, h('table', { class: 'mon-table' },
-            h('thead', null, h('tr', null, h('th', null, 'Date'), h('th', null, 'Tokens'), h('th', null, 'Source'), h('th', { class: 'num' }, 'Value'))),
-            h('tbody', null, collects.map((c) => h('tr', null,
-              h('td', null, new Date(c.at).toLocaleDateString()),
-              h('td', { class: 'small' }, tokenCell(c)),
-              h('td', { class: 'small muted', title: c.tx ?? null }, SOURCE_NAMES[sourceOf(c)]),
-              h('td', { class: 'num' }, usdOrDash(c.usd ?? null)))))))
-        : h('p', { class: 'muted small' }, 'No collections logged for this position.')),
-    facts.length
-      ? h('section', { class: 'card stack' },
-          h('h3', null, 'Details'),
-          h('dl', { class: 'lp-facts' }, facts.map(([k, v, title]) => [h('dt', { class: 'muted' }, k), h('dd', { title: title ?? null }, v)])))
-      : null);
+    detailCollections(collects),
+    r ? detailFacts(store, r) : null);
 }
 
-const FEES_SUBTITLE ='Fees collected from your positions: read from the chain, from Etherscan when its key is set, and logged by hand.';
+const FEES_SUBTITLE = 'Fees collected from your positions: read from the chain, from Etherscan when its key is set, and logged by hand.';
 
 // The tab's two views: the positions, and the fees collected from them. Sub-tabs, as in Monitoring and Tools.
 function tabs(store) {
