@@ -4,6 +4,9 @@ import { uid, now, todayISO, statusOf } from './ui.js';
 import { ask } from './ai.js';
 import { makeTask } from './capture.js';
 import { notify } from './notifications.js';
+import { calendarEvents, calendarAccounts, eventDate } from './gcal.js';
+import { sitesOf, siteData } from './automations.js';
+import { openPositions } from './modules/positions.js';
 
 export const COLLECTION = 'cron';
 export const DEFAULTS = { flows: [], runs: [] };
@@ -24,6 +27,11 @@ export const SOURCES = [
   ['due', 'Tasks due within 7 days'],
   ['project', 'One project (description and tasks)'],
   ['spending', 'Spending this month'],
+  ['calendar', 'Calendar events today'],
+  ['inbox', 'Unread emails in the Inbox'],
+  ['sites', 'Site check problems (last 24 hours)'],
+  ['pools', 'Liquidity pool positions'],
+  ['pools-out', 'Pool positions out of range'],
   ['text', 'Fixed text'],
 ];
 
@@ -219,7 +227,7 @@ function taskLines(store, list) {
   return list.map((t) => `- ${t.text} [${nameOf(t.projectId)}${t.priority && t.priority !== 'none' ? `, ${t.priority}` : ''}${t.due ? `, due ${t.due}` : ''}]`).join('\n');
 }
 
-function gather(store, step) {
+async function gather(store, step) {
   const open = store.get('todos').items.filter((t) => statusOf(t) !== 'done');
   if (step.source === 'open') return taskLines(store, open) || 'No open tasks.';
   if (step.source === 'due') {
@@ -242,7 +250,44 @@ function gather(store, step) {
     const rows = Object.entries(totals).sort((a, b) => b[1] - a[1]);
     return rows.length ? rows.map(([k, v]) => `- ${k}: ${v.toFixed(2)}`).join('\n') : 'No expenses this month yet.';
   }
+  if (step.source === 'calendar') return gatherCalendar(store);
+  if (step.source === 'inbox') {
+    const unread = (store.get('inbox')?.emails ?? []).filter((e) => e.dir === 'received' && !e.archived && e.unread).slice(0, 50);
+    return unread.map((e) => `- ${e.from || 'Unknown sender'}: ${e.subject || '(no subject)'}`).join('\n') || 'No unread email.';
+  }
+  if (step.source === 'sites') {
+    const since = Date.now() - 24 * 60 * MINUTE;
+    const lines = sitesOf(store).flatMap((p) => {
+      const s = siteData(store, p.id);
+      const log = (s.log ?? []).filter((e) => e.level !== 'info' && Date.parse(e.at) >= since);
+      const down = s.health?.status === 'down' ? [`- ${p.name}: down as of the last check`] : [];
+      return [...down, ...log.map((e) => `- ${p.name} (${e.level === 'error' ? 'error' : 'warning'}): ${e.text}`)];
+    });
+    return lines.join('\n') || 'No site check problems in the last 24 hours.';
+  }
+  if (step.source === 'pools' || step.source === 'pools-out') {
+    const usd = (n) => (n == null ? 'unknown' : `$${n.toFixed(2)}`);
+    const rows = openPositions(store).filter((r) => step.source === 'pools' || !r.inRange);
+    return rows.map((r) => `- ${r.pair} on ${r.chain} #${r.tokenId}: ${r.inRange ? 'in range' : 'out of range'}, value ${usd(r.value)}, unclaimed fees ${usd(r.fees)}`).join('\n')
+      || (step.source === 'pools' ? 'No open pool positions.' : 'Every pool position is in range.');
+  }
   return step.text || '';
+}
+
+// Today's events of every shown calendar. Calendar sign-ins last one session, so a flow fails until they are renewed.
+async function gatherCalendar(store) {
+  if (!calendarAccounts(store).length) throw new Error('Connect a Google Calendar in Settings first.');
+  const from = new Date();
+  from.setHours(0, 0, 0, 0);
+  const to = new Date(from);
+  to.setDate(to.getDate() + 1);
+  const { events, errors, waiting } = await calendarEvents(store, from, to);
+  if (!events.length && (waiting.length || errors.length)) {
+    throw new Error(waiting.length ? `Sign in again to ${waiting.join(', ')} in Calendar.` : errors.join(' · '));
+  }
+  const clock = (v) => eventDate(v).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return events.map((e) => `- ${e.allDay ? 'All day' : `${clock(e.start)}–${clock(e.end)}`}: ${e.title}${e.location ? ` (${e.location})` : ''}`).join('\n')
+    || 'No events today.';
 }
 
 async function runStep(store, flow, step, input) {
