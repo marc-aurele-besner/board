@@ -6,6 +6,7 @@ import { openDialog } from './modal.js';
 export const JUMPS = [
   ['h', 'home', 'Home'],
   ['t', 'todos', 'Tasks'],
+  ['a', 'calendar', 'Calendar'],
   ['p', 'projects', 'Projects'],
   ['k', 'kitchen', 'Kitchen'],
   ['m', 'money', 'Money'],
