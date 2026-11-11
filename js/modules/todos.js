@@ -599,7 +599,7 @@ function selectAllBox(store, visible) {
 }
 
 // One todo row. Title, description, and the pickers all edit in place.
-// ctx: { store, projects, projectLabel, order }
+// ctx: { store, projects, projectLabel, order, showDue }. Without a deadline column, its button sits with the actions.
 function todoRow(store, item, ctx) {
   const expanded = view.expanded.has(item.id);
   const status = statusOf(item);
@@ -702,8 +702,9 @@ function todoRow(store, item, ctx) {
           onPick: (v) => updateItem(store, item.id, { category: v ?? '' }),
           onCreate: (name) => updateItem(store, item.id, { category: createTodoCategory(store, name, item.projectId) }),
         }),
-        dueControl(store, item)),
+        ctx.showDue ? dueControl(store, item) : null),
       h('div', { class: 'todo-actions' },
+        ctx.showDue ? null : dueControl(store, item),
         repos.length || item.issue ? issueControl(store, item, repos) : null,
         item.email
           ? h('a', { href: `#/inbox?email=${encodeURIComponent(item.email.id)}`, class: 'icon-btn', title: 'Open the email', 'aria-label': 'Open the email this task came from' }, icon('mail'))
@@ -878,7 +879,7 @@ function columnHeader(store, key, text) {
 }
 
 // Filter row under the headers, one control per column, aligned with the rows.
-function columnFilters(store, projects, categories) {
+function columnFilters(store, projects, categories, showDue) {
   const f = view.colFilter;
   const set = (key) => (e) => {
     view.colFilter = { ...view.colFilter, [key]: e.target.value };
@@ -901,7 +902,7 @@ function columnFilters(store, projects, categories) {
     select('priority', PRIORITIES),
     select('project', [['none', 'Personal'], ...projects.map((p) => [p.id, p.name])]),
     select('category', [[NO_CATEGORY, 'No category'], ...categories.map((c) => [c, c])]),
-    h('span'),
+    showDue ? h('span') : null,
     h('span', null, Object.values(f).some(Boolean) || !isDefaultSort(view.sort)
       ? h('button', {
           type: 'button',
@@ -1196,7 +1197,9 @@ function draw(root, store) {
   // The selection only holds tasks on screen, so a batch never touches one hidden by a filter or deleted elsewhere.
   const order = visible.map((i) => i.id);
   for (const id of view.selected) if (!order.includes(id)) view.selected.delete(id);
-  const rowOf = (item) => todoRow(store, item, { store, projects, order, projectLabel: view.filter === 'all' ? projectName(item.projectId) : '' });
+  // A deadline column with nothing in it only takes room, so it shows once a task on screen has one.
+  const showDue = visible.some((i) => i.due);
+  const rowOf = (item) => todoRow(store, item, { store, projects, order, showDue, projectLabel: view.filter === 'all' ? projectName(item.projectId) : '' });
   const grouped = (groups) => h('div', { class: 'todo-groups' },
     groups.filter(([, rows]) => rows.length).map(([name, rows]) =>
       h('section', { class: 'todo-group' },
@@ -1389,7 +1392,7 @@ function draw(root, store) {
 
         batchBar(store, visible, projects, categories),
 
-        h('div', { class: view.layout === 'table' ? 'todo-table' : 'todo-table no-columns' },
+        h('div', { class: ['todo-table', view.layout === 'table' ? '' : 'no-columns', showDue ? '' : 'no-due'].filter(Boolean).join(' ') },
           h('div', { class: 'todo-row todo-head' },
             h('span'), selectAllBox(store, visible),
             columnHeader(store, 'text', 'Task'),
@@ -1397,9 +1400,9 @@ function draw(root, store) {
             columnHeader(store, 'priority', 'Priority'),
             columnHeader(store, 'project', 'Project'),
             columnHeader(store, 'category', 'Category'),
-            columnHeader(store, 'due', 'Deadline'),
+            showDue ? columnHeader(store, 'due', 'Deadline') : null,
             h('span')),
-          columnFilters(store, projects, categories),
+          columnFilters(store, projects, categories, showDue),
           listBody))));
 }
 

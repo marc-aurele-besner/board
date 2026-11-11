@@ -1497,6 +1497,9 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .todo-groups { display: flex; flex-direction: column; gap: 14px; }
 .todo-group h3 { margin: 0; padding: 8px 4px; border-bottom: 2px solid var(--border); }
 @media (min-width: 1700px) { .todo-table.no-columns .todo-row { grid-template-columns: 20px 20px minmax(200px, 1fr) 156px 124px 140px 150px 136px 150px; } }
+/* Without a deadline column, the deadline button joins the actions */
+.todo-table.no-due .todo-head, .todo-table.no-due .todo-row { grid-template-columns: 20px 20px minmax(200px, 1fr) 156px 124px 140px 150px 180px; }
+@media (max-width: 720px) { .todo-table.no-due .todo-row { grid-template-columns: 20px 20px minmax(0, 1fr) auto; } }
 
 /* Money: month stepper and budgets */
 .month-step { display: inline-flex; align-items: center; gap: 2px; }
