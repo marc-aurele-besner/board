@@ -453,19 +453,20 @@ function projectList(store, projects, items, categories) {
         h('div', { class: 'grow' },
           h('strong', null, p.name),
           h('div', { class: 'muted small' }, [labels.map((l) => l.name).join(', '), githubLine(p)].filter(Boolean).join(' · '))),
-        googleBadges(store, p),
         h('span', { class: 'count', title: 'Open tasks' }, String(open)));
     }));
 }
 
-// Gmail and Google Calendar marks for the accounts connected to a project; nothing when none are.
-function googleBadges(store, p) {
+// The Gmail and Google Calendar accounts connected to a project, one logo and address each; nothing when none are.
+function googleField(store, p) {
   const badges = [
     ['gmail', 'Gmail', connectedGmailOf(store, p.id)],
     ['gcal', 'Google Calendar', connectedCalendarsOf(store, p.id)],
-  ].filter(([, , emails]) => emails.length)
-    .map(([name, label, emails]) => h('span', { class: 'service-badge', title: `${label}: ${emails.join(', ')}`, 'aria-label': `${label} connected` }, icon(name)));
-  return badges.length ? h('span', { class: 'service-badges' }, badges) : null;
+  ].flatMap(([name, label, emails]) => emails.map((email) =>
+    h('span', { class: 'service-badge', title: `${label}: ${email}` }, icon(name), h('span', { class: 'sr-only' }, `${label}: `), email)));
+  return badges.length
+    ? h('div', { class: 'pp-field' }, h('span', { class: 'pp-label' }, 'Connected'), h('div', { class: 'pp-chips' }, badges))
+    : null;
 }
 
 function repoTable(store, p) {
@@ -748,7 +749,9 @@ function projectView(store, p, items, categories) {
 
       h('div', { class: 'pp-field' },
         h('span', { class: 'pp-label' }, 'Open / done'),
-        h('span', null, `${open} open · ${done} done`))),
+        h('span', null, `${open} open · ${done} done`)),
+
+      googleField(store, p)),
 
     h('section', { class: 'pp-block' },
       h('h3', null, 'Description'),
