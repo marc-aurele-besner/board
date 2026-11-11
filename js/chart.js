@@ -1,21 +1,27 @@
-// Plain SVG bar charts with a hover tooltip. Only numbers and escaped labels go into the markup.
+// Plain SVG bar charts with a tooltip. Only numbers and escaped labels go into the markup.
 import { h } from './ui.js';
 
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
 
 // Bars per label. With several series the bars stack; `grouped` puts them side by side instead.
-// Hovering, tapping or using the arrow keys on a column shows its values in a tooltip.
-export function barChart(labels, series, { grouped = false, format = (v) => v.toLocaleString() } = {}) {
+// tip(i): what to show for label i on hover, focus or tap, as a node or text. Without it, the tooltip lists each series' value.
+export function barChart(labels, series, { grouped = false, format = (v) => v.toLocaleString(), tip = null } = {}) {
   const W = Math.max(360, labels.length * (grouped ? 30 : 24));
   const H = 180;
   const PAD = 24;
   const totals = labels.map((_, i) => (grouped ? Math.max(0, ...series.map((s) => s.values[i] || 0)) : series.reduce((s, sr) => s + (sr.values[i] || 0), 0)));
   // Scale to the tallest bar, so small amounts such as a few cents of AI cost still show.
   const max = Math.max(...totals) || 1;
+  tip ??= (i) => [
+    h('span', { class: 'muted' }, labels[i]),
+    series.map((sr) => h('span', { class: 'tip-row' },
+      h('span', null, h('span', { class: 'legend-swatch', style: { background: sr.color } }), ` ${sr.name}`),
+      h('strong', null, format(sr.values[i] || 0)))),
+    series.length > 1 && !grouped ? h('span', { class: 'tip-row' }, h('span', null, 'Total'), h('strong', null, format(totals[i]))) : null,
+  ];
   const slot = W / labels.length;
   const barWidth = grouped ? Math.max(4, (slot * 0.8) / series.length) : Math.max(4, slot * 0.6);
-  let bars = '';
-  let hits = '';
+  let body = '';
   labels.forEach((label, i) => {
     const x0 = i * slot + (slot - barWidth * (grouped ? series.length : 1)) / 2;
     let y = H - PAD;
@@ -24,72 +30,79 @@ export function barChart(labels, series, { grouped = false, format = (v) => v.to
       const height = (v / max) * (H - PAD - 8);
       const x = grouped ? x0 + k * barWidth : x0;
       const top = grouped ? H - PAD - height : (y -= height);
-      bars += `<rect class="bar" data-i="${i}" x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${height.toFixed(1)}" rx="3" style="fill:${esc(sr.color)}"/>`;
+      body += `<rect class="bar" data-i="${i}" x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${height.toFixed(1)}" rx="3" style="fill:${esc(sr.color)}"/>`;
     });
     if (labels.length <= 14 || i % Math.ceil(labels.length / 12) === 0) {
-      bars += `<text x="${(i * slot + slot / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="axis">${esc(label)}</text>`;
+      body += `<text x="${(i * slot + slot / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="axis">${esc(label)}</text>`;
     }
-    // A full-height target per column, so short or empty bars are as easy to hover as tall ones.
-    hits += `<rect class="hit" data-i="${i}" x="${(i * slot).toFixed(1)}" y="0" width="${slot.toFixed(1)}" height="${H - PAD}"/>`;
   });
-  bars += `<line x1="0" x2="${W}" y1="${H - PAD}" y2="${H - PAD}" class="baseline"/>`;
+  body += `<line x1="0" x2="${W}" y1="${H - PAD}" y2="${H - PAD}" class="baseline"/>`;
+  // Full-height targets over each slot, so a short bar is as easy to hover as a tall one.
+  labels.forEach((_, i) => { body += `<rect class="hit" data-i="${i}" x="${(i * slot).toFixed(1)}" y="0" width="${slot.toFixed(1)}" height="${H - PAD}"/>`; });
+  const wrap = h('div', { class: 'chart interactive' });
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Chart">${body}</svg>`;
+  hoverable(wrap, labels.length, totals, tip);
+  return wrap;
+}
 
-  const scroller = h('div', { class: 'chart' });
-  scroller.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" tabindex="0" aria-label="Bar chart. Use the arrow keys to read each value.">${bars}${hits}</svg>`;
-  const tip = h('div', { class: 'chart-tip', role: 'status', 'aria-live': 'polite', hidden: true });
-  const box = h('div', { class: 'chart-box' }, scroller, tip);
-  const svg = scroller.firstElementChild;
-  let active = -1;
-
-  const hide = () => {
-    active = -1;
-    tip.hidden = true;
-    svg.classList.remove('hovering');
-    svg.querySelectorAll('.bar.on').forEach((b) => b.classList.remove('on'));
-  };
-
+// Hover, tap and arrow keys pick a bar: the others dim and a tooltip shows what tip() says about it.
+function hoverable(wrap, count, totals, tip) {
+  const svg = wrap.querySelector('svg');
+  const box = h('div', { class: 'chart-tip', role: 'status', hidden: true });
+  wrap.append(box);
+  svg.setAttribute('tabindex', '0');
+  svg.setAttribute('aria-label', 'Chart. Use the arrow keys to read each bar.');
+  let current = -1;
   const show = (i) => {
-    if (i < 0 || i >= labels.length) return;
-    active = i;
-    svg.classList.add('hovering');
-    svg.querySelectorAll('.bar').forEach((b) => b.classList.toggle('on', Number(b.dataset.i) === i));
-    const rows = series.map((sr) =>
-      h('div', { class: 'chart-tip-row' },
-        h('span', { class: 'legend-swatch', style: { background: sr.color } }),
-        h('span', { class: 'grow' }, sr.name),
-        h('strong', null, format(sr.values[i] || 0))));
-    const total = series.length > 1 && !grouped
-      ? h('div', { class: 'chart-tip-row total' }, h('span', { class: 'grow' }, 'Total'), h('strong', null, format(totals[i])))
-      : null;
-    tip.replaceChildren(h('div', { class: 'chart-tip-label' }, labels[i]), ...rows, total ?? '');
-    tip.hidden = false;
-
-    // Place it above the column, kept inside the chart's box.
-    const outer = box.getBoundingClientRect();
-    const col = svg.querySelector(`.hit[data-i="${i}"]`).getBoundingClientRect();
-    const tops = [...svg.querySelectorAll(`.bar[data-i="${i}"]`)].map((b) => b.getBoundingClientRect().top);
-    const top = Math.min(col.bottom, ...tops) - outer.top;
-    const half = tip.offsetWidth / 2;
-    const center = col.left + col.width / 2 - outer.left;
-    tip.style.left = `${Math.min(Math.max(center, half), outer.width - half)}px`;
-    tip.style.top = `${Math.max(top - 8, tip.offsetHeight)}px`;
+    if (i < 0 || i >= count) return;
+    current = i;
+    wrap.classList.add('hovering');
+    for (const el of svg.querySelectorAll('rect.bar')) el.classList.toggle('hot', Number(el.dataset.i) === i);
+    const content = tip(i);
+    box.replaceChildren(...[content].flat(Infinity).filter((x) => x != null));
+    box.hidden = false;
+    const hit = svg.querySelector(`rect.hit[data-i="${i}"]`).getBoundingClientRect();
+    const bars = [...svg.querySelectorAll(`rect.bar[data-i="${i}"]`)].map((el) => el.getBoundingClientRect().top);
+    const outer = wrap.getBoundingClientRect();
+    const top = Math.min(hit.bottom, ...bars) - outer.top;
+    // Kept inside the chart's width, so it never makes the page scroll sideways.
+    const half = box.offsetWidth / 2;
+    const center = hit.left + hit.width / 2 - outer.left + wrap.scrollLeft;
+    const left = Math.max(half + 4, Math.min(wrap.scrollWidth - half - 4, center));
+    box.style.left = `${left}px`;
+    box.style.top = `${Math.max(box.offsetHeight + 6, top - 8)}px`;
   };
-
+  const hide = () => {
+    current = -1;
+    wrap.classList.remove('hovering');
+    box.hidden = true;
+  };
+  const indexOf = (e) => {
+    const el = e.target.closest?.('rect[data-i]');
+    return el ? Number(el.dataset.i) : -1;
+  };
   svg.addEventListener('pointermove', (e) => {
-    const i = Number(e.target.dataset?.i ?? -1);
-    if (e.target.classList?.contains('hit') && i !== active) show(i);
+    const i = indexOf(e);
+    if (i >= 0 && i !== current) show(i);
   });
-  svg.addEventListener('pointerleave', hide);
+  svg.addEventListener('pointerdown', (e) => show(indexOf(e)));
+  svg.addEventListener('pointerleave', (e) => {
+    if (e.pointerType === 'mouse') hide();
+  });
   svg.addEventListener('blur', hide);
+  svg.addEventListener('focus', () => {
+    // Keyboard focus starts on the latest bar with a value.
+    let i = count - 1;
+    while (i > 0 && !totals[i]) i--;
+    show(i);
+  });
   svg.addEventListener('keydown', (e) => {
-    const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+    const step = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
     if (e.key === 'Escape') return hide();
     if (!step) return;
     e.preventDefault();
-    show(active < 0 ? (step > 0 ? 0 : labels.length - 1) : Math.min(labels.length - 1, Math.max(0, active + step)));
+    show(Math.max(0, Math.min(count - 1, (current < 0 ? count : current) + step)));
   });
-  scroller.addEventListener('scroll', hide);
-  return box;
 }
 
 export function legend(series) {
