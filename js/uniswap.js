@@ -10,27 +10,27 @@ const ETH_LOGO = trustLogo('ethereum');
 // The chains the LP tab reads. Each address is Uniswap's own deployment on that chain, checked on-chain.
 // The same address is not used on every chain, so every chain carries its own.
 // v4.start is the first block worth searching for v4 positions (the deployment, or a day before it).
-// v4.span is the widest block range the default node accepts in one log search.
+// span is the widest block range the default node accepts in one log search.
 const ETH = { symbol: 'ETH', coingecko: 'ethereum', logo: ETH_LOGO };
 export const CHAINS = [
-  { id: 1, name: 'Ethereum', rpc: 'https://ethereum.publicnode.com', prices: 'ethereum', app: 'ethereum', logo: ETH_LOGO, native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-    v4: { positions: '0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e', stateView: '0x7ffe42c4a5deea5b0fec41c94c136cf115597227', start: 21689089, span: 10000 } },
-  { id: 8453, name: 'Base', rpc: 'https://base.publicnode.com', prices: 'base', app: 'base', logo: trustLogo('base'), native: ETH, factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD', positions: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
-    v4: { positions: '0x7c5f5a4bbd8fd63184577525326123b519429bdc', stateView: '0xa3c0c9b65bad0b08107aa264b0f3db444b867a71', start: 25350993, span: 50000 } },
-  { id: 42161, name: 'Arbitrum One', rpc: 'https://arbitrum-one-rpc.publicnode.com', prices: 'arbitrum', app: 'arbitrum', logo: trustLogo('arbitrum'), native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-    v4: { positions: '0xd88f38f930b7952f2db2432cb002e7abbf3dd869', stateView: '0x76fd297e2d437cd7f76d50f01afe6160f86e9990', start: 298179155, span: 10000 } },
-  { id: 10, name: 'Optimism', rpc: 'https://optimism-rpc.publicnode.com', prices: 'optimism', app: 'optimism', logo: trustLogo('optimism'), native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-    v4: { positions: '0x3c3ea4b57a46241e54610e5f022e5c45859a1017', stateView: '0xc18a3169788f4f75a170290584eca6395c75ecdb', start: 130947681, span: 10000 } },
-  { id: 137, name: 'Polygon', rpc: 'https://polygon-bor-rpc.publicnode.com', prices: 'polygon', app: 'polygon', logo: trustLogo('polygon'), native: { symbol: 'POL', coingecko: 'polygon-ecosystem-token', logo: trustLogo('polygon') }, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-    v4: { positions: '0x1ec2ebf4f37e7363fdfe3551602425af0b3ceef9', stateView: '0x5ea1bd7974c8a611cbab0bdcafcb1d9cc9b3ba5a', start: 66980394, span: 10000 } },
-  { id: 56, name: 'BNB Chain', rpc: 'https://bsc-rpc.publicnode.com', prices: 'bsc', app: 'bnb', logo: trustLogo('smartchain'), native: { symbol: 'BNB', coingecko: 'binancecoin', logo: trustLogo('smartchain') }, factory: '0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7', positions: '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613',
-    v4: { positions: '0x7a4a5c919ae2541aed11041a1aeee68f1287f95b', stateView: '0xd13dd3d6e93f276fafc9db9e6bb47c1180aee0c4', start: 45996818, span: 50000 } },
-  { id: 43114, name: 'Avalanche', rpc: 'https://avalanche-c-chain-rpc.publicnode.com', prices: 'avax', app: 'avalanche', logo: trustLogo('avalanchec'), native: { symbol: 'AVAX', coingecko: 'avalanche-2', logo: trustLogo('avalanchec') }, factory: '0x740b1c1de25031C31FF4fC9A62f554A55cdC1baD', positions: '0x655C406EBFa14EE2006250925e54ec43AD184f8B',
-    v4: { positions: '0xb74b1f14d2754acfcbbe1a221023a5cf50ab8acd', stateView: '0xc3c9e198c735a4b97e3e683f391ccbdd60b69286', start: 56203165, span: 50000 } },
-  { id: 130, name: 'Unichain', rpc: 'https://unichain-rpc.publicnode.com', prices: 'unichain', app: 'unichain', logo: ETH_LOGO, native: ETH, factory: '0x1f98400000000000000000000000000000000003', positions: '0x943e6e07a7e8e791dafc44083e54041d743c46e9',
-    v4: { positions: '0x4529a01c7a0410167c5740c487a8de60232617bf', stateView: '0x86e8631a016f9068c3f085faf484ee3f5fdee8f2', start: 6819679, span: 10000 } },
-  { id: 4663, name: 'Robinhood Chain', rpc: 'https://rpc.mainnet.chain.robinhood.com', prices: 'robinhood', app: 'robinhood', logo: ETH_LOGO, native: ETH, factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa', positions: '0x73991a25c818bf1f1128deaab1492d45638de0d3',
-    v4: { positions: '0x58daec3116aae6d93017baaea7749052e8a04fa7', stateView: '0xf3334192d15450cdd385c8b70e03f9a6bd9e673b', start: 9506, span: 10000000 } },
+  { id: 1, name: 'Ethereum', rpc: 'https://ethereum.publicnode.com', span: 10000, prices: 'ethereum', app: 'ethereum', logo: ETH_LOGO, native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+    v4: { positions: '0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e', stateView: '0x7ffe42c4a5deea5b0fec41c94c136cf115597227', start: 21689089 } },
+  { id: 8453, name: 'Base', rpc: 'https://base.publicnode.com', span: 50000, prices: 'base', app: 'base', logo: trustLogo('base'), native: ETH, factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD', positions: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
+    v4: { positions: '0x7c5f5a4bbd8fd63184577525326123b519429bdc', stateView: '0xa3c0c9b65bad0b08107aa264b0f3db444b867a71', start: 25350993 } },
+  { id: 42161, name: 'Arbitrum One', rpc: 'https://arbitrum-one-rpc.publicnode.com', span: 10000, prices: 'arbitrum', app: 'arbitrum', logo: trustLogo('arbitrum'), native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+    v4: { positions: '0xd88f38f930b7952f2db2432cb002e7abbf3dd869', stateView: '0x76fd297e2d437cd7f76d50f01afe6160f86e9990', start: 298179155 } },
+  { id: 10, name: 'Optimism', rpc: 'https://optimism-rpc.publicnode.com', span: 10000, prices: 'optimism', app: 'optimism', logo: trustLogo('optimism'), native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+    v4: { positions: '0x3c3ea4b57a46241e54610e5f022e5c45859a1017', stateView: '0xc18a3169788f4f75a170290584eca6395c75ecdb', start: 130947681 } },
+  { id: 137, name: 'Polygon', rpc: 'https://polygon-bor-rpc.publicnode.com', span: 10000, prices: 'polygon', app: 'polygon', logo: trustLogo('polygon'), native: { symbol: 'POL', coingecko: 'polygon-ecosystem-token', logo: trustLogo('polygon') }, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+    v4: { positions: '0x1ec2ebf4f37e7363fdfe3551602425af0b3ceef9', stateView: '0x5ea1bd7974c8a611cbab0bdcafcb1d9cc9b3ba5a', start: 66980394 } },
+  { id: 56, name: 'BNB Chain', rpc: 'https://bsc-rpc.publicnode.com', span: 50000, prices: 'bsc', app: 'bnb', logo: trustLogo('smartchain'), native: { symbol: 'BNB', coingecko: 'binancecoin', logo: trustLogo('smartchain') }, factory: '0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7', positions: '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613',
+    v4: { positions: '0x7a4a5c919ae2541aed11041a1aeee68f1287f95b', stateView: '0xd13dd3d6e93f276fafc9db9e6bb47c1180aee0c4', start: 45996818 } },
+  { id: 43114, name: 'Avalanche', rpc: 'https://avalanche-c-chain-rpc.publicnode.com', span: 50000, prices: 'avax', app: 'avalanche', logo: trustLogo('avalanchec'), native: { symbol: 'AVAX', coingecko: 'avalanche-2', logo: trustLogo('avalanchec') }, factory: '0x740b1c1de25031C31FF4fC9A62f554A55cdC1baD', positions: '0x655C406EBFa14EE2006250925e54ec43AD184f8B',
+    v4: { positions: '0xb74b1f14d2754acfcbbe1a221023a5cf50ab8acd', stateView: '0xc3c9e198c735a4b97e3e683f391ccbdd60b69286', start: 56203165 } },
+  { id: 130, name: 'Unichain', rpc: 'https://unichain-rpc.publicnode.com', span: 10000, prices: 'unichain', app: 'unichain', logo: ETH_LOGO, native: ETH, factory: '0x1f98400000000000000000000000000000000003', positions: '0x943e6e07a7e8e791dafc44083e54041d743c46e9',
+    v4: { positions: '0x4529a01c7a0410167c5740c487a8de60232617bf', stateView: '0x86e8631a016f9068c3f085faf484ee3f5fdee8f2', start: 6819679 } },
+  { id: 4663, name: 'Robinhood Chain', rpc: 'https://rpc.mainnet.chain.robinhood.com', span: 10000000, prices: 'robinhood', app: 'robinhood', logo: ETH_LOGO, native: ETH, factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa', positions: '0x73991a25c818bf1f1128deaab1492d45638de0d3',
+    v4: { positions: '0x58daec3116aae6d93017baaea7749052e8a04fa7', stateView: '0xf3334192d15450cdd385c8b70e03f9a6bd9e673b', start: 9506 } },
 ];
 
 // v4 pools hold the chain's native coin directly, as the zero address.
@@ -307,7 +307,7 @@ async function searchFrom(chain, node, owner, start, end, span, forward) {
 export async function scanV4(chain, node, owner, prev) {
   const head = Number(await rpc(node, 'eth_blockNumber', []));
   const fresh = !prev || prev.node !== node;
-  const s = fresh ? { node, from: head + 1, to: head, span: chain.v4.span, ids: [], done: false } : { ...prev, ids: [...prev.ids] };
+  const s = fresh ? { node, from: head + 1, to: head, span: chain.span, ids: [], done: false } : { ...prev, ids: [...prev.ids] };
   const found = new Set(s.ids);
   let calls = SCAN_CALLS;
 
@@ -420,7 +420,7 @@ export async function positionHistory(chain, node, pos, prev) {
   const floor = pos.version === 'v4' ? chain.v4.start : 0;
   const fresh = !prev || prev.node !== node;
   const s = fresh
-    ? { node, from: head + 1, to: head, span: chain.v4.span, done: false, events: [] }
+    ? { node, from: head + 1, to: head, span: chain.span, done: false, events: [] }
     : { ...prev, events: [...prev.events] };
   const have = new Set(s.events.map((e) => `${e.tx}:${e.index}`));
   const add = (list) => list.forEach((e) => {
@@ -720,9 +720,9 @@ export async function poolSwaps(chain, node, version, pool, from, head) {
   const key = `${chain.id}:${version}:${pool}`;
   let c = swapCache.get(key);
   // A gap too long to close in one load starts over, so the swaps read are always one unbroken range.
-  if (!c || c.node !== node || head - c.to > chain.v4.span * (SWAP_CALLS / 2)) c = { node, from: head + 1, to: head, swaps: [] };
+  if (!c || c.node !== node || head - c.to > chain.span * (SWAP_CALLS / 2)) c = { node, from: head + 1, to: head, swaps: [] };
   const filter = version === 'v3' ? { address: pool, topics: [SWAP_V3] } : { address: await managerOf(chain, node), topics: [SWAP_V4, pool] };
-  let span = chain.v4.span;
+  let span = chain.span;
   let calls = SWAP_CALLS;
   while (c.to < head && calls > 0) {
     calls--;
