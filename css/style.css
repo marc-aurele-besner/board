@@ -979,6 +979,14 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .org-keys .project-icon, .org-keys > li > .icon { width: 18px; height: 18px; }
 .org-keys .org-missing { color: var(--warn); }
 .org-keys code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.fx-providers { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; }
+.fx-providers li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.fx-provider-pick { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; min-width: 0; flex: 1 1 260px; }
+.fx-provider-pick input { margin-top: 3px; }
+.fx-provider-pick > span { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.fx-provider-source { flex-basis: 100%; }
+.fx-result.ok { color: var(--income); }
+.fx-result.error { color: var(--danger); }
 .org-key-form { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr) auto; gap: 8px; align-items: center; }
 @media (max-width: 720px) { .org-key-form { grid-template-columns: 1fr; } }
 

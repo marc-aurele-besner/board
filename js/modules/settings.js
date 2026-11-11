@@ -1,5 +1,6 @@
-import { h, icon, refreshIcon, empty, notice, todayISO, copyable } from '../ui.js';
-import { fetchDayRate, manualRate, setManualRate, clearCachedRates } from '../fx.js';
+import { h, icon, refreshIcon, empty, notice, copyable } from '../ui.js';
+import { toast } from '../toast.js';
+import { manualRate, setManualRate, clearCachedRates, PROVIDERS, providerId, setProvider, fallbackOn, setFallback, testProvider, lastSource } from '../fx.js';
 import { configure, checkGithubToken, orgAvatar } from '../github.js';
 import { connect, disconnect, isConnected } from '../google.js';
 import { editText, pill } from '../inline.js';
@@ -51,6 +52,7 @@ const SECTION_GROUPS = [
       ['search', 'Search consoles', 'search'],
       ['resend', 'Resend', 'mail'],
       ['gmail', 'Gmail', 'inbox'],
+      ['exchange', 'Exchange rates', 'coins'],
     ],
   },
   {
@@ -60,7 +62,6 @@ const SECTION_GROUPS = [
       ['models', 'Models & tasks', 'cpu'],
       ['prompts', 'Prompts', 'sparkle'],
       ['categories', 'Categories', 'tag'],
-      ['exchange', 'Exchange rates', 'coins'],
       ['notifications', 'Notifications', 'bell'],
       ['automations', 'Automations', 'zap'],
       ['data', 'Data folder', 'folder'],
@@ -304,24 +305,22 @@ function modelsPanel(store) {
 
 // --- Exchange rates ---
 
-// Result of the last connection check, shown on the card.
-const exchange = { message: '', ok: null };
+// The last check of each provider, shown on its row: { [id]: { status: 'checking' | 'ok' | 'error', text } }.
+const exchange = { results: {} };
 
 function exchangeCard(store) {
   const manual = manualRate();
-  const today = todayISO();
-  const check = () => {
-    exchange.message = 'Checking…';
-    exchange.ok = null;
+  const first = providerId();
+  const fallback = fallbackOn();
+  const check = (p) => {
+    exchange.results[p.id] = { status: 'checking', text: 'Checking…' };
     store.refresh();
-    fetchDayRate(today)
-      .then((rate) => {
-        exchange.message = `Working. Today’s rate: 1 USD = ${rate.toFixed(4)} CAD.`;
-        exchange.ok = true;
+    testProvider(p.id)
+      .then(({ rate, date }) => {
+        exchange.results[p.id] = { status: 'ok', text: `1 USD = ${rate.toFixed(4)} CAD on ${date}` };
       })
       .catch((err) => {
-        exchange.message = err.message;
-        exchange.ok = false;
+        exchange.results[p.id] = { status: 'error', text: err.message };
       })
       .finally(() => store.refresh());
   };
@@ -331,31 +330,64 @@ function exchangeCard(store) {
     setManualRate(v > 0 ? v : null);
     store.refresh();
   };
-
+  const results = Object.values(exchange.results);
+  const firstResult = exchange.results[first];
   const status = manual !== null
     ? h('span', { class: 'pill tone-doing' }, 'Your rate')
-    : exchange.ok === true
+    : firstResult?.status === 'ok'
       ? h('span', { class: 'pill tone-done' }, 'Working')
-      : exchange.ok === false
-        ? h('span', { class: 'pill tone-high' }, 'Failed')
-        : h('span', { class: 'pill tone-plain' }, 'Not checked');
+      : results.some((r) => r.status === 'ok') && fallback
+        ? h('span', { class: 'pill tone-doing' }, 'Using a fallback')
+        : results.some((r) => r.status === 'error')
+          ? h('span', { class: 'pill tone-high' }, 'Failed')
+          : h('span', { class: 'pill tone-plain' }, 'Not checked');
+  const used = PROVIDERS.find((p) => p.id === (lastSource.id ?? first));
 
   return h('section', { class: 'card panel' },
     h('header', { class: 'panel-head' },
       h('div', null,
         h('h2', null, 'Exchange rates'),
-        h('p', { class: 'muted' }, 'Converts USD and CAD in Money. Each amount uses the rate of its own day, from the European Central Bank through Frankfurter. No account or key is needed.')),
+        h('p', { class: 'muted' }, `Converts USD and CAD in Money. Each amount uses the rate of its own day. Rates come from ${used.name} (${used.source.replace(/\.$/, '')}). No account or key is needed.`)),
       h('div', { class: 'row' }, status)),
 
     h('div', { class: 'cred-body' },
       h('div', { class: 'svc-section' },
-        h('h3', null, 'Check the connection'),
-        h('p', { class: 'muted small' }, 'Fetches today’s rate to confirm this browser can reach the service.'),
+        h('h3', null, 'Providers'),
+        h('p', { class: 'muted small' }, 'The board asks the provider you pick first. When it does not answer, the next one in the list is asked, so Money keeps converting if one service is down. Each provider is asked only for the USD to CAD rate of the days shown.'),
+        h('ul', { class: 'fx-providers' },
+          PROVIDERS.map((p) => {
+            const r = exchange.results[p.id];
+            return h('li', null,
+              h('label', { class: 'fx-provider-pick' },
+                h('input', {
+                  type: 'radio',
+                  name: 'fx-provider',
+                  checked: p.id === first,
+                  onchange: () => {
+                    setProvider(p.id);
+                    store.refresh();
+                  },
+                }),
+                h('span', null,
+                  h('strong', null, p.name),
+                  p.id === first ? h('span', { class: 'pill tone-plain' }, 'Asked first') : null,
+                  h('span', { class: 'muted small fx-provider-source' }, p.source, ' ', link(p.docs, p.host)))),
+              h('span', { class: 'grow' }),
+              r ? h('span', { class: `small fx-result ${r.status}`, role: 'status' }, r.text) : null,
+              h('button', { type: 'button', class: 'btn-small', disabled: r?.status === 'checking', onclick: () => check(p) }, 'Check'));
+          })),
         h('div', { class: 'svc-actions' },
-          h('button', { type: 'button', class: 'primary', onclick: check, disabled: exchange.message === 'Checking…' }, 'Check now')),
-        exchange.ok === null || !exchange.message
-          ? null
-          : notice({ tone: exchange.ok ? 'ok' : 'error', text: exchange.message })),
+          h('button', { type: 'button', class: 'primary', onclick: () => PROVIDERS.forEach(check) }, 'Check all'),
+          h('label', { class: 'row check' },
+            h('input', {
+              type: 'checkbox',
+              checked: fallback,
+              onchange: (e) => {
+                setFallback(e.target.checked);
+                store.refresh();
+              },
+            }),
+            h('span', null, 'Fall back to the other providers')))),
 
       h('form', { class: 'svc-section', onsubmit: saveManual },
         h('h3', null, 'Use one rate instead'),
@@ -385,9 +417,8 @@ function exchangeCard(store) {
             class: 'danger',
             onclick: () => {
               clearCachedRates();
-              exchange.message = 'Stored rates cleared. They will be fetched again when needed.';
-              exchange.ok = true;
               store.refresh();
+              toast('Stored rates cleared. They are fetched again when needed.');
             },
           }, 'Forget stored rates')))));
 }
