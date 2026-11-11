@@ -288,8 +288,8 @@ function attentionCard(store, open) {
     add('wallet', `${b.category} is over its budget this month: ${money(b.spent, b.currency)} of ${money(b.budget, b.currency)}`, '#/money', 'Open');
   }
   const out = outOfRange(store);
-  if (out.length === 1) add('droplet', `${out[0].pair} on ${out[0].chain} is out of its price range`, '#/positions?filter=out', 'Open');
-  else if (out.length) add('droplet', `${out.length} pool positions are out of their price range`, '#/positions?filter=out', 'Open');
+  if (out.length === 1) add('droplet', `${out[0].pair} on ${out[0].chain} is out of its price range`, '#/positions?tab=positions&filter=out', 'Open');
+  else if (out.length) add('droplet', `${out.length} pool positions are out of their price range`, '#/positions?tab=positions&filter=out', 'Open');
   if (!rows.length) return null;
   return h('section', { class: 'card board-panel' },
     h('div', { class: 'row between board-panel-head' }, h('h3', null, 'Needs attention')),

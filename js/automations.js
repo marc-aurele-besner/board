@@ -89,7 +89,7 @@ export function runRules(store) {
 export function poolsChanged(store, rows) {
   for (const r of rows.filter((x) => !x.inRange)) {
     const ref = r.ref;
-    notify(store, { kind: 'pools', text: `${r.pair} on ${r.chain} is out of its price range.`, href: '#/positions?filter=out', key: `pool:${ref}:${todayISO()}` });
+    notify(store, { kind: 'pools', text: `${r.pair} on ${r.chain} is out of its price range.`, href: '#/positions?tab=positions&filter=out', key: `pool:${ref}:${todayISO()}` });
     if (ruleOf(store, 'pools').on) {
       makeAuto(store, { kind: 'pools', ref, priority: 'medium', text: `Rebalance ${r.pair} on ${r.chain}`, why: 'the position left its price range.' });
     }
