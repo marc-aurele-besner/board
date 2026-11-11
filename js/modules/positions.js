@@ -205,7 +205,7 @@ const SORTS = {
   move: { value: (r) => r.move, dir: -1 },
 };
 // The choices in the Sort menu. Sorting by a table column that is not here adds it to the menu as it is.
-const PRESETS = [['value', -1, 'Value'], ['fees', -1, 'Unclaimed fees'], ['apr', -1, 'Fee APR'], ['number', -1, 'Newest'], ['number', 1, 'Oldest']];
+const PRESETS = [['value', -1, 'Value'], ['fees', -1, 'Unclaimed fees'], ['apr', -1, 'Fee APR'], ['move', -1, 'Movement'], ['number', -1, 'Newest'], ['number', 1, 'Oldest']];
 const SORT_NAMES = { pool: 'Pool', chain: 'Chain', range: 'Price range', split: 'Distribution', move: 'Movement', value: 'Value', fees: 'Unclaimed fees', apr: 'Fee APR', number: 'Number' };
 
 // Rows without the value sorted on go last, whatever the direction. Ties fall back to the newest first.
