@@ -319,7 +319,9 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
 
   // A line the board adds itself (the command, how it ended), styled with a class rather than a colour.
   function note(text, cls) {
-    if (t.x > 0 || line().cells.length) {
+    // Below everything shown: a program that ended may have left the cursor higher up.
+    t.y = Math.max(t.y, used() - 1);
+    if (line().cells.some(Boolean)) {
       t.x = 0;
       lineFeed();
     }
