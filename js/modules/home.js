@@ -4,7 +4,7 @@ import { repoStats } from '../github.js';
 import { ask } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
-import { calendarAccounts, calendarEvents, connectCalendar, isCalendarConnected, eventDate } from '../gcal.js';
+import { calendarAccounts, calendarEvents, cachedCalendarEvents, CALENDAR_TTL, connectCalendar, isCalendarConnected, eventDate } from '../gcal.js';
 import { eventAsTask } from './calendar.js';
 import { sitesOf, siteData, ruleOf } from '../automations.js';
 import { hostOf, daysUntil } from '../sitecheck.js';
@@ -61,8 +61,9 @@ function planPanel(store) {
 
 // --- Calendar (Google) ---
 
-// The next two days of every connected calendar. Loaded once per session and on demand; Calendar has the full view.
-const cal = { status: 'idle', events: [], error: '', waiting: [] };
+// The next two days of every calendar. Shown from the cache at once, then read again when it is stale; Calendar has
+// the full view. checked: when the board last asked, so the panel refreshes itself once per TTL.
+const cal = { status: 'idle', events: [], error: '', waiting: [], checked: 0 };
 
 const timeLabel = (e) => (e.allDay ? 'All day' : eventDate(e.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
 const dayLabel = (e) => {
@@ -70,13 +71,29 @@ const dayLabel = (e) => {
   return d.toDateString() === new Date().toDateString() ? '' : d.toLocaleDateString([], { weekday: 'short' });
 };
 
+// Whole days are read, so the cache of Calendar's week or month covers them; events already over are left out.
+function nextTwoDays() {
+  const from = new Date(new Date().setHours(0, 0, 0, 0));
+  return [from, new Date(from.getFullYear(), from.getMonth(), from.getDate() + 3)];
+}
+const upcoming = (events) => {
+  const now = new Date();
+  const until = new Date(now.getTime() + 2 * 86400000);
+  return events.filter((e) => eventDate(e.end || e.start) > now && eventDate(e.start) < until);
+};
+
 function loadCalendar(store) {
-  cal.status = 'loading';
+  const [from, to] = nextTwoDays();
+  if (cal.status === 'idle') {
+    const cached = cachedCalendarEvents(store, from, to);
+    if (cached.at) Object.assign(cal, { status: 'ok', events: upcoming(cached.events) });
+  }
+  if (cal.status !== 'ok') cal.status = 'loading';
+  cal.checked = Date.now();
   store.refresh();
-  const from = new Date();
-  calendarEvents(store, from, new Date(from.getTime() + 2 * 86400000))
+  calendarEvents(store, from, to)
     .then(({ events, errors, waiting }) => {
-      cal.events = events;
+      cal.events = upcoming(events);
       cal.waiting = waiting;
       cal.error = errors.join(' · ');
       cal.status = 'ok';
@@ -105,13 +122,17 @@ function calendarBlock(store) {
     return setupBanner('google', clientId ? 'Add a Google account to see your calendars here.' : 'Calendar needs a Google OAuth Client ID.');
   }
   const offline = accounts.filter((a) => !isCalendarConnected(a.email));
-  if (offline.length === accounts.length) {
+  if (cal.status === 'idle' || (cal.status !== 'loading' && Date.now() - cal.checked > CALENDAR_TTL)) {
+    cal.checked = Date.now();
+    queueMicrotask(() => loadCalendar(store));
+  }
+  // With no account signed in, cached events still show, with the connect buttons below them.
+  if (offline.length === accounts.length && !cal.events.length) {
     return h('div', { class: 'stack' },
       h('p', { class: 'muted small' }, 'Connect to see the next two days.'),
       h('div', { class: 'row' }, offline.map((a) =>
         h('button', { type: 'button', class: 'btn-small', onclick: () => connectAccount(store, clientId, a.email) }, icon('plus'), a.email))));
   }
-  if (cal.status === 'idle') queueMicrotask(() => loadCalendar(store));
   if (cal.status !== 'ok' && cal.status !== 'error') return h('p', { class: 'muted small' }, 'Loading events…');
   if (cal.status === 'error') {
     return h('div', { class: 'stack' }, notice({ text: cal.error }),

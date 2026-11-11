@@ -1,6 +1,7 @@
 // Google Calendar, read-only, straight from the browser. Like Gmail, each account signs in on its own, so several
 // accounts can be shown side by side. Tokens live in memory only and last about an hour.
-// settings.json keeps gcal: { accounts: [{ email, calendars: [{ id, name, color, on, projectId }] }] }; events are not saved.
+// settings.json keeps gcal: { accounts: [{ email, calendars: [{ id, name, color, on, projectId }] }] }. Events are cached
+// in this browser only (localStorage), so a reload shows the last read at once and Google is asked again when it is stale.
 import { loadGis } from './google.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
@@ -9,6 +10,56 @@ const PAGE = 250;
 const MAX_PAGES = 4;
 
 const tokens = new Map(); // address -> { value, expiresAt }
+
+// --- Event cache ---
+// One localStorage entry per calendar, holding its last few reads: [{ from, to, at, events }], newest first.
+// A read is used for any range it covers, so a day or week inside a cached month needs no request.
+export const CALENDAR_TTL = 10 * 60 * 1000;
+const CACHE_PREFIX = 'board:gcal:';
+const CACHE_READS = 6;
+const cacheKey = (address, calendarId) => `${CACHE_PREFIX}${address}|${calendarId}`;
+
+function cachedReads(address, calendarId) {
+  try {
+    const list = JSON.parse(localStorage.getItem(cacheKey(address, calendarId)) ?? '[]');
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function cacheRead(address, calendarId, from, to, events) {
+  const read = { from: from.getTime(), to: to.getTime(), at: Date.now(), events };
+  // Reads the new one covers are dropped.
+  const kept = cachedReads(address, calendarId).filter((r) => r.from < read.from || r.to > read.to);
+  try {
+    localStorage.setItem(cacheKey(address, calendarId), JSON.stringify([read, ...kept].slice(0, CACHE_READS)));
+  } catch {
+    /* storage full or blocked: the read still shows, it is just not kept */
+  }
+}
+
+// The newest cached read of a calendar that covers [from, to), with only the events in that range, or null.
+function fromCache(account, cal, from, to) {
+  const hit = cachedReads(account.email, cal.id).find((r) => r.from <= from.getTime() && r.to >= to.getTime());
+  if (!hit) return null;
+  // Same overlap rule as Google's timeMin/timeMax. The calendar's name and project are taken from settings, as they may
+  // have changed since the read.
+  const events = hit.events
+    .filter((e) => eventDate(e.start) < to && eventDate(e.end || e.start) > from)
+    .map((e) => ({ ...e, calendar: cal.name, projectId: cal.projectId ?? null }));
+  return { at: hit.at, events };
+}
+
+export function clearCalendarCache(address = '') {
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith(address ? `${CACHE_PREFIX}${address}|` : CACHE_PREFIX)) localStorage.removeItem(key);
+    }
+  } catch {
+    /* storage blocked */
+  }
+}
 
 export const calendarAccounts = (store) => store.get('settings').gcal?.accounts ?? [];
 export const isCalendarConnected = (address) => (tokens.get(address)?.expiresAt ?? 0) > Date.now();
@@ -100,6 +151,7 @@ export async function syncCalendarList(store, address) {
 
 export const removeCalendarAccount = (store, address) => {
   disconnectCalendar(address);
+  clearCalendarCache(address);
   saveAccounts(store, (accounts) => accounts.filter((a) => a.email !== address));
 };
 
@@ -145,29 +197,62 @@ async function eventsOf(account, cal, from, to) {
   return out;
 }
 
-// Events of every shown calendar of every connected account between two dates, in day order.
-// Returns { events, errors: [text], waiting: [addresses not connected this session] }.
-export async function calendarEvents(store, from, to) {
+const byDay = (a, b) => eventDate(a.start).setHours(0, 0, 0, 0) - eventDate(b.start).setHours(0, 0, 0, 0)
+  || Number(b.allDay) - Number(a.allDay) || eventDate(a.start) - eventDate(b.start);
+
+// Events of every shown calendar of every account between two dates, in day order. A calendar whose cached read is
+// younger than maxAge is not asked again; pass maxAge 0 to read everything. Accounts not connected this session show
+// their cached events, of any age.
+// Returns { events, errors: [text], waiting: [addresses not connected], at: time of the oldest read used, or 0 }.
+export async function calendarEvents(store, from, to, { maxAge = CALENDAR_TTL } = {}) {
   const events = [];
   const errors = [];
   const waiting = [];
+  const times = [];
   await Promise.all(calendarAccounts(store).map(async (account) => {
-    if (!isCalendarConnected(account.email)) {
-      waiting.push(account.email);
-      return;
-    }
+    const connected = isCalendarConnected(account.email);
+    if (!connected) waiting.push(account.email);
     await Promise.all(account.calendars.filter((c) => c.on).map(async (cal) => {
+      const cached = fromCache(account, cal, from, to);
+      if (cached && (!connected || Date.now() - cached.at < maxAge)) {
+        events.push(...cached.events);
+        times.push(cached.at);
+        return;
+      }
+      if (!connected) return;
       try {
-        events.push(...await eventsOf(account, cal, from, to));
+        const fresh = await eventsOf(account, cal, from, to);
+        cacheRead(account.email, cal.id, from, to, fresh);
+        events.push(...fresh);
+        times.push(Date.now());
       } catch (err) {
         errors.push(`${cal.name}: ${err.message}`);
+        // The last read stands in while Google cannot be reached.
+        if (cached) {
+          events.push(...cached.events);
+          times.push(cached.at);
+        }
       }
     }));
   }));
-  // By day, then all-day events first, then by time.
-  events.sort((a, b) => eventDate(a.start).setHours(0, 0, 0, 0) - eventDate(b.start).setHours(0, 0, 0, 0)
-    || Number(b.allDay) - Number(a.allDay) || eventDate(a.start) - eventDate(b.start));
-  return { events, errors, waiting };
+  events.sort(byDay);
+  return { events, errors, waiting, at: times.length ? Math.min(...times) : 0 };
+}
+
+// What the cache already holds for a range, without asking Google: shown while a read is on its way.
+export function cachedCalendarEvents(store, from, to) {
+  const events = [];
+  const times = [];
+  for (const account of calendarAccounts(store)) {
+    for (const cal of account.calendars.filter((c) => c.on)) {
+      const cached = fromCache(account, cal, from, to);
+      if (!cached) continue;
+      events.push(...cached.events);
+      times.push(cached.at);
+    }
+  }
+  events.sort(byDay);
+  return { events, at: times.length ? Math.min(...times) : 0 };
 }
 
 // "2026-11-11" or a date-time, as a local Date. A bare date is midnight local time, not UTC.

@@ -1,9 +1,9 @@
 // Calendar: the events of every connected Google account, by day, week or month, with task deadlines on the same days.
-// Events are read for the range on screen and kept in memory only. Settings → Google Calendar lists the accounts.
+// Events of the range on screen show from the browser's cache at once, then are read again when the cache is stale. Settings → Google Calendar lists the accounts.
 import { h, icon, refreshIcon, notice, statusOf, empty } from '../ui.js';
 import { projectIcon, projectTree } from './projects.js';
 import { setupBanner } from '../integrations.js';
-import { calendarAccounts, calendarEvents, connectCalendar, isCalendarConnected, setCalendar, eventDate } from '../gcal.js';
+import { calendarAccounts, calendarEvents, cachedCalendarEvents, CALENDAR_TTL, connectCalendar, isCalendarConnected, setCalendar, eventDate } from '../gcal.js';
 import { makeTask } from '../capture.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
@@ -13,8 +13,9 @@ const MONTH_CELL = 3; // events listed in a month cell before "+N more"
 
 // View state. date: the day the view is anchored on, YYYY-MM-DD.
 const view = { mode: 'week', date: '', project: 'all', tasks: true };
-// The last read: the range and calendars it covered, so a change of either reads again.
-const read = { key: '', busy: false, events: [], errors: [], waiting: [] };
+// The last read: the range and calendars it covered, so a change of either reads again. at: when the oldest of its
+// events was read from Google; checked: when the board last asked, so a stale view refreshes itself once per TTL.
+const read = { key: '', busy: false, events: [], errors: [], waiting: [], at: 0, checked: 0 };
 
 const pad = (n) => String(n).padStart(2, '0');
 const isoOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -48,6 +49,14 @@ function titleOf(mode, d) {
   const short = (x) => x.toLocaleDateString([], { month: 'short', day: 'numeric' });
   // "Nov 9 – 15, 2026", or "Nov 30 – Dec 6, 2026" across months.
   return `${short(from)} – ${from.getMonth() === end.getMonth() ? end.getDate() : short(end)}, ${end.getFullYear()}`;
+}
+
+function ago(t) {
+  const min = Math.round((Date.now() - t) / 60000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  const hours = Math.round(min / 60);
+  return hours < 24 ? `${hours} h ago` : new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
 const clock = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -96,14 +105,17 @@ function keyOf(store, from, to) {
   return `${isoOf(from)}|${isoOf(to)}|${shown.join(';')}`;
 }
 
-function load(store, key, from, to) {
+function load(store, key, from, to, { maxAge } = {}) {
+  // A new range shows what the cache has right away; a refresh of the same range keeps what is on screen.
+  if (read.key !== key) Object.assign(read, cachedCalendarEvents(store, from, to), { errors: [], waiting: [] });
   read.key = key;
   read.busy = true;
+  read.checked = Date.now();
   store.refresh();
-  calendarEvents(store, from, to)
-    .then(({ events, errors, waiting }) => {
+  calendarEvents(store, from, to, { maxAge })
+    .then(({ events, errors, waiting, at }) => {
       if (read.key !== key) return;
-      Object.assign(read, { events, errors, waiting });
+      Object.assign(read, { events, errors, waiting, at });
     })
     .catch((err) => {
       if (read.key === key) Object.assign(read, { events: [], errors: [err.message] });
@@ -252,7 +264,8 @@ function draw(root, store) {
   const [from, to] = rangeOf(view.mode, d);
   const connected = accounts.filter((a) => isCalendarConnected(a.email));
   const key = keyOf(store, from, to);
-  if (connected.length && key !== read.key) queueMicrotask(() => load(store, key, from, to));
+  const stale = connected.length && !read.busy && Date.now() - read.checked > CALENDAR_TTL;
+  if (accounts.length && (key !== read.key || stale)) queueMicrotask(() => load(store, key, from, to));
 
   const byProject = (x) => view.project === 'all' || x.projectId === view.project;
   const events = read.key === key ? read.events.filter(byProject) : [];
@@ -278,8 +291,9 @@ function draw(root, store) {
         type: 'button',
         class: 'btn-small',
         disabled: read.busy || !connected.length,
-        onclick: () => load(store, key, from, to),
-      }, refreshIcon(read.busy), read.busy ? 'Reading…' : 'Refresh')));
+        onclick: () => load(store, key, from, to, { maxAge: 0 }),
+      }, refreshIcon(read.busy), read.busy ? 'Reading…' : 'Refresh'),
+      read.key === key && read.at ? h('span', { class: 'muted small', title: new Date(read.at).toLocaleString() }, `Updated ${ago(read.at)}`) : null));
 
   const offline = accounts.filter((a) => !isCalendarConnected(a.email));
   const banners = [
