@@ -781,6 +781,7 @@ select { width: auto; min-width: 0; }
 .chain-test { grid-column: 2 / -1; }
 .chain-test.ok { color: var(--income); }
 .chain-test.bad { color: var(--danger); }
+.chain-test-node { display: block; color: var(--muted); overflow-wrap: anywhere; }
 @media (max-width: 720px) {
   .chain-item { grid-template-columns: minmax(0, 1fr) auto; }
   .chain-item > input { grid-column: 1 / -1; grid-row: 2; }
