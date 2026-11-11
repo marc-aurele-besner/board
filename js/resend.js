@@ -1,5 +1,5 @@
 // Emails sent and received through Resend, one API key per project. Read-only.
-// Resend sends no CORS header, so requests go through tools/resend-relay.js running on this machine.
+// Resend sends no CORS header, so requests go through tools/relays.js running on this machine.
 import { hostOf } from './sitecheck.js';
 
 export const RESEND_RELAY = 'http://127.0.0.1:8418';
@@ -37,7 +37,7 @@ function get(key, path, relay) {
       try {
         res = await fetch(base + path, { headers: { Authorization: `Bearer ${key}` } });
       } catch {
-        throw new Error(`Could not reach the Resend relay at ${base}. Start it with: bun tools/resend-relay.js`);
+        throw new Error(`Could not reach the Resend relay at ${base}. Start it with: bun tools/start.js`);
       }
       const body = await res.json().catch(() => null);
       if (res.ok) return body;

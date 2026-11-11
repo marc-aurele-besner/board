@@ -13,7 +13,7 @@ Sections (v1):
 - **Cron**: recurring flows, drawn as a chain of steps like a workflow canvas. A schedule (every few minutes or hours, daily, or weekly) starts the chain: gather data from the board (open tasks, tasks due soon, a project, this month's spending, or fixed text), ask an AI model with a prompt that uses `{{input}}`, then create a task or post a notification. Each step's output from the last run is shown beside it. Flows run only while the board is open; a run missed while it was closed happens once when you open it.
 - **Settings**: the gear at the top right. **Prompts** shows the system prompt of every AI feature; edit one to change how that feature answers, or add a prompt sent with every AI call.
 - **Monitoring**: AI usage (cost, calls and tokens by model and task), GitHub activity, web analytics and search. Hover or tap a bar, or focus a chart and use the arrow keys, to read its values. Select a recent AI call to see the messages sent, the full reply and the details OpenRouter returned.
-- **Inbox**: the emails every project sends and receives through Resend and Gmail, laid out like a mail client. Received mail lands in the Inbox; Sent, Starred, Archive and All mail are folders beside it. New mail is unread until opened, and the Home page counts it. Star or archive an email (with undo), filter by project, delivery status (delivered, bounced, opened…) and emails that have a task, or search all mail by subject and address. Open an email to read it with the rest of its conversation, or turn it into a task in its project. Each project has its own Resend key in Settings; projects that share an account can share a key, and their emails are told apart by the project website's domain. Needs `tools/resend-relay.js` running (see Outside services). A project can also have one or more Gmail accounts (Settings → Gmail), read-only with the same Google OAuth Client ID as Calendar; each account signs in on its own for about an hour, and a Mailbox filter shows one account at a time.
+- **Inbox**: the emails every project sends and receives through Resend and Gmail, laid out like a mail client. Received mail lands in the Inbox; Sent, Starred, Archive and All mail are folders beside it. New mail is unread until opened, and the Home page counts it. Star or archive an email (with undo), filter by project, delivery status (delivered, bounced, opened…) and emails that have a task, or search all mail by subject and address. Open an email to read it with the rest of its conversation, or turn it into a task in its project. Each project has its own Resend key in Settings; projects that share an account can share a key, and their emails are told apart by the project website's domain. Needs the relays running, which `tools/start.js` starts (see Outside services). A project can also have one or more Gmail accounts (Settings → Gmail), read-only with the same Google OAuth Client ID as Calendar; each account signs in on its own for about an hour, and a Mailbox filter shows one account at a time.
 - **Notifications**: the bell in the top bar lists deadlines, automated tasks, site checks, provider outages and Telegram messages.
 
 Tasks have a deadline. The lists **Today**, **To Organize** and **Automated** gather what is due, what arrived without a project or deadline (for example from Telegram), and what the board created by itself. Press Cmd/Ctrl+K or `/` to search, jump, or capture something:
@@ -39,12 +39,12 @@ Settings → Labels lists the project labels and the Money categories, each in i
 Browsers only allow the folder picker on a secure origin, so serve the folder locally:
 
 ```sh
-bun tools/serve.js
+bun tools/start.js
 # or
-node tools/serve.js
+node tools/start.js
 ```
 
-Then open `http://localhost:8000` in **Chrome or Edge** (`PORT=<port>` picks another port). The File System Access API is not available in Firefox or Safari.
+This starts the board's static server and the local relays for Resend (Inbox) and Bing (search data) together, in one process; Ctrl+C stops them all. Then open `http://localhost:8000` in **Chrome or Edge**. `PORT=<port>` picks another port for the board, and `RESEND_PORT` and `BING_PORT` for the relays (8418 and 8417 by default; set the same address in Settings). To run only one part, use `bun tools/serve.js` or `bun tools/relays.js`. The File System Access API is not available in Firefox or Safari.
 
 `tools/serve.js` has no dependencies and marks every file `no-cache`, so the browser always runs the code you just edited. Any other static server works too, but `python3 -m http.server` sends no cache headers, so Chrome reuses the modules it cached earlier and keeps running the old code after a reload: with that server, hard reload the page (Cmd+Shift+R) after every change.
 
@@ -96,9 +96,9 @@ Nothing runs on a server, and everything automatic runs only while the board is 
 | Liquidity Pools prices | `coins.llama.fi` (DefiLlama) | the token addresses in your positions, and the time of each fee collect read from the chain |
 | Liquidity Pools logos | `raw.githubusercontent.com` (Uniswap's token lists, Trust Wallet's chain logos) | nothing but the request itself |
 | GitHub organization logos | `github.com` (each `<org>.png` avatar) | the organization or repo owner name |
-| Inbox | Resend API, through `tools/resend-relay.js` on your machine (Resend does not answer web pages directly) | each project's Resend API key, to list and read its emails |
+| Inbox | Resend API, through `tools/relays.js` on your machine (Resend does not answer web pages directly) | each project's Resend API key, to list and read its emails |
 | Inbox (Gmail) | Gmail API (`gmail.googleapis.com`), with your own OAuth Client ID | a read-only sign-in per account that lasts about an hour, to list and read its mail |
-| Bing search data | Bing Webmaster API, through `tools/bing-relay.js` on your machine (Bing does not answer web pages directly) | your API key and the site address |
+| Bing search data | Bing Webmaster API, through `tools/relays.js` on your machine (Bing does not answer web pages directly) | your API key and the site address |
 
 The typefaces (Inter, Space Grotesk) are in `fonts/`, under the SIL Open Font License, so no font is fetched from another site.
 

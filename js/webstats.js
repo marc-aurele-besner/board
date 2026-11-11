@@ -4,7 +4,7 @@ import { googleFetch } from './google.js';
 
 const GA = 'https://analyticsdata.googleapis.com/v1beta';
 const GSC = 'https://www.googleapis.com/webmasters/v3';
-// Bing sends no CORS header, so requests go through tools/bing-relay.js running on this machine.
+// Bing sends no CORS header, so requests go through tools/relays.js running on this machine.
 export const BING_RELAY = 'http://127.0.0.1:8417';
 const BING_PATH = '/webmaster/api.svc/json';
 const post = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -93,7 +93,7 @@ async function bing(method, key, website, relay) {
   try {
     res = await fetch(`${base}${BING_PATH}/${method}?siteUrl=${encodeURIComponent(website)}&apikey=${encodeURIComponent(key)}`);
   } catch {
-    throw new Error(`Could not reach the Bing relay at ${base}. Start it with: bun tools/bing-relay.js`);
+    throw new Error(`Could not reach the Bing relay at ${base}. Start it with: bun tools/start.js`);
   }
   // Bing answers a bad key with 400 and ErrorCode 3 (InvalidApiKey).
   const body = await res.json().catch(() => null);
