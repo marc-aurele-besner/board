@@ -42,7 +42,7 @@ export function makeFlow(fields = {}) {
     id: uid(),
     name: 'New flow',
     enabled: false,
-    schedule: { every: 'daily', time: '08:00', weekday: 1, minutes: 60 },
+    schedule: { every: 'daily', time: '08:00', weekday: 1, days: [1, 2, 3, 4, 5], day: 1, minutes: 60, from: '', to: '' },
     steps: [],
     lastRun: '',
     created: now(),
@@ -81,7 +81,7 @@ export const TEMPLATES = [
 ];
 
 export function flowFromTemplate(t) {
-  return makeFlow({ name: t.name, schedule: { ...t.schedule }, steps: t.steps.map((s) => ({ ...makeStep(s.type), ...s })) });
+  return makeFlow({ name: t.name, schedule: { ...makeFlow().schedule, ...t.schedule },steps: t.steps.map((s) => ({ ...makeStep(s.type), ...s })) });
 }
 
 // --- Schedule ---
@@ -93,20 +93,76 @@ const atTime = (d, time) => {
   return x;
 };
 
+export const REPEATS = [
+  ['interval', 'Every few minutes or hours'],
+  ['daily', 'Every day'],
+  ['days', 'On chosen days'],
+  ['weekly', 'Every week'],
+  ['monthly', 'Every month'],
+];
+
+export const SHORT_DAYS = WEEKDAYS.map((d) => d.slice(0, 3));
+const validDay = (d) => Number.isInteger(d) && d >= 0 && d <= 6;
+
+// The weekdays a slot may fall on, or null for every day. A bad value falls back, so the day search always ends.
+export function daysOf(s) {
+  if (s.every === 'weekly') return [validDay(Number(s.weekday)) ? Number(s.weekday) : 1];
+  if (s.every !== 'days') return null;
+  const days = (Array.isArray(s.days) ? s.days : []).map(Number).filter(validDay);
+  return days.length ? days : [1, 2, 3, 4, 5];
+}
+
+// A month's slot. A day past the month's end (31 in April) falls on its last day.
+const monthDay = (s) => Math.min(31, Math.max(1, Number(s.day) || 1));
+function monthSlot(year, month, s) {
+  const last = new Date(year, month + 1, 0).getDate();
+  return atTime(new Date(year, month, Math.min(monthDay(s), last)), s.time);
+}
+
 // The latest slot at or before `at`. For an interval there is no fixed slot, so the next run follows the last one.
 function lastSlot(s, at) {
-  if (s.every === 'daily') {
-    const t = atTime(at, s.time);
-    if (t > at) t.setDate(t.getDate() - 1);
-    return t;
+  if (s.every === 'monthly') {
+    const t = monthSlot(at.getFullYear(), at.getMonth(), s);
+    return t > at ? monthSlot(at.getFullYear(), at.getMonth() - 1, s) : t;
   }
-  if (s.every === 'weekly') {
-    const t = atTime(at, s.time);
-    t.setDate(t.getDate() - ((t.getDay() - Number(s.weekday) + 7) % 7));
-    if (t > at) t.setDate(t.getDate() - 7);
-    return t;
+  const days = daysOf(s);
+  const t = atTime(at, s.time);
+  if (t > at) t.setDate(t.getDate() - 1);
+  if (days) while (!days.includes(t.getDay())) t.setDate(t.getDate() - 1);
+  return t;
+}
+
+// The first slot after `at`.
+function nextSlot(s, at) {
+  if (s.every === 'monthly') {
+    const t = monthSlot(at.getFullYear(), at.getMonth(), s);
+    return t > at ? t : monthSlot(at.getFullYear(), at.getMonth() + 1, s);
   }
-  return null;
+  const days = daysOf(s);
+  const t = atTime(at, s.time);
+  if (t <= at) t.setDate(t.getDate() + 1);
+  if (days) while (!days.includes(t.getDay())) t.setDate(t.getDate() + 1);
+  return t;
+}
+
+// An interval flow's active hours. A From later than To wraps past midnight (22:00 to 06:00).
+const minutesOf = (time) => {
+  const [hh, mm] = String(time || '00:00').split(':').map(Number);
+  return (hh || 0) * 60 + (mm || 0);
+};
+const hasWindow = (s) => Boolean(s.from && s.to && s.from !== s.to);
+function inWindow(s, at) {
+  if (!hasWindow(s)) return true;
+  const m = at.getHours() * 60 + at.getMinutes();
+  const a = minutesOf(s.from);
+  const b = minutesOf(s.to);
+  return a < b ? m >= a && m < b : m >= a || m < b;
+}
+function intoWindow(s, t) {
+  if (inWindow(s, t)) return t;
+  const x = atTime(t, s.from);
+  if (x < t) x.setDate(x.getDate() + 1);
+  return x;
 }
 
 // The later of the last run and the moment the flow was switched on, so switching a flow on never replays a past slot.
@@ -118,11 +174,9 @@ export function nextRun(flow, at = new Date()) {
   const s = flow.schedule;
   if (s.every === 'interval') {
     const since = sinceOf(flow) || at.getTime();
-    return new Date(Math.max(at.getTime(), since + intervalMs(s)));
+    return intoWindow(s, new Date(Math.max(at.getTime(), since + intervalMs(s))));
   }
-  const t = lastSlot(s, at);
-  t.setDate(t.getDate() + (s.every === 'weekly' ? 7 : 1));
-  return t;
+  return nextSlot(s, at);
 }
 
 // Due when a slot has passed since the last run, or since the flow was switched on. A missed slot runs once, not once per slot.
@@ -130,16 +184,28 @@ export function isDue(flow, at = new Date()) {
   if (!flow.enabled || !flow.steps.length) return false;
   const since = sinceOf(flow);
   const s = flow.schedule;
-  if (s.every === 'interval') return at.getTime() - since >= intervalMs(s);
+  if (s.every === 'interval') return at.getTime() - since >= intervalMs(s) && inWindow(s, at);
   return lastSlot(s, at).getTime() > since;
+}
+
+function daysLabel(days) {
+  const key = [...days].sort().join('');
+  if (key === '12345') return 'Weekdays';
+  if (key === '06') return 'Weekends';
+  if (key === '0123456') return 'Every day';
+  // Monday first.
+  return [...days].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((d) => SHORT_DAYS[d]).join(', ');
 }
 
 export function scheduleLabel(s) {
   if (s.every === 'interval') {
     const m = Math.max(5, Number(s.minutes) || 60);
-    return m % 60 === 0 ? `Every ${m / 60 === 1 ? 'hour' : `${m / 60} hours`}` : `Every ${m} minutes`;
+    const every = m % 60 === 0 ? `Every ${m / 60 === 1 ? 'hour' : `${m / 60} hours`}` : `Every ${m} minutes`;
+    return hasWindow(s) ? `${every}, ${s.from}–${s.to}` : every;
   }
-  if (s.every === 'weekly') return `${WEEKDAYS[Number(s.weekday)] ?? 'Monday'}s at ${s.time}`;
+  if (s.every === 'weekly') return `${WEEKDAYS[daysOf(s)[0]]}s at ${s.time}`;
+  if (s.every === 'days') return `${daysLabel(daysOf(s))} at ${s.time}`;
+  if (s.every === 'monthly') return `Monthly on day ${monthDay(s)} at ${s.time}`;
   return `Daily at ${s.time}`;
 }
 

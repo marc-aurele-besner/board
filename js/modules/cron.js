@@ -6,7 +6,7 @@ import { modelChip } from '../model-picker.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import {
-  COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, TEMPLATES,
+  COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, REPEATS, TEMPLATES, daysOf,
   makeFlow, makeStep, flowFromTemplate, nextRun, scheduleLabel, runFlow, isRunning,
 } from '../cron.js';
 import { modelForTask } from './settings.js';
@@ -189,14 +189,39 @@ function select(value, options, onchange, attrs = {}) {
 function triggerForm(store, flow) {
   const s = flow.schedule;
   const set = (patch) => updateFlow(store, flow.id, (f) => Object.assign(f.schedule, patch));
+  const days = daysOf({ ...s, every: 'days' });
+  const toggleDay = (d) => {
+    const next = days.includes(d) ? days.filter((x) => x !== d) : [...days, d];
+    if (next.length) set({ days: next });
+  };
   return h('div', { class: 'stack' },
     h('div', { class: 'row cron-fields' },
-      field('Repeat', select(s.every, [['interval', 'Every few minutes or hours'], ['daily', 'Every day'], ['weekly', 'Every week']], (every) => set({ every }))),
+      field('Repeat', select(s.every, REPEATS, (every) => set({ every }))),
       s.every === 'interval'
         ? field('Minutes between runs', h('input', { type: 'number', min: 5, step: 5, value: String(s.minutes ?? 60), onchange: (e) => set({ minutes: Math.max(5, Number(e.target.value) || 60) }) }))
         : null,
       s.every === 'weekly' ? field('Day', select(s.weekday, WEEKDAYS.map((d, i) => [i, d]), (v) => set({ weekday: Number(v) }))) : null,
+      s.every === 'monthly'
+        ? field('Day of the month', h('input', { type: 'number', min: 1, max: 31, value: String(s.day ?? 1), onchange: (e) => set({ day: Math.min(31, Math.max(1, Number(e.target.value) || 1)) }) }), 'A day the month lacks runs on its last day.')
+        : null,
       s.every !== 'interval' ? field('Time', h('input', { type: 'time', value: s.time, onchange: (e) => set({ time: e.target.value || '08:00' }) })) : null),
+    s.every === 'days'
+      ? h('div', { class: 'cron-days', role: 'group', 'aria-label': 'Days' },
+          [1, 2, 3, 4, 5, 6, 0].map((d) => h('button', {
+            type: 'button',
+            class: days.includes(d) ? 'cron-day on' : 'cron-day',
+            'aria-pressed': String(days.includes(d)),
+            title: WEEKDAYS[d],
+            onclick: () => toggleDay(d),
+          }, SHORT_DAYS[d])),
+          h('button', { type: 'button', class: 'btn-link small', onclick: () => set({ days: [1, 2, 3, 4, 5] }) }, 'Weekdays'),
+          h('button', { type: 'button', class: 'btn-link small', onclick: () => set({ days: [0, 6] }) }, 'Weekends'))
+      : null,
+    s.every === 'interval'
+      ? h('div', { class: 'row cron-fields' },
+          field('Active from', h('input', { type: 'time', value: s.from ?? '', onchange: (e) => set({ from: e.target.value }) })),
+          field('Until', h('input', { type: 'time', value: s.to ?? '', onchange: (e) => set({ to: e.target.value }) }), 'Leave both empty to run around the clock.'))
+      : null,
     h('p', { class: 'muted small' },
       flow.enabled ? `Next run: ${timeOf(nextRun(flow).toISOString())}. ` : 'The flow is paused. ',
       'Flows run only while the board is open; a run missed while it was closed happens once when you open it.'));
