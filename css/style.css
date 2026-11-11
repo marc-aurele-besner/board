@@ -1016,7 +1016,6 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .status-pill.out { color: var(--expense); background: color-mix(in srgb, var(--expense) 12%, transparent); }
 .status-pill.closed { color: var(--muted); background: var(--surface-2); }
 .pool-card.is-closed { opacity: 0.8; }
-.lp-tabs { align-self: flex-start; }
 .pool-card.is-closed .range-band { opacity: 0.4; }
 .outdated-pill { display: inline-flex; align-items: center; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
 .status-pill .dot { position: relative; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -1182,8 +1181,8 @@ label.check { cursor: pointer; }
 .palette-foot { margin: 0; padding: 0 8px 4px; }
 
 /* Segmented controls that sit in a row instead of filling it */
-.r-tabs, .r-layout, .lp-layout, .lp-tabs { margin: 0; flex: none; }
-.r-tabs .seg, .r-layout .seg, .lp-layout .seg, .lp-tabs .seg { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; white-space: nowrap; }
+.r-tabs, .r-layout, .lp-layout { margin: 0; flex: none; }
+.r-tabs .seg, .r-layout .seg, .lp-layout .seg { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; white-space: nowrap; }
 
 /* Kitchen: a searchable gallery, as cards or as a list */
 .r-bar { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; }
@@ -1217,7 +1216,7 @@ label.check { cursor: pointer; }
 .lp-table td { vertical-align: middle; }
 
 /* Tools */
-.tools .sub-tab { display: inline-flex; align-items: center; gap: 6px; }
+.tools .sub-tab, .lp-tabs .sub-tab { display: inline-flex; align-items: center; gap: 6px; }
 .tool-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--gap); }
 .site-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: var(--gap); }
 .site-card { display: flex; flex-direction: column; gap: 14px; }
@@ -1483,7 +1482,17 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .insight-action.bad { color: var(--expense); background: color-mix(in srgb, var(--expense) 14%, transparent); }
 .insight-range { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; font-variant-numeric: tabular-nums; }
 
-/* Fees collected: how far the search for collects has got */
+/* Fees collected: how far the search for collects has got. Collapsed, a one-line recap that opens the detail */
+.lp-coverage-toggle { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 0; padding: 0; background: none; border: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.lp-coverage-toggle h3 { margin: 0; flex: none; }
+.lp-coverage-toggle .meter { flex: 1 1 60px; max-width: 220px; }
+.lp-coverage-toggle .lp-coverage-pct { font-variant-numeric: tabular-nums; }
+.lp-coverage-recap { margin-left: auto; text-align: right; min-width: 0; }
+.lp-coverage.collapsed { padding-top: 10px; padding-bottom: 10px; }
+@media (max-width: 520px) {
+  .lp-coverage-toggle { flex-wrap: wrap; }
+  .lp-coverage-recap { margin-left: 0; flex-basis: 100%; text-align: left; order: 5; }
+}
 .lp-coverage-all { display: grid; gap: 6px; }
 .lp-coverage-all strong { font-size: 1.5rem; font-variant-numeric: tabular-nums; }
 .lp-coverage-chains { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }

@@ -21,7 +21,7 @@ const MAX_TICK = 887272; // the widest possible range: a "full range" position
 // adding: the form to add a position by hand is open.
 // window: the WINDOWS key fee APR is read over.
 // feeSort, feeDir: the Fees collected table's sort. feeChain, feeToken, feeSource: its filters.
-const view = { filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, window: '24h', feeSort: 'date', feeDir: -1, feeChain: 'all', feeToken: 'all', feeSource: 'all' };
+const view = { filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, window: '24h', feeSort: 'date', feeDir: -1, feeChain: 'all', feeToken: 'all', feeSource: 'all', coverageOpen: false };
 // Loaded positions and the state of the last load. shallow: chains whose node would not search back to v4's start.
 // stale: chains shown from the last good read because this one failed, with when that read was.
 // pending: chains still being read in the current load.
@@ -1208,10 +1208,24 @@ function coverageCard(store) {
   if (!cov.total) return null;
   const busy = historyBusy || loading;
   const meter = (x) => h('div', { class: 'meter', role: 'presentation' }, h('span', { style: { width: `${x * 100}%` } }));
+  const status = busy ? 'Searching…' : cov.pct >= 1 ? 'Every collect found' : 'Searches further on each load';
+  // Collapsed by default to a one-line recap; the per-chain detail opens on demand.
+  const toggle = h('button', {
+    type: 'button',
+    class: 'lp-coverage-toggle',
+    'aria-expanded': String(Boolean(view.coverageOpen)),
+    onclick: () => {
+      view.coverageOpen = !view.coverageOpen;
+      store.refresh();
+    },
+  },
+    h('h3', null, 'Search coverage'),
+    view.coverageOpen ? null : [h('strong', { class: 'lp-coverage-pct' }, coveragePct(cov.pct)), meter(cov.pct)],
+    h('span', { class: 'muted small lp-coverage-recap' }, view.coverageOpen ? status : `${cov.done}/${cov.total} positions · ${status}`),
+    h('span', { class: 'sort-mark' }, icon(view.coverageOpen ? 'chevron-up' : 'chevron-down')));
+  if (!view.coverageOpen) return h('section', { class: 'card lp-coverage collapsed', title: COVERAGE_TITLE }, toggle);
   return h('section', { class: 'card stack lp-coverage', title: COVERAGE_TITLE },
-    h('div', { class: 'row between' },
-      h('h3', null, 'Search coverage'),
-      h('span', { class: 'muted small' }, busy ? 'Searching…' : cov.pct >= 1 ? 'Every collect found' : 'Searches further on each load')),
+    toggle,
     h('div', { class: 'lp-coverage-all' },
       h('strong', null, coveragePct(cov.pct)),
       meter(cov.pct),
@@ -1343,14 +1357,16 @@ function feesView(store) {
           h('p', null, filtered ? 'No collections match these filters.' : all.length ? 'No collections in this range.' : 'No collections yet. Collects are read from the chain, and from Etherscan when its key is set in Settings. Between two reads, a drop in unclaimed fees is logged too. You can also log one by hand.')));
 }
 
-// The tab's two views: the positions, and the fees collected from them.
+const FEES_SUBTITLE = 'Fees collected from your positions: read from the chain, from Etherscan when its key is set, and logged by hand.';
+
+// The tab's two views: the positions, and the fees collected from them. Sub-tabs, as in Monitoring and Tools.
 function tabs(store) {
-  return h('div', { class: 'segmented lp-tabs', role: 'tablist', 'aria-label': 'Liquidity Pools view' },
-    [['positions', 'Positions', 'droplet'], ['fees', 'Fees collected', 'coins']].map(([key, label, iconName]) =>
+  return h('nav', { class: 'sub-tabs lp-tabs', role: 'tablist', 'aria-label': 'Liquidity Pools view' },
+    [['positions', 'Positions', 'droplet'], ['fees', 'Fees Collected', 'coins']].map(([key, label, iconName]) =>
       h('button', {
         type: 'button',
         role: 'tab',
-        class: view.tab === key ? 'seg active' : 'seg',
+        class: view.tab === key ? 'sub-tab active' : 'sub-tab',
         'aria-selected': String(view.tab === key),
         onclick: () => {
           view.tab = key;
@@ -1367,8 +1383,10 @@ function draw(root, store) {
     // The log of collections stays reachable once there is one, even with no wallet left.
     const logged = collectedOf(store).length > 0;
     if (!logged) view.tab = 'positions';
-    return root.replaceChildren(h('div', { class: 'stack-lg' },
-      h('h2', null, 'Liquidity Pools'),
+    return root.replaceChildren(h('div', { class: 'stack-lg lp' },
+      h('header', null,
+        h('h2', null, 'Liquidity Pools'),
+        logged && view.tab === 'fees' ? h('p', { class: 'muted small' }, FEES_SUBTITLE) : null),
       logged ? tabs(store) : null,
       view.tab === 'fees'
         ? feesView(store)
@@ -1470,15 +1488,18 @@ function draw(root, store) {
       h('div', null,
         h('h2', null, 'Liquidity Pools'),
         h('p', { class: 'muted small' },
-          `Uniswap v3 and v4 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`,
+          view.tab === 'fees'
+            ? FEES_SUBTITLE
+            : `Uniswap v3 and v4 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`,
           state.pending.length ? ` Reading ${state.pending.join(', ')}…` : state.at ? ` ${updatedText()}.` : '')),
       h('div', { class: 'row' },
-        h('button', { type: 'button', class: 'btn-small', onclick: () => openAdd(store), title: 'Add a position the board did not find' }, icon('plus'), 'Add position'),
+        view.tab === 'fees' ? null : h('button', { type: 'button', class: 'btn-small', onclick: () => openAdd(store), title: 'Add a position the board did not find' }, icon('plus'), 'Add position'),
         h('button', { type: 'button', class: 'btn-small', disabled: reading || chainCount === 0, onclick: () => load(store) },
         refreshIcon(reading),
           reading ? 'Reading…' : 'Refresh'))),
 
-    view.adding ? addForm(store) : null,
+    tabs(store),
+    view.adding && view.tab !== 'fees' ? addForm(store) : null,
     state.shallow.length
       ? notice({ tone: 'info', text: `The node for ${state.shallow.join(', ')} keeps only recent history, so older v4 positions there are not found. Add them with Add position, or set a node that keeps full history in Settings.` })
       : null,
@@ -1488,7 +1509,6 @@ function draw(root, store) {
     state.status === 'error' ? notice({ text: `The positions could not be read: ${state.error}` }) : null,
     chainCount === 0 ? notice({ tone: 'info', text: 'No chains are selected. Pick the chains to read in Settings.' }) : null,
 
-    tabs(store),
     view.tab === 'fees' ? feesView(store) : [
     h('div', { class: 'lp-stats' },
       h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Total liquidity'), valueEl),
