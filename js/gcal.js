@@ -1,43 +1,36 @@
 // Google Calendar, read-only, straight from the browser. Like Gmail, each account signs in on its own, so several
-// accounts can be shown side by side. Tokens last about an hour and survive a reload (see accountTokens).
+// accounts can be shown side by side. Sign-ins are kept in google.json and renewed by themselves (see js/google.js).
 // settings.json keeps gcal: { accounts: [{ email, projectId, labelId, calendars: [{ id, name, color, on, projectId, labelId }] }] }.
-// The account's project and project label are optional defaults; a calendar's own ones win. Events are cached in this
-// browser only (localStorage), so a reload shows the last read at once and Google is asked again when it is stale.
-import { loadGis, PROFILE_SCOPE, rememberPicture, accountTokens } from './google.js';
+// The account's project and project label are optional defaults; a calendar's own ones win. Events are cached in google.json,
+// so a reload shows the last read at once and Google is asked again when it is stale.
+import { PROFILE_SCOPE, rememberPicture, signIn, saveToken, forgetToken, hasToken, accessToken, googleData, saveGoogleData } from './google.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
 const API = 'https://www.googleapis.com/calendar/v3';
 const PAGE = 250;
 const MAX_PAGES = 4;
 
-const tokens = accountTokens('gcal'); // address -> { value, expiresAt, scope }, kept until it expires
+const keyOf = (address) => `gcal:${address}`;
 
 // --- Event cache ---
-// One localStorage entry per calendar, holding its last few reads: [{ from, to, at, events }], newest first.
+// One entry per calendar in google.json's events, holding its last few reads: [{ from, to, at, events }], newest first.
 // A read is used for any range it covers, so a day or week inside a cached month needs no request.
 export const CALENDAR_TTL = 10 * 60 * 1000;
-const CACHE_PREFIX = 'board:gcal:';
 const CACHE_READS = 6;
-const cacheKey = (address, calendarId) => `${CACHE_PREFIX}${address}|${calendarId}`;
+const cacheKey = (address, calendarId) => `${address}|${calendarId}`;
 
 function cachedReads(address, calendarId) {
-  try {
-    const list = JSON.parse(localStorage.getItem(cacheKey(address, calendarId)) ?? '[]');
-    return Array.isArray(list) ? list : [];
-  } catch {
-    return [];
-  }
+  const list = googleData().events?.[cacheKey(address, calendarId)];
+  return Array.isArray(list) ? list : [];
 }
 
 function cacheRead(address, calendarId, from, to, events) {
   const read = { from: from.getTime(), to: to.getTime(), at: Date.now(), events };
   // Reads the new one covers are dropped.
   const kept = cachedReads(address, calendarId).filter((r) => r.from < read.from || r.to > read.to);
-  try {
-    localStorage.setItem(cacheKey(address, calendarId), JSON.stringify([read, ...kept].slice(0, CACHE_READS)));
-  } catch {
-    /* storage full or blocked: the read still shows, it is just not kept */
-  }
+  saveGoogleData((d) => {
+    d.events = { ...d.events, [cacheKey(address, calendarId)]: [read, ...kept].slice(0, CACHE_READS) };
+  });
 }
 
 // The newest cached read of a calendar that covers [from, to), with only the events in that range, or null.
@@ -53,24 +46,20 @@ function fromCache(account, cal, from, to) {
 }
 
 export function clearCalendarCache(address = '') {
-  try {
-    for (const key of Object.keys(localStorage)) {
-      if (key.startsWith(address ? `${CACHE_PREFIX}${address}|` : CACHE_PREFIX)) localStorage.removeItem(key);
-    }
-  } catch {
-    /* storage blocked */
-  }
+  saveGoogleData((d) => {
+    d.events = Object.fromEntries(Object.entries(d.events ?? {}).filter(([key]) => address && !key.startsWith(`${address}|`)));
+  });
 }
 
 export const calendarAccounts = (store) => store.get('settings').gcal?.accounts ?? [];
-export const isCalendarConnected = (address) => (tokens.get(address)?.expiresAt ?? 0) > Date.now();
+export const isCalendarConnected = (address) => hasToken(keyOf(address));
 export const anyCalendarConnected = (store) => calendarAccounts(store).some((a) => isCalendarConnected(a.email));
 
 async function call(value, path) {
   const res = await fetch(API + path, { headers: { Authorization: `Bearer ${value}` } });
   if (!res.ok) {
     const detail = await res.json().then((d) => d.error?.message).catch(() => '');
-    const err = new Error(res.status === 401 ? 'The Google Calendar session expired. Connect again.' : `Google Calendar error ${res.status}${detail ? `: ${detail}` : ''}`);
+    const err = new Error(res.status === 401 ? 'Google Calendar refused the sign-in. Connect again.' : `Google Calendar error ${res.status}${detail ? `: ${detail}` : ''}`);
     err.status = res.status;
     throw err;
   }
@@ -80,10 +69,11 @@ async function call(value, path) {
 async function get(address, path) {
   if (!isCalendarConnected(address)) throw new Error(`Connect ${address} to read its calendars.`);
   try {
-    return await call(tokens.get(address).value, path);
+    return await call(await accessToken(keyOf(address)), path);
   } catch (err) {
-    if (err.status === 401) tokens.delete(address);
-    throw err;
+    if (err.status !== 401) throw err;
+    // Refused before it expired: renewed once and tried again.
+    return call(await accessToken(keyOf(address), true), path);
   }
 }
 
@@ -98,40 +88,20 @@ async function listCalendars(address) {
 
 // Opens Google's sign-in. Must run from a click. With an address it reconnects that account; without one Google asks
 // which account to add. Resolves to the address that signed in.
-export async function connectCalendar(clientId, address = '') {
-  if (!clientId) throw new Error('Add your Google OAuth Client ID in Settings → Google Calendar first.');
-  await loadGis();
-  const value = await new Promise((resolve, reject) => {
-    const client = window.google.accounts.oauth2.initTokenClient({
-      client_id: clientId,
-      // The profile is only read for the account's picture.
-      scope: `${SCOPE} ${PROFILE_SCOPE}`,
-      // Other Google services granted earlier are not mixed into a calendar account's token.
-      include_granted_scopes: false,
-      ...(address ? { login_hint: address } : {}),
-      callback: (resp) => {
-        if (resp.error) return reject(new Error(resp.error_description || resp.error));
-        if (!String(resp.scope ?? '').split(' ').includes(SCOPE)) return reject(new Error('Google did not grant calendar access. Tick its box on the consent screen.'));
-        resolve({ value: resp.access_token, expiresAt: Date.now() + (Number(resp.expires_in) - 60) * 1000, scope: resp.scope });
-      },
-      error_callback: (err) => reject(new Error(err?.message || 'Google sign-in was closed.')),
-    });
-    client.requestAccessToken({ prompt: address ? '' : 'select_account' });
-  });
+export async function connectCalendar(_clientId, address = '') {
+  // The profile is only read for the account's picture.
+  const token = await signIn({ scopes: [SCOPE, PROFILE_SCOPE], address });
+  if (!token.scope.split(' ').includes(SCOPE)) throw new Error('Google did not grant calendar access. Tick its box on the consent screen.');
   // The primary calendar's id is the account's address, so no profile scope is needed.
-  const { id } = await call(value.value, '/calendars/primary');
+  const { id } = await call(token.access, '/calendars/primary');
   const signedIn = String(id ?? '').toLowerCase();
   if (address && signedIn !== address) throw new Error(`You signed in as ${signedIn}, not ${address}.`);
-  tokens.set(signedIn, value);
-  await rememberPicture(signedIn, value.value, value.scope);
+  saveToken(keyOf(signedIn), token);
+  await rememberPicture(signedIn, token.access, token.scope);
   return signedIn;
 }
 
-export function disconnectCalendar(address) {
-  const token = tokens.get(address);
-  if (token && window.google?.accounts?.oauth2) window.google.accounts.oauth2.revoke(token.value, () => {});
-  tokens.delete(address);
-}
+export const disconnectCalendar = (address) => forgetToken(keyOf(address));
 
 const saveAccounts = (store, mutate) => store.update('settings', (d) => {
   d.gcal = { ...d.gcal, accounts: mutate(d.gcal?.accounts ?? []) };
@@ -213,8 +183,8 @@ const byDay = (a, b) => eventDate(a.start).setHours(0, 0, 0, 0) - eventDate(b.st
   || Number(b.allDay) - Number(a.allDay) || eventDate(a.start) - eventDate(b.start);
 
 // Events of every shown calendar of every account between two dates, in day order. A calendar whose cached read is
-// younger than maxAge is not asked again; pass maxAge 0 to read everything. Accounts not connected this session show
-// their cached events, of any age.
+// younger than maxAge is not asked again; pass maxAge 0 to read everything. Accounts not connected show their
+// cached events, of any age.
 // Returns { events, errors: [text], waiting: [addresses not connected], at: time of the oldest read used, or 0 }.
 export async function calendarEvents(store, from, to, { maxAge = CALENDAR_TTL } = {}) {
   const events = [];

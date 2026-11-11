@@ -1,6 +1,6 @@
 // Gmail, read-only, straight from the browser. Each account signs in on its own and may belong to a project (a
-// project can have several) and carry a project label for the Inbox filter; both are optional. Tokens last about an hour and survive a reload (see accountTokens).
-import { loadGis, PROFILE_SCOPE, rememberPicture, accountTokens } from './google.js';
+// project can have several) and carry a project label for the Inbox filter; both are optional. Sign-ins are kept in google.json and renewed by themselves (see js/google.js).
+import { PROFILE_SCOPE, rememberPicture, signIn, saveToken, forgetToken, hasToken, accessToken } from './google.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me';
@@ -12,10 +12,10 @@ const KEEP = 1000;
 const PARALLEL = 5;
 const HEADERS = ['From', 'To', 'Cc', 'Subject', 'Date'];
 
-const tokens = accountTokens('gmail'); // address -> { value, expiresAt, scope }, kept until it expires
+const keyOf = (address) => `gmail:${address}`;
 
 export const gmailAccounts = (store) => store.get('settings').gmail?.accounts ?? [];
-export const isGmailConnected = (address) => (tokens.get(address)?.expiresAt ?? 0) > Date.now();
+export const isGmailConnected = (address) => hasToken(keyOf(address));
 // Projects that have at least one Gmail account, in project order.
 export const gmailProjects = (store) => {
   const ids = new Set(gmailAccounts(store).map((a) => a.projectId));
@@ -26,7 +26,7 @@ async function call(value, path) {
   const res = await fetch(API + path, { headers: { Authorization: `Bearer ${value}` } });
   if (!res.ok) {
     const detail = await res.json().then((d) => d.error?.message).catch(() => '');
-    const err = new Error(res.status === 401 ? 'The Gmail session expired. Connect again.' : `Gmail error ${res.status}${detail ? `: ${detail}` : ''}`);
+    const err = new Error(res.status === 401 ? 'Gmail refused the sign-in. Connect again.' : `Gmail error ${res.status}${detail ? `: ${detail}` : ''}`);
     err.status = res.status;
     throw err;
   }
@@ -34,51 +34,31 @@ async function call(value, path) {
 }
 
 async function get(address, path) {
-  const token = tokens.get(address);
   if (!isGmailConnected(address)) throw new Error(`Connect ${address} to read its mail.`);
   try {
-    return await call(token.value, path);
+    return await call(await accessToken(keyOf(address)), path);
   } catch (err) {
-    if (err.status === 401) tokens.delete(address);
-    throw err;
+    if (err.status !== 401) throw err;
+    // Refused before it expired: renewed once and tried again.
+    return call(await accessToken(keyOf(address), true), path);
   }
 }
 
 // Opens Google's sign-in. Must run from a click. With an address it reconnects that account;
 // without one Google asks which account to add. Resolves to the address that signed in.
-export async function connectGmail(clientId, address = '') {
-  if (!clientId) throw new Error('Add your Google OAuth Client ID in Settings → Google Calendar first.');
-  await loadGis();
-  const value = await new Promise((resolve, reject) => {
-    const client = window.google.accounts.oauth2.initTokenClient({
-      client_id: clientId,
-      // The profile is only read for the account's picture.
-      scope: `${SCOPE} ${PROFILE_SCOPE}`,
-      // Other Google services granted earlier are not mixed into a Gmail account's token.
-      include_granted_scopes: false,
-      ...(address ? { login_hint: address } : {}),
-      callback: (resp) => {
-        if (resp.error) return reject(new Error(resp.error_description || resp.error));
-        if (!String(resp.scope ?? '').split(' ').includes(SCOPE)) return reject(new Error('Google did not grant Gmail access. Tick its box on the consent screen.'));
-        resolve({ value: resp.access_token, expiresAt: Date.now() + (Number(resp.expires_in) - 60) * 1000, scope: resp.scope });
-      },
-      error_callback: (err) => reject(new Error(err?.message || 'Google sign-in was closed.')),
-    });
-    client.requestAccessToken({ prompt: address ? '' : 'select_account' });
-  });
-  const { emailAddress } = await call(value.value, '/profile');
+export async function connectGmail(_clientId, address = '') {
+  // The profile is only read for the account's picture.
+  const token = await signIn({ scopes: [SCOPE, PROFILE_SCOPE], address });
+  if (!token.scope.split(' ').includes(SCOPE)) throw new Error('Google did not grant Gmail access. Tick its box on the consent screen.');
+  const { emailAddress } = await call(token.access, '/profile');
   const signedIn = String(emailAddress ?? '').toLowerCase();
   if (address && signedIn !== address) throw new Error(`You signed in as ${signedIn}, not ${address}.`);
-  tokens.set(signedIn, value);
-  await rememberPicture(signedIn, value.value, value.scope);
+  saveToken(keyOf(signedIn), token);
+  await rememberPicture(signedIn, token.access, token.scope);
   return signedIn;
 }
 
-export function disconnectGmail(address) {
-  const token = tokens.get(address);
-  if (token && window.google?.accounts?.oauth2) window.google.accounts.oauth2.revoke(token.value, () => {});
-  tokens.delete(address);
-}
+export const disconnectGmail = (address) => forgetToken(keyOf(address));
 
 // "A <a@x.com>, \"B, C\" <b@x.com>" -> two addresses. Commas inside quotes or angle brackets do not split.
 function splitAddresses(value) {
@@ -142,7 +122,7 @@ const rowOf = (account, m, dir, known) => ({
   unread: dir === 'received' && known.size > 0 && (m.labelIds ?? []).includes('UNREAD'),
 });
 
-// Reads the new mail of every connected account into inbox.json. Accounts not connected this session are skipped,
+// Reads the new mail of every connected account into inbox.json. Accounts not connected are skipped,
 // and their saved mail stays. Returns { added, errors: [{ projectIds, text }], waiting: [addresses] }.
 export async function syncGmail(store) {
   const accounts = gmailAccounts(store);

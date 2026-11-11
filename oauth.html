@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Google sign-in</title>
+</head>
+<body>
+<p>Signing in…</p>
+<script>
+  // Google's sign-in comes back here with a code. The board's tab listens on this channel (js/google.js signIn).
+  const params = new URLSearchParams(location.search);
+  const channel = new BroadcastChannel('board-oauth');
+  channel.postMessage({ state: params.get('state'), code: params.get('code'), error: params.get('error') });
+  channel.close();
+  window.close();
+</script>
+</body>
+</html>
