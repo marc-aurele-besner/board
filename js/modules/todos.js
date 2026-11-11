@@ -1,35 +1,26 @@
-import { h, uid, icon, statusOf, empty, notice, todayISO } from '../ui.js';
+import { h, uid, icon, statusOf, notice, todayISO } from '../ui.js';
 import { makeTask } from '../capture.js';
 import { AUTO_SOURCES } from '../automations.js';
 import { toast } from '../toast.js';
 import { createProject, projectIcon, labelsOf, projectTree, moveProject, labelColor } from './projects.js';
-import { editText, pickChip, pickButton } from '../inline.js';
+import { editText, pickChip, pickButton, pill } from '../inline.js';
 import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
 import { openDialog } from '../modal.js';
 import { ask, parseJson } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { taskMatcher, QUERY_HINT } from '../task-query.js';
+import { taskStatuses, statusName, statusOptions, statusLook, categoryColor } from '../task-labels.js';
 
 const COLLECTION = 'todos';
-const STATUSES = [
-  ['todo', 'To do'],
-  ['blocked', 'Blocked'],
-  ['paused', 'Paused'],
-  ['ondeck', 'On Deck'],
-  ['doing', 'In progress'],
-  ['review', 'In Review'],
-  ['done', 'Completed'],
-];
-// Each status uses one of the palette tones, so pills stay consistent across the app.
-const STATUS_TONE = { todo: 'todo', blocked: 'high', paused: 'plain', ondeck: 'low', doing: 'doing', review: 'medium', done: 'done' };
 const PRIORITIES = [
   ['none', 'No priority'],
   ['low', 'Low'],
   ['medium', 'Medium'],
   ['high', 'High'],
 ];
-const STATUS_FILTERS = [['open', 'Open'], ['all', 'All'], ...STATUSES];
+// The "Show" filter: open, all, or one status by the name it has in Settings → Labels.
+const statusFilters = (store) => [['open', 'Open'], ['all', 'All'], ...taskStatuses(store).map((s) => [s.key, s.name])];
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2, none: 3 };
 const NO_CATEGORY = '__none';
 // Lists that are not a project: everything, no project, due today or late, waiting to be organized, made by a rule.
@@ -44,7 +35,7 @@ const DEFAULT_SORT = { key: 'status', dir: 'asc' };
 const isDefaultSort = (s) => s.key === DEFAULT_SORT.key && s.dir === DEFAULT_SORT.dir;
 
 // View state lives here so it survives re-renders.
-// filter: one of SMART_LISTS, or a project id. status: a STATUS_FILTERS key. category: '' means any.
+// filter: one of SMART_LISTS, or a project id. status: a statusFilters key. category: '' means any.
 // sort: { key, dir }. colFilter: per-column filters. An empty value means "any".
 // query: the search box, read by taskMatcher (words plus #project, !priority, is:status, cat:, due: tokens).
 const view = {
@@ -60,9 +51,7 @@ const view = {
   lastPicked: null,
   dragId: null,
   dragStatus: null,
-  managingCategories: false,
   creatingProject: false,
-  catError: '',
   showProject: false,
   sort: { ...DEFAULT_SORT },
   colFilter: { text: '', status: '', priority: '', project: '', category: '' },
@@ -120,12 +109,6 @@ function parseScope(value) {
   if (value.startsWith('category:')) return { scope: 'projectCategory', projectId: null, projectCategoryId: value.slice(9) };
   return { scope: 'all', projectId: null, projectCategoryId: null };
 }
-function scopeValue(c) {
-  if (c.scope === 'project') return `project:${c.projectId}`;
-  if (c.scope === 'projectCategory') return `category:${c.projectCategoryId}`;
-  return 'all';
-}
-
 // "buy milk #home" files the item under project "home" (created if missing).
 // Extra lines from a multi-line paste arrive as the description.
 function addItem(store, raw, description = '') {
@@ -246,6 +229,13 @@ function autoBadge(item) {
   return h('span', { class: 'auto-badge', title: `Created automatically by ${AUTO_SOURCES[item.auto] ?? 'a rule'}` }, icon(telegram ? 'send' : 'zap'), telegram ? 'Telegram' : 'Auto');
 }
 
+// A category on a card: in its colour when Settings → Labels gives it one, otherwise a plain tag.
+function categoryTag(store, name) {
+  if (!name) return null;
+  const color = categoryColor(store, name);
+  return color ? pill(name, { color }) : h('span', { class: 'tag' }, name);
+}
+
 // What a task in "To Organize" still needs.
 const missingFor = (item) => [item.projectId ? '' : 'a project', item.due ? '' : 'a deadline'].filter(Boolean).join(' and ') || 'a look';
 
@@ -257,37 +247,6 @@ function createTodoCategory(store, name, projectId) {
       d.categories.push({ id: uid(), name, ...(projectId ? parseScope(`project:${projectId}`) : parseScope('all')) }));
   }
   return name;
-}
-
-function saveTodoCategory(store, id, name, scope) {
-  if (!name) return;
-  if (todoCategories(store).some((c) => c.id !== id && sameLower(c.name, name))) {
-    view.catError = `"${name}" already exists.`;
-    return store.refresh();
-  }
-  view.catError = '';
-  store.update(COLLECTION, (d) => {
-    const c = d.categories.find((x) => x.id === id);
-    if (c) Object.assign(c, { name }, parseScope(scope));
-  });
-}
-
-function addTodoCategory(store, v) {
-  const name = v.name.trim();
-  if (!name) return;
-  if (todoCategories(store).some((c) => sameLower(c.name, name))) {
-    view.catError = `"${name}" already exists.`;
-    return store.refresh();
-  }
-  view.catError = '';
-  store.update(COLLECTION, (d) => d.categories.push({ id: uid(), name, ...parseScope(v.scope) }));
-}
-
-function deleteTodoCategory(store, c) {
-  if (!confirm(`Delete category "${c.name}"? Todos keep their label.`)) return;
-  store.update(COLLECTION, (d) => {
-    d.categories = d.categories.filter((x) => x.id !== c.id);
-  });
 }
 
 const toggleExpanded = (store, id) => {
@@ -444,10 +403,10 @@ function issueControl(store, item, repos) {
 }
 
 // A task as Markdown: a checklist line with its status, project and deadline, then its description indented.
-function taskMarkdown(item, projects) {
+function taskMarkdown(store, item, projects) {
   const status = statusOf(item);
   const project = projects.find((p) => p.id === item.projectId)?.name;
-  const details = [status === 'done' ? '' : label(STATUSES, status), project, item.due ? `due ${item.due}` : ''].filter(Boolean);
+  const details = [status === 'done' ? '' : statusName(store, status), project, item.due ? `due ${item.due}` : ''].filter(Boolean);
   const head = `- [${status === 'done' ? 'x' : ' '}] ${item.text}${details.length ? ` (${details.join(' · ')})` : ''}`;
   const desc = (item.description ?? '').trim();
   return desc ? `${head}\n${desc.split(/\r?\n/).map((l) => `  ${l}`).join('\n')}` : head;
@@ -456,7 +415,7 @@ function taskMarkdown(item, projects) {
 // A copied task is being handed on, so it moves to "On Deck" (completed ones stay done) and leaves the selection.
 async function copyTasks(store, items) {
   if (!items.length) return;
-  const text = items.map((i) => taskMarkdown(i, projectsOf(store))).join('\n');
+  const text = items.map((i) => taskMarkdown(store, i, projectsOf(store))).join('\n');
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -556,13 +515,13 @@ function batchBar(store, visible, projects, categories) {
           },
         }, `Select all ${visible.length} shown`),
     h('button', { type: 'button', class: 'btn-small', title: 'Mark the selected tasks done', onclick: () => apply({ status: 'done' }) }, icon('check'), 'Done'),
-    select('Status', STATUSES.map(([v, l]) => ({ value: v, label: l, tone: STATUS_TONE[v] })), (v) => apply({ status: v })),
+    select('Status', statusOptions(store), (v) => apply({ status: v })),
     select('Priority', PRIORITIES.map(([v, l]) => ({ value: v, label: l, tone: v === 'none' ? 'plain' : v })), (v) => apply({ priority: v })),
     select('Project', [
       { value: '__personal', label: 'Personal' },
       ...[...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
     ], (v) => apply({ projectId: v === '__personal' ? null : v })),
-    select('Category', [{ value: NO_CATEGORY, label: 'No category' }, ...categories.map((c) => ({ value: c, label: c }))],
+    select('Category', [{ value: NO_CATEGORY, label: 'No category' }, ...categories.map((c) => ({ value: c, label: c, color: categoryColor(store, c) }))],
       (v) => apply({ category: v === NO_CATEGORY ? '' : v })),
     h('span', { class: 'due-control' },
       h('button', {
@@ -677,7 +636,7 @@ function todoRow(store, item, ctx) {
         h('div', { class: 'todo-status' },
           pickChip({
             value: status,
-            options: STATUSES.map(([v, l]) => ({ value: v, label: l, tone: STATUS_TONE[v] })),
+            options: statusOptions(store, status),
             onPick: (v) => updateItem(store, item.id, { status: v }),
           }),
           doneButton(store, item)),
@@ -695,7 +654,7 @@ function todoRow(store, item, ctx) {
         }),
         pickChip({
           value: item.category || null,
-          options: categoryNames.map((c) => ({ value: c, label: c })),
+          options: categoryNames.map((c) => ({ value: c, label: c, color: categoryColor(store, c) })),
           nullable: true,
           nullLabel: 'No category',
           allowCreate: true,
@@ -768,14 +727,14 @@ function boardCard(store, item, projects, order) {
     h('div', { class: 'row kanban-meta' },
       p ? h('span', { class: 'row small' }, projectIcon(p), p.name) : h('span', { class: 'muted small' }, 'Personal'),
       priority !== 'none' ? h('span', { class: `pill tone-${priority}` }, label(PRIORITIES, priority)) : null,
-      item.category ? h('span', { class: 'tag' }, item.category) : null,
+      categoryTag(store, item.category),
       dueChip(item),
       autoBadge(item)),
     h('div', { class: 'row between' },
       h('div', { class: 'todo-status' },
         pickChip({
           value: statusOf(item),
-          options: STATUSES.map(([v, l]) => ({ value: v, label: l, tone: STATUS_TONE[v] })),
+          options: statusOptions(store, statusOf(item)),
           onPick: (v) => updateItem(store, item.id, { status: v }),
         }),
         doneButton(store, item)),
@@ -814,7 +773,10 @@ function boardCard(store, item, projects, order) {
 }
 
 function boardView(store, items, projects, order) {
-  return h('div', { class: 'kanban' }, STATUSES.map(([key, name]) => {
+  // A status hidden in Settings → Labels keeps its column only while a task shown is in it.
+  const columns = taskStatuses(store).filter((s) => !s.hidden || items.some((i) => statusOf(i) === s.key));
+  return h('div', { class: 'kanban' }, columns.map((s) => {
+    const { key } = s;
     const cards = items.filter((i) => statusOf(i) === key);
     return h('section', {
       class: 'kanban-col',
@@ -831,7 +793,7 @@ function boardView(store, items, projects, order) {
         view.dragId = null;
       },
     },
-      h('h3', { class: 'row between' }, h('span', { class: `pill tone-${STATUS_TONE[key]}` }, name), h('span', { class: 'count' }, String(cards.length))),
+      h('h3', { class: 'row between' }, pill(s.name, statusLook(s)), h('span', { class: 'count' }, String(cards.length))),
       cards.length ? cards.map((item) => boardCard(store, item, projects, order)) : h('p', { class: 'muted small' }, 'Drop a task here'));
   }));
 }
@@ -898,7 +860,7 @@ function columnFilters(store, projects, categories, showDue) {
       'aria-label': 'Filter titles',
       onchange: set('text'),
     }),
-    select('status', STATUSES),
+    select('status', taskStatuses(store).map((s) => [s.key, s.name])),
     select('priority', PRIORITIES),
     select('project', [['none', 'Personal'], ...projects.map((p) => [p.id, p.name])]),
     select('category', [[NO_CATEGORY, 'No category'], ...categories.map((c) => [c, c])]),
@@ -985,7 +947,7 @@ function tidyPanel(store) {
           h('span', { class: 'muted' }, before?.text ?? ''),
           h('span', { class: 'arrow' }, '→'),
           h('strong', null, s.title),
-          s.category ? h('span', { class: 'tag' }, s.category) : null,
+          categoryTag(store, s.category),
           s.priority !== 'none' ? h('span', { class: `pill tone-${s.priority}` }, label(PRIORITIES, s.priority)) : null,
           h('button', { type: 'button', class: 'btn-small', onclick: () => applyTidy(store, s) }, 'Apply'));
       })));
@@ -1044,70 +1006,6 @@ function projectDetails(store, p) {
               h('span', { class: 'muted' }, text));
           }))
       : null);
-}
-
-// --- Category manager ---
-
-// Manager card: name and scope of every todo category, edited in place.
-function categoriesManager(store) {
-  const projects = projectsOf(store);
-  const projectCategories = store.get('projects').categories ?? [];
-  const scopeOptions = () => [
-    h('option', { value: 'all' }, 'All projects'),
-    h('optgroup', { label: 'One project' },
-      [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => h('option', { value: `project:${p.id}` }, p.name))),
-    h('optgroup', { label: 'Projects in a category' },
-      projectCategories.map((c) => h('option', { value: `category:${c.id}` }, c.name))),
-  ];
-  const scopeLabel = (c) => {
-    if (c.scope === 'project') return projects.find((p) => p.id === c.projectId)?.name ?? 'Missing project';
-    if (c.scope === 'projectCategory') return `Category: ${projectCategories.find((x) => x.id === c.projectCategoryId)?.name ?? 'Missing'}`;
-    return 'All projects';
-  };
-  const cats = todoCategories(store);
-
-  return h('section', { class: 'panel-mini stack' },
-    h('div', { class: 'row between' },
-      h('strong', null, 'Task categories'),
-      h('button', {
-        type: 'button',
-        class: 'btn-small',
-        onclick: () => {
-          view.managingCategories = false;
-          store.refresh();
-        },
-      }, 'Done')),
-    h('p', { class: 'muted small' }, 'General categories apply to every project. Scope one to a single project, or to all projects in a project category. Click a name or scope to change it.'),
-    view.catError ? h('p', { class: 'error', role: 'alert' }, view.catError) : null,
-    cats.length
-      ? h('ul', { class: 'cat-list' },
-          cats.map((c) =>
-            h('li', { class: 'cat-row' },
-              editText({
-                value: c.name,
-                placeholder: 'Name',
-                className: 'cat-name',
-                onSave: (name) => saveTodoCategory(store, c.id, name, scopeValue(c)),
-              }),
-              h('label', { class: 'cat-scope' },
-                h('select', {
-                  value: scopeValue(c),
-                  'aria-label': `Applies to for ${c.name}`,
-                  onchange: (e) => saveTodoCategory(store, c.id, c.name, e.target.value),
-                }, scopeOptions())),
-              h('span', { class: 'muted small' }, scopeLabel(c)),
-              h('button', { type: 'button', class: 'icon-btn', title: 'Delete', 'aria-label': `Delete ${c.name}`, onclick: () => deleteTodoCategory(store, c) }, icon('x')))))
-      : empty('No todo categories yet. Add one below.'),
-    h('form', {
-      class: 'row',
-      onsubmit: (e) => {
-        e.preventDefault();
-        addTodoCategory(store, formValues(e.currentTarget));
-      },
-    },
-      h('input', { name: 'name', placeholder: 'New category, e.g. errands', 'aria-label': 'New category', class: 'grow', autocomplete: 'off' }),
-      h('select', { name: 'scope', 'aria-label': 'Applies to' }, scopeOptions()),
-      h('button', { class: 'primary', type: 'submit' }, 'Add')));
 }
 
 // --- Page ---
@@ -1215,7 +1113,7 @@ function draw(root, store) {
   } else if (view.layout === 'project') {
     listBody = grouped([['Personal', visible.filter((i) => !i.projectId)], ...projectTree(projects).map(({ project: p }) => [p.name, visible.filter((i) => i.projectId === p.id)])]);
   } else if (view.layout === 'status') {
-    listBody = grouped(STATUS_GROUP_ORDER.map((key) => [label(STATUSES, key), visible.filter((i) => statusOf(i) === key)]));
+    listBody = grouped(STATUS_GROUP_ORDER.map((key) => [statusName(store, key), visible.filter((i) => statusOf(i) === key)]));
   } else {
     listBody = h('ul', { class: 'todo-list' }, visible.map(rowOf));
   }
@@ -1320,7 +1218,7 @@ function draw(root, store) {
                   view.status = e.target.value;
                   store.refresh();
                 },
-              }, STATUS_FILTERS.map(([k, l]) => h('option', { value: k }, l)))),
+              }, statusFilters(store).map(([k, l]) => h('option', { value: k }, l)))),
             categories.length
               ? h('label', { class: 'inline' }, 'Category',
                   h('select', {
@@ -1339,15 +1237,7 @@ function draw(root, store) {
               disabled: view.tidy.status === 'loading',
               onclick: () => runTidy(store),
             }, 'Tidy with AI'),
-            h('button', {
-              type: 'button',
-              class: 'btn-small',
-              onclick: () => {
-                view.managingCategories = !view.managingCategories;
-                view.catError = '';
-                store.refresh();
-              },
-            }, 'Labels'),
+            h('a', { href: '#/settings?section=categories', class: 'btn-small', title: 'Statuses and categories, in Settings' }, 'Labels'),
             h('div', { class: 'segmented layout-seg', role: 'group', 'aria-label': 'View' },
               LAYOUTS.map(([key, text, iconName]) =>
                 h('button', {
@@ -1369,7 +1259,6 @@ function draw(root, store) {
           ? projectDetails(store, projects.find((p) => p.id === view.filter))
           : null,
 
-        view.managingCategories ? categoriesManager(store) : null,
         tidyPanel(store),
 
         h('form', {
