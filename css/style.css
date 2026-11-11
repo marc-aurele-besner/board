@@ -1046,6 +1046,7 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 
 /* LP positions: Uniswap v3 positions read from the chain */
 .lp-head { align-items: flex-start; gap: var(--gap); }
+.lp-head .money-currency { margin-bottom: 0; }
 .lp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: var(--gap); }
 .lp-stat { display: flex; flex-direction: column; gap: 4px; }
 .lp-stat strong { font-size: 1.35rem; font-variant-numeric: tabular-nums; }

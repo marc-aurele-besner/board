@@ -1,4 +1,5 @@
-import { h, icon, refreshIcon, money, empty, notice, uid, todayISO, copyable } from '../ui.js';
+import { h, icon, refreshIcon, money, empty, notice, uid, todayISO, copyable, CURRENCIES } from '../ui.js';
+import { knownRate, fetchDayRate } from '../fx.js';
 import { barChart, lineChart, legend } from '../chart.js';
 import { toast } from '../toast.js';
 import { setupBanner } from '../integrations.js';
@@ -21,7 +22,8 @@ const MAX_TICK = 887272; // the widest possible range: a "full range" position
 // adding: the form to add a position by hand is open.
 // window: the WINDOWS key fee APR is read over.
 // feeSort, feeDir: the Fees collected table's sort. feeChain, feeToken, feeSource: its filters.
-const view = { filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, window: '24h', feeSort: 'date', feeDir: -1, feeChain: 'all', feeToken: 'all', feeSource: 'all', coverageOpen: false };
+// currency: what amounts are shown in. They are read in USD.
+const view = { currency: 'USD', filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, window: '24h', feeSort: 'date', feeDir: -1, feeChain: 'all', feeToken: 'all', feeSource: 'all', coverageOpen: false };
 // Loaded positions and the state of the last load. shallow: chains whose node would not search back to v4's start.
 // stale: chains shown from the last good read because this one failed, with when that read was.
 // pending: chains still being read in the current load.
@@ -823,7 +825,46 @@ function askLogos(store) {
 
 const amount = (n) => (n >= 1000 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toFixed(2) : n.toPrecision(4));
 const price = (n) => (n === Infinity ? '∞' : n === 0 ? '0' : amount(n));
-const usdOrDash = (n) => (n === null ? '—' : money(n, 'USD'));
+// Amounts are read in USD. In CAD they use today's rate, the same for every amount, and stay in USD until it is known.
+const fxToday = { day: '', status: 'idle', error: '' };
+const shownRate = () => (view.currency === 'CAD' ? knownRate(todayISO()) : null);
+const cash = (n) => {
+  const rate = shownRate();
+  return rate ? money(n * rate, 'CAD') : money(n, 'USD');
+};
+const usdOrDash = (n) => (n === null ? '—' : cash(n));
+
+// Fetches today's rate once a day when CAD is picked, then draws again.
+function askRate(store) {
+  const day = todayISO();
+  if (view.currency !== 'CAD' || knownRate(day) !== null || fxToday.day === day) return;
+  Object.assign(fxToday, { day, status: 'loading', error: '' });
+  fetchDayRate(day)
+    .then(() => Object.assign(fxToday, { status: 'ok' }))
+    .catch((err) => Object.assign(fxToday, { status: 'error', error: err.message }))
+    .finally(() => store.refresh());
+}
+
+function currencySwitch(store) {
+  return h('div', { class: 'segmented money-currency', role: 'group', 'aria-label': 'Show amounts in' },
+    CURRENCIES.map((c) => h('button', {
+      type: 'button',
+      class: c === view.currency ? 'seg active' : 'seg',
+      'aria-pressed': String(c === view.currency),
+      onclick: () => {
+        view.currency = c;
+        if (c === 'CAD' && fxToday.status === 'error') fxToday.day = '';
+        store.refresh();
+      },
+    }, c)));
+}
+
+function rateNotice() {
+  if (view.currency !== 'CAD' || shownRate()) return null;
+  return fxToday.status === 'error'
+    ? notice({ text: `The USD to CAD rate could not be read, so amounts stay in USD: ${fxToday.error}` })
+    : notice({ tone: 'info', text: 'Reading today\'s USD to CAD rate. Amounts show in USD until then.' });
+}
 const pct = (n) => `${(n * 100).toFixed(n < 0.1 ? 2 : 1)}%`;
 const span = (secs) => (secs >= 2 * 86400 ? `${(secs / 86400).toFixed(1)} days` : secs >= 2 * 3600 ? `${(secs / 3600).toFixed(1)} hours` : `${Math.round(secs / 60)} min`);
 // A row with its fee APR over the chosen window, and its movement from the window before when both cover at
@@ -1026,7 +1067,7 @@ function poolCard(r, i, collected, store) {
       poolStat('Value', usdOrDash(r.value)),
       poolStat('Unclaimed fees', usdOrDash(r.fees)),
       r.closed
-        ? poolStat('Fees collected', collected.has(r.ref) ? money(collected.get(r.ref), 'USD') : '—', 'The collections of this position in the fee log')
+        ? poolStat('Fees collected', collected.has(r.ref) ? cash(collected.get(r.ref)) : '—', 'The collections of this position in the fee log')
         : [poolStat(`Fee APR · ${WINDOWS[view.window][1]}`, aprText(r), aprTitle(r)),
             poolStat(`Movement · ${WINDOWS[view.window][1]}`, moveView(r), moveTitle(r))]),
     distribution(r),
@@ -1249,9 +1290,9 @@ function bucketTip(key, group, list) {
   const top = [...byPos].sort((a, b) => b[1] - a[1]);
   return [
     h('span', { class: 'muted' }, bucketName(key, group)),
-    h('strong', null, money(total, 'USD')),
+    h('strong', null, cash(total)),
     h('span', { class: 'muted' }, list.length ? plural(list.length, 'collection') : 'No collections'),
-    top.slice(0, 3).map(([name, usd]) => h('span', { class: 'tip-row' }, h('span', null, name), h('span', null, money(usd, 'USD')))),
+    top.slice(0, 3).map(([name, usd]) => h('span', { class: 'tip-row' }, h('span', null, name), h('span', null, cash(usd)))),
     top.length > 3 ? h('span', { class: 'muted' }, `and ${plural(top.length - 3, 'more position')}`) : null,
   ];
 }
@@ -1645,7 +1686,7 @@ function feeOutlook(ctx) {
   if (from !== null) {
     const len = end - start;
     const before = sumBetween(pool, start - len, start);
-    tiles.push(stat('vs the period before', signedChange(sumUsd(list), before), `${money(before, 'USD')} in the ${plural(Math.max(1, Math.round(len / DAY_MS)), 'day')} before`));
+    tiles.push(stat('vs the period before', signedChange(sumUsd(list), before), `${cash(before)} in the ${plural(Math.max(1, Math.round(len / DAY_MS)), 'day')} before`));
   }
   // Estimates run at the last 30 days' pace: long enough to smooth a big collect, short enough to follow changes.
   const rate30 = sumBetween(pool, nowMs - 30 * DAY_MS, nowMs + 1) / 30;
@@ -1656,14 +1697,16 @@ function feeOutlook(ctx) {
   const yearEnd = new Date(today.getFullYear() + 1, 0, 1).getTime();
   const mtd = sumBetween(pool, monthStart, nowMs + 1);
   const ytd = sumBetween(pool, yearStart, nowMs + 1);
-  tiles.push(stat('Month-end estimate', money(mtd + rate30 * ((monthEnd - nowMs) / DAY_MS), 'USD'), `${money(mtd, 'USD')} so far, at the 30-day pace`));
-  tiles.push(stat('Year-end estimate', money(ytd + rate30 * ((yearEnd - nowMs) / DAY_MS), 'USD'), `${money(ytd, 'USD')} so far in ${today.getFullYear()}`));
+  tiles.push(stat('Month-end estimate', cash(mtd + rate30 * ((monthEnd - nowMs) / DAY_MS)), `${cash(mtd)} so far, at the 30-day pace`));
+  tiles.push(stat('Year-end estimate', cash(ytd + rate30 * ((yearEnd - nowMs) / DAY_MS)), `${cash(ytd)} so far in ${today.getFullYear()}`));
   const lifetime = sumUsd(pool);
-  const goal = nextMilestone(lifetime);
+  // A round milestone in the shown currency, kept in USD like the rest.
+  const k = shownRate() ?? 1;
+  const goal = nextMilestone(lifetime * k) / k;
   if (goal) {
     const days = rate30 > 0 ? (goal - lifetime) / rate30 : null;
-    tiles.push(stat(`Next ${money(goal, 'USD')}`, days === null ? '—' : days < 1 ? 'Today' : `~${plural(Math.ceil(days), 'day')}`,
-      days === null ? `${money(lifetime, 'USD')} in all; nothing in the last 30 days` : `${money(goal - lifetime, 'USD')} to go, around ${shortDate(nowMs + days * DAY_MS)}`));
+    tiles.push(stat(`Next ${cash(goal)}`, days === null ? '—' : days < 1 ? 'Today' : `~${plural(Math.ceil(days), 'day')}`,
+      days === null ? `${cash(lifetime)} in all; nothing in the last 30 days` : `${cash(goal - lifetime)} to go, around ${shortDate(nowMs + days * DAY_MS)}`));
   }
   // The usual time between collects, from the days that had one.
   const collectDays = [...new Set(pool.map((c) => localDay(new Date(c.at))))].sort();
@@ -1677,7 +1720,7 @@ function feeOutlook(ctx) {
   const priced = list.filter((c) => c.usd != null);
   if (priced.length) {
     const largest = priced.reduce((a, c) => (a.usd >= c.usd ? a : c));
-    tiles.push(stat('Average collect', money(sumUsd(priced) / priced.length, 'USD'), `Largest ${money(largest.usd, 'USD')} on ${shortDate(Date.parse(largest.at))}`));
+    tiles.push(stat('Average collect', cash(sumUsd(priced) / priced.length), `Largest ${cash(largest.usd)} on ${shortDate(Date.parse(largest.at))}`));
   }
   return h('div', { class: 'lp-stats' }, tiles);
 }
@@ -1712,15 +1755,15 @@ function cumulativeChart(ctx) {
   const series = [{ name: 'Collected', color: 'var(--accent)', values: [...actual, ...future.map(() => null)], area: true }];
   if (ahead) series.push({ name: 'Estimate', color: 'var(--income)', values: estimate, dashed: true });
   const chart = lineChart(all.map((k) => bucketLabel(k, group)), series, {
-    format: (v) => money(v, 'USD'),
+    format: (v) => cash(v),
     tip: (i) => [
       h('span', { class: 'muted' }, bucketName(all[i], group)),
       i < keys.length
-        ? [h('strong', null, money(actual[i], 'USD')), h('span', { class: 'muted' }, `+${money(sums.get(all[i]) ?? 0, 'USD')} this ${group}`)]
-        : [h('strong', null, money(estimate[i], 'USD')), h('span', { class: 'muted' }, 'Estimate at this range\'s pace')],
+        ? [h('strong', null, cash(actual[i])), h('span', { class: 'muted' }, `+${cash(sums.get(all[i]) ?? 0)} this ${group}`)]
+        : [h('strong', null, cash(estimate[i])), h('span', { class: 'muted' }, 'Estimate at this range\'s pace')],
     ],
   });
-  const note = ahead ? `About ${money(estimate[estimate.length - 1], 'USD')} by the end of ${bucketName(future[future.length - 1], group)}` : money(total, 'USD');
+  const note = ahead ? `About ${cash(estimate[estimate.length - 1])} by the end of ${bucketName(future[future.length - 1], group)}` : cash(total);
   return panel('Running total', note, chart, legend(series));
 }
 
@@ -1753,13 +1796,13 @@ function paceChart(ctx) {
   ];
   return panel('Pace per day', note,
     lineChart(days.map((k) => bucketLabel(k, 'day')), series, {
-      format: (v) => money(v, 'USD'),
+      format: (v) => cash(v),
       tip: (i) => [
         h('span', { class: 'muted' }, bucketName(days[i], 'day')),
         series.map((sr) => h('span', { class: 'tip-row' },
           h('span', null, h('span', { class: 'legend-swatch', style: { background: sr.color } }), ` ${sr.name}`),
-          h('strong', null, money(sr.values[i] ?? 0, 'USD')))),
-        h('span', { class: 'tip-row' }, h('span', null, 'Collected that day'), h('span', null, money(daily.get(days[i]) ?? 0, 'USD'))),
+          h('strong', null, cash(sr.values[i] ?? 0)))),
+        h('span', { class: 'tip-row' }, h('span', null, 'Collected that day'), h('span', null, cash(daily.get(days[i]) ?? 0))),
       ],
     }),
     legend(series),
@@ -1841,10 +1884,10 @@ function breakdown(store, ctx) {
       h('div', { class: 'fee-split-name' }, name(g),
         h('span', { class: 'muted small' }, g.amount ? `${amount(g.amount)} ${g.label} · ${plural(g.n, 'collection')}` : plural(g.n, 'collection'))),
       h('div', { class: 'meter', role: 'presentation' }, h('span', { style: { width: `${(g.usd / max) * 100}%` } })),
-      h('strong', { class: 'num' }, money(g.usd, 'USD')),
+      h('strong', { class: 'num' }, cash(g.usd)),
       h('span', { class: 'muted small num' }, share(g.usd))))),
     lead && rows.length > 1 && total > 0 ? h('p', { class: 'muted small' }, `${lead.label} gave ${share(lead.usd)} of the range.`) : null,
-    split === 'token' ? h('p', { class: 'muted small' }, 'Each collection\'s value is split between its two tokens at the position\'s current prices.') : null);
+    split === 'token' ? h('p', { class: 'muted small' }, 'Each collection\'s value is split between its tokens at the position\'s current prices, or evenly when the amounts or prices are unknown.') : null);
 }
 
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -1875,7 +1918,7 @@ function feeCalendar(ctx) {
       const d = daily.get(k);
       return h('span', {
         class: `fee-cal-day l${level(shown[i])}`,
-        title: `${bucketName(k, 'day')}: ${d ? `${money(d.usd, 'USD')} · ${plural(d.n, 'collection')}` : 'no collects'}`,
+        title: `${bucketName(k, 'day')}: ${d ? `${cash(d.usd)} · ${plural(d.n, 'collection')}` : 'no collects'}`,
       });
     }));
   return panel('Last 26 weeks', `${plural(sorted.length, 'day')} with collects`,
@@ -1953,7 +1996,7 @@ function feesView(store) {
     }
     const keys = bucketsBetween(new Date(start), new Date(end - 1), view.feeGroup);
     chart = barChart(keys.map((k) => bucketLabel(k, view.feeGroup)), [{ name: 'Collected', color: 'var(--accent)', values: keys.map((k) => sums.get(k) ?? 0) }], {
-      format: (v) => money(v, 'USD'),
+      format: (v) => cash(v),
       tip: (i) => bucketTip(keys[i], view.feeGroup, groups.get(keys[i]) ?? []),
     });
   }
@@ -2012,11 +2055,11 @@ function feesView(store) {
     view.logging ? logForm(store) : null,
     feeFilters(store, inRange),
     h('div', { class: 'lp-stats' },
-      stat('Collected', money(total, 'USD'), plural(list.length, 'collection')),
-      stat('Per day', money(perDay, 'USD'), `over ${plural(Math.round(spanDays), 'day')}`),
-      stat('Per week', money(perDay * 7, 'USD')),
-      stat('Per month', money(perDay * 30.44, 'USD')),
-      stat('Per year', money(perDay * 365, 'USD'))),
+      stat('Collected', cash(total), plural(list.length, 'collection')),
+      stat('Per day', cash(perDay), `over ${plural(Math.round(spanDays), 'day')}`),
+      stat('Per week', cash(perDay * 7)),
+      stat('Per month', cash(perDay * 30.44)),
+      stat('Per year', cash(perDay * 365))),
     coverageCard(store),
     etherscanErrors.size
       ? notice({ tone: 'info', text: `Etherscan could not be read for ${[...etherscanErrors].map(([name, text]) => `${name} (${text})`).join(', ')}. Collects there come from the node only.` })
@@ -2118,12 +2161,12 @@ function earnedChart(store, r) {
   const usd = (d) => (d ? d.a0 * r.p0 + d.a1 * r.p1 : 0);
   const total = [...days.values()].reduce((s, d) => s + usd(d), 0);
   const chart = barChart(keys.map((k) => bucketLabel(k, 'day')), [{ name: 'Earned', color: 'var(--income)', values: keys.map((k) => usd(days.get(k))) }], {
-    format: (v) => money(v, 'USD'),
+    format: (v) => cash(v),
     tip: (i) => {
       const d = days.get(keys[i]);
       return [
         h('span', { class: 'muted' }, bucketName(keys[i], 'day')),
-        h('strong', null, money(usd(d), 'USD')),
+        h('strong', null, cash(usd(d))),
         d ? h('span', { class: 'tip-row' }, h('span', null, r.sym0), h('span', null, amount(d.a0))) : h('span', { class: 'muted' }, 'No hours saved'),
         d ? h('span', { class: 'tip-row' }, h('span', null, r.sym1), h('span', null, amount(d.a1))) : null,
         d && d.hours < 24 ? h('span', { class: 'muted' }, `${plural(d.hours, 'hour')} saved`) : null,
@@ -2211,11 +2254,11 @@ function detailHoldings(r) {
   const line = (addr, sym, n, px, share = null) => h('li', null,
     h('span', { class: 'lp-token' }, logo(tokenLogoOf(r, addr), sym, 'xs'), h('strong', null, sym)),
     h('span', { class: 'num' }, amount(n)),
-    h('span', { class: 'num muted' }, px == null ? '—' : money(n * px, 'USD')),
+    h('span', { class: 'num muted' }, px == null ? '—' : cash(n * px)),
     share == null ? null : h('span', { class: 'lp-share', title: `${Math.round(share * 100)}% of the value`, style: { '--w': `${Math.round(share * 100)}%` } }),
     share == null ? null : h('span', { class: 'lp-share-pct muted small' }, `${Math.round(share * 100)}%`));
   const fees = typeof r.fee0 === 'number';
-  return panel('Holdings', total ? money(total, 'USD') : null,
+  return panel('Holdings', total ? cash(total) : null,
     h('ul', { class: 'lp-holdings' },
       line(r.addr0, r.sym0, r.a0, r.p0, total ? (r.a0 * r.p0) / total : null),
       line(r.addr1, r.sym1, r.a1, r.p1, total ? (r.a1 * r.p1) / total : null)),
@@ -2234,7 +2277,7 @@ function detailEarnings(store, r) {
       h('thead', null, h('tr', null, h('th', null, 'Over'), h('th', { class: 'num' }, 'Earned'), h('th', { class: 'num' }, 'Fee APR'), h('th', { class: 'num' }, 'Covered'))),
       h('tbody', null, rows.map(([label, secs, e]) => h('tr', null,
         h('td', null, label),
-        h('td', { class: 'num' }, e ? money(e.usd, 'USD') : '—'),
+        h('td', { class: 'num' }, e ? cash(e.usd) : '—'),
         h('td', { class: 'num' }, e?.apr != null ? pct(e.apr) : '—'),
         h('td', { class: 'num muted' }, e ? (e.covered >= secs * 0.95 ? 'full' : span(e.covered)) : '—'))))));
 }
@@ -2268,7 +2311,7 @@ function detailFacts(store, r) {
 // The position's collections, newest first, with their total.
 function detailCollections(collects) {
   const total = collects.reduce((s, c) => s + (c.usd ?? 0), 0);
-  return panel('Collections', collects.length ? `${plural(collects.length, 'collection')} · ${money(total, 'USD')}` : null,
+  return panel('Collections', collects.length ? `${plural(collects.length, 'collection')} · ${cash(total)}` : null,
     collects.length
       ? h('div', { class: 'mon-scroll' }, h('table', { class: 'mon-table' },
           h('thead', null, h('tr', null, h('th', null, 'Date'), h('th', null, 'Tokens'), h('th', null, 'Source'), h('th', { class: 'num' }, 'Value'))),
@@ -2332,8 +2375,8 @@ function detailView(store, ref) {
       r ? stat('Unclaimed fees', usdOrDash(r.fees)) : null,
       r && !r.closed ? stat(`Fee APR · ${win}`, aprText(r), null, aprTitle(r)) : null,
       r && !r.closed ? stat(`Movement · ${win}`, moveView(r), r.aprPrev != null ? `from ${pct(r.aprPrev)}` : null, moveTitle(r)) : null,
-      stat('Fees collected', money(collectedUsd, 'USD'), plural(collects.length, 'collection')),
-      r && r.fees != null ? stat('Total earned', money(collectedUsd + r.fees, 'USD'), 'collected and unclaimed') : null),
+      stat('Fees collected', cash(collectedUsd), plural(collects.length, 'collection')),
+      r && r.fees != null ? stat('Total earned', cash(collectedUsd + r.fees), 'collected and unclaimed') : null),
     r && !r.closed
       ? h('label', { class: 'inline lp-sort', title: 'The time fee APR is read over' }, 'APR window',
           h('select', {
@@ -2349,7 +2392,7 @@ function detailView(store, ref) {
     // A closed position holds nothing, so its holdings are left out unless fees are still owed.
     r ? h('div', { class: 'lp-detail-grid' }, r.closed && !(r.a0 || r.a1 || r.fee0 || r.fee1) ? null : detailHoldings(r), detailEarnings(store, r)) : null,
     earned
-      ? panel('Fees earned per day', `${money(earned.total, 'USD')} over ${plural(earned.days, 'day')} · ${money(earned.total / earned.days, 'USD')} a day`, earned.chart)
+      ? panel('Fees earned per day', `${cash(earned.total)} over ${plural(earned.days, 'day')} · ${cash(earned.total / earned.days)} a day`, earned.chart)
       : null,
     detailCollections(collects),
     r ? detailFacts(store, r) : null);
@@ -2391,11 +2434,15 @@ function draw(root, store) {
       showDetail(root, store);
       return;
     }
+    askRate(store);
     root.replaceChildren(h('div', { class: 'stack-lg lp' },
-      h('header', null,
-        h('h2', null, 'Liquidity Pools'),
-        logged && view.tab === 'fees' ? h('p', { class: 'muted small' }, FEES_SUBTITLE) : null),
+      h('header', { class: 'row between lp-head' },
+        h('div', null,
+          h('h2', null, 'Liquidity Pools'),
+          logged && view.tab === 'fees' ? h('p', { class: 'muted small' }, FEES_SUBTITLE) : null),
+        logged ? currencySwitch(store) : null),
       logged ? tabs(store) : null,
+      logged ? rateNotice() : null,
       view.tab === 'fees'
         ? feesView(store)
         : [setupBanner('uniswap', 'Add a wallet address in Settings to see its Uniswap positions.'),
@@ -2411,6 +2458,7 @@ function draw(root, store) {
     setTimeout(() => load(store), 0);
   }
   askLogos(store);
+  askRate(store);
   if (view.detail) {
     showDetail(root, store);
     return;
@@ -2442,7 +2490,7 @@ function draw(root, store) {
     const from = shownTotals[key];
     shownTotals[key] = value;
     if (from === value) el.textContent = usdOrDash(value);
-    else counters.push(() => countUp(el, from, value, (n) => money(n, 'USD')));
+    else counters.push(() => countUp(el, from, value, (n) => cash(n)));
   };
   const valueEl = h('strong', null, '—');
   const feesEl = h('strong', null, '—');
@@ -2501,12 +2549,14 @@ function draw(root, store) {
             : `Uniswap v3 and v4 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`,
           state.pending.length ? ` Reading ${state.pending.join(', ')}…` : state.at ? ` ${updatedText()}.` : '')),
       h('div', { class: 'row' },
+        currencySwitch(store),
         view.tab === 'fees' ? null : h('button', { type: 'button', class: 'btn-small', onclick: () => openAdd(store), title: 'Add a position the board did not find' }, icon('plus'), 'Add position'),
         h('button', { type: 'button', class: 'btn-small', disabled: reading || chainCount === 0, onclick: () => load(store) },
         refreshIcon(reading),
           reading ? 'Reading…' : 'Refresh'))),
 
     tabs(store),
+    rateNotice(),
     view.adding && view.tab !== 'fees' ? addForm(store) : null,
     state.shallow.length
       ? notice({ tone: 'info', text: `The node for ${state.shallow.join(', ')} keeps only recent history, so older v4 positions there are not found. Add them with Add position, or set a node that keeps full history in Settings.` })
@@ -2527,6 +2577,7 @@ function draw(root, store) {
       sideOf: (r) => sideOf(r, isFlipped(store, r)),
       isFlipped: (pair) => isFlipped(store, pair),
       logo,
+      cash,
       // The open row's logos when it is still read; a saved read of a closed position falls back to the symbols.
       tokenLogos: (pos, row) => (row ? [tokenLogoOf(row, row.addr0), tokenLogoOf(row, row.addr1)] : [symbolLogo(pos.sym0), symbolLogo(pos.sym1)]),
     }),
@@ -2588,6 +2639,7 @@ export default {
   defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [], history: {}, hidden: [], etherscan: {}, flip: {}, insights: [] },
   render: draw,
   serialize: () => ({
+    cur: view.currency === 'USD' ? '' : view.currency,
     filter: view.filter === 'all' ? '' : view.filter,
     chain: view.chain === 'all' ? '' : String(view.chain),
     view: view.layout === 'list' ? 'list' : '',
@@ -2604,6 +2656,7 @@ export default {
     from: view.detail && view.detailFrom === 'fees' ? 'fees' : '',
   }),
   restore: (p = {}) => {
+    view.currency = CURRENCIES.includes(p.cur) ? p.cur : 'USD';
     view.filter = ['in', 'out', 'closed'].includes(p.filter) ? p.filter : 'all';
     view.layout = p.view === 'list' ? 'list' : 'cards';
     [view.sort, view.dir] = parseSort(p.sort);

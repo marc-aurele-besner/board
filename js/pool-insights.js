@@ -238,14 +238,15 @@ function runView(store, rows, shown, isFlipped, look) {
 
 // rows: the open positions on screen (closed ones left out), with fee APR when it is known.
 // sideOf(r): the row's prices in the base the board shows. isFlipped(pair): whether a pair is shown flipped.
-export function insightsPanel(store, rows, { sideOf, isFlipped, logo, tokenLogos }) {
+// cash(n): formats a USD amount in the currency the page shows.
+export function insightsPanel(store, rows, { sideOf, isFlipped, logo, tokenLogos, cash = (n) => money(n, 'USD') }) {
   if (!rows.length) return null;
   const out = rows.filter((r) => !r.inRange);
   const edge = rows.filter(nearEdge);
   const outValue = out.reduce((s, r) => s + (r.value ?? 0), 0);
   const tally = [
     `${rows.length - out.length} in range`,
-    `${out.length} out of range${outValue > 0 ? ` (${money(outValue, 'USD')} idle)` : ''}`,
+    `${out.length} out of range${outValue > 0 ? ` (${cash(outValue)} idle)` : ''}`,
     edge.length ? `${edge.length} near an edge` : '',
   ].filter(Boolean).join(' · ');
 
