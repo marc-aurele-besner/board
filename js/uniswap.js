@@ -159,6 +159,8 @@ function pickNode(urls, tried) {
   return (up.length ? up : left).reduce((a, b) => (wait(b) < wait(a) ? b : a));
 }
 
+const isLimit = (e) => e.code === -32005 || /usage limit|rate limit|request limit|daily limit|limit exceeded|limit reached|too many|over capacity|upgrade/i.test(String(e.message ?? ''));
+
 // One request to one node. With other nodes to fall back on, a node that takes too long is given up on.
 async function rpcOne(url, method, params, alone, retry = true) {
   const h = health(url);
@@ -185,7 +187,9 @@ async function rpcOne(url, method, params, alone, retry = true) {
     h.downUntil = 0;
     if (json.error) {
       const err = new Error(`The node refused the call: ${json.error.message ?? 'error'}.`);
-      err.refused = true; // the node answered and said no, unlike a network error, which may pass
+      // A node over its rate or plan limit says so as an error too. That is the node, not the call, so another
+      // node is asked; anything else (a revert, bad params) is the answer, and the node answered and said no.
+      err.refused = !isLimit(json.error);
       throw err;
     }
     return json.result;
