@@ -2428,7 +2428,7 @@ function draw(root, store) {
       view.filter = key;
       store.refresh();
     },
-  }, label, h('span', { class: 'chip-count' }, count));
+  }, key === 'all' ? null : h('span', { class: `pos-dot ${key}`, 'aria-hidden': 'true' }), label, h('span', { class: 'chip-count' }, count));
 
   const chainChip = (key, label, logoSrc, count) => h('button', {
     type: 'button',

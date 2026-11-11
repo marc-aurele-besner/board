@@ -560,7 +560,7 @@ function addedList(store, added, remove) {
               h('strong', null, `${r.sym0} / ${r.sym1}`))
           : h('span', { class: 'added-pair muted' }, 'Open Liquidity Pools to read it'),
         h('span', { class: 'added-id' }, r?.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener' }, `${x.version} #${x.tokenId}`) : `${x.version} #${x.tokenId}`),
-        h('span', { class: 'added-status small' }, label),
+        h('span', { class: 'added-status small' }, h('span', { class: `pos-dot ${tone === 'unread' ? 'gone' : tone}`, 'aria-hidden': 'true' }), label),
         h('button', { type: 'button', class: 'btn-small', onclick: () => remove(x) }, 'Remove'));
     }));
 }
