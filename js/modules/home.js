@@ -4,8 +4,8 @@ import { repoStats } from '../github.js';
 import { ask } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
-import { connect, isConnected, upcomingEvents } from '../google.js';
-import { makeTask } from '../capture.js';
+import { calendarAccounts, calendarEvents, connectCalendar, isCalendarConnected, eventDate } from '../gcal.js';
+import { eventAsTask } from './calendar.js';
 import { sitesOf, siteData, ruleOf } from '../automations.js';
 import { hostOf, daysUntil } from '../sitecheck.js';
 import { overBudget } from './money.js';
@@ -61,16 +61,24 @@ function planPanel(store) {
 
 // --- Calendar (Google) ---
 
-const cal = { status: 'idle', events: [], error: '' };
+// The next two days of every connected calendar. Loaded once per session and on demand; Calendar has the full view.
+const cal = { status: 'idle', events: [], error: '', waiting: [] };
 
-const timeLabel = (e) => (e.allDay ? 'All day' : new Date(e.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+const timeLabel = (e) => (e.allDay ? 'All day' : eventDate(e.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+const dayLabel = (e) => {
+  const d = eventDate(e.start);
+  return d.toDateString() === new Date().toDateString() ? '' : d.toLocaleDateString([], { weekday: 'short' });
+};
 
 function loadCalendar(store) {
   cal.status = 'loading';
   store.refresh();
-  upcomingEvents(2)
-    .then((events) => {
+  const from = new Date();
+  calendarEvents(store, from, new Date(from.getTime() + 2 * 86400000))
+    .then(({ events, errors, waiting }) => {
       cal.events = events;
+      cal.waiting = waiting;
+      cal.error = errors.join(' · ');
       cal.status = 'ok';
     })
     .catch((err) => {
@@ -80,8 +88,8 @@ function loadCalendar(store) {
     .finally(() => store.refresh());
 }
 
-function connectCalendar(store, clientId) {
-  connect(clientId)
+function connectAccount(store, clientId, email) {
+  connectCalendar(clientId, email)
     .then(() => loadCalendar(store))
     .catch((err) => {
       cal.status = 'error';
@@ -90,37 +98,40 @@ function connectCalendar(store, clientId) {
     });
 }
 
-// Turns a calendar event into a task in Personal, with its time and place in the description.
-function eventAsTask(store, e) {
-  const description = [timeLabel(e), e.location].filter(Boolean).join(' · ');
-  store.update('todos', (d) =>
-    d.items.push(makeTask({ text: e.title, description, due: String(e.start ?? '').slice(0, 10) })));
-}
-
 function calendarBlock(store) {
   const clientId = store.get('settings').google?.clientId ?? '';
-  if (!isConnected()) {
-    return h('div', { class: 'stack' },
-      h('p', { class: 'muted small' }, clientId ? 'Connect to see the next two days.' : 'Add a Google OAuth Client ID to see your calendar here.'),
-      clientId
-        ? h('button', { type: 'button', class: 'btn-small', onclick: () => connectCalendar(store, clientId) }, icon('plus'), 'Connect Google Calendar')
-        : setupBanner('google', 'Calendar needs a Google OAuth Client ID.'));
+  const accounts = calendarAccounts(store);
+  if (!clientId || !accounts.length) {
+    return setupBanner('google', clientId ? 'Add a Google account to see your calendars here.' : 'Calendar needs a Google OAuth Client ID.');
   }
-  if (cal.status === 'loading') return h('p', { class: 'muted small' }, 'Loading events…');
+  const offline = accounts.filter((a) => !isCalendarConnected(a.email));
+  if (offline.length === accounts.length) {
+    return h('div', { class: 'stack' },
+      h('p', { class: 'muted small' }, 'Connect to see the next two days.'),
+      h('div', { class: 'row' }, offline.map((a) =>
+        h('button', { type: 'button', class: 'btn-small', onclick: () => connectAccount(store, clientId, a.email) }, icon('plus'), a.email))));
+  }
+  if (cal.status === 'idle') queueMicrotask(() => loadCalendar(store));
+  if (cal.status !== 'ok' && cal.status !== 'error') return h('p', { class: 'muted small' }, 'Loading events…');
   if (cal.status === 'error') {
     return h('div', { class: 'stack' }, notice({ text: cal.error }),
       h('button', { type: 'button', class: 'btn-small', onclick: () => loadCalendar(store) }, 'Try again'));
   }
-  if (cal.status !== 'ok') {
-    return h('button', { type: 'button', class: 'btn-small', onclick: () => loadCalendar(store) }, 'Load events');
-  }
-  if (!cal.events.length) return h('p', { class: 'muted small' }, 'No events in the next two days.');
-  return h('ul', { class: 'board-list' },
-    cal.events.map((e) =>
-      h('li', null,
-        h('span', { class: 'time muted small' }, timeLabel(e)),
-        h('span', { class: 'grow' }, e.title),
-        h('button', { type: 'button', class: 'btn-small', title: 'Add as a task', onclick: () => eventAsTask(store, e) }, 'Task'))));
+  return h('div', { class: 'stack' },
+    cal.error ? notice({ text: cal.error }) : null,
+    cal.events.length
+      ? h('ul', { class: 'board-list' },
+          cal.events.map((e) =>
+            h('li', null,
+              h('span', { class: 'gcal-swatch', style: { '--c': e.color || 'var(--accent)' } }),
+              h('span', { class: 'time muted small' }, [dayLabel(e), timeLabel(e)].filter(Boolean).join(' ')),
+              h('span', { class: 'grow' }, e.title),
+              h('button', { type: 'button', class: 'btn-small', title: 'Add as a task', onclick: () => eventAsTask(store, e) }, 'Task'))))
+      : h('p', { class: 'muted small' }, 'No events in the next two days.'),
+    offline.length
+      ? h('div', { class: 'row' }, h('span', { class: 'muted small' }, 'Not connected:'), offline.map((a) =>
+          h('button', { type: 'button', class: 'btn-small', onclick: () => connectAccount(store, clientId, a.email) }, a.email)))
+      : null);
 }
 
 // --- Board sections ---
@@ -237,7 +248,7 @@ function setupCard(store) {
     ['github', 'GitHub token', s.github?.token],
     ['openrouter', 'OpenRouter key, for the AI features', s.openrouter?.key],
     ['models', 'Default AI model', s.models?.default],
-    ['google', 'Google Calendar', s.google?.clientId],
+    ['google', 'Google Calendar', s.google?.clientId && s.gcal?.accounts?.length],
     ['uniswap', 'Wallet for Liquidity Pools', s.uniswap?.wallets?.length],
     ['telegram', 'Telegram bot', s.telegram?.token && s.telegram?.chatId],
   ];
@@ -322,7 +333,8 @@ function draw(root, store) {
             : h('p', { class: 'muted small' }, 'Nothing urgent or in progress. A good time to plan.'),
           h('div', { class: 'board-sub' },
             h('span', { class: 'muted small' }, 'Calendar · next two days'),
-            calendarBlock(store))),
+            calendarBlock(store),
+            h('a', { href: '#/calendar', class: 'muted small' }, 'Open Calendar'))),
         panel('Plan my day', null, planPanel(store))),
 
       h('section', { class: 'board-section' },
