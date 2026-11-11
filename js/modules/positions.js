@@ -1617,6 +1617,8 @@ function feesView(store) {
       h('tbody', null, sortCollects([...list], view.feeSort, view.feeDir).map((c) => h('tr', null,
         h('td', { title: c.since ? `Collected between ${new Date(c.since).toLocaleString()} and ${new Date(c.at).toLocaleString()}` : null },
           new Date(c.at).toLocaleDateString(),
+          // One logged by hand is set to noon, a placeholder, so it shows no time.
+          c.source === 'manual' ? null : h('span', { class: 'muted' }, ` ${new Date(c.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`),
           c.level === 1 ? h('div', { class: 'muted small' }, `The ${c.sym0} part could not be read`) : null),
         h('td', null, c.chain
           ? h('span', { class: 'chain-chip' }, logo(CHAINS.find((x) => x.name === c.chain)?.logo, c.chain, 'xs'), c.chain)
