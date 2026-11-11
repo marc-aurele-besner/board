@@ -16,7 +16,7 @@ const RECENT_SHOWN = 8;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
 // View state: the workspace, the sessions, the one shown, and what the runner said about itself.
-const view = { workspace: 'board', sessions: [], active: '', info: null, infoError: '', checking: false, count: 0, pending: null };
+const view = { workspace: 'board', sessions: [], active: '', info: null, infoError: '', checking: false, count: 0, pending: null, queued: null };
 let currentStore = null;
 
 const runnerOf = (store) => store.get(COLLECTION).runner || TERMINAL_RUNNER;
@@ -254,6 +254,31 @@ async function checkRunner(store) {
   }
 }
 
+// A shell word: single quotes keep newlines, quotes and $ in the prompt as typed.
+const shellQuote = (text) => `'${text.replace(/'/g, `'\\''`)}'`;
+
+// Opens Dev with a new terminal that runs claude on a prompt, in the project's folder when it has one.
+// The command waits for the runner to answer, so it also works when Dev was not open yet.
+export function startClaudeSession({ prompt, projectId = '' }) {
+  view.queued = { prompt, projectId };
+  if (location.hash.startsWith('#/dev')) currentStore?.refresh();
+  else location.hash = '#/dev';
+}
+
+function startQueued(store) {
+  const { prompt, projectId } = view.queued;
+  const project = store.get('projects').projects.find((p) => p.id === projectId);
+  if (project?.localPath) {
+    view.workspace = `p:${project.id}`;
+    setRoot(filesCtx(store), rootPath(store, view.workspace));
+  }
+  view.queued = null;
+  const s = newSession(store);
+  if (!s) return;
+  // Runs once the terminal is on the page, so it starts at the size it is shown.
+  requestAnimationFrame(() => run(store, s, `claude ${shellQuote(prompt)}`, { remember: false }));
+}
+
 function remember(store, command) {
   store.update(COLLECTION, (d) => {
     d.history = [command, ...d.history.filter((c) => c !== command)].slice(0, HISTORY_MAX);
@@ -265,7 +290,7 @@ function clearTerminal(s) {
   schedulePaint();
 }
 
-async function run(store, s, command) {
+async function run(store, s, command, { remember: keep = true } = {}) {
   if (command === 'clear') {
     clearTerminal(s);
     return store.refresh();
@@ -274,7 +299,8 @@ async function run(store, s, command) {
   s.term.note(`${s.cwd || 'board'} $ ${command}`, 't-cmd');
   const ctl = new AbortController();
   Object.assign(s, { running: true, abort: ctl, pid: 0, exit: null, command, started: performance.now(), stick: true, browse: -1 });
-  remember(store, command);
+  // A task's prompt is long and one-off; it would crowd the recent commands.
+  if (keep) remember(store, command);
   // Keys now go to the program.
   requestAnimationFrame(() => s.el?.out.focus({ preventScroll: true }));
   try {
@@ -481,6 +507,7 @@ function draw(root, store) {
     if (open) view.active = open.id;
     else newSession(store);
   }
+  if (view.queued && view.info) startQueued(store);
   if (!view.sessions.length) newSession(store);
   const s = activeSession();
   const busy = view.sessions.filter((x) => x.running).length;
