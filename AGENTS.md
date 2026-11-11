@@ -30,6 +30,7 @@ js/modules/*.js       one file per section (todos, projects, kitchen, money, too
 js/notifications.js   the bell, its drawer, and notify(); saved in notifications.json
 js/automations.js     site checks and the rules that turn their results into tasks
 js/terminal.js        Dev's calls to the command runner: info, folders and files, a command's streamed output, keys
+js/folder-picker.js   the dialog that finds a folder on this machine through the runner (Projects → Local folder)
 js/vt.js              the terminal emulator Dev draws command output with (cursor moves, colours, alternate screen)
 js/highlight.js       syntax colours for the Dev file reader, per language, with no dependency
 js/sitecheck.js       the lookups behind Tools (health, domain, certificate, share tags)
