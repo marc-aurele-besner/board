@@ -26,6 +26,8 @@ The last row, **See all results**, opens the search on its own page: **All** sho
 
 The search box in Tasks filters the list as you type. Words match the title, description, category and project; `#atlas` keeps a project (`#personal` for none), `!high` a priority, `is:doing` a status (`is:done` looks in completed tasks too), `cat:design` a category, and `due:today`, `due:late`, `due:week` or `due:none` a deadline. Search page results for tasks open in Tasks with the same filter.
 
+A task's checkbox selects it; the check button next to its status marks it done. Shift+click selects a range. With tasks selected, a bar sets their status, priority, project, category or deadline at once, copies them as a Markdown checklist, or deletes them. The copy button on a task copies just that one.
+
 Outside a field, `g` then a letter jumps to a section (`g t` for Tasks, `g m` for Money), `n` starts a new task, and `?` lists every shortcut.
 
 Deleting a task, a Money entry, a bill, a recipe or a recipe iteration shows **Undo** for a few seconds.
