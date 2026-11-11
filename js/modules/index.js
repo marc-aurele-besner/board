@@ -11,5 +11,6 @@ import monitoring from './monitoring.js';
 import tools from './tools.js';
 import cron from './cron.js';
 import settings from './settings.js';
+import search from './search.js';
 
-export const modules = [home, todos, projects, kitchen, money, positions, inbox, monitoring, tools, cron, settings];
+export const modules = [home, todos, projects, kitchen, money, positions, inbox, monitoring, tools, cron, settings, search];
