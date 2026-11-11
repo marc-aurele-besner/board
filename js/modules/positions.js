@@ -4,12 +4,15 @@ import { poolsChanged } from '../automations.js';
 import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition } from '../uniswap.js';
 
 const STALE_MS = 10 * 60 * 1000;
+const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+// Fee APR needs some time between two reads, or a few cents of fees turn into a wild yearly rate.
+const APR_MIN_MS = 6 * 60 * 60 * 1000;
 const MAX_TICK = 887272; // the widest possible range: a "full range" position
 
 // View state: which rows are shown.
-// layout: 'cards' or 'list'.
+// layout: 'cards' or 'list'. sort: one of the SORTS keys.
 // adding: the form to add a position by hand is open; addMessage is its last error.
-const view = { filter: 'all', chain: 'all', layout: 'cards', adding: false, addMessage: '' };
+const view = { filter: 'all', chain: 'all', layout: 'cards', sort: 'value', adding: false, addMessage: '' };
 // Loaded positions and the state of the last load. shallow: chains whose node would not search back to v4's start.
 // stale: chains shown from the last good read because this one failed, with when that read was.
 // pending: chains still being read in the current load.
@@ -40,7 +43,9 @@ function buildRow(p, pool, prices, chain, pricesAt = null) {
   const p1 = prices[p.token1.toLowerCase()] ?? null;
   const priced = p0 !== null && p1 !== null;
   const value = priced ? a0 * p0 + a1 * p1 : null;
-  const fees = priced ? (Number(p.owed0) / 10 ** m0.decimals) * p0 + (Number(p.owed1) / 10 ** m1.decimals) * p1 : null;
+  const fee0 = Number(p.owed0) / 10 ** m0.decimals;
+  const fee1 = Number(p.owed1) / 10 ** m1.decimals;
+  const fees = priced ? fee0 * p0 + fee1 * p1 : null;
   const full = p.tickLower <= -MAX_TICK && p.tickUpper >= MAX_TICK;
   const min = p.tickLower <= -MAX_TICK ? 0 : priceAtTick(p.tickLower, m0.decimals, m1.decimals);
   const max = p.tickUpper >= MAX_TICK ? Infinity : priceAtTick(p.tickUpper, m0.decimals, m1.decimals);
@@ -74,6 +79,11 @@ function buildRow(p, pool, prices, chain, pricesAt = null) {
     marker,
     a0,
     a1,
+    // Unclaimed fees in tokens, and the token prices, so fee APR counts fees earned and not price moves.
+    fee0,
+    fee1,
+    p0,
+    p1,
     value,
     fees,
     share0: value ? (a0 * p0) / value : null,
@@ -83,6 +93,43 @@ function buildRow(p, pool, prices, chain, pricesAt = null) {
 
 const shortAddress = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const hasValue = (p) => p.liquidity > 0n || p.owed0 > 0n || p.owed1 > 0n;
+
+// The fee baseline of each position: its unclaimed fees in tokens when the board started counting. It restarts
+// when the fees drop, which means they were collected. Rows from an earlier read keep their baseline as is.
+function nextBaselines(old = {}, rows, now) {
+  const out = { ...old };
+  for (const r of rows) {
+    if (typeof r.fee0 !== 'number' || typeof r.fee1 !== 'number') continue;
+    const b = old[r.ref];
+    if (!b || r.fee0 < b.f0 || r.fee1 < b.f1) out[r.ref] = { at: now, f0: r.fee0, f1: r.fee1 };
+  }
+  return out;
+}
+
+// Yearly fee rate from the fees earned since the baseline, at today's prices. null until enough time has passed.
+function feeApr(r, baselines) {
+  const b = baselines?.[r.ref];
+  const elapsed = Date.now() - (b?.at ?? Date.now());
+  if (!b || elapsed < APR_MIN_MS || !(r.value > 0) || r.p0 == null || r.p1 == null || typeof r.fee0 !== 'number') return null;
+  const earned = Math.max(0, r.fee0 - b.f0) * r.p0 + Math.max(0, r.fee1 - b.f1) * r.p1;
+  return (earned / r.value) * (YEAR_MS / elapsed);
+}
+
+// Position numbers only grow, so a higher number is a newer position on the same contract.
+const byNumber = (a, b) => {
+  const x = BigInt(a.tokenId);
+  const y = BigInt(b.tokenId);
+  return x === y ? 0 : x > y ? 1 : -1;
+};
+// Rows without the number sorted on go last, whatever the direction.
+const desc = (key) => (a, b) => (a[key] == null ? 1 : 0) - (b[key] == null ? 1 : 0) || (b[key] ?? 0) - (a[key] ?? 0);
+const SORTS = {
+  value: { label: 'Value', compare: desc('value') },
+  fees: { label: 'Unclaimed fees', compare: desc('fees') },
+  apr: { label: 'Fee APR', compare: desc('apr') },
+  newest: { label: 'Newest', compare: (a, b) => byNumber(b, a) },
+  oldest: { label: 'Oldest', compare: byNumber },
+};
 
 // Finds and reads one chain's v4 positions: those the search found for each wallet, and those added by hand.
 // saved is the search state the last load kept for this chain, keyed by lowercase wallet address.
@@ -236,6 +283,7 @@ async function load(store) {
           // Save as each part lands, so a reload mid-read keeps what was already read.
           store.update(COLLECTION, (d) => {
             d.cache = { ...d.cache, [key]: { at: Date.now(), rows: done.rows } };
+            d.fees = nextBaselines(d.fees, done.rows, Date.now());
             if (done.prices) d.prices = { ...d.prices, [chain.id]: { at: Date.now(), usd: { ...d.prices?.[chain.id]?.usd, ...done.prices } } };
             // Keep how far each v4 search got, so the next load goes on from there.
             if (got.scans) d.scan = { ...d.scan, [chain.id]: got.scans };
@@ -283,6 +331,7 @@ function askLogos(store) {
 const amount = (n) => (n >= 1000 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toFixed(2) : n.toPrecision(4));
 const price = (n) => (n === Infinity ? '∞' : n === 0 ? '0' : amount(n));
 const usdOrDash = (n) => (n === null ? '—' : money(n, 'USD'));
+const aprText = (n) => (n == null ? '—' : `${(n * 100).toFixed(n < 0.1 ? 2 : 1)}%`);
 
 // A short, stable colour for a symbol, so a missing logo still looks like it belongs to its token.
 function hueOf(text) {
@@ -332,8 +381,10 @@ function outdatedPill(r) {
   return null;
 }
 
+const APR_TITLE = 'Fees earned since the board started counting, as a yearly rate of the value. Shown after 6 hours, and counted again from zero when fees are collected.';
+
 function poolStat(label, value) {
-  return h('div', { class: 'pool-stat' }, h('span', null, label), h('strong', null, value));
+  return h('div', { class: 'pool-stat', title: label === 'Fee APR' ? APR_TITLE : null }, h('span', null, label), h('strong', null, value));
 }
 
 // One position as a card: the pair, its chain and fee, the range, the value and the token split.
@@ -358,7 +409,8 @@ function poolCard(r, i) {
     rangeView(r),
     h('div', { class: 'pool-stats' },
       poolStat('Value', usdOrDash(r.value)),
-      poolStat('Unclaimed fees', usdOrDash(r.fees))),
+      poolStat('Unclaimed fees', usdOrDash(r.fees)),
+      poolStat('Fee APR', aprText(r.apr))),
     distribution(r),
     h('footer', { class: 'pool-foot muted small' },
       h('span', null, r.owner),
@@ -400,7 +452,7 @@ function poolTable(rows) {
     h('table', { class: 'mon-table lp-table' },
       h('thead', null, h('tr', null,
         h('th', null, 'Pool'), h('th', null, 'Chain'), h('th', null, 'Price range'), h('th', null, 'Distribution'),
-        h('th', { class: 'num' }, 'Value'), h('th', { class: 'num' }, 'Unclaimed fees'), h('th', null, ''))),
+        h('th', { class: 'num' }, 'Value'), h('th', { class: 'num' }, 'Unclaimed fees'), h('th', { class: 'num', title: APR_TITLE }, 'Fee APR'), h('th', null, ''))),
       h('tbody', null, rows.map((r) =>
         h('tr', null,
           h('td', null, h('div', { class: 'row' },
@@ -415,6 +467,7 @@ function poolTable(rows) {
           h('td', null, distribution(r)),
           h('td', { class: 'num' }, usdOrDash(r.value)),
           h('td', { class: 'num' }, usdOrDash(r.fees)),
+          h('td', { class: 'num' }, aprText(r.apr)),
           h('td', null, r.url
             ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn', title: 'Open on Uniswap', 'aria-label': `Open position ${r.tokenId} on Uniswap` }, icon('link'))
             : null))))));
@@ -484,7 +537,10 @@ function draw(root, store) {
   if (view.chain !== 'all' && !chainsWithRows.some((c) => c.id === view.chain)) view.chain = 'all';
   const byChain = view.chain === 'all' ? all : all.filter((r) => r.chainId === view.chain);
   const inRange = byChain.filter((r) => r.inRange).length;
-  const shown = view.filter === 'in' ? byChain.filter((r) => r.inRange) : view.filter === 'out' ? byChain.filter((r) => !r.inRange) : byChain;
+  const baselines = store.get(COLLECTION)?.fees ?? {};
+  const shown = (view.filter === 'in' ? byChain.filter((r) => r.inRange) : view.filter === 'out' ? byChain.filter((r) => !r.inRange) : byChain)
+    .map((r) => ({ ...r, apr: feeApr(r, baselines) }))
+    .sort(SORTS[view.sort].compare);
   const totalValue = byChain.reduce((s, r) => s + (r.value ?? 0), 0);
   const totalFees = byChain.reduce((s, r) => s + (r.fees ?? 0), 0);
   const totalValueKnown = byChain.some((r) => r.value !== null);
@@ -584,6 +640,15 @@ function draw(root, store) {
         chip('all', 'All', byChain.length),
         chip('in', 'In range', inRange),
         chip('out', 'Out of range', byChain.length - inRange)),
+      h('div', { class: 'row lp-tools' },
+      h('label', { class: 'inline lp-sort' }, 'Sort',
+        h('select', {
+          'aria-label': 'Sort positions',
+          onchange: (e) => {
+            view.sort = e.target.value;
+            store.refresh();
+          },
+        }, Object.entries(SORTS).map(([key, s]) => h('option', { value: key, selected: view.sort === key }, s.label)))),
       h('div', { class: 'segmented lp-layout', role: 'group', 'aria-label': 'View' },
         [['cards', 'Cards', 'cards'], ['list', 'List', 'list']].map(([key, label, iconName]) =>
           h('button', {
@@ -594,7 +659,7 @@ function draw(root, store) {
               view.layout = key;
               store.refresh();
             },
-          }, icon(iconName), label)))),
+          }, icon(iconName), label))))),
 
     body));
 
@@ -607,16 +672,18 @@ export default {
   short: 'Pools',
   icon: 'droplet',
   collection: COLLECTION,
-  defaults: { cache: {}, prices: {}, scan: {} },
+  defaults: { cache: {}, prices: {}, scan: {}, fees: {} },
   render: draw,
   serialize: () => ({
     filter: view.filter === 'all' ? '' : view.filter,
     chain: view.chain === 'all' ? '' : String(view.chain),
     view: view.layout === 'list' ? 'list' : '',
+    sort: view.sort === 'value' ? '' : view.sort,
   }),
   restore: (p = {}) => {
     view.filter = ['in', 'out'].includes(p.filter) ? p.filter : 'all';
     view.layout = p.view === 'list' ? 'list' : 'cards';
+    view.sort = Object.hasOwn(SORTS, p.sort) ? p.sort : 'value';
     const id = Number(p.chain);
     view.chain = CHAINS.some((c) => c.id === id) ? id : 'all';
   },

@@ -963,6 +963,9 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .lp-chip:active { transform: scale(0.96); }
 .lp-chip .chip-count { font-size: 0.75rem; opacity: 0.7; font-variant-numeric: tabular-nums; }
 .lp-chip.chain .logo { width: 14px; height: 14px; }
+.lp-tools { gap: 8px; flex-wrap: wrap; }
+.lp-sort { font-size: 0.85rem; color: var(--muted); }
+.lp-sort select { color: var(--text); }
 .lp-chains { margin-top: -6px; }
 
 .lp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--gap); }
@@ -1012,7 +1015,7 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .range-foot > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .range-foot .now { color: var(--text); font-weight: 600; }
 
-.pool-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pool-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px; }
 .pool-stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
 .pool-stat span { font-size: 0.74rem; color: var(--muted); }
 .pool-stat strong { font-size: 1.05rem; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
