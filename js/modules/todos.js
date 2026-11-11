@@ -30,7 +30,6 @@ const PRIORITIES = [
   ['high', 'High'],
 ];
 const STATUS_FILTERS = [['open', 'Open'], ['all', 'All'], ...STATUSES];
-const STATUS_ORDER = Object.fromEntries(STATUSES.map(([key], i) => [key, i]));
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2, none: 3 };
 const NO_CATEGORY = '__none';
 // Lists that are not a project: everything, no project, due today or late, waiting to be organized, made by a rule.
@@ -39,6 +38,10 @@ const SMART_LISTS = ['all', 'personal', 'today', 'organize', 'auto'];
 const LAYOUTS = [['table', 'Table', 'list'], ['board', 'Board', 'columns'], ['project', 'By project', 'folder'], ['status', 'By status', 'check-square']];
 // In "By status", what is being worked on comes first and what is done comes last.
 const STATUS_GROUP_ORDER = ['doing', 'review', 'ondeck', 'todo', 'blocked', 'paused', 'done'];
+
+// Tasks open sorted by status, so what is being worked on is on top. An empty key means the manual (dragged) order.
+const DEFAULT_SORT = { key: 'status', dir: 'asc' };
+const isDefaultSort = (s) => s.key === DEFAULT_SORT.key && s.dir === DEFAULT_SORT.dir;
 
 // View state lives here so it survives re-renders.
 // filter: one of SMART_LISTS, or a project id. status: a STATUS_FILTERS key. category: '' means any.
@@ -56,11 +59,12 @@ const view = {
   // The task last ticked, so Shift+click can tick everything between it and the next one.
   lastPicked: null,
   dragId: null,
+  dragStatus: null,
   managingCategories: false,
   creatingProject: false,
   catError: '',
   showProject: false,
-  sort: { key: '', dir: 'asc' },
+  sort: { ...DEFAULT_SORT },
   colFilter: { text: '', status: '', priority: '', project: '', category: '' },
   tidy: { status: 'idle', items: [] },
 };
@@ -322,7 +326,9 @@ function clearDropMarks(el) {
 let dragProjectId = null;
 
 // Sorting by a column replaces the stored order, so drag-to-reorder is off while a sort is active.
-const reorderEnabled = () => !view.sort.key;
+// The status sort is stable and keeps the stored order within a status, so tasks of the same status can still be dragged.
+const reorderEnabled = () => !view.sort.key || view.sort.key === 'status';
+const canDropOn = (item) => !view.sort.key || view.dragStatus === statusOf(item);
 
 // --- GitHub issues for a task ---
 
@@ -598,6 +604,7 @@ function todoRow(store, item, ctx) {
     ondragstart: (e) => {
       if (!reorderEnabled()) return e.preventDefault();
       view.dragId = item.id;
+      view.dragStatus = statusOf(item);
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', item.id); // Firefox needs data to start a drag
       e.currentTarget.classList.add('dragging');
@@ -608,7 +615,7 @@ function todoRow(store, item, ctx) {
       e.currentTarget.classList.remove('dragging');
     },
     ondragover: (e) => {
-      if (!reorderEnabled() || !view.dragId || view.dragId === item.id) return;
+      if (!reorderEnabled() || !view.dragId || view.dragId === item.id || !canDropOn(item)) return;
       e.preventDefault();
       const side = dropSide(e);
       e.currentTarget.classList.toggle('drop-before', side === 'before');
@@ -616,7 +623,7 @@ function todoRow(store, item, ctx) {
     },
     ondragleave: (e) => clearDropMarks(e.currentTarget),
     ondrop: (e) => {
-      if (!reorderEnabled() || !view.dragId) return;
+      if (!reorderEnabled() || !view.dragId || !canDropOn(item)) return;
       e.preventDefault();
       const after = dropSide(e) === 'after';
       clearDropMarks(e.currentTarget);
@@ -819,7 +826,7 @@ function boardView(store, items, projects, order) {
 
 const columnValue = (item, key, projects) => {
   if (key === 'text') return item.text.toLowerCase();
-  if (key === 'status') return STATUS_ORDER[statusOf(item)];
+  if (key === 'status') return STATUS_GROUP_ORDER.indexOf(statusOf(item));
   if (key === 'priority') return PRIORITY_ORDER[item.priority ?? 'none'];
   if (key === 'project') return (projects.find((p) => p.id === item.projectId)?.name ?? 'Personal').toLowerCase();
   if (key === 'due') return item.due || '9999-99-99'; // tasks without a deadline sort last
@@ -838,7 +845,7 @@ function sortItems(items, projects) {
   });
 }
 
-// Click a column title: ascending, then descending, then back to manual order.
+// Click a column title: ascending, then descending, then the manual order.
 function cycleSort(store, key) {
   if (view.sort.key !== key) view.sort = { key, dir: 'asc' };
   else if (view.sort.dir === 'asc') view.sort = { key, dir: 'desc' };
@@ -882,13 +889,13 @@ function columnFilters(store, projects, categories) {
     select('project', [['none', 'Personal'], ...projects.map((p) => [p.id, p.name])]),
     select('category', [[NO_CATEGORY, 'No category'], ...categories.map((c) => [c, c])]),
     h('span'),
-    h('span', null, Object.values(f).some(Boolean) || view.sort.key
+    h('span', null, Object.values(f).some(Boolean) || !isDefaultSort(view.sort)
       ? h('button', {
           type: 'button',
           class: 'btn-small',
           onclick: () => {
             view.colFilter = { text: '', status: '', priority: '', project: '', category: '' };
-            view.sort = { key: '', dir: 'asc' };
+            view.sort = { ...DEFAULT_SORT };
             store.refresh();
           },
         }, 'Reset')
@@ -1186,7 +1193,7 @@ function draw(root, store) {
   if (!visible.length) {
     listBody = h('p', { class: 'empty' }, matchesQuery.active
       ? `No task matches “${view.query.trim()}”${view.status === 'open' && !matchesQuery.hasStatus ? ' among open tasks. Add is:done to look in completed ones.' : '.'}`
-      : columnsActive || view.sort.key ? 'No todo matches these filters.' : 'Nothing matches these filters.');
+      : columnsActive ? 'No todo matches these filters.' : 'Nothing matches these filters.');
   } else if (view.layout === 'board') {
     listBody = boardView(store, visible, projects, order);
   } else if (view.layout === 'project') {
@@ -1398,7 +1405,7 @@ export default {
     status: view.status,
     category: view.category,
     more: view.showProject ? '1' : '',
-    sort: view.sort.key ? `${view.sort.key}.${view.sort.dir}` : '',
+    sort: isDefaultSort(view.sort) ? '' : view.sort.key ? `${view.sort.key}.${view.sort.dir}` : 'manual',
   }),
   restore: (p = {}) => {
     view.layout = LAYOUTS.some(([k]) => k === p.view) ? p.view : 'table';
@@ -1408,6 +1415,10 @@ export default {
     view.category = p.category || '';
     view.showProject = p.more === '1';
     const [key = '', dir = 'asc'] = (p.sort ?? '').split('.');
-    view.sort = { key: ['text', 'status', 'priority', 'project', 'category', 'due'].includes(key) ? key : '', dir: dir === 'desc' ? 'desc' : 'asc' };
+    view.sort = p.sort === 'manual'
+      ? { key: '', dir: 'asc' }
+      : ['text', 'status', 'priority', 'project', 'category', 'due'].includes(key)
+        ? { key, dir: dir === 'desc' ? 'desc' : 'asc' }
+        : { ...DEFAULT_SORT };
   },
 };
