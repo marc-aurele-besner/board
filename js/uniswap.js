@@ -72,7 +72,12 @@ const SEL = {
   getFeeGrowthInside: '0x53e9c1fb',
   getPositionInfo: '0xdacf1d2f',
   collect: '0xfc6f7865',
+  poolManager: '0xdc4c90d3',
 };
+// Swap(address,address,int256,int256,uint160,uint128,int24) on a v3 pool, and
+// Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24) on v4's pool manager.
+const SWAP_V3 = '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67';
+const SWAP_V4 = '0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f';
 const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const MAX_POSITIONS = 40;
 const Q96 = 2 ** 96;
@@ -322,6 +327,109 @@ export async function scanV4(chain, node, owner, prev) {
   }
   s.ids = [...found];
   return s;
+}
+
+// Fee APR over a past window comes from the pool's swaps in it, read from logs: public nodes refuse to read
+// past state, but keep logs. Each pool's swaps stay in memory, so a longer window or the next load only reads
+// the blocks not yet read.
+const SWAP_CALLS = 40; // log searches per pool and load
+const swapCache = new Map(); // "chainId:version:pool" -> { node, from, to, swaps }
+const managers = new Map(); // chainId -> v4 pool manager address, which emits every v4 pool's swaps
+
+// The head block, its time (unix seconds), and the average seconds per block over the last 10,000 blocks.
+export async function chainClock(node) {
+  const head = Number(await rpc(node, 'eth_blockNumber', []));
+  const back = Math.max(0, head - 10000);
+  const [a, b] = await Promise.all([head, back].map((n) => rpc(node, 'eth_getBlockByNumber', [`0x${n.toString(16)}`, false])));
+  const perBlock = (Number(a.timestamp) - Number(b.timestamp)) / Math.max(1, head - back);
+  return { head, time: Number(a.timestamp), perBlock: perBlock > 0 ? perBlock : 1 };
+}
+
+async function managerOf(chain, node) {
+  if (!managers.has(chain.id)) managers.set(chain.id, addressOf(words(await rpcCall(node, chain.v4.positions, SEL.poolManager))[0]));
+  return managers.get(chain.id);
+}
+
+// One swap, kept small: the block, the tick and active liquidity after it, the amount paid in of each token and,
+// on v4, the fee charged (v4 fees can change per swap). v3 amounts are the pool's side, so paid in is positive;
+// v4 amounts are the swapper's, so paid in is negative.
+function parseSwap(log, version) {
+  const w = words(log.data);
+  const side = version === 'v3' ? 1n : -1n;
+  const a0 = signed(w[0]) * side;
+  const a1 = signed(w[1]) * side;
+  return { block: Number(log.blockNumber), tick: Number(signed(w[4])), liq: big(w[3]), in0: a0 > 0n ? a0 : 0n, in1: a1 > 0n ? a1 : 0n, fee: version === 'v4' ? Number(big(w[5])) : null };
+}
+
+// Swaps in one block range, narrowing it while the node refuses (too wide, or too many results). null on failure.
+async function swapsIn(node, filter, version, start, end, span, forward) {
+  for (let width = span; width >= MIN_SPAN; width = Math.floor(width / 2)) {
+    const from = forward ? start : Math.max(start, end - width + 1);
+    const to = forward ? Math.min(end, start + width - 1) : end;
+    try {
+      const logs = await rpc(node, 'eth_getLogs', [{ ...filter, fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}` }]);
+      return { swaps: (logs ?? []).map((l) => parseSwap(l, version)), from, to, span: width };
+    } catch (err) {
+      if (!err.refused) return null;
+    }
+  }
+  return null;
+}
+
+// A pool's swaps from block `from` to `head`, adding to what was already read: new blocks first, then older ones
+// back to `from`. Stops at the call budget, so on a fast chain a long window may be covered only in part; the
+// returned `from` is the oldest block read. pool is the v3 pool address or the v4 pool id.
+export async function poolSwaps(chain, node, version, pool, from, head) {
+  const key = `${chain.id}:${version}:${pool}`;
+  let c = swapCache.get(key);
+  // A gap too long to close in one load starts over, so the swaps read are always one unbroken range.
+  if (!c || c.node !== node || head - c.to > chain.v4.span * (SWAP_CALLS / 2)) c = { node, from: head + 1, to: head, swaps: [] };
+  const filter = version === 'v3' ? { address: pool, topics: [SWAP_V3] } : { address: await managerOf(chain, node), topics: [SWAP_V4, pool] };
+  let span = chain.v4.span;
+  let calls = SWAP_CALLS;
+  while (c.to < head && calls > 0) {
+    calls--;
+    const r = await swapsIn(node, filter, version, c.to + 1, head, span, true);
+    if (!r) break;
+    c.swaps.push(...r.swaps);
+    span = r.span;
+    c.to = r.to;
+  }
+  if (c.to < head) c = { node, from: head + 1, to: head, swaps: [] };
+  while (c.from > from && calls > 0) {
+    calls--;
+    const r = await swapsIn(node, filter, version, from, c.from - 1, span, false);
+    if (!r) break;
+    c.swaps.push(...r.swaps);
+    span = r.span;
+    c.from = r.from;
+  }
+  swapCache.set(key, c);
+  return c;
+}
+
+// The fees a position earned from swaps since a block, in raw token units: each swap that ended inside its range
+// pays it the fee times its share of the active liquidity. An estimate: a swap that crosses ticks is counted at
+// where it ended, and a hook can change what is paid.
+export function swapFees(swaps, fromBlock, p) {
+  let e0 = 0n;
+  let e1 = 0n;
+  for (const s of swaps) {
+    if (s.block < fromBlock) continue;
+    const [f0, f1] = swapEarn(s, p);
+    e0 += f0;
+    e1 += f1;
+  }
+  return { e0, e1 };
+}
+
+// What one swap paid a position, in raw units of each token. p.liquidity may be text.
+export function swapEarn(s, p) {
+  if (s.tick < p.tickLower || s.tick >= p.tickUpper || s.liq === 0n) return [0n, 0n];
+  const L = BigInt(p.liquidity);
+  const share = L < s.liq ? L : s.liq;
+  const pips = BigInt(s.fee ?? p.fee);
+  return [(s.in0 * pips * share) / (1000000n * s.liq), (s.in1 * pips * share) / (1000000n * s.liq)];
 }
 
 // The id Uniswap v4 gives a pool: the hash of its key.
