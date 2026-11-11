@@ -29,6 +29,7 @@ js/notifications.js   the bell, its drawer, and notify(); saved in notifications
 js/automations.js     site checks and the rules that turn their results into tasks
 js/sitecheck.js       the lookups behind Tools (health, domain, certificate, share tags)
 js/telegram.js        tasks from Telegram messages, read while the board is open
+js/pool-insights.js   the Liquidity Pools AI insights: in and out of range positions, and what to adjust
 js/resend.js          the Inbox's Resend reads: email lists per project key, and one email's body
 js/background.js      timers for the above; started once the data folder is open
 js/capture.js         parseTask(), parseMoney() and makeTask(): one place for a task's shape

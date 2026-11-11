@@ -21,6 +21,7 @@ export const DEFAULT_TASKS = [
   { id: 'task-review', name: 'Issue & PR triage', description: 'Summarize open GitHub issues and PRs and flag stale ones.' },
   { id: 'task-budget', name: 'Spending review', description: 'Explain the month’s expenses and point out unusual categories.' },
   { id: 'task-cron', name: 'Cron flows', description: 'Default model for the AI steps of Cron flows. A step can pick its own.' },
+  { id: 'task-pools', name: 'Pool insights', description: 'Read Uniswap positions in and out of range and suggest range adjustments.' },
   { id: 'task-receipt', name: 'Read bills & screenshots', description: 'Turn a dropped bill or screenshot into money entries. Needs a model that can read images.' },
 ];
 
