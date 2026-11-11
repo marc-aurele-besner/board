@@ -22,6 +22,7 @@ css/style.css         design tokens (light and dark) and all styles
 js/app.js             shell: folder connection, router, top nav, theme toggle
 js/storage.js         File System Access API wrapper; remembers the folder in IndexedDB
 js/store.js           in-memory state; debounced, serialized saves; subscriptions
+js/keep-fields.js     keeps unsubmitted fields across re-renders; holds background re-renders while typing
 js/ui.js              h() DOM helper, icon(), ids, dates, money formatting
 js/modules/index.js   registry of sections (the nav is built from this list)
 js/modules/*.js       one file per section (todos, projects, kitchen, money, tools, ...)
