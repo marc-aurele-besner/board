@@ -2,12 +2,11 @@ import { h, icon, refreshIcon, empty, notice, copyable } from '../ui.js';
 import { toast } from '../toast.js';
 import { manualRate, setManualRate, clearCachedRates, PROVIDERS, providerId, setProvider, fallbackOn, setFallback, testProvider, lastSource } from '../fx.js';
 import { configure, checkGithubToken, orgAvatar } from '../github.js';
-import { connect, disconnect, isConnected } from '../google.js';
 import { editText } from '../inline.js';
 import { modelChip } from '../model-picker.js';
 import { isAddress, CHAINS, chainSettings, savedNode, parsePosition, addPosition, addedPositions, addedListOf, tokenLogos } from '../uniswap.js';
 import { positionFields, positionError } from '../position-input.js';
-import { telegramCard, analyticsCard, searchCard, resendCard, gmailCard, notificationsCard, automationsCard, dataCard } from './settings-more.js';
+import { calendarAccountsCard, telegramCard, analyticsCard, searchCard, resendCard, gmailCard, notificationsCard, automationsCard, dataCard } from './settings-more.js';
 import { promptsCard } from './settings-prompts.js';
 import { labelsCard } from './settings-labels.js';
 import { logo } from './positions.js';
@@ -427,80 +426,56 @@ function exchangeCard(store) {
 
 // --- Google Calendar ---
 
-// Connection state and the last message shown on the card.
-const google = { message: '' };
-
 function googleCard(store) {
   const clientId = store.get(COLLECTION).google?.clientId ?? '';
-  const connected = isConnected();
-
   const save = (value) => {
     store.update(COLLECTION, (d) => {
       d.google = { ...d.google, clientId: value };
     });
-    google.message = '';
-    store.refresh();
   };
-  const connectNow = () => {
-    google.message = 'Waiting for Google…';
-    store.refresh();
-    connect(clientId)
-      .then(() => {
-        google.message = 'Connected. Home now shows your calendar.';
-      })
-      .catch((err) => {
-        google.message = err.message;
-      })
-      .finally(() => store.refresh());
-  };
-  const disconnectNow = () => {
-    disconnect();
-    google.message = 'Disconnected.';
-    store.refresh();
-  };
+  const accounts = store.get(COLLECTION).gcal?.accounts?.length ?? 0;
 
-  return h('section', { class: 'card panel' },
-    h('header', { class: 'panel-head' },
-      h('div', null,
-        h('h2', null, 'Google Calendar'),
-        h('p', { class: 'muted' }, 'Shows the next two days of events on Home, read-only. Nothing is stored on disk. The connection lasts about an hour, then you connect again.')),
-      h('div', { class: 'row' },
-        connected
-          ? h('span', { class: 'pill tone-done' }, 'Connected')
-          : h('span', { class: 'pill tone-plain' }, 'Not connected'))),
+  return h('div', { class: 'stack-lg' },
+    h('section', { class: 'card panel' },
+      h('header', { class: 'panel-head' },
+        h('div', null,
+          h('h2', null, 'Google Calendar'),
+          h('p', { class: 'muted' }, 'Shows the events of one or more Google accounts in Calendar and the next two days on Home, read-only. Events are not stored on disk. Each connection lasts about an hour, then you connect again. Gmail, Analytics and Search Console use the same Client ID.')),
+        h('div', { class: 'row' },
+          clientId
+            ? h('span', { class: 'pill tone-done' }, accounts ? `${accounts} account${accounts === 1 ? '' : 's'}` : 'Client ID set')
+            : h('span', { class: 'pill tone-plain' }, 'Not set'))),
 
-    h('div', { class: 'cred-body' },
-      h('div', { class: 'svc-section' },
-        h('h3', null, 'Setup'),
-        h('ol', { class: 'steps' }, [
-          ['Open ', link('https://console.cloud.google.com/', 'Google Cloud Console'), ' and create a project, or pick one.'],
-          ['APIs & Services → Library: enable ', link('https://console.cloud.google.com/apis/library/calendar-json.googleapis.com', 'Google Calendar API'), '.'],
-          ['APIs & Services → OAuth consent screen: choose External, and add your own Google account as a test user.'],
-          ['APIs & Services → Credentials → Create credentials → OAuth client ID → Web application.'],
-          ['Under Authorized JavaScript origins, add the address you open the board at: ', copyable(location.origin), '.'],
-          ['Copy the Client ID (it ends in .apps.googleusercontent.com) and paste it here.'],
-        ].map((s) => h('li', null, h('span', { class: 'step-text' }, s))))),
+      h('div', { class: 'cred-body' },
+        h('div', { class: 'svc-section' },
+          h('h3', null, 'Setup'),
+          h('ol', { class: 'steps' }, [
+            ['Open ', link('https://console.cloud.google.com/', 'Google Cloud Console'), ' and create a project, or pick one.'],
+            ['APIs & Services → Library: enable ', link('https://console.cloud.google.com/apis/library/calendar-json.googleapis.com', 'Google Calendar API'), '.'],
+            ['APIs & Services → OAuth consent screen: choose External, and add each Google account you will connect as a test user.'],
+            ['APIs & Services → Credentials → Create credentials → OAuth client ID → Web application.'],
+            ['Under Authorized JavaScript origins, add the address you open the board at: ', copyable(location.origin), '.'],
+            ['Copy the Client ID (it ends in .apps.googleusercontent.com), paste it here, then add your accounts below.'],
+          ].map((s) => h('li', null, h('span', { class: 'step-text' }, s))))),
 
-      h('form', {
-        class: 'svc-section',
-        onsubmit: (e) => {
-          e.preventDefault();
-          save(new FormData(e.currentTarget).get('clientId').trim());
+        h('form', {
+          class: 'svc-section',
+          onsubmit: (e) => {
+            e.preventDefault();
+            save(new FormData(e.currentTarget).get('clientId').trim());
+          },
         },
-      },
-        h('h3', null, 'OAuth Client ID'),
-        h('input', {
-          name: 'clientId',
-          value: clientId,
-          placeholder: '123456789-abc….apps.googleusercontent.com',
-          autocomplete: 'off',
-          spellcheck: false,
-        }),
-        h('div', { class: 'svc-actions' },
-          h('button', { class: 'primary', type: 'submit' }, 'Save'),
-          h('button', { type: 'button', onclick: connectNow, disabled: !clientId }, connected ? 'Reconnect' : 'Connect Google Calendar'),
-          connected ? h('button', { type: 'button', onclick: disconnectNow }, 'Disconnect') : null),
-        google.message ? h('p', { class: 'test-result', role: 'status' }, google.message) : null)));
+          h('h3', null, 'OAuth Client ID'),
+          h('input', {
+            name: 'clientId',
+            value: clientId,
+            placeholder: '123456789-abc….apps.googleusercontent.com',
+            autocomplete: 'off',
+            spellcheck: false,
+          }),
+          h('div', { class: 'svc-actions' },
+            h('button', { class: 'primary', type: 'submit' }, 'Save'))))),
+    calendarAccountsCard(store));
 }
 
 // --- Appearance ---
@@ -977,7 +952,7 @@ export default {
   icon: 'settings',
   hidden: true, // opened from the gear in the top bar
   collection: COLLECTION,
-  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '', relay: '' }, resend: { relay: '', keys: {} }, gmail: { accounts: [] }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) }, prompts: {} },
+  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '', relay: '' }, resend: { relay: '', keys: {} }, gmail: { accounts: [] }, gcal: { accounts: [] }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) }, prompts: {} },
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),
   restore: (p = {}) => {

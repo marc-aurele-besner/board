@@ -1,18 +1,16 @@
-// Google, read-only, straight from the browser (Google Identity Services): Calendar, Analytics and Search Console.
-// One access token covers the services you connected. It lives in memory only and lasts about an hour,
+// Google, read-only, straight from the browser (Google Identity Services): Analytics and Search Console.
+// One access token covers the services you connected. Calendar (js/gcal.js) and Gmail sign in per account instead. It lives in memory only and lasts about an hour,
 // so reconnecting is one click.
 const SCOPES = {
-  calendar: 'https://www.googleapis.com/auth/calendar.readonly',
   analytics: 'https://www.googleapis.com/auth/analytics.readonly',
   search: 'https://www.googleapis.com/auth/webmasters.readonly',
 };
 const GIS_SRC = 'https://accounts.google.com/gsi/client';
-const EVENTS = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
 
 let token = null; // { value, expiresAt, scopes: Set }
 let loading = null;
 
-// Gmail (js/gmail.js) signs in to each of its accounts with the same library.
+// Gmail and Calendar sign in to each of its accounts with the same library.
 export function loadGis() {
   if (window.google?.accounts?.oauth2) return Promise.resolve();
   loading ??= new Promise((resolve, reject) => {
@@ -30,12 +28,12 @@ export function loadGis() {
 }
 
 const live = () => Boolean(token && token.expiresAt > Date.now());
-// True when the current session covers the service: 'calendar' (default), 'analytics' or 'search'.
-export const isConnected = (service = 'calendar') => live() && token.scopes.has(SCOPES[service]);
+// True when the current session covers the service: 'analytics' or 'search'.
+export const isConnected = (service) => live() && token.scopes.has(SCOPES[service]);
 
 // Opens Google's consent window. Must run from a click, or the browser blocks it.
 // Services already connected in this session stay connected.
-export async function connect(clientId, service = 'calendar') {
+export async function connect(clientId, service) {
   if (!clientId) throw new Error('Add your Google OAuth Client ID in Settings first.');
   await loadGis();
   const wanted = new Set([...(live() ? token.scopes : []), SCOPES[service]]);
@@ -74,25 +72,4 @@ export async function googleFetch(service, name, url, options = {}) {
     throw new Error(`${name} error ${res.status}${detail ? `: ${detail}` : ''}`);
   }
   return res.json();
-}
-
-// Events from now until `days` ahead, in start order.
-export async function upcomingEvents(days = 2) {
-  const start = new Date();
-  const end = new Date(start.getTime() + days * 86400000);
-  const params = new URLSearchParams({
-    timeMin: start.toISOString(),
-    timeMax: end.toISOString(),
-    singleEvents: 'true',
-    orderBy: 'startTime',
-    maxResults: '50',
-  });
-  const { items = [] } = await googleFetch('calendar', 'Google Calendar', `${EVENTS}?${params}`);
-  return items.map((e) => ({
-    id: e.id,
-    title: e.summary ?? '(no title)',
-    start: e.start?.dateTime ?? e.start?.date,
-    allDay: Boolean(e.start?.date),
-    location: e.location ?? '',
-  }));
 }
