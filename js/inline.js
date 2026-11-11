@@ -94,6 +94,34 @@ function positionPopover(el, anchor) {
   el.style.top = fitsBelow ? `${below}px` : `${Math.max(8, rect.top - 4 - el.offsetHeight)}px`;
 }
 
+// Up and down arrows move a highlight through the list while the focus stays in the search field, so typing
+// goes on; Enter then picks the highlighted row. The highlight keeps its place when the list is painted again.
+function listCursor(search, list) {
+  let at = -1;
+  const items = () => [...list.querySelectorAll('.pop-item')];
+  const mark = () => {
+    const all = items();
+    if (at >= all.length) at = all.length - 1;
+    all.forEach((b, i) => b.classList.toggle('cursor', i === at));
+    all[at]?.scrollIntoView({ block: 'nearest' });
+  };
+  search.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    const n = items().length;
+    if (!n) return;
+    at = e.key === 'ArrowDown' ? (at + 1) % n : (at <= 0 ? n : at) - 1;
+    mark();
+  });
+  return {
+    mark,
+    reset: () => {
+      at = -1;
+    },
+    current: () => items()[at] ?? null,
+  };
+}
+
 // Opens a searchable list anchored to `anchor`. `options` are { value, label, tone? }.
 // With `multi`, `value` is an array, a click ticks or unticks an option and the list stays open.
 function showPicker(anchor, { options, value, nullable, nullLabel, allowCreate, multi = false, key = null, onPick, onCreate }) {
@@ -135,6 +163,7 @@ function showPicker(anchor, { options, value, nullable, nullLabel, allowCreate, 
       pill(label, opt),
       selected ? icon('check') : null);
 
+  const cursor = listCursor(search, list);
   const renderList = () => {
     const q = search.value.trim();
     const lower = q.toLowerCase();
@@ -156,12 +185,18 @@ function showPicker(anchor, { options, value, nullable, nullLabel, allowCreate, 
         : null,
       !shown.length && !(allowCreate && q) ? h('p', { class: 'pop-empty' }, 'Nothing to pick') : null,
     ].filter(Boolean));
+    cursor.mark();
   };
 
-  search.addEventListener('input', renderList);
+  search.addEventListener('input', () => {
+    cursor.reset();
+    renderList();
+  });
   search.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
+    const highlighted = cursor.current();
+    if (highlighted) return highlighted.click();
     const q = search.value.trim();
     const lower = q.toLowerCase();
     const exact = options.find((o) => o.label.toLowerCase() === lower);
@@ -287,6 +322,7 @@ function showTree(anchor, { key, getOptions, onToggle }) {
   closePicker();
   const search = h('input', { class: 'pop-search', placeholder: 'Search…', autocomplete: 'off', 'aria-label': 'Search options' });
   const list = h('div', { class: 'pop-list pick-tree', role: 'listbox', 'aria-multiselectable': 'true' });
+  const cursor = listCursor(search, list);
   const paint = () => {
     const q = search.value.trim().toLowerCase();
     const options = getOptions();
@@ -324,8 +360,17 @@ function showTree(anchor, { key, getOptions, onToggle }) {
         o.lead ? o.lead() : null,
         h('span', { class: 'pick-tree-label' }, o.label)));
     list.replaceChildren(...(rows.length ? rows : [h('p', { class: 'pop-empty' }, 'Nothing to pick')]));
+    cursor.mark();
   };
-  search.addEventListener('input', paint);
+  search.addEventListener('input', () => {
+    cursor.reset();
+    paint();
+  });
+  search.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    cursor.current()?.click();
+  });
   const el = h('div', { class: 'popover', role: 'dialog', 'aria-label': 'Choose options' }, search, list);
   document.body.append(el);
   openPicker = { el, anchor, key };
