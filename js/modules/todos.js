@@ -7,6 +7,7 @@ import { editText, pickChip } from '../inline.js';
 import { repoStats, createIssue, getIssue } from '../github.js';
 import { openDialog } from '../modal.js';
 import { ask, parseJson } from '../ai.js';
+import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 
 const COLLECTION = 'todos';
@@ -700,15 +701,6 @@ function columnFilters(store, projects, categories) {
 
 // --- AI: tidy todo titles (task 3) ---
 
-const TIDY_PROMPT = [
-  'You clean up a personal todo list.',
-  'Reply with JSON only: an array of objects {"id","title","category","priority"}.',
-  'title: a short, clear action sentence in the same language as the original.',
-  'category: one short word, or an empty string if none fits.',
-  'priority: one of "none", "low", "medium", "high".',
-  'Keep every id exactly as given. Include only items you would change.',
-].join(' ');
-
 async function runTidy(store) {
   const open = store.get(COLLECTION).items.filter((i) => statusOf(i) !== 'done').slice(0, 40);
   if (!open.length) {
@@ -719,7 +711,7 @@ async function runTidy(store) {
   store.refresh();
   try {
     const reply = await ask(store, 'task-tidy', [
-      { role: 'system', content: TIDY_PROMPT },
+      { role: 'system', content: systemPrompt(store, 'tidy') },
       { role: 'user', content: JSON.stringify(open.map((i) => ({ id: i.id, title: i.text, category: i.category || '', priority: i.priority ?? 'none' }))) },
     ]);
     const parsed = parseJson(reply);
