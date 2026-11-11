@@ -1754,6 +1754,31 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .lp-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .lp-panel-head h3 { margin: 0; }
 .lp-panel-head .row { gap: 6px; }
+
+/* Fees collected insights: two panels side by side, one column on narrow screens */
+.lp-insight-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: var(--gap); }
+.lp-insight-grid > * { min-width: 0; }
+.fee-split { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.fee-split li { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(60px, 1fr) auto 48px; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; }
+.fee-split-name { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.fee-split-name > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fee-split .num { text-align: right; }
+@media (max-width: 520px) {
+  .fee-split li { grid-template-columns: minmax(0, 1fr) auto; }
+  .fee-split .meter { grid-column: 1 / -1; grid-row: 2; }
+}
+/* A day per square, weeks as columns, Monday on top. Shades mix the accent into the surface. */
+.fee-cal-wrap { display: flex; gap: 6px; overflow-x: auto; }
+.fee-cal-days { display: grid; grid-template-rows: repeat(7, 1fr); gap: 3px; font-size: 0.65rem; line-height: 1; }
+.fee-cal-days span { display: flex; align-items: center; }
+.fee-cal { flex: 1; display: grid; grid-template-rows: repeat(7, auto); grid-auto-flow: column; grid-auto-columns: minmax(9px, 1fr); gap: 3px; min-width: 260px; }
+.fee-cal-day { display: block; aspect-ratio: 1; border-radius: 3px; background: var(--surface-2); }
+.fee-cal-day.l1 { background: color-mix(in srgb, var(--accent) 30%, var(--surface-2)); }
+.fee-cal-day.l2 { background: color-mix(in srgb, var(--accent) 55%, var(--surface-2)); }
+.fee-cal-day.l3 { background: color-mix(in srgb, var(--accent) 78%, var(--surface-2)); }
+.fee-cal-day.l4 { background: var(--accent); }
+.fee-cal-key { display: inline-flex; align-items: center; gap: 3px; }
+.fee-cal-key .fee-cal-day { width: 10px; }
 .lp-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: var(--gap); align-items: start; }
 .lp-detail-grid > .card { min-width: 0; }
 
