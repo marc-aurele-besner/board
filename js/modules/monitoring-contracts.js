@@ -146,7 +146,7 @@ function oneView(settings, c, w, entry) {
   const cov = coverage(d, w);
   return [
     d.errors.length ? notice({ text: d.errors.join(' ') }) : null,
-    d.txs === null ? notice({ tone: 'info', text: 'Transactions need an Etherscan API key (Settings → Uniswap). Events are read from the node.' }) : null,
+    d.txs === null ? notice({ tone: 'info', text: 'Transactions need an Etherscan API key (Settings → Blockchains). Events are read from the node.' }) : null,
     h('div', { class: 'summary' },
       s.txs !== null ? stat('Transactions', fmt(s.txs)) : null,
       s.senders !== null ? stat('Senders', fmt(s.senders)) : null,

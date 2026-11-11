@@ -109,7 +109,7 @@ function contractForm(store, settings) {
       draft.abi),
     h('div', { class: 'row' },
       h('button', { type: 'submit', class: 'btn-small primary' }, editing ? 'Save contract' : 'Add contract'),
-      h('button', { type: 'button', class: 'btn-small', disabled: contractsView.busy, title: 'Needs the Etherscan API key set in Settings → Uniswap', onclick: fetchInto }, contractsView.busy ? 'Fetching…' : 'Fetch ABI from Etherscan'),
+      h('button', { type: 'button', class: 'btn-small', disabled: contractsView.busy, title: 'Needs the Etherscan API key set in Settings → Blockchains', onclick: fetchInto }, contractsView.busy ? 'Fetching…' : 'Fetch ABI from Etherscan'),
       h('button', { type: 'button', class: 'btn-small', onclick: () => {
         contractsView.editing = null;
         say(store, null, '');
@@ -136,7 +136,7 @@ export function contractsCard(store) {
 
   return h('section', { class: 'card panel' },
     h('h2', null, 'Smart contracts'),
-    h('p', { class: 'muted small' }, 'Contracts to read and write in Tools → Contracts, and to follow in Monitoring → Contracts. Reads go through the chain\'s node, set in Blockchains. Writes are signed by your browser wallet, which asks before every transaction; the board never holds a key. Paste the ABI, or fetch a verified one from Etherscan with the key set in Uniswap.'),
+    h('p', { class: 'muted small' }, 'Contracts to read and write in Tools → Contracts, and to follow in Monitoring → Contracts. Reads go through the chain\'s node, set in Blockchains. Writes are signed by your browser wallet, which asks before every transaction; the board never holds a key. Paste the ABI, or fetch a verified one from Etherscan with the key set in Blockchains.'),
     list.length
       ? h('ul', { class: 'contract-list' }, list.map((c) => {
         const chain = chainById(settings, c.chainId);

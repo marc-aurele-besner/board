@@ -1,15 +1,15 @@
 // Smart contracts saved in Settings → Smart contracts: reading them through the chain's node, sending
 // transactions through the browser wallet (the board never holds a key), and reading their recent activity.
 import { rpc, rpcCall, etherscan, nodeUrls } from './uniswap.js';
-import { chainById } from './chains.js';
+import { chainById, etherscanKey } from './chains.js';
 import { encodeCall, decodeArgs, decodeLog, eventsOf, functionsOf, selector, parseAbi } from './abi.js';
 
 export const contractsOf = (settings) => settings?.contracts ?? [];
-export const etherscanKey = (settings) => settings?.uniswap?.etherscan ?? '';
+export { etherscanKey };
 
 // The verified ABI from Etherscan, which covers most chains by their ID.
 export async function fetchAbi(key, chainId, address) {
-  if (!key) throw new Error('Set an Etherscan API key in Settings → Uniswap to fetch ABIs.');
+  if (!key) throw new Error('Set an Etherscan API key in Settings → Blockchains to fetch ABIs.');
   return parseAbi(await etherscan(key, chainId, { module: 'contract', action: 'getabi', address }));
 }
 
