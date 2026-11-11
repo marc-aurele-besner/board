@@ -105,9 +105,12 @@ function collections() {
     },
     // A few fee collections, so the Fees collected view of Liquidity Pools has something to chart.
     pools: {
+      // Two positions on two chains, so the chain and token filters have something to pick from.
       collected: [[-2, 41.2], [-9, 37.5], [-16, 52.8], [-30, 18.4], [-44, 60.1], [-58, 33.9], [-75, 47.3]].map(([offset, usd], i) => ({
-        id: `fc${i}`, at: `${day(offset)}T12:00:00.000Z`, source: i % 3 ? 'auto' : 'manual', usd,
-        ref: '8453:v4:100001', pair: 'ETH / USDC', chain: 'Base', tokenId: '100001', note: '',
+        id: `fc${i}`, at: `${day(offset)}T12:00:00.000Z`, source: i % 3 ? 'auto' : 'manual', usd, note: '',
+        ...(i % 2
+          ? { ref: '42161:200002', pair: 'WBTC / ETH', chain: 'Arbitrum One', tokenId: '200002' }
+          : { ref: '8453:v4:100001', pair: 'ETH / USDC', chain: 'Base', tokenId: '100001' }),
       })),
     },
     tools: { every: 60, sites: { 'p-atlas': site(true, 64), 'p-docs': site(false, 9) } },
