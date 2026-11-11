@@ -6,7 +6,8 @@ import { checkBot, findChat, pollTelegram, hasTelegram } from '../telegram.js';
 import { propertyName, checkBing, BING_RELAY } from '../webstats.js';
 import { checkResend, resendSettings, RESEND_RELAY } from '../resend.js';
 import { connectGmail, disconnectGmail, isGmailConnected, gmailAccounts } from '../gmail.js';
-import { calendarAccounts, connectCalendar, disconnectCalendar, isCalendarConnected, syncCalendarList, removeCalendarAccount, setCalendar } from '../gcal.js';
+import { calendarAccounts, connectCalendar, disconnectCalendar, isCalendarConnected, syncCalendarList, removeCalendarAccount, setCalendar, setCalendarAccount } from '../gcal.js';
+import { taskCategoryNames, categoryColor } from '../task-labels.js';
 import { KINDS, prefOf, setPref } from '../notifications.js';
 import { RULES, ruleOf, sitesOf } from '../automations.js';
 import { hostOf } from '../sitecheck.js';
@@ -33,25 +34,45 @@ const byName = (a, b) => String(a.name ?? '').localeCompare(String(b.name ?? '')
 // A project in the searchable pickers below, with its icon, since the project list can grow long.
 const projectOption = (p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) });
 
+// Optional project and task-category pickers for an account or a calendar. Empty is a choice: `none` names it.
+function projectPick(projects, value, none, onPick) {
+  return pickChip({
+    value: value ?? null,
+    options: projects.map(projectOption),
+    nullable: true,
+    nullLabel: none,
+    className: 'field-pick project-field-pick',
+    onPick: (v) => onPick(v ?? null),
+  });
+}
+
+function categoryPick(store, value, none, onPick) {
+  return pickChip({
+    value: value || null,
+    options: taskCategoryNames(store).map((name) => ({ value: name, label: name, color: categoryColor(store, name) || undefined })),
+    nullable: true,
+    nullLabel: none,
+    className: 'field-pick project-field-pick',
+    onPick: (v) => onPick(v ?? ''),
+  });
+}
+
 // --- Google Calendar accounts ---
 
 function calendarRow(store, account, cal, projects) {
+  const accountProject = projects.find((p) => p.id === account.projectId);
   return h('li', { class: 'resend-row has-key gcal-row' },
     h('label', { class: 'resend-name check' },
       h('input', { type: 'checkbox', checked: cal.on, 'aria-label': `Show ${cal.name}`, onchange: (e) => setCalendar(store, account.email, cal.id, { on: e.target.checked }) }),
       h('span', { class: 'gcal-swatch', style: { '--c': cal.color || 'var(--accent)' } }),
       h('strong', { title: cal.id }, cal.name)),
+    // Left empty, a calendar takes the account's project and category.
     h('div', { class: 'resend-key' },
-      // Searchable, with each project's icon, since the project list can grow long.
-      pickChip({
-        value: cal.projectId ?? null,
-        options: projects.map(projectOption),
-        nullable: true,
-        nullLabel: 'No project',
-        className: 'field-pick project-field-pick',
-        onPick: (v) => setCalendar(store, account.email, cal.id, { projectId: v ?? null }),
-      })),
-    h('div', { class: 'resend-actions' }));
+      projectPick(projects, cal.projectId, accountProject ? `Account’s: ${accountProject.name}` : 'No project',
+        (projectId) => setCalendar(store, account.email, cal.id, { projectId }))),
+    h('div', { class: 'resend-actions' },
+      categoryPick(store, cal.category, account.category ? `Account’s: ${account.category}` : 'No category',
+        (category) => setCalendar(store, account.email, cal.id, { category }))));
 }
 
 function calendarAccount(store, account, projects, clientId) {
@@ -74,9 +95,15 @@ function calendarAccount(store, account, projects, clientId) {
         : h('button', { type: 'button', class: 'btn-small', disabled: !clientId, onclick: reconnect }, 'Connect'),
       h('button', { type: 'button', class: 'icon-btn', title: 'Remove account', 'aria-label': `Remove ${account.email}`, onclick: () => { removeCalendarAccount(store, account.email); sayRow(''); } }, icon('x'))),
     result(key),
+    h('div', { class: 'gcal-defaults' },
+      h('span', { class: 'muted small' }, 'For all its calendars'),
+      h('label', { class: 'gcal-default' }, h('span', { class: 'muted small' }, 'Project'),
+        projectPick(projects, account.projectId, 'No project', (projectId) => setCalendarAccount(store, account.email, { projectId }))),
+      h('label', { class: 'gcal-default' }, h('span', { class: 'muted small' }, 'Category'),
+        categoryPick(store, account.category, 'No category', (category) => setCalendarAccount(store, account.email, { category })))),
     h('ul', { class: 'resend-list' },
       account.calendars.length
-        ? [h('li', { class: 'resend-row resend-head', 'aria-hidden': 'true' }, h('span', null, 'Calendar'), h('span', null, 'Project'), h('span')),
+        ? [h('li', { class: 'resend-row resend-head', 'aria-hidden': 'true' }, h('span', null, 'Calendar'), h('span', null, 'Project'), h('span', null, 'Category')),
             ...account.calendars.map((c) => calendarRow(store, account, c, projects))]
         : [h('li', { class: 'empty' }, 'No calendars read yet. Connect to read them.')]));
 }
@@ -97,7 +124,7 @@ export function calendarAccountsCard(store) {
       .catch((err) => say(store, 'gcal', err.message, false));
   };
   return h('section', { class: 'card panel' },
-    head('Accounts', 'Each Google account signs in on its own, so work and personal calendars can sit side by side. Untick a calendar to hide it. A calendar given a project can be filtered by that project. Only the addresses and calendar choices are saved.',
+    head('Accounts', 'Each Google account signs in on its own, so work and personal calendars can sit side by side. Untick a calendar to hide it. A project and a category are optional: set on an account, they apply to each of its calendars that has none of its own. A calendar with a project can be filtered by it, and a task made from one of its events gets that project and category. Only the addresses and calendar choices are saved.',
       badge(accounts.length ? `${accounts.length} account${accounts.length === 1 ? '' : 's'}` : 'None', accounts.length ? 'doing' : 'plain')),
     h('div', { class: 'stack-lg' },
       h('div', { class: 'svc-section' },
@@ -431,8 +458,8 @@ export function resendCard(store) {
 
 // --- Gmail ---
 
-// The project a newly added account goes to.
-const gmailView = { project: '' };
+// The project a newly added account goes to, if any.
+const gmailView = { project: null };
 
 function gmailRow(store, account, projects, saveAccounts, clientId) {
   const msg = messages[`gmail:${account.email}`];
@@ -457,13 +484,10 @@ function gmailRow(store, account, projects, saveAccounts, clientId) {
   return h('li', { class: 'resend-row has-key' },
     h('div', { class: 'resend-name' }, project ? projectIcon(project) : icon('mail'), h('strong', { title: account.email }, account.email)),
     h('div', { class: 'resend-key' },
-      pickChip({
-        value: account.projectId ?? null,
-        options: projects.map(projectOption),
-        placeholder: 'Pick a project',
-        className: 'field-pick project-field-pick',
-        onPick: setProject,
-      }),
+      h('div', { class: 'gmail-picks' },
+        projectPick(projects, account.projectId, 'No project', setProject),
+        categoryPick(store, account.category, 'No category', (category) =>
+          saveAccounts(gmailAccounts(store).map((a) => (a.email === account.email ? { ...a, category } : a))))),
       msg ? h('span', { class: `resend-msg small ${msg.ok ? 'ok' : 'error'}`, role: 'status' }, msg.text) : null),
     h('div', { class: 'resend-actions' },
       badge(connected ? 'Connected' : 'Not connected', connected ? 'done' : 'plain'),
@@ -488,7 +512,8 @@ export function gmailCard(store) {
   const saveAccounts = (list) => store.update('settings', (d) => {
     d.gmail = { ...d.gmail, accounts: list };
   });
-  const target = projects.some((p) => p.id === gmailView.project) ? gmailView.project : projects[0]?.id ?? '';
+  // Optional: an account can be added without a project.
+  const target = projects.some((p) => p.id === gmailView.project) ? gmailView.project : null;
   const add = () => {
     const projectId = target;
     say(store, 'gmail', 'Waiting for Google…');
@@ -515,33 +540,28 @@ export function gmailCard(store) {
             ['Set the OAuth Client ID under ', h('a', { href: '#/settings?section=google' }, 'Google Calendar'), ' first. Gmail uses the same one.'],
             ['In Google Cloud Console, enable the ', link('https://console.cloud.google.com/apis/library/gmail.googleapis.com', 'Gmail API'), ' for that project.'],
             'On the OAuth consent screen, add each Gmail address you will connect as a test user. Gmail access is restricted, so the app stays in Testing.',
-            'Pick a project, press Add a Gmail account, choose the account and allow “View your email messages and settings”.',
+            'Pick a project if you like, press Add a Gmail account, choose the account and allow “View your email messages and settings”.',
           ])),
         h('div', { class: 'svc-section' },
           h('h3', null, 'Add an account'),
-          projects.length
-            ? h('div', { class: 'svc-actions' },
-                pickChip({
-                  value: target,
-                  options: projects.map(projectOption),
-                  className: 'field-pick project-field-pick',
-                  onPick: (v) => {
-                    gmailView.project = v;
-                    store.refresh();
-                  },
-                }),
-                h('button', { type: 'button', class: 'primary', disabled: !clientId, onclick: add }, icon('plus'), 'Add a Gmail account'))
-            : empty('No projects yet. Add one in Projects.'),
+          h('div', { class: 'svc-actions' },
+            projects.length
+              ? projectPick(projects, target, 'No project', (v) => {
+                  gmailView.project = v;
+                  store.refresh();
+                })
+              : null,
+            h('button', { type: 'button', class: 'primary', disabled: !clientId, onclick: add }, icon('plus'), 'Add a Gmail account')),
           clientId ? null : setupBanner('google', 'Add the Google OAuth Client ID first. The same one is used here.'),
           result('gmail')))),
     h('section', { class: 'card panel' },
       h('header', { class: 'panel-head' },
         h('div', null,
           h('h2', null, 'Accounts'),
-          h('p', { class: 'muted' }, 'Change an account’s project and its saved mail moves with it. Removing an account removes its mail from the Inbox.'))),
+          h('p', { class: 'muted' }, 'A project and a category are optional. Change an account’s project and its saved mail moves with it; a task made from its mail starts with its project and category. Removing an account removes its mail from the Inbox.'))),
       h('ul', { class: 'resend-list' },
         sorted.length
-          ? [h('li', { class: 'resend-row resend-head', 'aria-hidden': 'true' }, h('span', null, 'Account'), h('span', null, 'Project'), h('span')),
+          ? [h('li', { class: 'resend-row resend-head', 'aria-hidden': 'true' }, h('span', null, 'Account'), h('span', null, 'Project and category'), h('span')),
               ...sorted.map((a) => gmailRow(store, a, projects, saveAccounts, clientId))]
           : [h('li', { class: 'empty' }, 'No Gmail account yet.')])));
 }

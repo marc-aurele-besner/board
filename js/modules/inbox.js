@@ -6,6 +6,7 @@ import { setupBanner, settingsHref } from '../integrations.js';
 import { syncInbox, readEmail, keyedProjects } from '../resend.js';
 import { syncGmail, readGmail, gmailAccounts, gmailProjects, connectGmail, isGmailConnected } from '../gmail.js';
 import { makeTask } from '../capture.js';
+import { taskCategoryNames } from '../task-labels.js';
 import { pickChip } from '../inline.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
@@ -148,7 +149,10 @@ function plainText(body) {
 // A task from an email, filled in for its project and editable before it is added. The email keeps the task's id.
 function openTaskDialog(store, e) {
   const projects = projectTree(store.get('projects').projects).map(({ project }) => project);
-  const head = `${e.dir === 'sent' ? `Sent to ${e.to.join(', ')}` : `From ${e.from}`} · ${fullDate(e.at)}`;
+  // A Gmail account's category is the starting choice; one no longer in the list is still offered.
+  const category = e.source === 'gmail' ? gmailAccounts(store).find((a) => a.email === e.account)?.category ?? '' : '';
+  const categories = [...new Set([...taskCategoryNames(store), category].filter(Boolean))];
+  const head =`${e.dir === 'sent' ? `Sent to ${e.to.join(', ')}` : `From ${e.from}`} · ${fullDate(e.at)}`;
   const description = h('textarea', { name: 'description', rows: 6 }, head);
   let edited = false;
   description.addEventListener('input', () => {
@@ -176,6 +180,7 @@ function openTaskDialog(store, e) {
           text: title,
           description: String(f.get('description') ?? '').trim(),
           projectId,
+          category: String(f.get('category') ?? ''),
           priority: String(f.get('priority')),
           due: String(f.get('due') ?? ''),
           email: { id: e.id, dir: e.dir },
@@ -195,6 +200,9 @@ function openTaskDialog(store, e) {
         h('label', null, 'Project', h('select', { name: 'project' },
           h('option', { value: '' }, 'Personal'),
           projects.map((x) => h('option', { value: x.id, selected: x.id === e.projectId }, x.name)))),
+        h('label', null, 'Category', h('select', { name: 'category' },
+          h('option', { value: '' }, 'No category'),
+          categories.map((c) => h('option', { value: c, selected: c === category }, c)))),
         h('label', null, 'Priority', h('select', { name: 'priority' },
           [['none', 'No priority'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']].map(([v, l]) => h('option', { value: v, selected: v === 'medium' }, l)))),
         h('label', null, 'Due', h('input', { name: 'due', type: 'date' }))),
@@ -376,7 +384,9 @@ function draw(root, store) {
   const projects = new Map(store.get('projects').projects.map((p) => [p.id, p]));
   const { emails, syncedAt } = store.get(COLLECTION);
   // Read once on the first visit of the session; afterwards only when asked.
-  if (keyed.length && !read.asked) setTimeout(() => refresh(store), 0);
+  // A Gmail account needs no project, so it counts on its own.
+  const hasMail = keyed.length > 0 || accounts.length > 0;
+  if (hasMail && !read.asked) setTimeout(() => refresh(store), 0);
 
   const folder = FOLDERS.find(([key]) => key === view.folder) ?? FOLDERS[0];
   const mailboxes = [...(resendKeyed.length || emails.some((e) => !e.source) ? [['resend', 'Resend']] : []), ...accounts.map((a) => [a.email, a.email])];
@@ -437,10 +447,10 @@ function draw(root, store) {
         h('p', { class: 'muted small' },
           `Emails sent and received through ${[resendKeyed.length ? 'Resend' : '', accounts.length ? 'Gmail' : ''].filter(Boolean).join(' and ') || 'Resend or Gmail'}, for ${keyed.length} project${keyed.length === 1 ? '' : 's'}.`,
           syncedAt ? ` Read ${dateOf(syncedAt)}.` : '')),
-      h('button', { type: 'button', class: 'btn-small', disabled: read.busy || !keyed.length, onclick: () => refresh(store) },
+      h('button', { type: 'button', class: 'btn-small', disabled: read.busy || !hasMail, onclick: () => refresh(store) },
         refreshIcon(read.busy), read.busy ? 'Reading…' : 'Refresh')),
 
-    keyed.length ? null : setupBanner('resend', 'Add a Resend API key or a Gmail account to a project to see its emails here.', {
+    hasMail ? null : setupBanner('resend', 'Add a Resend API key to a project, or a Gmail account, to see emails here.', {
       actions: [h('a', { href: settingsHref('gmail'), class: 'btn-small' }, 'Add a Gmail account')],
     }),
     // Gmail sign-ins last about an hour; an account not signed in this session waits for a click.
@@ -456,7 +466,7 @@ function draw(root, store) {
       text: err.projectIds.length ? `${err.projectIds.map(nameOfProject).join(', ')}: ${err.text}` : err.text,
     })),
 
-    keyed.length || emails.length
+    hasMail || emails.length
       ? h('div', { class: 'stack' },
           h('div', { class: 'row lp-filters inbox-folders', role: 'tablist', 'aria-label': 'Folders' },
             FOLDERS.map((f) => chip(view.folder === f[0], [icon(f[2]), f[1]], countOf(f), () => set({ folder: f[0], status: 'all' }), {
