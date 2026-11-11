@@ -20,11 +20,17 @@ export function createStore(dir, collections) {
   // Renders are coalesced to one per frame: a search or a load saves many times in a burst, and redrawing the page
   // for each one made it flash.
   let frame = 0;
+  let byUser = false;
   const notify = () => {
+    // A save made while an event is handled (a click, a key, a submit) is the user's own. Saves from timers and
+    // finished loads are not, and the shell holds those while the user is typing.
+    if (window.event) byUser = true;
     if (frame) return;
     frame = requestAnimationFrame(() => {
       frame = 0;
-      dataListeners.forEach((fn) => fn());
+      const user = byUser;
+      byUser = false;
+      dataListeners.forEach((fn) => fn({ user }));
     });
   };
 
