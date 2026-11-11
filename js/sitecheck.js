@@ -181,7 +181,9 @@ export async function checkDns(host) {
   };
   const order = Object.keys(DNS_TYPES);
   const rank = (name) => (name === domain ? 0 : name === host ? 1 : name === www ? 2 : name.endsWith(`.${domain}`) ? 3 : 4);
-  const records = all.sort((x, y) => rank(x.name) - rank(y.name) || x.name.localeCompare(y.name) || order.indexOf(x.type) - order.indexOf(y.type));
+  const records = all.sort((x, y) => rank(x.name) - rank(y.name) || x.name.localeCompare(y.name) || order.indexOf(x.type) - order.indexOf(y.type)
+    // MX and SRV start with a priority number: lowest first.
+    || (/^(MX|SRV)$/.test(x.type) ? parseInt(x.data, 10) - parseInt(y.data, 10) : 0));
   const spf = of(domain, 'TXT').find((t) => /^v=spf1\b/i.test(t)) ?? '';
   const dmarc = of(`_dmarc.${domain}`, 'TXT').find((t) => /^v=DMARC1\b/i.test(t)) ?? '';
   const mx = of(domain, 'MX');
