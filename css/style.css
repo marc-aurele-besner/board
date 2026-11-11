@@ -620,6 +620,31 @@ textarea.editable-field { resize: vertical; }
 .pop-item.create { color: var(--accent); justify-content: flex-start; }
 .pop-item .icon { width: 14px; height: 14px; }
 .pop-empty { color: var(--muted); padding: 6px; margin: 0; font-size: 0.9rem; }
+/* Colour picker: a swatch button, and a popover with a palette, a hex field and the system picker. */
+.cp-button {
+  width: 28px; height: 28px; min-height: 0; padding: 0; flex: none; border-radius: 50%;
+  background: var(--c); border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--border); cursor: pointer;
+}
+.cp-button:hover { box-shadow: 0 0 0 2px var(--c); }
+.cp-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.color-pop { gap: 10px; }
+.cp-preview { display: flex; justify-content: center; padding: 6px; border-radius: 6px; background: var(--surface-2); }
+.cp-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+.cp-swatch {
+  aspect-ratio: 1; width: 100%; min-height: 0; padding: 0; border-radius: 50%;
+  background: var(--c); border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--border); cursor: pointer;
+}
+.cp-swatch:hover, .cp-swatch:focus-visible { box-shadow: 0 0 0 2px var(--c); outline: none; }
+.cp-swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--text); }
+.cp-custom { display: flex; align-items: center; gap: 6px; }
+.cp-more {
+  display: inline-flex; align-items: center; justify-content: center; flex: none; width: 32px; height: 32px;
+  border: 1px solid var(--border); border-radius: 6px; cursor: pointer; color: var(--muted); position: relative;
+}
+.cp-more:hover { background: var(--surface-2); color: var(--text); }
+.cp-more .icon { width: 16px; height: 16px; }
+.cp-hex { flex: 1; min-width: 0; font-size: 16px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.cp-hex.invalid { border-color: var(--danger); }
 /* Pill colors. Each pill sets --c; the tint and border are derived from it, so they work in both themes.
    Status, priority and project pills each get their own color. A project pill sets --c inline. */
 .pill[class*="tone-"], .pill.doing, .pill[class*="priority-"] {
