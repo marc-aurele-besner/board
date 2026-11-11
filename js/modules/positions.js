@@ -699,35 +699,46 @@ async function etherscanCollects(store, chain, node, key, wallets, rows) {
   }
 }
 
-let historyBusy = false;
-async function loadHistory(store) {
-  if (historyBusy) return;
-  historyBusy = true;
+// Chains whose collect search is running. Each chain searches on its own, so one can be pushed further while others wait.
+const searching = new Set();
+
+// One search pass for collects: each position's events a step further back, then Etherscan. `only` limits it to one
+// chain, for the Search further button. A chain already searching is left to finish.
+async function loadHistory(store, only = null) {
   const cfg = store.get('settings').uniswap ?? {};
   const key = String(cfg.etherscan ?? '').trim();
   const wallets = (cfg.wallets ?? []).filter((w) => isAddress(w.address)).map((w) => w.address.toLowerCase());
   const byChain = new Map();
-  for (const r of state.rows.filter((x) => !x.staleAt && x.liq != null && (x.version === 'v3' || x.pool))) byChain.set(r.chainId, [...(byChain.get(r.chainId) ?? []), r]);
-  await Promise.all([...byChain].map(async ([chainId, rows]) => {
+  for (const r of state.rows.filter((x) => !x.staleAt && x.liq != null && (x.version === 'v3' || x.pool) && (only === null || x.chainId === only))) {
+    byChain.set(r.chainId, [...(byChain.get(r.chainId) ?? []), r]);
+  }
+  const todo = [...byChain].filter(([chainId]) => !searching.has(chainId));
+  if (!todo.length) return;
+  todo.forEach(([chainId]) => searching.add(chainId));
+  store.refresh();
+  await Promise.all(todo.map(async ([chainId, rows]) => {
     const chain = chainOf(chainId);
     const { node } = chainSettings(cfg, chain);
-    for (const r of rows) {
-      try {
-        await nodeCollects(store, chain, node, r);
-      } catch {
-        // This position keeps the other readings until its history can be read.
-      }
-    }
-    if (!key || chain.etherscan === false) return;
     try {
-      await etherscanCollects(store, chain, node, key, wallets, rows);
-      etherscanErrors.delete(chain.name);
-    } catch (err) {
-      etherscanErrors.set(chain.name, err.message);
+      for (const r of rows) {
+        try {
+          await nodeCollects(store, chain, node, r);
+        } catch {
+          // This position keeps the other readings until its history can be read.
+        }
+      }
+      if (!key || chain.etherscan === false) return;
+      try {
+        await etherscanCollects(store, chain, node, key, wallets, rows);
+        etherscanErrors.delete(chain.name);
+      } catch (err) {
+        etherscanErrors.set(chain.name, err.message);
+      }
+    } finally {
+      searching.delete(chainId);
+      store.refresh();
     }
   }));
-  historyBusy = false;
-  store.refresh();
 }
 
 // How far the search for collects has got, per position, from 0 to 1. A position is covered in full once its
@@ -1488,7 +1499,7 @@ const COVERAGE_TITLE = 'How far the search for collect events has got, over ever
 function coverageCard(store) {
   const cov = collectCoverage(store);
   if (!cov.total) return null;
-  const busy = historyBusy || loading;
+  const busy = searching.size > 0 || loading;
   const meter = (x) => h('div', { class: 'meter', role: 'presentation' }, h('span', { style: { width: `${x * 100}%` } }));
   const status = busy ? 'Searching…' : cov.pct >= 1 ? 'Every collect found' : 'Searches further on each load';
   // Collapsed by default to a one-line recap; the per-chain detail opens on demand.
@@ -1512,12 +1523,21 @@ function coverageCard(store) {
       h('strong', null, coveragePct(cov.pct)),
       meter(cov.pct),
       h('span', { class: 'muted small' }, `${cov.done} of ${plural(cov.total, 'position')} searched back to their opening`)),
-    cov.chains.length > 1 || cov.chains[0].pct < 1
+    cov.chains.length
       ? h('ul', { class: 'lp-coverage-chains' }, cov.chains.map((c) => h('li', null,
           h('span', { class: 'chain-chip' }, logo(chainOf(c.chainId)?.logo, c.name, 'xs'), c.name),
           meter(c.pct),
           h('strong', null, coveragePct(c.pct)),
-          h('span', { class: 'muted small' }, `${c.done}/${c.total}`))))
+          h('span', { class: 'muted small' }, `${c.done}/${c.total}`),
+          h('button', {
+            type: 'button',
+            class: 'btn-small lp-search-more',
+            disabled: searching.has(c.chainId) || loading,
+            'aria-busy': searching.has(c.chainId) ? 'true' : null,
+            title: `Search ${c.name} further back for collects now, without waiting for the next load`,
+            'aria-label': `Search ${c.name} further`,
+            onclick: () => loadHistory(store, c.chainId),
+          }, refreshIcon(searching.has(c.chainId)), searching.has(c.chainId) ? 'Searching…' : 'Search further'))))
       : null);
 }
 
