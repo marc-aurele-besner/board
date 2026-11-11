@@ -1,7 +1,7 @@
 import { h, icon, refreshIcon, money, empty, notice } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { poolsChanged } from '../automations.js';
-import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn } from '../uniswap.js';
+import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed } from '../uniswap.js';
 
 const STALE_MS = 10 * 60 * 1000;
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
@@ -78,6 +78,8 @@ function buildRow(p, pool, prices, chain, pricesAt = null) {
     sym0: m0.symbol,
     sym1: m1.symbol,
     feePct: p.fee / 10000,
+    // closed: emptied but not burned. It is kept out of the totals and shown under its own filter.
+    closed: isClosed(p),
     inRange: pool.tick >= p.tickLower && pool.tick < p.tickUpper,
     full,
     min,
@@ -93,6 +95,8 @@ function buildRow(p, pool, prices, chain, pricesAt = null) {
     p1,
     value,
     fees,
+    // Fees read by a simulated collect, not the stored amounts, which lag. Only these can tell a collect apart.
+    feesFull: Boolean(p.feesFull),
     share0: value ? (a0 * p0) / value : null,
     url: chain.app ? `https://app.uniswap.org/positions/${p.version}/${chain.app}/${p.tokenId}` : null,
     // What fee APR from swaps needs: the range, the liquidity (as text, for JSON), the pool and the decimals.
@@ -107,7 +111,6 @@ function buildRow(p, pool, prices, chain, pricesAt = null) {
 }
 
 const shortAddress = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
-const hasValue = (p) => p.liquidity > 0n || p.owed0 > 0n || p.owed1 > 0n;
 
 // v3 baselines saved before v3 fees were read in full hold stale amounts, and would count every fee since the
 // last collect as earned at once, so they start again.
@@ -212,7 +215,7 @@ async function readV4(chain, node, wallets, cfg, saved) {
     s.ids = s.ids.filter((id) => read.get(id)?.position.owner === key);
   }
   const items = [...read.values()]
-    .filter((r) => r && hasValue(r.position) && (manual.has(r.position.tokenId) || labels.has(r.position.owner)))
+    .filter((r) => r && (manual.has(r.position.tokenId) || labels.has(r.position.owner)))
     .map((r) => ({ ...r, position: { ...r.position, label: labels.get(r.position.owner) ?? shortAddress(r.position.owner) } }));
   return { items, scans };
 }
@@ -224,7 +227,7 @@ async function readV3(chain, node, wallets, cfg) {
   const have = new Set(owned.map((p) => p.tokenId));
   const added = addedPositions(cfg).filter((x) => x.version === 'v3' && x.chainId === chain.id && !have.has(String(x.tokenId)));
   const extra = (await Promise.all(added.map((x) => readV3Position(chain, node, x.tokenId))))
-    .filter((p) => p && hasValue(p))
+    .filter(Boolean)
     .map((p) => ({ ...p, label: labels.get(p.owner) ?? shortAddress(p.owner) }));
   const positions = [...owned, ...extra];
   const pools = new Map();
@@ -282,10 +285,10 @@ function savedRows(store, cfg, keys) {
 const cacheKeys = (chains) => chains.flatMap((c) => [`${c.id}:v3`, `${c.id}:v4`]);
 const enabledChains = (cfg) => CHAINS.filter((chain) => chainSettings(cfg, chain).enabled);
 
-// Positions outside their price range as of the last saved read, for Home. Nothing is read from a chain here.
+// Open positions outside their price range as of the last saved read, for Home. Nothing is read from a chain here.
 export function outOfRange(store) {
   const cfg = store.get('settings').uniswap ?? {};
-  return savedRows(store, cfg, cacheKeys(enabledChains(cfg))).filter((r) => !r.inRange);
+  return savedRows(store, cfg, cacheKeys(enabledChains(cfg))).filter((r) => !r.inRange && !r.closed);
 }
 
 // Reads every enabled chain in parallel, and v3 and v4 side by side on each. Each part shows as soon as it is read,
@@ -368,7 +371,7 @@ async function load(store) {
     state.status = 'ok';
     state.at = Date.now();
     // Tell the automation rules and the notifications which positions left their range. Old rows are left out.
-    poolsChanged(store, state.rows.filter((r) => !r.staleAt));
+    poolsChanged(store, state.rows.filter((r) => !r.staleAt && !r.closed));
   } catch (err) {
     state.status = 'error';
     state.error = err.message;
@@ -419,7 +422,7 @@ async function loadAprs(store) {
   const secs = WINDOWS[win][0];
   const cfg = store.get('settings').uniswap ?? {};
   const byChain = new Map();
-  for (const r of state.rows.filter((x) => x.liq != null && x.pool)) byChain.set(r.chainId, [...(byChain.get(r.chainId) ?? []), r]);
+  for (const r of state.rows.filter((x) => x.liq != null && x.pool && !x.closed)) byChain.set(r.chainId, [...(byChain.get(r.chainId) ?? []), r]);
   await Promise.all([...byChain].map(async ([chainId, rows]) => {
     const chain = chainOf(chainId);
     const { node } = chainSettings(cfg, chain);
@@ -549,6 +552,11 @@ function distribution(row) {
     h('div', { class: 'muted small' }, `${pct0}% ${row.sym0} · ${100 - pct0}% ${row.sym1}`));
 }
 
+function statusPill(r) {
+  if (r.closed) return h('span', { class: 'status-pill closed', title: 'No liquidity and no unclaimed fees left' }, h('span', { class: 'dot' }), 'Closed');
+  return h('span', { class: r.inRange ? 'status-pill in' : 'status-pill out' }, h('span', { class: 'dot' }), r.inRange ? 'In range' : 'Out of range');
+}
+
 // Marks a row that may be out of date: read earlier, or valued with earlier prices.
 function outdatedPill(r) {
   if (r.staleAt) return h('span', { class: 'outdated-pill', title: `This read failed. Showing the read from ${ago(r.staleAt)}.` }, `Outdated · ${ago(r.staleAt)}`);
@@ -583,7 +591,7 @@ function poolStat(label, value, title = null) {
 // One position as a card: the pair, its chain and fee, the range, the value and the token split.
 function poolCard(r, i) {
   const chain = chainOf(r.chainId);
-  return h('article', { class: `pool-card ${r.inRange ? 'is-in' : 'is-out'}${i === null ? '' : ' enter'}`, style: { '--i': i ?? 0 } },
+  return h('article', { class: `pool-card ${r.closed ? 'is-closed' : r.inRange ? 'is-in' : 'is-out'}${i === null ? '' : ' enter'}`, style: { '--i': i ?? 0 } },
     h('header', { class: 'pool-head' },
       h('div', { class: 'pair' },
         logo(tokenLogoOf(r, r.addr0), r.sym0, 'token'),
@@ -594,9 +602,7 @@ function poolCard(r, i) {
           h('span', { class: 'chain-chip' }, logo(chain?.logo, r.chain, 'xs'), r.chain),
           h('span', { class: 'version-pill', title: `Uniswap ${r.version}` }, r.version),
           h('span', { class: 'fee-pill' }, `${r.feePct}%`),
-          h('span', { class: r.inRange ? 'status-pill in' : 'status-pill out' },
-            h('span', { class: 'dot' }),
-            r.inRange ? 'In range' : 'Out of range'),
+          statusPill(r),
           outdatedPill(r))),
       r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn pool-open', title: 'Open on Uniswap', 'aria-label': `Open position ${r.tokenId} on Uniswap` }, icon('link')) : null),
     rangeView(r),
@@ -661,8 +667,8 @@ function poolTable(rows, store) {
           h('td', null,
             h('div', null, r.full ? 'Full range' : `${price(r.min)} → ${price(r.max)} ${r.sym1}`),
             h('div', { class: 'row' },
-              h('span', { class: r.inRange ? 'status-pill in' : 'status-pill out' }, h('span', { class: 'dot' }), r.inRange ? 'In range' : 'Out of range'),
-              r.full ? null : h('span', { class: 'muted small' }, `now ${price(r.current)}`))),
+              statusPill(r),
+              r.full || r.closed ? null : h('span', { class: 'muted small' }, `now ${price(r.current)}`))),
           h('td', null, distribution(r)),
           h('td', { class: 'num' }, usdOrDash(r.value)),
           h('td', { class: 'num' }, usdOrDash(r.fees)),
@@ -734,10 +740,15 @@ function draw(root, store) {
   // Chain chips show only chains that have positions, so the row stays short.
   const chainsWithRows = CHAINS.filter((c) => all.some((r) => r.chainId === c.id));
   if (view.chain !== 'all' && !chainsWithRows.some((c) => c.id === view.chain)) view.chain = 'all';
-  const byChain = view.chain === 'all' ? all : all.filter((r) => r.chainId === view.chain);
+  const inChain = view.chain === 'all' ? all : all.filter((r) => r.chainId === view.chain);
+  // Closed positions only show under their own filter, and never count in the totals.
+  const byChain = inChain.filter((r) => !r.closed);
+  const closedRows = inChain.filter((r) => r.closed);
+  const showClosed = view.filter === 'closed';
   const inRange = byChain.filter((r) => r.inRange).length;
   const baselines = store.get(COLLECTION)?.fees ?? {};
-  const shown = sortRows((view.filter === 'in' ? byChain.filter((r) => r.inRange) : view.filter === 'out' ? byChain.filter((r) => !r.inRange) : byChain)
+  const pick = { in: byChain.filter((r) => r.inRange), out: byChain.filter((r) => !r.inRange), closed: closedRows }[view.filter] ?? byChain;
+  const shown = sortRows(pick
     .map((r) => {
       const s = aprs.get(`${view.window}|${r.ref}`);
       return s
@@ -801,7 +812,7 @@ function draw(root, store) {
     const filtered = view.filter !== 'all' || view.chain !== 'all';
     body = h('div', { class: 'lp-empty' },
       h('span', { class: 'float' }, icon('wallet')),
-      h('p', null, all.length && filtered ? 'No positions match this filter.' : 'No open Uniswap positions for these wallets.'));
+      h('p', null, showClosed ? 'No closed positions.' : all.length && filtered ? 'No positions match this filter.' : 'No open Uniswap positions for these wallets.'));
   }
 
   root.replaceChildren(h('div', { class: 'stack-lg lp' },
@@ -834,15 +845,16 @@ function draw(root, store) {
 
     chainsWithRows.length > 1
       ? h('div', { class: 'row lp-filters lp-chains' },
-          chainChip('all', 'All chains', null, all.length),
-          chainsWithRows.map((c) => chainChip(c.id, c.name, c.logo, all.filter((r) => r.chainId === c.id).length)))
+          chainChip('all', 'All chains', null, all.filter((r) => !!r.closed === showClosed).length),
+          chainsWithRows.map((c) => chainChip(c.id, c.name, c.logo, all.filter((r) => r.chainId === c.id && !!r.closed === showClosed).length)))
       : null,
 
     h('div', { class: 'row between' },
       h('div', { class: 'row lp-filters' },
         chip('all', 'All', byChain.length),
         chip('in', 'In range', inRange),
-        chip('out', 'Out of range', byChain.length - inRange)),
+        chip('out', 'Out of range', byChain.length - inRange),
+        closedRows.length || showClosed ? chip('closed', 'Closed', closedRows.length) : null),
       h('div', { class: 'row lp-tools' },
       h('label', { class: 'inline lp-sort', title: 'The time fee APR is read over' }, 'APR',
         h('select', {
@@ -894,7 +906,7 @@ export default {
     apr: view.window === '24h' ? '' : view.window,
   }),
   restore: (p = {}) => {
-    view.filter = ['in', 'out'].includes(p.filter) ? p.filter : 'all';
+    view.filter = ['in', 'out', 'closed'].includes(p.filter) ? p.filter : 'all';
     view.layout = p.view === 'list' ? 'list' : 'cards';
     [view.sort, view.dir] = parseSort(p.sort);
     view.window = Object.hasOwn(WINDOWS, p.apr) ? p.apr : '24h';

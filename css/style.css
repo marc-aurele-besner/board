@@ -999,6 +999,9 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .status-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
 .status-pill.in { color: var(--income); background: color-mix(in srgb, var(--income) 12%, transparent); }
 .status-pill.out { color: var(--expense); background: color-mix(in srgb, var(--expense) 12%, transparent); }
+.status-pill.closed { color: var(--muted); background: var(--surface-2); }
+.pool-card.is-closed { opacity: 0.8; }
+.pool-card.is-closed .range-band { opacity: 0.4; }
 .outdated-pill { display: inline-flex; align-items: center; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
 .status-pill .dot { position: relative; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .status-pill.in .dot::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: currentColor; animation: ping 1.8s ease-out infinite; }

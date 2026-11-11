@@ -154,7 +154,7 @@ async function withFees(chain, node, p) {
   try {
     const call = SEL.collect + pad(BigInt(p.tokenId).toString(16)) + pad(p.owner) + pad(MAX_U128) + pad(MAX_U128);
     const w = words(await rpcCall(node, chain.positions, call, p.owner));
-    if (w.length >= 2) return { ...p, owed0: big(w[0]), owed1: big(w[1]) };
+    if (w.length >= 2) return { ...p, owed0: big(w[0]), owed1: big(w[1]), feesFull: true };
   } catch {}
   return p;
 }
@@ -169,18 +169,21 @@ function decodeString(hex) {
   return ascii(w[0] ?? '');
 }
 
-// Every position with liquidity or unclaimed fees that a public address owns on a chain (up to MAX_POSITIONS).
+// Every position a public address owns on a chain (up to MAX_POSITIONS), closed ones included.
 export async function readPositions(chain, node, owner) {
   const ownerWord = pad(owner);
   const count = Number(big(words(await rpcCall(node, chain.positions, SEL.balanceOf + ownerWord))[0]));
   const indexes = Array.from({ length: Math.min(count, MAX_POSITIONS) }, (_, i) => i);
   const ids = await Promise.all(indexes.map(async (i) => big(words(await rpcCall(node, chain.positions, SEL.tokenOfOwnerByIndex + ownerWord + pad(i.toString(16))))[0])));
   const raw = await Promise.all(ids.map((id) => rpcCall(node, chain.positions, SEL.positions + pad(id.toString(16)))));
-  const live = raw
+  // A closed position (no liquidity, nothing owed) earns nothing, so its fees need no simulated collect.
+  return Promise.all(raw
     .map((hex, i) => decodeV3(chain, ids[i].toString(), owner, hex))
-    .filter((p) => p.liquidity > 0n || p.owed0 > 0n || p.owed1 > 0n);
-  return Promise.all(live.map((p) => withFees(chain, node, p)));
+    .map((p) => (isClosed(p) ? { ...p, feesFull: true } : withFees(chain, node, p))));
 }
+
+// No liquidity and nothing owed: the position was emptied but its token not burned.
+export const isClosed = (p) => BigInt(p.liquidity) === 0n && BigInt(p.owed0) === 0n && BigInt(p.owed1) === 0n;
 
 // A v3 position as the position manager returns it.
 function decodeV3(chain, tokenId, owner, hex) {
@@ -209,7 +212,8 @@ export async function readV3Position(chain, node, tokenId) {
       rpcCall(node, chain.positions, SEL.ownerOf + id),
       rpcCall(node, chain.positions, SEL.positions + id),
     ]);
-    return withFees(chain, node, decodeV3(chain, String(tokenId), addressOf(words(owner)[0]), hex));
+    const p = decodeV3(chain, String(tokenId), addressOf(words(owner)[0]), hex);
+    return isClosed(p) ? { ...p, feesFull: true } : withFees(chain, node, p);
   } catch (err) {
     if (err.refused) return null; // both calls revert for a burned token
     throw err;
@@ -488,6 +492,7 @@ export async function readV4Position(chain, node, tokenId) {
       liquidity,
       owed0: owed(g[0], l[1]),
       owed1: owed(g[1], l[2]),
+      feesFull: true,
     },
     pool: { pool: poolId, sqrtPrice: Number(big(s0[0])) / Q96, tick: Number(signed(s0[1])) },
   };
