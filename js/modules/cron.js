@@ -1,13 +1,13 @@
 // Cron: recurring flows that gather board data, ask an AI model, and turn the answer into a task or a notification.
 // The editor draws a flow as a chain of nodes, like a workflow canvas; the inspector below edits the selected node.
-import { h, icon, empty, notice, now } from '../ui.js';
+import { h, icon, empty, notice, now, uid } from '../ui.js';
 import { projectTree } from './projects.js';
 import { modelChip } from '../model-picker.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import {
-  COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, REPEATS, TEMPLATES, daysOf,
-  makeFlow, makeStep, flowFromTemplate, nextRun, scheduleLabel, runFlow, isRunning,
+  COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, REPEATS, STOP_WHEN, TEMPLATES, daysOf,
+  makeFlow, makeStep, flowFromTemplate, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
 } from '../cron.js';
 import { modelForTask } from './settings.js';
 
@@ -48,11 +48,39 @@ function deleteFlow(store, flow) {
   });
 }
 
-function startRun(store, flow) {
+// A copy starts paused, so it does not run beside the original until it is switched on.
+function duplicateFlow(store, flow) {
+  const copy = structuredClone(flow);
+  addFlow(store, {
+    ...copy,
+    id: uid(),
+    name: `${flow.name} (copy)`,
+    enabled: false,
+    enabledAt: '',
+    lastRun: '',
+    created: now(),
+    steps: copy.steps.map((s) => ({ ...s, id: uid() })),
+  });
+  toast(`Duplicated “${flow.name}”`);
+}
+
+function setEnabled(store, flow, enabled) {
+  updateFlow(store, flow.id, (f) => {
+    f.enabled = enabled;
+    if (enabled) f.enabledAt = now();
+  });
+}
+
+function startRun(store, flow, { dry = false } = {}) {
   if (isRunning(flow.id)) return;
-  const run = runFlow(store, flow.id, { manual: true });
+  const run = runFlow(store, flow.id, { manual: true, dry });
   store.refresh();
-  run.then((r) => toast(r?.status === 'ok' ? `“${flow.name}” ran` : `“${flow.name}” failed: ${r?.error ?? 'unknown error'}`));
+  const what = dry ? 'Test run of' : '';
+  run.then((r) => toast(
+    r?.status === 'ok' ? `${what} “${flow.name}” finished`.trim()
+      : r?.status === 'stopped' ? `${what} “${flow.name}” stopped early`.trim()
+        : `${what} “${flow.name}” failed: ${r?.error ?? 'unknown error'}`.trim(),
+  ));
 }
 
 // --- Flow list ---
@@ -65,7 +93,7 @@ function flowList(store, flows) {
     flows.length
       ? h('ul', { class: 'cron-flows' }, flows.map((f) => {
           const last = lastRunOf(store, f.id);
-          return h('li', null,
+          return h('li', { class: 'cron-flow-row' },
             h('button', {
               type: 'button',
               class: f.id === view.flow ? 'cron-flow active' : 'cron-flow',
@@ -78,7 +106,15 @@ function flowList(store, flows) {
               h('span', { class: `cron-dot ${isRunning(f.id) ? 'running' : !f.enabled ? 'off' : last?.status === 'error' ? 'bad' : 'on'}` }),
               h('span', { class: 'grow' },
                 h('strong', null, f.name),
-                h('span', { class: 'muted small' }, f.enabled ? scheduleLabel(f.schedule) : 'Paused'))));
+                h('span', { class: 'muted small' }, f.enabled ? scheduleLabel(f.schedule) : 'Paused'))),
+            h('input', {
+              type: 'checkbox',
+              class: 'cron-flow-toggle',
+              checked: f.enabled,
+              title: f.enabled ? 'On schedule. Uncheck to pause.' : 'Paused. Check to run on schedule.',
+              'aria-label': `Run “${f.name}” on schedule`,
+              onchange: (e) => setEnabled(store, f, e.target.checked),
+            }));
         }))
       : empty('No flow yet. Start from a template or a blank flow.'));
 }
@@ -119,6 +155,7 @@ function stepSummary(store, step) {
   }
   if (step.type === 'ai') return step.model || modelForTask(store, AI_TASK) || 'No model set';
   if (step.type === 'task') return step.title || '{{input}}';
+  if (step.type === 'stop') return stopLabel(step);
   return step.text || 'Notification';
 }
 
@@ -259,6 +296,14 @@ function stepForm(store, flow, step) {
         field('Priority', select(step.priority, [['none', 'No priority'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], (priority) => set({ priority }))),
         field('Due', select(step.due, [['', 'No deadline'], ['today', 'Day of the run'], ['tomorrow', 'Day after the run']], (due) => set({ due })))));
   }
+  if (step.type === 'stop') {
+    const needsText = step.when === 'contains' || step.when === 'lacks';
+    return h('div', { class: 'stack' },
+      h('div', { class: 'row cron-fields' },
+        field('Stop when', select(step.when, STOP_WHEN, (when) => set({ when }))),
+        needsText ? field('Words', h('input', { value: step.text ?? '', autocomplete: 'off', onchange: (e) => set({ text: e.target.value }) }), 'Not case-sensitive.') : null),
+      h('p', { class: 'muted small' }, 'The run ends here without counting as a failure, and the steps after this one are skipped. Put it after a data step to stay quiet when there is nothing to report.'));
+  }
   return h('div', { class: 'stack' },
     field('Message', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, step.text)),
     vars,
@@ -307,33 +352,44 @@ function inspector(store, flow) {
     output
       ? h('details', { class: 'cron-output', open: !output.ok },
           h('summary', null, output.ok ? `Output of the last run (${output.ms} ms)` : 'Last run failed here'),
+          output.note ? h('p', { class: 'muted small' }, output.note) : null,
           h('pre', { class: output.ok ? '' : 'error' }, output.output || '(empty)'))
       : null);
 }
 
 // --- Runs ---
 
-function runList(store, flow) {
-  const runs = store.get(COLLECTION).runs.filter((r) => r.flowId === flow.id).slice(0, 10);
+const RUN_STATUS = { ok: ['Done', 'done'], stopped: ['Stopped', 'plain'], error: ['Failed', 'high'] };
+
+// One run, folded: its status and time, and when opened each step's output. flowName: shown on the Runs tab.
+function runItem(flow, r, flowName = '') {
   const nameOf = (id) => {
-    const i = flow.steps.findIndex((s) => s.id === id);
+    const i = flow ? flow.steps.findIndex((s) => s.id === id) : -1;
     return i < 0 ? 'Removed step' : `${i + 1}. ${typeOf(flow.steps[i].type)[1]}`;
   };
+  const [label, tone] = RUN_STATUS[r.status] ?? RUN_STATUS.error;
+  return h('li', null, h('details', null,
+    h('summary', { class: 'row' },
+      h('span', { class: `pill tone-${tone}` }, label),
+      r.dry ? h('span', { class: 'pill tone-low' }, 'Test') : null,
+      flowName ? h('strong', null, flowName) : null,
+      h('span', null, timeOf(r.at)),
+      h('span', { class: 'muted small' }, r.dry ? 'test run' : r.manual ? 'run by hand' : 'on schedule'),
+      r.error ? h('span', { class: `${r.status === 'error' ? 'error' : 'muted'} small grow` }, r.error) : null),
+    h('ol', { class: 'cron-run-steps' }, r.steps.map((s) =>
+      h('li', null,
+        h('div', { class: 'row' }, h('strong', null, nameOf(s.stepId)), h('span', { class: 'muted small' }, `${s.ms} ms`)),
+        s.note ? h('p', { class: 'muted small' }, s.note) : null,
+        h('pre', { class: s.ok ? '' : 'error' }, s.output || '(empty)'))))));
+}
+
+function runList(store, flow) {
+  const runs = store.get(COLLECTION).runs.filter((r) => r.flowId === flow.id).slice(0, 10);
   return h('section', { class: 'card stack' },
     h('h3', null, 'Runs'),
     runs.length
-      ? h('ul', { class: 'cron-runs' }, runs.map((r) =>
-          h('li', null, h('details', null,
-            h('summary', { class: 'row' },
-              h('span', { class: `pill tone-${r.status === 'ok' ? 'done' : 'high'}` }, r.status === 'ok' ? 'Done' : 'Failed'),
-              h('span', null, timeOf(r.at)),
-              h('span', { class: 'muted small' }, r.manual ? 'run by hand' : 'on schedule'),
-              r.error ? h('span', { class: 'error small grow' }, r.error) : null),
-            h('ol', { class: 'cron-run-steps' }, r.steps.map((s) =>
-              h('li', null,
-                h('div', { class: 'row' }, h('strong', null, nameOf(s.stepId)), h('span', { class: 'muted small' }, `${s.ms} ms`)),
-                h('pre', { class: s.ok ? '' : 'error' }, s.output || '(empty)'))))))))
-      : empty('No run yet. Use “Run now” to try the flow.'));
+      ? h('ul', { class: 'cron-runs' }, runs.map((r) => runItem(flow, r)))
+      : empty('No run yet. Use “Test run” to try the flow without creating anything.'));
 }
 
 // --- Editor ---
@@ -354,16 +410,17 @@ function editor(store, flow) {
         }),
         h('div', { class: 'row' },
           h('label', { class: 'check' },
-            h('input', {
-              type: 'checkbox',
-              checked: flow.enabled,
-              onchange: (e) => updateFlow(store, flow.id, (f) => {
-                f.enabled = e.target.checked;
-                if (f.enabled) f.enabledAt = now();
-              }),
-            }),
+            h('input', { type: 'checkbox', checked: flow.enabled, onchange: (e) => setEnabled(store, flow, e.target.checked) }),
             ' On schedule'),
+          h('button', {
+            type: 'button',
+            class: 'btn-small',
+            disabled: busy || !flow.steps.length,
+            title: 'Runs every step but creates no task and sends no notification. AI steps still call the model.',
+            onclick: () => startRun(store, flow, { dry: true }),
+          }, icon('filter'), 'Test run'),
           h('button', { type: 'button', class: 'btn-small primary', disabled: busy || !flow.steps.length, onclick: () => startRun(store, flow) }, icon('play'), busy ? 'Running…' : 'Run now'),
+          h('button', { type: 'button', class: 'icon-btn', title: 'Duplicate flow', 'aria-label': 'Duplicate flow', onclick: () => duplicateFlow(store, flow) }, icon('copy')),
           h('button', { type: 'button', class: 'icon-btn', title: 'Delete flow', 'aria-label': 'Delete flow', onclick: () => deleteFlow(store, flow) }, icon('trash')))),
       canvas(store, flow),
       h('p', { class: 'muted small' }, `Last run: ${timeOf(flow.lastRun)}${flow.enabled ? ` · next: ${timeOf(nextRun(flow).toISOString())}` : ''}`)),

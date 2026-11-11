@@ -18,9 +18,29 @@ const MINUTE = 60000;
 export const STEP_TYPES = [
   ['gather', 'Gather data', 'list', 'Reads tasks, a project or spending from the board.'],
   ['ai', 'AI generate', 'cpu', 'Sends a prompt to a model through OpenRouter.'],
+  ['stop', 'Stop if', 'filter', 'Ends the run early, for example when there is nothing to report.'],
   ['task', 'Create task', 'check-square', 'Adds a task with the output as its description.'],
   ['notify', 'Notify', 'bell', 'Posts the output under the bell (and Telegram if enabled).'],
 ];
+
+export const STOP_WHEN = [
+  ['nothing', 'The data step found nothing'],
+  ['empty', 'The input is empty'],
+  ['contains', 'The input contains'],
+  ['lacks', 'The input does not contain'],
+];
+
+// What a source gives when it finds nothing. Later steps still get it, and "Stop if" can end the run on it.
+const NOTHING = {
+  open: 'No open tasks.',
+  due: 'Nothing is due within 7 days.',
+  spending: 'No expenses this month yet.',
+  calendar: 'No events today.',
+  inbox: 'No unread email.',
+  sites: 'No site check problems in the last 24 hours.',
+  pools: 'No open pool positions.',
+  'pools-out': 'Every pool position is in range.',
+};
 
 export const SOURCES = [
   ['open', 'Open tasks'],
@@ -42,6 +62,7 @@ export function makeStep(type) {
   if (type === 'gather') return { ...base, source: 'open', projectId: '', text: '' };
   if (type === 'ai') return { ...base, prompt: 'Summarize this in five bullet points:\n\n{{input}}', system: '', model: '' };
   if (type === 'task') return { ...base, title: '{{flow}} · {{date}}', projectId: '', priority: 'none', due: '' };
+  if (type === 'stop') return { ...base, when: 'nothing', text: '' };
   return { ...base, text: '{{flow}}: {{input}}' };
 }
 
@@ -227,12 +248,13 @@ function taskLines(store, list) {
   return list.map((t) => `- ${t.text} [${nameOf(t.projectId)}${t.priority && t.priority !== 'none' ? `, ${t.priority}` : ''}${t.due ? `, due ${t.due}` : ''}]`).join('\n');
 }
 
+// The source's data as plain text, or '' when it found nothing.
 async function gather(store, step) {
   const open = store.get('todos').items.filter((t) => statusOf(t) !== 'done');
-  if (step.source === 'open') return taskLines(store, open) || 'No open tasks.';
+  if (step.source === 'open') return taskLines(store, open);
   if (step.source === 'due') {
     const limit = new Date(Date.now() + 7 * 24 * 60 * MINUTE).toISOString().slice(0, 10);
-    return taskLines(store, open.filter((t) => t.due && t.due <= limit)) || 'Nothing is due within 7 days.';
+    return taskLines(store, open.filter((t) => t.due && t.due <= limit));
   }
   if (step.source === 'project') {
     const p = store.get('projects').projects.find((x) => x.id === step.projectId);
@@ -248,12 +270,12 @@ async function gather(store, step) {
       totals[key] = (totals[key] ?? 0) + Number(e.amount || 0);
     }
     const rows = Object.entries(totals).sort((a, b) => b[1] - a[1]);
-    return rows.length ? rows.map(([k, v]) => `- ${k}: ${v.toFixed(2)}`).join('\n') : 'No expenses this month yet.';
+    return rows.map(([k, v]) => `- ${k}: ${v.toFixed(2)}`).join('\n');
   }
   if (step.source === 'calendar') return gatherCalendar(store);
   if (step.source === 'inbox') {
     const unread = (store.get('inbox')?.emails ?? []).filter((e) => e.dir === 'received' && !e.archived && e.unread).slice(0, 50);
-    return unread.map((e) => `- ${e.from || 'Unknown sender'}: ${e.subject || '(no subject)'}`).join('\n') || 'No unread email.';
+    return unread.map((e) => `- ${e.from || 'Unknown sender'}: ${e.subject || '(no subject)'}`).join('\n');
   }
   if (step.source === 'sites') {
     const since = Date.now() - 24 * 60 * MINUTE;
@@ -263,13 +285,12 @@ async function gather(store, step) {
       const down = s.health?.status === 'down' ? [`- ${p.name}: down as of the last check`] : [];
       return [...down, ...log.map((e) => `- ${p.name} (${e.level === 'error' ? 'error' : 'warning'}): ${e.text}`)];
     });
-    return lines.join('\n') || 'No site check problems in the last 24 hours.';
+    return lines.join('\n');
   }
   if (step.source === 'pools' || step.source === 'pools-out') {
     const usd = (n) => (n == null ? 'unknown' : `$${n.toFixed(2)}`);
     const rows = openPositions(store).filter((r) => step.source === 'pools' || !r.inRange);
-    return rows.map((r) => `- ${r.pair} on ${r.chain} #${r.tokenId}: ${r.inRange ? 'in range' : 'out of range'}, value ${usd(r.value)}, unclaimed fees ${usd(r.fees)}`).join('\n')
-      || (step.source === 'pools' ? 'No open pool positions.' : 'Every pool position is in range.');
+    return rows.map((r) => `- ${r.pair} on ${r.chain} #${r.tokenId}: ${r.inRange ? 'in range' : 'out of range'}, value ${usd(r.value)}, unclaimed fees ${usd(r.fees)}`).join('\n');
   }
   return step.text || '';
 }
@@ -286,13 +307,37 @@ async function gatherCalendar(store) {
     throw new Error(waiting.length ? `Sign in again to ${waiting.join(', ')} in Calendar.` : errors.join(' · '));
   }
   const clock = (v) => eventDate(v).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return events.map((e) => `- ${e.allDay ? 'All day' : `${clock(e.start)}–${clock(e.end)}`}: ${e.title}${e.location ? ` (${e.location})` : ''}`).join('\n')
-    || 'No events today.';
+  return events.map((e) => `- ${e.allDay ? 'All day' : `${clock(e.start)}–${clock(e.end)}`}: ${e.title}${e.location ? ` (${e.location})` : ''}`).join('\n');
 }
 
-async function runStep(store, flow, step, input) {
+// Whether a "Stop if" step ends the run, given its input and whether the last data step found nothing.
+function stopsOn(step, input, nothing) {
+  const text = String(step.text ?? '').trim().toLowerCase();
+  if (step.when === 'empty') return !input.trim();
+  if (step.when === 'contains') return Boolean(text) && input.toLowerCase().includes(text);
+  if (step.when === 'lacks') return Boolean(text) && !input.toLowerCase().includes(text);
+  return nothing;
+}
+
+export function stopLabel(step) {
+  const label = STOP_WHEN.find(([k]) => k === step.when)?.[1] ?? STOP_WHEN[0][1];
+  return step.when === 'contains' || step.when === 'lacks' ? `${label} “${step.text || '…'}”` : label;
+}
+
+// ctx carries what passes between steps besides the text: whether the last data step found nothing, whether this is
+// a test run, and a note a step leaves for the run log (what it would have done, or why the run stopped).
+async function runStep(store, flow, step, input, ctx) {
   const vars = { input, date: todayISO(), flow: flow.name };
-  if (step.type === 'gather') return gather(store, step);
+  if (step.type === 'gather') {
+    const text = await gather(store, step);
+    ctx.nothing = !text.trim();
+    return text || NOTHING[step.source] || '';
+  }
+  if (step.type === 'stop') {
+    ctx.stop = stopsOn(step, input, ctx.nothing);
+    ctx.note = ctx.stop ? `Stopped: ${stopLabel(step).replace(/^./, (c) => c.toLowerCase())}.` : 'Went on: the condition was not met.';
+    return input;
+  }
   if (step.type === 'ai') {
     const messages = [];
     if (step.system?.trim()) messages.push({ role: 'system', content: fill(step.system, vars) });
@@ -302,6 +347,10 @@ async function runStep(store, flow, step, input) {
   if (step.type === 'task') {
     const title = fill(step.title || '{{input}}', vars).split('\n')[0].slice(0, 200).trim() || flow.name;
     const due = step.due === 'today' ? todayISO() : step.due === 'tomorrow' ? new Date(Date.now() + 24 * 60 * MINUTE).toISOString().slice(0, 10) : '';
+    if (ctx.dry) {
+      ctx.note = `Test run: would create the task “${title}”${due ? ` due ${due}` : ''}.`;
+      return input;
+    }
     store.update('todos', (d) => d.items.push(makeTask({
       text: title,
       description: input,
@@ -314,7 +363,12 @@ async function runStep(store, flow, step, input) {
     return input;
   }
   if (step.type === 'notify') {
-    notify(store, { kind: 'cron', text: fill(step.text, vars).slice(0, 1200), href: `#/cron?flow=${flow.id}` });
+    const text = fill(step.text, vars).slice(0, 1200);
+    if (ctx.dry) {
+      ctx.note = 'Test run: would send this notification.';
+      return text;
+    }
+    notify(store, { kind: 'cron', text, href: `#/cron?flow=${flow.id}` });
     return input;
   }
   throw new Error(`Unknown step “${step.type}”.`);
@@ -324,32 +378,42 @@ const running = new Set();
 export const isRunning = (id) => running.has(id);
 
 // Runs the steps in order and keeps each step's output, so the editor can show what passed between them.
-export async function runFlow(store, flowId, { manual = false } = {}) {
+// A test run (dry) creates no task and sends no notification, and leaves the schedule alone. AI steps still call the model.
+export async function runFlow(store, flowId, { manual = false, dry = false } = {}) {
   const flow = store.get(COLLECTION).flows.find((f) => f.id === flowId);
   if (!flow || running.has(flowId)) return null;
   running.add(flowId);
-  const run = { id: uid(), flowId, at: now(), manual, status: 'ok', steps: [], error: '' };
+  const run = { id: uid(), flowId, at: now(), manual: manual || dry, dry, status: 'ok', steps: [], error: '' };
   // Mark the run at its start, so a slow model call is not started twice by the next tick.
-  store.update(COLLECTION, (d) => {
-    const f = d.flows.find((x) => x.id === flowId);
-    if (f) f.lastRun = run.at;
-  });
+  if (!dry) {
+    store.update(COLLECTION, (d) => {
+      const f = d.flows.find((x) => x.id === flowId);
+      if (f) f.lastRun = run.at;
+    });
+  }
   let input = '';
+  const ctx = { dry, nothing: false, stop: false, note: '' };
   try {
     for (const step of flow.steps) {
       const started = Date.now();
+      ctx.note = '';
       try {
-        input = String(await runStep(store, flow, step, input) ?? '');
-        run.steps.push({ stepId: step.id, ok: true, output: input.slice(0, 4000), ms: Date.now() - started });
+        input = String(await runStep(store, flow, step, input, ctx) ?? '');
+        run.steps.push({ stepId: step.id, ok: true, output: input.slice(0, 4000), note: ctx.note, ms: Date.now() - started });
       } catch (err) {
         run.steps.push({ stepId: step.id, ok: false, output: err.message, ms: Date.now() - started });
         throw err;
+      }
+      if (ctx.stop) {
+        run.status = 'stopped';
+        run.error = ctx.note;
+        break;
       }
     }
   } catch (err) {
     run.status = 'error';
     run.error = err.message;
-    notify(store, { kind: 'cron', text: `Flow “${flow.name}” failed: ${err.message}`, href: `#/cron?flow=${flow.id}` });
+    if (!dry) notify(store, { kind: 'cron', text: `Flow “${flow.name}” failed: ${err.message}`, href: `#/cron?flow=${flow.id}` });
   } finally {
     running.delete(flowId);
     store.update(COLLECTION, (d) => {
