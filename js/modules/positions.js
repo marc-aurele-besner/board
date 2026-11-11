@@ -632,12 +632,17 @@ async function etherscanCollects(store, chain, node, key, wallets, rows) {
     let block = saved.block;
     const found = [];
     let more = true;
+    // cut: transactions were left for the next load. With no budget left, the last load's answer stands.
+    let cut = budget <= 0 && !saved.caughtUp;
     while (more && budget > 0) {
       const start = block;
       const page = await walletPositionTxs(key, chain, wallet, start);
       const todo = page.txs.filter((t) => !checked.has(t.tx));
       for (const t of todo) {
-        if (budget <= 0) break;
+        if (budget <= 0) {
+          cut = true;
+          break;
+        }
         budget--;
         const receipt = await src.call('eth_getTransactionReceipt', [t.tx]);
         for (const p of await positionsInReceipt(chain, node, receipt)) {
@@ -652,10 +657,13 @@ async function etherscanCollects(store, chain, node, key, wallets, rows) {
       // The next call starts at the newest block read in full; its transactions already read are skipped.
       if (budget > 0) block = Math.max(block, page.last ?? block);
       more = page.more && budget > 0 && page.last != null && page.last > start;
+      if (page.more && !more) cut = true;
     }
+    // Caught up: every transaction of this wallet to the position managers, back to its first, has been read.
+    const caughtUp = !cut;
     store.update(COLLECTION, (d) => {
       // Only the transactions of the block the next call starts at need remembering.
-      d.etherscan = { ...d.etherscan, [chain.id]: { ...d.etherscan?.[chain.id], [wallet]: { block, checked: [...checked].slice(-200) } } };
+      d.etherscan = { ...d.etherscan, [chain.id]: { ...d.etherscan?.[chain.id], [wallet]: { block, checked: [...checked].slice(-200), caughtUp, at: Date.now() } } };
       if (found.length) mergeCollects(d, found);
     });
   }
