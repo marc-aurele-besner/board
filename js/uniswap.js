@@ -35,6 +35,22 @@ export const CHAINS = [
   { id: 324, name: 'ZKsync Era', rpc: 'https://mainnet.era.zksync.io', span: 50000, prices: 'era', app: 'zksync', logo: trustLogo('zksync'), native: ETH, factory: '0x8FdA5a7a8dCA67BBcDd10F02Fa0649A937215422', positions: '0x0616e5762c1E7Dc3723c50663dF10a162D690a86', etherscan: false },
 ];
 
+// More public nodes per chain, each checked to answer browser calls. With no node saved in Settings, a chain is
+// read from its own node above plus these, which share the load and stand in when one stops answering.
+const MORE_NODES = {
+  1: ['https://eth.drpc.org', 'https://1rpc.io/eth', 'https://rpc.mevblocker.io'],
+  8453: ['https://mainnet.base.org', 'https://base.drpc.org', 'https://1rpc.io/base'],
+  42161: ['https://arb1.arbitrum.io/rpc', 'https://arbitrum.drpc.org', 'https://1rpc.io/arb'],
+  10: ['https://mainnet.optimism.io', 'https://optimism.drpc.org', 'https://1rpc.io/op'],
+  137: ['https://polygon.drpc.org', 'https://1rpc.io/matic'],
+  56: ['https://bsc-dataseed.bnbchain.org', 'https://1rpc.io/bnb'],
+  43114: ['https://api.avax.network/ext/bc/C/rpc', 'https://avalanche.drpc.org', 'https://1rpc.io/avax/c'],
+  130: ['https://mainnet.unichain.org', 'https://unichain.drpc.org'],
+  4663: ['https://robinhood.drpc.org'],
+  324: ['https://zksync.drpc.org', 'https://1rpc.io/zksync2-era'],
+};
+for (const c of CHAINS) c.rpc = [c.rpc, ...(MORE_NODES[c.id] ?? [])].join(' ');
+
 // v4 pools hold the chain's native coin directly, as the zero address.
 export const NATIVE = '0x0000000000000000000000000000000000000000';
 export const isNative = (address) => String(address).toLowerCase() === NATIVE;
@@ -121,26 +137,85 @@ export function chainSettings(cfg, chain) {
   return { enabled: cfg?.chains?.[chain.id]?.enabled !== false, node: savedNode(cfg, chain) || chain.rpc };
 }
 
-// One JSON-RPC request to a chain's node.
-// A node that says "too many requests" is asked once more after a pause.
-export async function rpc(node, method, params, retry = true) {
-  const res = await fetch(node, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  if (res.status === 429 && retry) {
-    await new Promise((resolve) => setTimeout(resolve, 1000 + Math.random() * 1000));
-    return rpc(node, method, params, false);
+// A chain's node field may list several addresses, separated by spaces or commas.
+export const nodeUrls = (node) => [...new Set(String(node ?? '').split(/[\s,]+/).filter(Boolean))];
+// What a saved search is keyed by: the first address, so adding more nodes does not start it over.
+export const nodeKey = (node) => nodeUrls(node)[0] ?? '';
+
+// How each node has done lately: calls in flight, a running average of its answer time, and until when it is
+// left aside after it failed. Shared by every read, so a node that stops answering is skipped everywhere.
+const nodeHealth = new Map();
+const NODE_REST = 60000;
+const health = (url) => nodeHealth.get(url) ?? nodeHealth.set(url, { busy: 0, ms: 0, downUntil: 0 }).get(url);
+
+// The node expected to answer first: its average time, times the calls already waiting on it. Calls spread across
+// the nodes this way, and a node resting after a failure is used only once every other one has been tried.
+function pickNode(urls, tried) {
+  const left = urls.filter((u) => !tried.has(u));
+  if (!left.length) return null;
+  const now = Date.now();
+  const up = left.filter((u) => health(u).downUntil <= now);
+  const wait = (u) => (health(u).busy + 1) * (health(u).ms || 400);
+  return (up.length ? up : left).reduce((a, b) => (wait(b) < wait(a) ? b : a));
+}
+
+// One request to one node. With other nodes to fall back on, a node that takes too long is given up on.
+async function rpcOne(url, method, params, alone, retry = true) {
+  const h = health(url);
+  const ctl = alone ? null : new AbortController();
+  const timer = ctl ? setTimeout(() => ctl.abort(), method === 'eth_getLogs' ? 25000 : 10000) : 0;
+  const start = performance.now();
+  h.busy++;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      signal: ctl?.signal,
+    });
+    // Alone, a node that says "too many requests" is asked once more after a pause; otherwise another node is.
+    if (res.status === 429 && alone && retry) {
+      await new Promise((resolve) => setTimeout(resolve, 1000 + Math.random() * 1000));
+      return await rpcOne(url, method, params, alone, false);
+    }
+    if (!res.ok) throw new Error(`The node answered ${res.status}.`);
+    const json = await res.json();
+    const ms = performance.now() - start;
+    h.ms = h.ms ? h.ms * 0.7 + ms * 0.3 : ms;
+    h.downUntil = 0;
+    if (json.error) {
+      const err = new Error(`The node refused the call: ${json.error.message ?? 'error'}.`);
+      err.refused = true; // the node answered and said no, unlike a network error, which may pass
+      throw err;
+    }
+    return json.result;
+  } catch (err) {
+    if (err.refused) throw err;
+    h.downUntil = Date.now() + NODE_REST;
+    throw err.name === 'AbortError' ? new Error('The node did not answer in time.') : err;
+  } finally {
+    clearTimeout(timer);
+    h.busy--;
   }
-  if (!res.ok) throw new Error(`The node answered ${res.status}.`);
-  const json = await res.json();
-  if (json.error) {
-    const err = new Error(`The node refused the call: ${json.error.message ?? 'error'}.`);
-    err.refused = true; // the node answered and said no, unlike a network error, which may pass
-    throw err;
+}
+
+// One JSON-RPC request to a chain's node, or to the first of its nodes that answers.
+// A refusal is the answer, except for log searches: nodes keep different history and accept different ranges.
+export async function rpc(node, method, params) {
+  const urls = nodeUrls(node);
+  if (!urls.length) throw new Error('No node address is set.');
+  const tried = new Set();
+  let failed = null;
+  for (let url = pickNode(urls, tried); url; url = pickNode(urls, tried)) {
+    tried.add(url);
+    try {
+      return await rpcOne(url, method, params, urls.length === 1);
+    } catch (err) {
+      if (err.refused && method !== 'eth_getLogs') throw err;
+      if (!failed?.refused) failed = err; // a refusal says more than a node that was offline
+    }
   }
-  return json.result;
+  throw failed;
 }
 
 // One read-only call to a contract. from: the caller, for a call that checks who sends it.
@@ -308,7 +383,7 @@ async function searchFrom(chain, node, owner, start, end, span, forward) {
 // done means the search reached the deployment or the node refused to go further back.
 export async function scanV4(chain, node, owner, prev) {
   const head = Number(await rpc(node, 'eth_blockNumber', []));
-  const fresh = !prev || prev.node !== node;
+  const fresh = !prev || nodeKey(prev.node) !== nodeKey(node);
   const s = fresh ? { node, from: head + 1, to: head, span: chain.span, ids: [], done: false } : { ...prev, ids: [...prev.ids] };
   const found = new Set(s.ids);
   let calls = SCAN_CALLS;
@@ -422,7 +497,7 @@ export async function positionHistory(chain, node, pos, prev, onRange = null) {
   const head = Number(await rpc(node, 'eth_blockNumber', []));
   const query = await historyQuery(chain, node, pos);
   const floor = pos.version === 'v4' ? chain.v4.start : 0;
-  const fresh = !prev || prev.node !== node;
+  const fresh = !prev || nodeKey(prev.node) !== nodeKey(node);
   const s = fresh
     ? { node, from: head + 1, to: head, span: chain.span, done: false, events: [] }
     : { ...prev, events: [...prev.events] };
@@ -732,7 +807,7 @@ export async function poolSwaps(chain, node, version, pool, from, head) {
   const key = `${chain.id}:${version}:${pool}`;
   let c = swapCache.get(key);
   // A gap too long to close in one load starts over, so the swaps read are always one unbroken range.
-  if (!c || c.node !== node || head - c.to > chain.span * (SWAP_CALLS / 2)) c = { node, from: head + 1, to: head, swaps: [] };
+  if (!c || nodeKey(c.node) !== nodeKey(node) || head - c.to > chain.span * (SWAP_CALLS / 2)) c = { node, from: head + 1, to: head, swaps: [] };
   const filter = version === 'v3' ? { address: pool, topics: [SWAP_V3] } : { address: await managerOf(chain, node), topics: [SWAP_V4, pool] };
   let span = chain.span;
   let calls = SWAP_CALLS;

@@ -1,6 +1,6 @@
 // Smart contracts saved in Settings → Smart contracts: reading them through the chain's node, sending
 // transactions through the browser wallet (the board never holds a key), and reading their recent activity.
-import { rpc, rpcCall, etherscan } from './uniswap.js';
+import { rpc, rpcCall, etherscan, nodeUrls } from './uniswap.js';
 import { chainById } from './chains.js';
 import { encodeCall, decodeArgs, decodeLog, eventsOf, functionsOf, selector, parseAbi } from './abi.js';
 
@@ -48,7 +48,7 @@ async function onChain(chain) {
     if (err?.code !== 4902) throw err;
     await wallet().request({
       method: 'wallet_addEthereumChain',
-      params: [{ chainId, chainName: chain.name, rpcUrls: [chain.node], nativeCurrency: { name: chain.symbol, symbol: chain.symbol, decimals: 18 }, blockExplorerUrls: chain.explorer ? [chain.explorer] : undefined }],
+      params: [{ chainId, chainName: chain.name, rpcUrls: nodeUrls(chain.node), nativeCurrency: { name: chain.symbol, symbol: chain.symbol, decimals: 18 }, blockExplorerUrls: chain.explorer ? [chain.explorer] : undefined }],
     });
   }
 }
