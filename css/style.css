@@ -723,12 +723,12 @@ select { width: auto; min-width: 0; }
 .added-row:nth-child(even) { background: var(--surface-2); }
 .added-head { border-left-color: transparent; font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .added-row.tone-in { --edge: var(--income); }
-.added-row.tone-out { --edge: var(--warn); }
+.added-row.tone-out { --edge: var(--expense); }
 .added-row.tone-closed, .added-row.tone-unread { --edge: var(--muted); }
 .added-chain, .added-pair { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .added-pair strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .added-id { font-variant-numeric: tabular-nums; }
-.added-status { font-weight: 600; color: var(--edge); }
+.added-status { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--edge); }
 .tone-closed .added-status, .tone-unread .added-status { color: var(--muted); }
 .logo.sm { width: 22px; height: 22px; }
 .added-pair .pair .logo.second { margin-left: -7px; }
@@ -1692,6 +1692,9 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .insight-item { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2); }
 .insight-item p { margin: 0; }
 .insight-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.insight-pair { display: inline-flex; align-items: center; }
+.insight-pair .logo { width: 18px; height: 18px; box-shadow: 0 0 0 1.5px var(--surface); }
+.insight-pair .logo.second { margin-left: -5px; }
 .insight-open { margin-left: auto; }
 .insight-headline { font-weight: 600; }
 .insight-action { font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.03em; }
@@ -1738,9 +1741,11 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .lp-pos { display: inline-flex; align-items: center; gap: 8px; }
 .pos-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .pos-dot.in { background: var(--income); box-shadow: 0 0 0 3px color-mix(in srgb, var(--income) 20%, transparent); }
-.pos-dot.out { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 20%, transparent); }
+.pos-dot.out { background: var(--expense); box-shadow: 0 0 0 3px color-mix(in srgb, var(--expense) 20%, transparent); }
 .pos-dot.closed { background: var(--muted); opacity: 0.7; }
 .pos-dot.gone { background: transparent; border: 1.5px solid var(--muted); }
+/* The status dot on a filter chip: a thin outline instead of the halo, so it reads on the accent fill of the active chip too. */
+.lp-chip .pos-dot { width: 8px; height: 8px; box-shadow: 0 0 0 1.5px var(--surface); }
 .link-btn { background: none; border: none; padding: 0; min-height: 0; font: inherit; font-weight: 600; color: var(--text); text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent); text-underline-offset: 3px; }
 .link-btn:hover { color: var(--accent); text-decoration-color: currentColor; }
 .lp-picker { position: relative; display: inline-flex; }

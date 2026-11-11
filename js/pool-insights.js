@@ -4,6 +4,7 @@ import { h, icon, money, notice, uid } from './ui.js';
 import { ask, parseJson } from './ai.js';
 import { systemPrompt } from './prompts.js';
 import { setupBanner, hasOpenRouter } from './integrations.js';
+import { CHAINS } from './uniswap.js';
 
 const COLLECTION = 'pools';
 const KEEP = 5;
@@ -140,7 +141,7 @@ function inBase(pos, flipped, range) {
   };
 }
 
-function item(it, live, flipped) {
+function item(it, live, flipped, look) {
   const [label, tone] = ACTIONS[it.action];
   const pos = it.pos;
   const now = inBase(pos, flipped, { min: pos.min, max: pos.max ?? Infinity, current: pos.current });
@@ -149,6 +150,7 @@ function item(it, live, flipped) {
   return h('li', { class: 'insight-item' },
     h('div', { class: 'insight-top' },
       h('span', { class: `insight-action ${tone}` }, label),
+      h('span', { class: 'pair insight-pair' }, look.tokens(pos, live).map((src, i) => look.logo(src, i ? pos.sym1 : pos.sym0, i ? 'xs second' : 'xs'))),
       h('strong', null, pos.pair),
       h('span', { class: 'muted small' }, `${pos.chain} · ${pos.feePct}% · #${pos.tokenId}`),
       h('span', { class: pos.inRange ? 'status-pill in' : 'status-pill out' }, h('span', { class: 'dot' }), pos.inRange ? 'In range' : 'Out of range'),
@@ -166,17 +168,20 @@ function item(it, live, flipped) {
       : null);
 }
 
+// The same status dot the positions list shows: green in range, red out of range.
+const dot = (kind) => h('span', { class: `pos-dot ${kind}`, 'aria-hidden': 'true' });
+
 // The chips over a read's list: by action, by range status, and by chain when there are several.
-function filters(store, items) {
-  const chip = (key, value, label, n) => h('button', {
+function filters(store, items, look) {
+  const chip = (key, value, label, n, lead = null) => h('button', {
     type: 'button',
-    class: insight[key] === value ? 'lp-chip active' : 'lp-chip',
+    class: `lp-chip${key === 'chain' ? ' chain' : ''}${insight[key] === value ? ' active' : ''}`,
     'aria-pressed': String(insight[key] === value),
     onclick: () => {
       insight[key] = value;
       store.refresh();
     },
-  }, label, h('span', { class: 'chip-count' }, n));
+  }, lead, label, h('span', { class: 'chip-count' }, n));
   const count = (pred) => items.filter(pred).length;
   const actions = ORDER.filter((a) => items.some((it) => it.action === a));
   const chains = [...new Set(items.map((it) => it.pos.chain))].sort((a, b) => a.localeCompare(b));
@@ -186,10 +191,10 @@ function filters(store, items) {
       actions.map((a) => chip('action', a, ACTIONS[a][0], count((it) => it.action === a)))),
     h('div', { class: 'row lp-filters' },
       chip('range', 'all', 'Any range', items.length),
-      chip('range', 'in', 'In range', count((it) => it.pos.inRange)),
-      chip('range', 'out', 'Out of range', count((it) => !it.pos.inRange)),
+      chip('range', 'in', 'In range', count((it) => it.pos.inRange), dot('in')),
+      chip('range', 'out', 'Out of range', count((it) => !it.pos.inRange), dot('out')),
       chains.length > 1 ? chip('chain', 'all', 'All chains', items.length) : null,
-      chains.length > 1 ? chains.map((c) => chip('chain', c, c, count((it) => it.pos.chain === c))) : null));
+      chains.length > 1 ? chains.map((c) => chip('chain', c, c, count((it) => it.pos.chain === c), look.logo(CHAINS.find((x) => x.name === c)?.logo, c, 'xs'))) : null));
 }
 
 // The saved reads as tabs, newest first, each named by its date and time.
@@ -209,7 +214,7 @@ function tabs(store, runs, shown) {
     }, whenText(r.at))));
 }
 
-function runView(store, rows, shown, isFlipped) {
+function runView(store, rows, shown, isFlipped, look) {
   const live = new Map(rows.map((r) => [r.ref, r]));
   const latest = runsOf(store)[0]?.id === shown.id;
   const items = shown.items
@@ -224,16 +229,16 @@ function runView(store, rows, shown, isFlipped) {
       ? notice({ tone: 'info', text: 'The positions changed since this read. Ask again for an up-to-date one.' })
       : null,
     shown.summary ? h('p', null, shown.summary) : null,
-    items.length > 1 ? filters(store, items) : null,
+    items.length > 1 ? filters(store, items, look) : null,
     picked.length
-      ? h('ul', { class: 'insight-list' }, picked.map((it) => item(it, live.get(it.ref), isFlipped(it.pos))))
+      ? h('ul', { class: 'insight-list' }, picked.map((it) => item(it, live.get(it.ref), isFlipped(it.pos), look)))
       : items.length ? h('p', { class: 'muted small' }, 'No insights match these filters.') : null,
     h('p', { class: 'muted small' }, `Read ${whenText(shown.at)}. An AI read of the numbers above, not financial advice.`));
 }
 
 // rows: the open positions on screen (closed ones left out), with fee APR when it is known.
 // sideOf(r): the row's prices in the base the board shows. isFlipped(pair): whether a pair is shown flipped.
-export function insightsPanel(store, rows, { sideOf, isFlipped }) {
+export function insightsPanel(store, rows, { sideOf, isFlipped, logo, tokenLogos }) {
   if (!rows.length) return null;
   const out = rows.filter((r) => !r.inRange);
   const edge = rows.filter(nearEdge);
@@ -281,7 +286,7 @@ export function insightsPanel(store, rows, { sideOf, isFlipped }) {
       insight.status === 'error' ? notice({ text: insight.error }) : null,
       loading ? h('p', { class: 'muted small' }, `Reading ${rows.length} position${rows.length === 1 ? '' : 's'}…`) : null,
       shown ? tabs(store, runs, shown) : null,
-      shown ? runView(store, rows, shown, isFlipped) : null);
+      shown ? runView(store, rows, shown, isFlipped, { logo, tokens: tokenLogos }) : null);
   }
 
   return h('section', { class: 'card stack lp-insights' }, head, body);
