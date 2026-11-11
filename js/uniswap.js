@@ -506,15 +506,22 @@ export const addedPositions = (cfg) => [
 ];
 export const addedListOf = (version) => (version === 'v3' ? 'v3ids' : 'v4ids');
 
-// Reads what was typed to add a position: a Uniswap app link (…/positions/<v3|v4>/<chain>/<id>), which names its
-// chain and version, or a plain number, which takes the chain and version picked beside it.
+// Reads a Uniswap app link (…/positions/<v3|v4>/<chain>/<id>), which names its chain, version and number.
+// Returns null for text that is not such a link, and { slug } alone when the link names a chain the board does not read.
+export function readLink(text) {
+  const m = String(text ?? '').trim().match(/positions\/(v3|v4)\/([a-z0-9_-]+)\/(\d+)/i);
+  if (!m) return null;
+  const slug = m[2].toLowerCase();
+  const chain = CHAINS.find((c) => c.app === slug);
+  return chain ? { chainId: chain.id, version: m[1].toLowerCase(), tokenId: m[3], slug } : { slug };
+}
+
+// Reads what was typed to add a position: a Uniswap app link, or a plain number, which takes the chain and version
+// picked beside it.
 export function parsePosition(text, chainId, version) {
+  const link = readLink(text);
+  if (link) return link.chainId ? { chainId: link.chainId, version: link.version, tokenId: link.tokenId } : null;
   const s = String(text ?? '').trim();
-  const m = s.match(/positions\/(v3|v4)\/([a-z0-9_-]+)\/(\d+)/i);
-  if (m) {
-    const chain = CHAINS.find((c) => c.app === m[2].toLowerCase());
-    return chain ? { chainId: chain.id, version: m[1].toLowerCase(), tokenId: m[3] } : null;
-  }
   return /^\d+$/.test(s) && CHAINS.some((c) => c.id === chainId) && ['v3', 'v4'].includes(version) ? { chainId, version, tokenId: s } : null;
 }
 
