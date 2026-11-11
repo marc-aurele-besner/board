@@ -110,6 +110,38 @@ export function checkBudgets(store) {
 }
 
 const HISTORY = 60; // checks kept per site for the uptime bars
+const LOG_KEEP = 200; // log entries kept per site
+const LOG_REPEAT_MS = 6 * 3600000; // the same warning is written again only after this long
+const PART_LABEL = { ssl: 'SSL', domain: 'Domain', dns: 'DNS', crawl: 'Crawl files', meta: 'Metadata' };
+
+// What one round of checks found worth keeping: errors, warnings, and a site coming back.
+// Each entry is { at, level: 'error' | 'warn' | 'info', source, text }.
+function logEntries(project, found, before, after) {
+  const host = hostOf(project.website);
+  const out = [];
+  const add = (level, source, text) => out.push({ at: now(), level, source, text });
+  if (found.health) {
+    const { status, ms } = found.health;
+    if (status === 'down') add('error', 'health', `${host} did not answer.`);
+    else if (status === 'slow') add('warn', 'health', `Slow answer: ${ms} ms.`);
+    else if (before.health?.status === 'down') add('info', 'health', `Answering again (${ms} ms).`);
+  }
+  for (const key of Object.keys(PART_LABEL)) {
+    if (found[key]?.error) add('warn', key, `${PART_LABEL[key]} lookup failed: ${found[key].error}`);
+  }
+  if (found.ssl && after.ssl?.until && daysUntil(after.ssl.until) <= 30) add(daysUntil(after.ssl.until) <= 7 ? 'error' : 'warn', 'ssl', `The SSL certificate expires on ${after.ssl.until}.`);
+  if (found.domain && after.domain?.until && daysUntil(after.domain.until) <= 60) add(daysUntil(after.domain.until) <= 14 ? 'error' : 'warn', 'domain', `The domain ${after.domain.name} expires on ${after.domain.until}.`);
+  if (found.dns) {
+    const gaps = emailGaps(after.dns);
+    if (gaps.length) add('warn', 'dns', `${after.dns.domain} receives mail but has no ${gaps.join(' or ')} record.`);
+  }
+  if (found.crawl && after.crawl?.robots) {
+    if (after.crawl.robots.blocksSearch) add('error', 'crawl', 'robots.txt blocks Google or Bing from the whole site.');
+    const broken = Object.entries(after.crawl).filter(([, f]) => f?.checks?.some(([l]) => l === 'error')).map(([k]) => k);
+    if (broken.length) add('warn', 'crawl', `Format errors in ${broken.join(', ')}.`);
+  }
+  return out;
+}
 
 // Runs the chosen checks for one project and saves what they found. A failed lookup is saved as its error text.
 export async function checkSite(store, project, parts = ['health', 'ssl', 'domain']) {
@@ -144,6 +176,16 @@ export async function checkSite(store, project, parts = ['health', 'ssl', 'domai
       s.history = [...(s.history ?? []), { at: found.health.at, ok: found.health.status !== 'down', ms: found.health.ms }].slice(-HISTORY);
     }
   });
+  const entries = logEntries(project, found, before, siteData(store, project.id));
+  if (entries.length) {
+    store.update('tools', (d) => {
+      const s = d.sites[project.id];
+      const log = s.log ?? [];
+      // A health problem is written each time, so the log shows how long it lasted; other warnings only when new or stale.
+      const fresh = entries.filter((e) => e.source === 'health' || !log.some((x) => x.source === e.source && x.text === e.text && Date.parse(e.at) - Date.parse(x.at) < LOG_REPEAT_MS));
+      s.log = [...log, ...fresh].slice(-LOG_KEEP);
+    });
+  }
   if (found.health?.status === 'down' && wasUp) {
     notify(store, { kind: 'health', text: `${host} did not answer.`, href: '#/tools' });
   }
@@ -178,7 +220,7 @@ export async function checkProviders(store, ids = null) {
   const providers = store.get('tools').providers.filter((pr) => !ids || ids.includes(pr.id));
   const found = await Promise.all(providers.map(async (pr) => {
     try {
-      return [pr, { ...(await checkProvider(pr.url)), at: now() }];
+      return [pr, { ...(await checkProvider(pr.url, pr.kind ?? store.get('tools').status[pr.id]?.kind)), at: now() }];
     } catch (err) {
       return [pr, { error: err.name === 'AbortError' ? 'The status page took too long.' : err.message, at: now() }];
     }
