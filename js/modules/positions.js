@@ -1202,6 +1202,8 @@ function feeRangeBounds(key, nowMs) {
   return [days ? nowMs - days * DAY_MS : null, null];
 }
 const FEE_GROUPS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month']];
+// Days by default; a year of days is too many bars, so the 1 year range starts on months.
+const defaultFeeGroup = (range) => (range === '365' ? 'month' : 'day');
 
 // Local calendar keys, so a collect late in the evening counts on its own day.
 const localDay = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -1699,7 +1701,7 @@ function feesView(store) {
 
   return h('div', { class: 'stack-lg' },
     h('div', { class: 'row between' },
-      pills(FEE_RANGE_ORDER.map((k) => [k, FEE_RANGES[k][1]]), view.feeRange, (k) => { view.feeRange = k; }),
+      pills(FEE_RANGE_ORDER.map((k) => [k, FEE_RANGES[k][1]]), view.feeRange, (k) => { view.feeRange = k; view.feeGroup = defaultFeeGroup(k); }),
       view.logging ? null : h('button', {
         type: 'button',
         class: 'btn-small',
@@ -2291,7 +2293,7 @@ export default {
     apr: view.window === '24h' ? '' : view.window,
     tab: view.tab === 'fees' ? 'fees' : '',
     range: view.feeRange === 'all' ? '' : view.feeRange,
-    by: view.feeGroup === 'month' ? '' : view.feeGroup,
+    by: view.feeGroup === defaultFeeGroup(view.feeRange) ? '' : view.feeGroup,
     fsort: view.feeSort === 'date' && view.feeDir === -1 ? '' : sortName(view.feeSort, view.feeDir),
     fchain: view.feeChain === 'all' ? '' : view.feeChain,
     ftoken: view.feeToken === 'all' ? '' : view.feeToken,
@@ -2308,7 +2310,7 @@ export default {
     view.chain = CHAINS.some((c) => c.id === id) ? id : 'all';
     view.tab = p.tab === 'fees' ? 'fees' : 'positions';
     view.feeRange = Object.hasOwn(FEE_RANGES, p.range) ? p.range : 'all';
-    view.feeGroup = ['day', 'week'].includes(p.by) ? p.by : 'month';
+    view.feeGroup = FEE_GROUPS.some(([k]) => k === p.by) ? p.by : defaultFeeGroup(view.feeRange);
     const [fkey, fdir] = String(p.fsort ?? '').split('-');
     [view.feeSort, view.feeDir] = Object.hasOwn(FEE_SORTS, fkey) ? [fkey, fdir === 'asc' ? 1 : -1] : ['date', -1];
     // Chain and token names are checked against the log when it is drawn.
