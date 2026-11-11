@@ -2153,3 +2153,31 @@ button.sum-line:hover { background: var(--surface-2); }
 .account-avatar.is-letter { display: inline-flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 600; color: var(--accent-text); background: var(--accent); }
 .account-avatar.large { width: 28px; height: 28px; font-size: 0.85rem; }
 .opt-plain .account-avatar { width: 16px; height: 16px; font-size: 0.6rem; }
+
+/* Inbox: folders and project directories in a side column, like a mail client. On a phone they sit above the list. */
+.inbox-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 16px; align-items: start; }
+.inbox-side { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+.inbox-layout .inbox-folders { display: flex; flex-direction: column; gap: 2px; }
+.inbox-layout .inbox-folders .lp-chip { border-color: transparent; background: transparent; border-radius: 0 999px 999px 0; padding: 6px 12px; justify-content: flex-start; }
+.inbox-layout .inbox-folders .lp-chip:hover { background: var(--surface-2); }
+.inbox-layout .inbox-folders .lp-chip.active { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); color: var(--text); font-weight: 600; }
+.inbox-folder-name { flex: 1; text-align: left; }
+.inbox-dirs-wrap > summary { cursor: pointer; padding: 4px 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+.inbox-dirs { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.inbox-dir { display: flex; align-items: center; padding-left: calc(var(--depth, 0) * 14px); }
+.inbox-dir-toggle, .inbox-dir-gap { flex: none; width: 22px; height: 22px; min-height: 0; padding: 0; }
+.inbox-dir-toggle .icon { width: 12px; height: 12px; transition: transform 0.15s ease; }
+.inbox-dir-toggle.open .icon { transform: rotate(90deg); }
+.inbox-dir-btn { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; border: none; background: transparent; color: var(--text); padding: 5px 10px 5px 4px; border-radius: 0 999px 999px 0; font-size: 0.88rem; text-align: left; }
+.inbox-dir-btn:hover { background: var(--surface-2); }
+.inbox-dir-btn.active { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); font-weight: 600; }
+.inbox-dir-btn .icon { width: 14px; height: 14px; flex: none; }
+.inbox-dir-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inbox-dir-btn .chip-count { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) {
+  .inbox-layout { grid-template-columns: minmax(0, 1fr); }
+  .inbox-side { position: static; max-height: none; overflow: visible; }
+  .inbox-layout .inbox-folders { flex-direction: row; overflow-x: auto; scrollbar-width: none; }
+  .inbox-layout .inbox-folders .lp-chip { flex: none; border-color: var(--border); border-radius: 999px; }
+  .inbox-layout .inbox-folders .lp-chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+}
