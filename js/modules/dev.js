@@ -510,19 +510,12 @@ function draw(root, store) {
   if (view.queued && view.info) startQueued(store);
   if (!view.sessions.length) newSession(store);
   const s = activeSession();
-  const busy = view.sessions.filter((x) => x.running).length;
   // The page is rebuilt around the terminal; it keeps the keys if it had them.
   const focused = document.activeElement === s.el?.out;
   const ctx = filesCtx(store);
 
   root.replaceChildren(
     h('div', { class: 'stack-lg dev' },
-      h('header', null,
-        h('h2', null, 'Dev'),
-        h('p', { class: 'muted small' },
-          view.info
-            ? `Files and terminals on this machine, in ${view.info.shell.split(/[\\/]/).pop()}. Interactive programs such as claude work: click the terminal and type. ${busy} of ${view.info.max} running; closing or reloading the page stops them.`
-            : 'Files and terminals on this machine.')),
       view.infoError ? runnerNotice(store) : null,
       h('div', { class: 'ide' },
         explorer(ctx, workspacePicker(store)),
