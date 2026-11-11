@@ -7,6 +7,7 @@
     "start": "bun tools/start.js",
     "dev": "bun --watch --no-clear-screen tools/start.js",
     "serve": "bun tools/serve.js",
-    "relays": "bun tools/relays.js"
+    "relays": "bun tools/relays.js",
+    "terminal": "bun tools/terminal.js"
   }
 }

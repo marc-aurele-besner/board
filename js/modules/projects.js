@@ -140,6 +140,8 @@ export function makeProject(existingCount, fields = {}) {
     color: PALETTE[existingCount % PALETTE.length],
     description: '',
     website: '',
+    // The project's folder on this machine, where the Dev section opens its terminals.
+    localPath: '',
     labels: [],
     parentId: null,
     github: { org: '', repos: [] },
@@ -248,6 +250,11 @@ function updateProject(store, id, patch) {
     const owner = patch.repos !== undefined && !org && repos.length ? repos[0].split('/')[0] : org;
     const { org: _org, repos: _repos, ...rest } = patch;
     patch = { ...rest, github: { org: owner, repos } };
+  }
+  if (patch.localPath !== undefined) {
+    const localPath = patch.localPath.trim().replace(/(.)[\\/]+$/, '$1');
+    if (localPath && !/^(~|\/|[A-Za-z]:[\\/])/.test(localPath)) return flashError(store, 'The local folder must be a full path, such as ~/code/my-app or /Users/me/code/my-app.');
+    patch = { ...patch, localPath };
   }
   if (patch.iconUrl !== undefined) {
     const iconUrl = patch.iconUrl.trim();
@@ -789,6 +796,15 @@ function projectView(store, p, items, categories) {
           onSave: (website) => updateProject(store, p.id, { website }),
         }),
         p.website ? h('a', { href: p.website, target: '_blank', rel: 'noopener', class: 'muted small' }, p.website) : null),
+      h('section', { class: 'pp-block' },
+        h('h3', null, 'Local folder'),
+        editText({
+          value: p.localPath ?? '',
+          placeholder: '~/code/my-app',
+          allowEmpty: true,
+          onSave: (localPath) => updateProject(store, p.id, { localPath }),
+        }),
+        p.localPath ? h('a', { href: `#/dev?project=${p.id}`, class: 'muted small' }, 'Open a terminal here') : null),
       h('section', { class: 'pp-block' },
         h('h3', null, 'Icon'),
         h('div', { class: 'pp-icon-row' },

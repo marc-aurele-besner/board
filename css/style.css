@@ -2257,3 +2257,35 @@ button.sum-line:hover { background: var(--surface-2); }
   .cal-toolbar .cal-title { font-size: 1.05rem; }
   .cal-actions { width: 100%; justify-content: space-between; }
 }
+
+/* Dev: terminals on this machine */
+.term-tabs { align-items: center; }
+.term-tab { display: inline-flex; align-items: center; }
+.term-tab .sub-tab { padding-right: 4px; }
+.term-close { background: none; border: none; min-height: 0; padding: 4px; border-radius: 6px; color: var(--muted); opacity: 0.6; }
+.term-close:hover { opacity: 1; background: var(--surface-2); color: var(--text); }
+.term-close .icon { width: 12px; height: 12px; }
+.term-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--income); animation: pulse 1.4s ease-in-out infinite; }
+.term-new { color: var(--muted); }
+.term { display: flex; flex-direction: column; gap: 10px; }
+.term-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.term-cwd { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 0.8rem ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+.term-actions { flex: none; }
+.term-out { height: min(60vh, 560px); overflow: auto; padding: 10px 12px; border-radius: 8px; background: var(--surface-2); font: 0.8rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.term-line.t-err { color: var(--danger); }
+.term-line.t-cmd { color: var(--accent); font-weight: 600; margin-top: 6px; }
+.term-line.t-cmd:first-child { margin-top: 0; }
+.term-line.t-meta { color: var(--muted); }
+.term-line.t-meta.t-ok { color: var(--income); }
+.term-form { display: flex; align-items: center; gap: 8px; }
+.term-prompt { font: 600 1rem ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); }
+.term-input { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 16px; }
+.term-form .btn-small { min-height: 36px; padding: 4px 12px; }
+.term-status { gap: 8px; }
+.term-recent { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.term-chip { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; min-height: 26px; padding: 2px 10px; }
+.term-runner input { flex: 1; min-width: 0; font-size: 16px; }
+@media (max-width: 640px) {
+  .term-out { height: 50vh; }
+  .term-recent { justify-content: flex-start; }
+}

@@ -14,6 +14,7 @@ export const JUMPS = [
   ['i', 'inbox', 'Inbox'],
   ['o', 'monitoring', 'Monitoring'],
   ['u', 'tools', 'Tools'],
+  ['d', 'dev', 'Dev'],
   ['c', 'cron', 'Cron'],
   ['s', 'settings', 'Settings'],
 ];

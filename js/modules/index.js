@@ -10,8 +10,9 @@ import positions from './positions.js';
 import inbox from './inbox.js';
 import monitoring from './monitoring.js';
 import tools from './tools.js';
+import dev from './dev.js';
 import cron from './cron.js';
 import settings from './settings.js';
 import search from './search.js';
 
-export const modules = [home, todos, inbox, calendar, projects, kitchen, money, positions, monitoring, tools, cron, settings, search];
+export const modules = [home, todos, inbox, calendar, projects, kitchen, money, positions, monitoring, tools, dev, cron, settings, search];
