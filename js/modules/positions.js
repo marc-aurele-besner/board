@@ -4,6 +4,7 @@ import { toast } from '../toast.js';
 import { setupBanner } from '../integrations.js';
 import { positionFields, positionError } from '../position-input.js';
 import { poolsChanged } from '../automations.js';
+import { insightsPanel } from '../pool-insights.js';
 import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs } from '../uniswap.js';
 
 const STALE_MS = 10 * 60 * 1000;
@@ -1295,13 +1296,13 @@ function draw(root, store) {
   const inRange = byChain.filter((r) => r.inRange).length;
   const baselines = store.get(COLLECTION)?.fees ?? {};
   const pick = { in: byChain.filter((r) => r.inRange), out: byChain.filter((r) => !r.inRange), closed: closedRows }[view.filter] ?? byChain;
-  const shown = sortRows(pick
-    .map((r) => {
-      const s = aprs.get(`${view.window}|${r.ref}`);
-      return s
-        ? { ...r, apr: s.apr, aprSecs: s.secs, aprFull: s.full }
-        : { ...r, apr: feeApr(r, baselines), aprLeft: counterLeft(r, baselines) };
-    }), view.sort, view.dir);
+  const withApr = (r) => {
+    const s = aprs.get(`${view.window}|${r.ref}`);
+    return s
+      ? { ...r, apr: s.apr, aprSecs: s.secs, aprFull: s.full }
+      : { ...r, apr: feeApr(r, baselines), aprLeft: counterLeft(r, baselines) };
+  };
+  const shown = sortRows(pick.map(withApr), view.sort, view.dir);
   const totalValue = byChain.reduce((s, r) => s + (r.value ?? 0), 0);
   const totalFees = byChain.reduce((s, r) => s + (r.fees ?? 0), 0);
   const totalValueKnown = byChain.some((r) => r.value !== null);
@@ -1392,6 +1393,8 @@ function draw(root, store) {
       h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Total liquidity'), valueEl),
       h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Unclaimed fees'), feesEl),
       h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Positions'), h('strong', null, `${byChain.length} · ${inRange} in range`))),
+
+    firstRead ? null : insightsPanel(store, byChain.map(withApr)),
 
     chainsWithRows.length > 1
       ? h('div', { class: 'row lp-filters lp-chains' },
