@@ -32,6 +32,8 @@ Outside a field, `g` then a letter jumps to a section (`g t` for Tasks, `g m` fo
 
 Deleting a task, a Money entry, a bill, a recipe or a recipe iteration shows **Undo** for a few seconds.
 
+Settings → Labels lists the project labels and the Money categories, each in its own section. Rename one, change its colour, or delete it; deleting one that is in use first moves its projects, or its entries, recurring items and budget, to another label or category.
+
 ## Run it
 
 Browsers only allow the folder picker on a secure origin, so serve the folder locally:
@@ -89,6 +91,7 @@ Nothing runs on a server, and everything automatic runs only while the board is 
 | Calendar, Analytics, Search Console | Google, with your own OAuth Client ID | a read-only sign-in that lasts about an hour |
 | Liquidity Pools | each chain's node (a public node by default, or the one you set) | your wallet addresses and the position numbers |
 | Liquidity Pools fee collects (optional) | `api.etherscan.io` (Etherscan), only with a key set in Settings, and not for ZKsync Era, which Etherscan does not cover | your wallet addresses, the key, and the collect transactions and pools it reads |
+| Money exchange rates | `api.frankfurter.dev` (ECB rates) by default; `www.bankofcanada.ca` (Valet API) and `cdn.jsdelivr.net` (Currency API) when it fails, or first if picked in Settings → Exchange rates | the days whose USD to CAD rate is needed |
 | Liquidity Pools prices | `coins.llama.fi` (DefiLlama) | the token addresses in your positions, and the time of each fee collect read from the chain |
 | Liquidity Pools logos | `raw.githubusercontent.com` (Uniswap's token lists, Trust Wallet's chain logos) | nothing but the request itself |
 | GitHub organization logos | `github.com` (each `<org>.png` avatar) | the organization or repo owner name |
