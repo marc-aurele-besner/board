@@ -208,7 +208,7 @@ export function walletsTab(store, ui) {
   const wallets = walletsOf(store);
   const chains = enabledChains(cfg);
   if (!wallets.length) {
-    return { subtitle: 'Native coins and tokens held by your wallets.', actions: [], body: setupBanner('uniswap', 'Add a wallet address in Settings to see what it holds.') };
+    return { subtitle: 'Native coins and tokens held by your wallets.', actions: [], body: setupBanner('wallets', 'Add a wallet address in Settings to see what it holds.') };
   }
   // Until the first read lands, show what the last one saved.
   if (state.status === 'idle' && !state.rows.length) state.rows = savedRows(store, chains, wallets);

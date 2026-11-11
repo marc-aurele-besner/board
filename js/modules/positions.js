@@ -2459,7 +2459,7 @@ function draw(root, store) {
       logged ? rateNotice() : null,
       view.tab === 'fees'
         ? feesView(store)
-        : [setupBanner('uniswap', 'Add a wallet address in Settings to see its Uniswap positions.'),
+        : [setupBanner('wallets', 'Add a wallet address in Settings to see its Uniswap positions.'),
             view.adding ? addForm(store) : h('button', { type: 'button', class: 'btn-small', onclick: () => openAdd(store) }, icon('plus'), 'Add a position by link or number')]));
     keepPickerFocus(root);
     return;
