@@ -1,4 +1,4 @@
-// Settings sections for Telegram, Google Analytics, the search consoles, Resend, Gmail, notifications and automations.
+// Settings sections for Google Calendar accounts, Telegram, Google Analytics, the search consoles, Resend, Gmail, notifications and automations.
 import { h, icon, empty, notice, statusOf, copyable } from '../ui.js';
 import { editText } from '../inline.js';
 import { connect, isConnected } from '../google.js';
@@ -6,6 +6,7 @@ import { checkBot, findChat, pollTelegram, hasTelegram } from '../telegram.js';
 import { propertyName, checkBing, BING_RELAY } from '../webstats.js';
 import { checkResend, resendSettings, RESEND_RELAY } from '../resend.js';
 import { connectGmail, disconnectGmail, isGmailConnected, gmailAccounts } from '../gmail.js';
+import { calendarAccounts, connectCalendar, disconnectCalendar, isCalendarConnected, syncCalendarList, removeCalendarAccount, setCalendar } from '../gcal.js';
 import { KINDS, prefOf, setPref } from '../notifications.js';
 import { RULES, ruleOf, sitesOf } from '../automations.js';
 import { hostOf } from '../sitecheck.js';
@@ -28,6 +29,75 @@ const say = (store, key, text, ok = true) => {
 };
 const result = (key) => (messages[key] ? h('p', { class: `test-result ${messages[key].ok ? 'ok' : 'error'}`, role: 'status' }, messages[key].text) : null);
 const byName = (a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), undefined, { sensitivity: 'base' });
+
+// --- Google Calendar accounts ---
+
+function calendarRow(store, account, cal, projects) {
+  return h('li', { class: 'resend-row has-key gcal-row' },
+    h('label', { class: 'resend-name check' },
+      h('input', { type: 'checkbox', checked: cal.on, 'aria-label': `Show ${cal.name}`, onchange: (e) => setCalendar(store, account.email, cal.id, { on: e.target.checked }) }),
+      h('span', { class: 'gcal-swatch', style: { '--c': cal.color || 'var(--accent)' } }),
+      h('strong', { title: cal.id }, cal.name)),
+    h('div', { class: 'resend-key' },
+      h('select', { 'aria-label': `Project of ${cal.name}`, onchange: (e) => setCalendar(store, account.email, cal.id, { projectId: e.target.value || null }) },
+        h('option', { value: '', selected: !cal.projectId }, 'No project'),
+        projects.map((p) => h('option', { value: p.id, selected: p.id === cal.projectId }, p.name)))),
+    h('div', { class: 'resend-actions' }));
+}
+
+function calendarAccount(store, account, projects, clientId) {
+  const key = `gcal:${account.email}`;
+  const connected = isCalendarConnected(account.email);
+  const sayRow = (text, ok) => say(store, key, text, ok);
+  const reconnect = () => {
+    sayRow('Waiting for Google…');
+    connectCalendar(clientId, account.email)
+      .then(() => syncCalendarList(store, account.email))
+      .then(() => sayRow('Connected.'))
+      .catch((err) => sayRow(err.message, false));
+  };
+  return h('div', { class: 'svc-section' },
+    h('div', { class: 'row between' },
+      h('h3', { class: 'grow' }, account.email),
+      badge(connected ? 'Connected' : 'Not connected', connected ? 'done' : 'plain'),
+      connected
+        ? h('button', { type: 'button', class: 'btn-small', onclick: () => { disconnectCalendar(account.email); sayRow('Disconnected.'); } }, 'Disconnect')
+        : h('button', { type: 'button', class: 'btn-small', disabled: !clientId, onclick: reconnect }, 'Connect'),
+      h('button', { type: 'button', class: 'icon-btn', title: 'Remove account', 'aria-label': `Remove ${account.email}`, onclick: () => { removeCalendarAccount(store, account.email); sayRow(''); } }, icon('x'))),
+    result(key),
+    h('ul', { class: 'resend-list' },
+      account.calendars.length
+        ? [h('li', { class: 'resend-row resend-head', 'aria-hidden': 'true' }, h('span', null, 'Calendar'), h('span', null, 'Project'), h('span')),
+            ...account.calendars.map((c) => calendarRow(store, account, c, projects))]
+        : [h('li', { class: 'empty' }, 'No calendars read yet. Connect to read them.')]));
+}
+
+// The accounts the Calendar section reads, each with its calendars. Shown under the Client ID on the Google Calendar page.
+export function calendarAccountsCard(store) {
+  const clientId = store.get('settings').google?.clientId ?? '';
+  const accounts = calendarAccounts(store);
+  const projects = projectTree(store.get('projects').projects).map(({ project }) => project);
+  const add = () => {
+    say(store, 'gcal', 'Waiting for Google…');
+    connectCalendar(clientId)
+      .then(async (email) => {
+        const known = accounts.some((a) => a.email === email);
+        await syncCalendarList(store, email);
+        say(store, 'gcal', known ? `${email} is already added. It is connected again.` : `Added ${email}. Its calendars show in Calendar.`);
+      })
+      .catch((err) => say(store, 'gcal', err.message, false));
+  };
+  return h('section', { class: 'card panel' },
+    head('Accounts', 'Each Google account signs in on its own, so work and personal calendars can sit side by side. Untick a calendar to hide it. A calendar given a project can be filtered by that project. Only the addresses and calendar choices are saved.',
+      badge(accounts.length ? `${accounts.length} account${accounts.length === 1 ? '' : 's'}` : 'None', accounts.length ? 'doing' : 'plain')),
+    h('div', { class: 'stack-lg' },
+      h('div', { class: 'svc-section' },
+        h('div', { class: 'svc-actions' },
+          h('button', { type: 'button', class: 'primary', disabled: !clientId, onclick: add }, icon('plus'), 'Add a Google account')),
+        clientId ? null : h('p', { class: 'muted small' }, 'Save the OAuth Client ID above first.'),
+        result('gcal')),
+      accounts.map((a) => calendarAccount(store, a, projects, clientId))));
+}
 
 // --- Telegram ---
 
