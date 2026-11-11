@@ -1190,13 +1190,15 @@ function keepAddFocus() {
 // ---- Fees collected: the log of collections, its averages and a chart over time ----
 
 const DAY_MS = 86400000;
-const FEE_RANGES = { today: [0, 'Today'], all: [0, 'All time'], 7: [7, '7 days'], 30: [30, '30 days'], 90: [90, '90 days'], 365: [365, '1 year'], month: [0, 'This month'], lastmonth: [0, 'Last month'] };
-const FEE_RANGE_ORDER = ['today', '7', '30', '90', '365', 'month', 'lastmonth', 'all'];
+const FEE_RANGES = { today: [0, 'Today'], yesterday: [0, 'Yesterday'], all: [0, 'All time'], 7: [7, '7 days'], 30: [30, '30 days'], 90: [90, '90 days'], 365: [365, '1 year'], month: [0, 'This month'], lastmonth: [0, 'Last month'] };
+const FEE_RANGE_ORDER = ['today', 'yesterday', '7', '30', '90', '365', 'month', 'lastmonth', 'all'];
 // A range's start and its end (excluded) in ms; null for no bound. Months are calendar months in local time.
 function feeRangeBounds(key, nowMs) {
   const now = new Date(nowMs);
   const monthStart = (back) => new Date(now.getFullYear(), now.getMonth() - back, 1).getTime();
-  if (key === 'today') return [new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime(), null];
+  const dayStart = (back) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - back).getTime();
+  if (key === 'today') return [dayStart(0), null];
+  if (key === 'yesterday') return [dayStart(1), dayStart(0)];
   if (key === 'month') return [monthStart(0), null];
   if (key === 'lastmonth') return [monthStart(1), monthStart(0)];
   const days = FEE_RANGES[key][0];
@@ -1614,6 +1616,10 @@ function feesView(store) {
   const nowMs = Date.now();
   const [todayStart] = feeRangeBounds('today', nowMs);
   const anyToday = all.some((c) => Date.parse(c.at) >= todayStart);
+  const [yesterdayStart] = feeRangeBounds('yesterday', nowMs);
+  const anyYesterday = all.some((c) => Date.parse(c.at) >= yesterdayStart && Date.parse(c.at) < todayStart);
+  // Today and Yesterday only show when they have collects, or when picked.
+  const shown = { today: anyToday, yesterday: anyYesterday };
   // With no range picked, open on Today when something was collected today, else on 7 days.
   if (view.feeAuto) view.feeRange = anyToday ? 'today' : '7';
   const [from, to] = feeRangeBounds(view.feeRange, nowMs);
@@ -1706,7 +1712,7 @@ function feesView(store) {
 
   return h('div', { class: 'stack-lg' },
     h('div', { class: 'row between' },
-      pills(FEE_RANGE_ORDER.filter((k) => k !== 'today' || anyToday || view.feeRange === 'today').map((k) => [k, FEE_RANGES[k][1]]), view.feeRange, (k) => { view.feeRange = k; view.feeAuto = false; view.feeGroup = defaultFeeGroup(k); }),
+      pills(FEE_RANGE_ORDER.filter((k) => (shown[k] ?? true) || view.feeRange === k).map((k) => [k, FEE_RANGES[k][1]]), view.feeRange, (k) => { view.feeRange = k; view.feeAuto = false; view.feeGroup = defaultFeeGroup(k); }),
       view.logging ? null : h('button', {
         type: 'button',
         class: 'btn-small',
