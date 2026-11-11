@@ -24,14 +24,20 @@ export async function readFunction(settings, contract, fn, args) {
 
 // --- Browser wallets (EIP-1193, found through EIP-6963) ---
 
-// Each wallet extension announces itself (EIP-6963), so several can sit side by side. A wallet that only sets
-// window.ethereum is kept as a fallback. uuid -> { info: { uuid, name, icon, rdns }, provider }.
+// Each wallet extension announces itself (EIP-6963), so several can sit side by side, each with its own name and
+// icon. window.ethereum is only a fallback for a wallet that announces nothing: whichever extension set it is often
+// one of the announced ones behind a proxy, and some (Phantom among them) set isMetaMask too, so listing it next to
+// them showed an icon-less "MetaMask" that opened another wallet. uuid -> { info: { uuid, name, icon, rdns }, provider }.
 const found = new Map();
 const listeners = new Set();
 const changed = () => listeners.forEach((fn) => fn());
 
+// Wallets that also set isMetaMask are checked first.
 function legacyName(p) {
+  if (p.isPhantom) return 'Phantom';
   if (p.isRabby) return 'Rabby';
+  if (p.isOkxWallet) return 'OKX Wallet';
+  if (p.isTrust || p.isTrustWallet) return 'Trust Wallet';
   if (p.isCoinbaseWallet) return 'Coinbase Wallet';
   if (p.isBraveWallet) return 'Brave Wallet';
   if (p.isMetaMask) return 'MetaMask';
@@ -51,7 +57,7 @@ if (globalThis.window?.addEventListener) {
 export function wallets() {
   const list = [...found.values()];
   const legacy = globalThis.ethereum;
-  if (legacy?.request && !list.some((w) => w.provider === legacy)) {
+  if (!list.length && legacy?.request) {
     list.push({ info: { uuid: 'injected', name: legacyName(legacy), icon: '', rdns: '' }, provider: legacy });
   }
   return list;
