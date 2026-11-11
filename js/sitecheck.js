@@ -500,19 +500,92 @@ export function statusPageOf(input) {
   }
 }
 
-// Statuspage's public summary: the overall state, open incidents, and the components that are not operational.
-export async function checkProvider(page) {
+const RECENT_DAYS = 30; // how far back resolved incidents are counted
+const UPDATE_KEEP = 280; // characters of an incident's latest update kept
+const clip = (text) => String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, UPDATE_KEEP);
+const recentOf = (list) => list.filter((i) => i.at && Date.now() - Date.parse(i.at) < RECENT_DAYS * 86400000).sort((a, b) => b.at.localeCompare(a.at));
+
+// Every status reader returns the same shape:
+//   indicator: none | minor | major | critical | maintenance; description: the page's own one-line state;
+//   parts: { total, ok }; components: the parts that are not operational;
+//   incidents: open ones, with their latest update; maintenances: in progress or coming;
+//   recent: incidents resolved in the last 30 days, newest first (a few kept), and recentCount.
+
+// Statuspage: the public summary, and the incident history when the page shares it.
+async function fromStatuspage(page) {
   const res = await timed(`${page}/api/v2/summary.json`);
   if (res.status === 404) throw new Error('This page does not publish a Statuspage summary.');
   if (!res.ok) throw new Error(`The status page answered ${res.status}.`);
   const data = await res.json().catch(() => null);
   if (!data?.status?.indicator) throw new Error('This page does not publish a Statuspage summary. Try its full address, often with www.');
+  const history = await timed(`${page}/api/v2/incidents.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const parts = (data.components ?? []).filter((c) => !c.group);
+  const resolved = recentOf((history?.incidents ?? []).filter((i) => ['resolved', 'postmortem'].includes(i.status))
+    .map((i) => ({ name: i.name, impact: i.impact, at: i.resolved_at ?? i.updated_at, url: i.shortlink ?? `${page}/incidents/${i.id}` })));
   return {
     indicator: data.status.indicator,
     description: data.status.description ?? '',
-    components: (data.components ?? []).filter((c) => !c.group && c.status !== 'operational').slice(0, STATUS_KEEP).map((c) => ({ name: c.name, status: c.status })),
-    incidents: (data.incidents ?? []).filter((i) => !['resolved', 'postmortem'].includes(i.status)).map((i) => ({ name: i.name, impact: i.impact, status: i.status, url: i.shortlink ?? `${page}/incidents/${i.id}` })),
+    parts: { total: parts.length, ok: parts.filter((c) => c.status === 'operational').length },
+    components: parts.filter((c) => c.status !== 'operational').slice(0, STATUS_KEEP).map((c) => ({ name: c.name, status: c.status })),
+    incidents: (data.incidents ?? []).filter((i) => !['resolved', 'postmortem'].includes(i.status)).map((i) => ({
+      name: i.name,
+      impact: i.impact,
+      status: i.status,
+      url: i.shortlink ?? `${page}/incidents/${i.id}`,
+      started: i.started_at ?? i.created_at,
+      updated: i.incident_updates?.[0]?.updated_at ?? i.updated_at,
+      update: clip(i.incident_updates?.[0]?.body),
+    })),
+    maintenances: (data.scheduled_maintenances ?? []).filter((m) => ['scheduled', 'in_progress', 'verifying'].includes(m.status)).map((m) => ({
+      name: m.name, status: m.status, start: m.scheduled_for, end: m.scheduled_until, url: m.shortlink ?? `${page}/incidents/${m.id}`,
+    })),
+    recent: resolved.slice(0, 5),
+    recentCount: history ? resolved.length : null,
   };
+}
+
+// Datadog status pages (OpenRouter's, for one) publish a config.json without a CORS header, so it is read
+// through the page reader, like the crawl files.
+const DD_STATUS = { operational: 0, under_maintenance: 1, degraded_performance: 2, partial_outage: 3, major_outage: 4 };
+async function fromDatadog(page) {
+  const res = await inTurn(() => timed(`${READER}${page}/config.json`, { headers: { 'X-Return-Format': 'text' } }));
+  if (!res.ok) throw new Error(`The page reader answered ${res.status}.`);
+  const data = JSON.parse(await res.text());
+  if (!Array.isArray(data?.components)) throw new Error('This page is not a Datadog status page.');
+  const parts = data.components.flatMap((c) => (c.type === 'ComponentGroup' ? c.components ?? [] : [c]));
+  const worst = Math.max(0, ...parts.map((c) => DD_STATUS[c.status] ?? 0));
+  const open = (data.incidents ?? []).filter((i) => !i.resolved);
+  const ongoing = (data.maintenances ?? []).filter((m) => ['scheduled', 'in_progress'].includes(m.currentStatus));
+  const indicator = worst >= 4 ? 'critical' : worst === 3 ? 'major' : worst === 2 || open.length ? 'minor' : worst === 1 || ongoing.some((m) => m.currentStatus === 'in_progress') ? 'maintenance' : 'none';
+  const resolved = recentOf((data.incidents ?? []).filter((i) => i.resolved).map((i) => ({ name: i.title, impact: '', at: i.resolvedDate ?? i.lastModifiedAt, url: `${page}/incidents/${i.id}` })));
+  return {
+    indicator,
+    description: { none: 'All Systems Operational', minor: 'Minor Service Outage', major: 'Partial System Outage', critical: 'Major Service Outage', maintenance: 'Service Under Maintenance' }[indicator],
+    parts: { total: parts.length, ok: parts.filter((c) => c.status === 'operational').length },
+    components: parts.filter((c) => c.status !== 'operational').slice(0, STATUS_KEEP).map((c) => ({ name: c.name, status: c.status })),
+    incidents: open.map((i) => ({
+      name: i.title, impact: '', status: i.currentStatus, url: `${page}/incidents/${i.id}`, started: i.publishedDate, updated: i.lastModifiedAt, update: clip(i.timeline?.[0]?.description ?? i.description),
+    })),
+    maintenances: ongoing.map((m) => ({ name: m.title ?? m.scheduledDescription?.slice(0, 80) ?? 'Maintenance', status: m.currentStatus, start: m.startDate, end: m.completedDate, url: `${page}/maintenances/${m.id}` })),
+    recent: resolved.slice(0, 5),
+    recentCount: resolved.length,
+  };
+}
+
+// Reads a status page. `kind` is known for presets and remembered after the first read;
+// an unknown page is tried as Statuspage, then as a Datadog page.
+export async function checkProvider(page, kind = '') {
+  if (kind === 'datadog') return { ...(await fromDatadog(page)), kind };
+  try {
+    return { ...(await fromStatuspage(page)), kind: 'statuspage' };
+  } catch (err) {
+    if (kind === 'statuspage') throw err;
+    try {
+      return { ...(await fromDatadog(page)), kind: 'datadog' };
+    } catch {
+      throw err;
+    }
+  }
 }
 
 export const daysUntil = (isoDate) => Math.round((Date.parse(`${isoDate}T00:00:00`) - new Date().setHours(0, 0, 0, 0)) / 86400000);

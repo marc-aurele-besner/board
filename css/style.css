@@ -1291,6 +1291,29 @@ label.check { cursor: pointer; }
 .task-open { gap: 5px; border-radius: 7px; background: color-mix(in srgb, var(--warn) 16%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent); color: var(--warn); font-weight: 600; white-space: nowrap; }
 .task-open:hover { background: color-mix(in srgb, var(--warn) 26%, transparent); }
 .task-open .icon { width: 13px; height: 13px; }
+.provider-card { --c: var(--muted); display: flex; flex-direction: column; gap: 12px; border-top: 3px solid var(--c); }
+.provider-card.tone-done { --c: var(--income); }
+.provider-card.tone-medium { --c: var(--warn); }
+.provider-card.tone-high { --c: var(--danger); }
+.provider-card .stack-sm { display: flex; flex-direction: column; gap: 6px; }
+.provider-head { gap: 10px; }
+.status-dot { --c: var(--muted); width: 12px; height: 12px; border-radius: 50%; flex: none; background: var(--c); box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 22%, transparent); }
+.status-dot.tone-done { --c: var(--income); }
+.status-dot.tone-medium { --c: var(--warn); }
+.status-dot.tone-high { --c: var(--danger); animation: dot-pulse 1.6s ease-in-out infinite; }
+@keyframes dot-pulse { 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--c) 10%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .status-dot.tone-high { animation: none; } }
+.provider-state { margin: 0; font: 600 1rem var(--display); color: var(--c); }
+.provider-card .provider-meter span { background: var(--c); }
+.incidents { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.incidents li { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--c) 8%, var(--surface)); border-left: 3px solid var(--c); }
+.incidents.maint li { --c: var(--info); }
+.incident-name { font-weight: 600; overflow-wrap: anywhere; }
+.incident-update { margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.provider-recent summary { cursor: pointer; }
+.provider-recent ul { margin-top: 6px; }
+.provider-foot { margin-top: auto; }
+.card.stat.stat-bad strong { color: var(--danger); }
 .follow-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .follow-form input { flex: 1 1 180px; min-width: 0; }
 .up-bars { display: flex; gap: 2px; height: 26px; }

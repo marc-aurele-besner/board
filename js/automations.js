@@ -220,7 +220,7 @@ export async function checkProviders(store, ids = null) {
   const providers = store.get('tools').providers.filter((pr) => !ids || ids.includes(pr.id));
   const found = await Promise.all(providers.map(async (pr) => {
     try {
-      return [pr, { ...(await checkProvider(pr.url)), at: now() }];
+      return [pr, { ...(await checkProvider(pr.url, pr.kind ?? store.get('tools').status[pr.id]?.kind)), at: now() }];
     } catch (err) {
       return [pr, { error: err.name === 'AbortError' ? 'The status page took too long.' : err.message, at: now() }];
     }

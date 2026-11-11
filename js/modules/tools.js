@@ -728,7 +728,7 @@ function metaTab(store, sites) {
 
 // --- Provider status ---
 
-// Common services whose status page runs on Statuspage. Any other Statuspage address can be added by hand.
+// Common services and the kind of status page they run. Any other Statuspage or Datadog page can be added by hand.
 const PRESETS = [
   ['GitHub', 'https://www.githubstatus.com'],
   ['Vercel', 'https://www.vercel-status.com'],
@@ -737,17 +737,35 @@ const PRESETS = [
   ['npm', 'https://status.npmjs.org'],
   ['Anthropic', 'https://status.anthropic.com'],
   ['OpenAI', 'https://status.openai.com'],
+  ['OpenRouter', 'https://status.openrouter.ai', 'datadog'],
+  ['Supabase', 'https://status.supabase.com'],
+  ['Stripe', 'https://www.stripestatus.com'],
+  ['Render', 'https://status.render.com'],
+  ['DigitalOcean', 'https://status.digitalocean.com'],
+  ['Discord', 'https://discordstatus.com'],
 ];
 const INDICATOR = { none: ['Operational', 'done'], minor: ['Minor issue', 'medium'], maintenance: ['Maintenance', 'medium'], major: ['Major outage', 'high'], critical: ['Critical outage', 'high'] };
 const COMPONENT = { degraded_performance: 'degraded', partial_outage: 'partial outage', major_outage: 'major outage', under_maintenance: 'maintenance' };
+const IMPACT = { none: 'plain', minor: 'medium', major: 'high', critical: 'high', maintenance: 'medium' };
+const INCIDENT_STATUS = { investigating: 'Investigating', identified: 'Identified', monitoring: 'Monitoring', scheduled: 'Scheduled', in_progress: 'In progress', verifying: 'Verifying' };
 
-function follow(store, name, url) {
+// "3 hours ago", "in 2 days": close enough to tell how fresh an incident is.
+function agoOf(at) {
+  if (!at) return '';
+  const diff = Date.parse(at) - Date.now();
+  const abs = Math.abs(diff);
+  const [n, unit] = abs < 3600000 ? [Math.max(1, Math.round(abs / 60000)), 'minute'] : abs < 86400000 ? [Math.round(abs / 3600000), 'hour'] : [Math.round(abs / 86400000), 'day'];
+  const text = `${n} ${unit}${n === 1 ? '' : 's'}`;
+  return diff > 0 ? `in ${text}` : `${text} ago`;
+}
+
+function follow(store, name, url, kind = '') {
   const page = statusPageOf(url);
   if (!page) return toast('Enter the address of a status page, such as www.githubstatus.com.');
   if (store.get(COLLECTION).providers.some((pr) => pr.url === page)) return toast(`${name || page} is already followed.`);
   const id = uid();
   store.update(COLLECTION, (d) => {
-    d.providers.push({ id, name: name.trim() || new URL(page).hostname, url: page });
+    d.providers.push({ id, name: name.trim() || new URL(page).hostname, url: page, ...(kind ? { kind } : {}) });
   });
   run(store, id, () => checkProviders(store, [id]));
 }
@@ -760,26 +778,59 @@ function unfollow(store, pr) {
   toast(`${pr.name} is no longer followed`);
 }
 
+const problemOf = (s) => (s?.indicator && s.indicator !== 'none' ? (s.indicator === 'maintenance' ? 1 : 2) : 0);
+
 function providerCard(store, pr) {
   const s = store.get(COLLECTION).status[pr.id];
   const busy = view.busy.has(pr.id) || view.busy.has('all');
   const [label, tone] = s?.indicator ? INDICATOR[s.indicator] ?? [s.indicator, 'medium'] : s?.error ? ['Unreadable', 'plain'] : ['Not read yet', 'plain'];
-  return h('article', { class: `card site-card stack ${s?.indicator && s.indicator !== 'none' ? 'down' : ''}` },
+  const parts = s?.parts;
+  const recent = s?.recent ?? [];
+  return h('article', { class: `card provider-card stack tone-${s?.indicator ? tone : 'plain'}` },
     h('div', { class: 'row between' },
-      h('div', null, h('strong', null, pr.name), h('div', null, h('a', { href: pr.url, target: '_blank', rel: 'noopener', class: 'small' }, new URL(pr.url).hostname))),
+      h('div', { class: 'row provider-head' },
+        h('span', { class: `status-dot tone-${s?.indicator ? tone : 'plain'}`, 'aria-hidden': 'true' }),
+        h('div', null,
+          h('strong', null, pr.name),
+          h('div', null, h('a', { href: pr.url, target: '_blank', rel: 'noopener', class: 'small' }, new URL(pr.url).hostname)))),
       busy ? pillOf('Reading…', 'plain') : pillOf(label, tone)),
-    s?.description && s.indicator !== 'none' ? h('p', { class: 'small' }, s.description) : null,
+    s?.description ? h('p', { class: 'provider-state' }, s.description) : null,
+    parts?.total
+      ? h('div', { class: 'stack-sm' },
+          h('div', { class: 'meter provider-meter' }, h('span', { style: { width: `${(parts.ok / parts.total) * 100}%` } })),
+          h('span', { class: 'muted small' }, `${parts.ok} of ${parts.total} part${parts.total === 1 ? '' : 's'} operational`))
+      : null,
     s?.incidents?.length
-      ? h('ul', { class: 'crawl-facts' }, s.incidents.map((i) => h('li', null, h('a', { href: i.url, target: '_blank', rel: 'noopener' }, i.name), h('span', { class: 'muted small' }, ` · ${i.status}`))))
+      ? h('ul', { class: 'incidents' }, s.incidents.map((i) =>
+          h('li', null,
+            h('div', { class: 'row' },
+              pillOf(INCIDENT_STATUS[i.status] ?? i.status, IMPACT[i.impact] ?? 'medium'),
+              h('a', { href: i.url, target: '_blank', rel: 'noopener', class: 'incident-name' }, i.name)),
+            i.update ? h('p', { class: 'small incident-update' }, i.update) : null,
+            h('span', { class: 'muted small' }, [i.started ? `Started ${agoOf(i.started)}` : '', i.updated ? `updated ${agoOf(i.updated)}` : ''].filter(Boolean).join(' · ')))))
       : null,
     s?.components?.length
-      ? h('details', null,
-          h('summary', { class: 'muted small' }, `${s.components.length}${s.components.length >= 12 ? '+' : ''} part${s.components.length === 1 ? '' : 's'} affected`),
-          h('ul', { class: 'crawl-facts' }, s.components.map((c) => h('li', null, c.name, h('span', { class: 'muted small' }, ` · ${COMPONENT[c.status] ?? c.status}`)))))
+      ? h('div', { class: 'stack-sm' },
+          h('span', { class: 'small' }, h('strong', null, 'Affected')),
+          h('div', { class: 'chips' }, s.components.map((c) => h('span', { class: `pill tone-${c.status === 'major_outage' || c.status === 'partial_outage' ? 'high' : 'medium'}`, title: COMPONENT[c.status] ?? c.status }, `${c.name} · ${COMPONENT[c.status] ?? c.status}`))))
+      : null,
+    s?.maintenances?.length
+      ? h('ul', { class: 'incidents maint' }, s.maintenances.map((m) =>
+          h('li', null,
+            h('div', { class: 'row' }, pillOf(INCIDENT_STATUS[m.status] ?? m.status, 'doing'), h('a', { href: m.url, target: '_blank', rel: 'noopener', class: 'incident-name' }, m.name)),
+            m.start ? h('span', { class: 'muted small' }, `${m.status === 'scheduled' ? 'Starts' : 'Started'} ${timeOf(m.start)} (${agoOf(m.start)})${m.end ? ` · until ${timeOf(m.end)}` : ''}`) : null)))
+      : null,
+    s?.recentCount != null || recent.length
+      ? h('details', { class: 'provider-recent' },
+          h('summary', { class: 'small' },
+            s.recentCount === 0
+              ? 'No incident in the last 30 days'
+              : [h('strong', null, `${s.recentCount ?? recent.length} incident${(s.recentCount ?? recent.length) === 1 ? '' : 's'}`), ` in 30 days · last ${agoOf(recent[0]?.at)}`]),
+          h('ul', { class: 'crawl-facts' }, recent.map((i) => h('li', null, h('a', { href: i.url, target: '_blank', rel: 'noopener' }, i.name), h('span', { class: 'muted small' }, ` · resolved ${agoOf(i.at)}`)))))
       : null,
     s?.error ? h('p', { class: 'muted small' }, `${s.indicator ? 'Last read failed' : 'Could not read'}: ${s.error}`) : null,
-    h('div', { class: 'row between' },
-      h('span', { class: 'muted small' }, `Read ${timeOf(s?.at)}`),
+    h('div', { class: 'row between provider-foot' },
+      h('span', { class: 'muted small' }, `Read ${timeOf(s?.at)}${s?.kind === 'datadog' ? ' · Datadog page' : ''}`),
       h('div', { class: 'row' },
         h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Read again', 'aria-label': `Read ${pr.name} again`, onclick: () => run(store, pr.id, () => checkProviders(store, [pr.id])) }, refreshIcon(busy)),
         h('button', { type: 'button', class: 'icon-btn', title: 'Stop following', 'aria-label': `Stop following ${pr.name}`, onclick: () => unfollow(store, pr) }, icon('x')))));
@@ -789,23 +840,35 @@ function statusTab(store) {
   const { providers, status } = store.get(COLLECTION);
   const followed = new Set(providers.map((pr) => pr.url));
   const presets = PRESETS.filter(([, url]) => !followed.has(url));
-  const down = providers.filter((pr) => status[pr.id]?.indicator && status[pr.id].indicator !== 'none');
+  const down = providers.filter((pr) => problemOf(status[pr.id]) === 2);
+  const maint = providers.filter((pr) => problemOf(status[pr.id]) === 1);
+  // Services with a problem come first; the rest keep the order they were followed in.
+  const sorted = [...providers].sort((a, b) => problemOf(status[b.id]) - problemOf(status[a.id]));
+  const incidents30 = providers.reduce((n, pr) => n + (status[pr.id]?.recentCount ?? 0), 0);
+  const stat = (n, label, tone = '') => h('div', { class: `card stat ${tone}` }, h('strong', null, String(n)), h('span', { class: 'muted small' }, label));
   // The fields are read on submit, so typing never re-renders the tab.
   const name = h('input', { type: 'text', placeholder: 'Name', 'aria-label': 'Provider name', autocomplete: 'off' });
   const url = h('input', { type: 'text', inputmode: 'url', placeholder: 'status.example.com', 'aria-label': 'Status page address', autocomplete: 'off' });
   return h('div', { class: 'stack-lg' },
     providers.length
-      ? notice(down.length
-          ? { tone: 'info', text: `${down.map((pr) => pr.name).join(', ')} ${down.length === 1 ? 'reports' : 'report'} a problem right now.` }
-          : { tone: 'ok', text: 'Every followed service reports that it is working.' })
+      ? h('div', { class: 'summary tool-stats' },
+          stat(providers.length - down.length - maint.length, 'operational'),
+          stat(down.length, 'with a problem', down.length ? 'stat-bad' : ''),
+          stat(maint.length, 'in maintenance'),
+          stat(incidents30, 'incidents in 30 days'))
       : null,
     providers.length
-      ? h('div', { class: 'site-grid' }, providers.map((pr) => providerCard(store, pr)))
+      ? notice(down.length
+          ? { tone: 'info', text: `${down.map((pr) => pr.name).join(', ')} ${down.length === 1 ? 'reports' : 'report'} a problem right now.` }
+          : { tone: 'ok', text: maint.length ? `Everything works; ${maint.map((pr) => pr.name).join(', ')} ${maint.length === 1 ? 'is' : 'are'} in maintenance.` : 'Every followed service reports that it is working.' })
+      : null,
+    providers.length
+      ? h('div', { class: 'site-grid' }, sorted.map((pr) => providerCard(store, pr)))
       : h('div', { class: 'card' }, empty('Follow the services your projects rely on, and the bell tells you when one has an outage and when it is over.')),
     h('section', { class: 'card stack' },
       h('h3', null, 'Follow a service'),
       presets.length
-        ? h('div', { class: 'chips' }, presets.map(([n, u]) => h('button', { type: 'button', class: 'chip', onclick: () => follow(store, n, u) }, icon('plus'), n)))
+        ? h('div', { class: 'chips' }, presets.map(([n, u, kind]) => h('button', { type: 'button', class: 'chip', onclick: () => follow(store, n, u, kind) }, icon('plus'), n)))
         : null,
       h('form', {
         class: 'follow-form',
@@ -814,7 +877,7 @@ function statusTab(store) {
           follow(store, name.value, url.value);
         },
       }, name, url, h('button', { type: 'submit', class: 'btn-small primary' }, 'Follow'))),
-    h('p', { class: 'muted small' }, 'Works with status pages hosted on Statuspage (most providers use it). The page’s public summary is read on the same interval as website health; nothing about you is sent.'));
+    h('p', { class: 'muted small' }, 'Works with status pages hosted on Statuspage (most providers use it) and on Datadog (OpenRouter, for one). The page’s public summary and recent incidents are read on the same interval as website health; nothing about you is sent. Datadog pages are read through r.jina.ai, which receives only the page’s address.'));
 }
 
 function draw(root, store) {
