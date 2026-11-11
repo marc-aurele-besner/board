@@ -316,7 +316,7 @@ function rowEl(store, e, projects, threadSize) {
   return h('li', { class: e.unread ? 'mail-row unread' : 'mail-row' },
     starButton(store, e),
     h('button', { type: 'button', class: 'mail-open', onclick: () => openReader(store, e), 'aria-label': `${e.unread ? 'Unread. ' : ''}${who}: ${e.subject || '(no subject)'}` },
-      view.folder === 'inbox' ? null : h('span', { class: `mail-dir ${e.dir}`, title: e.dir === 'sent' ? 'Sent' : 'Received' }, icon(e.dir === 'sent' ? 'send' : 'inbox')),
+      view.folder === 'inbox' || view.folder === 'sent' ? null : h('span', { class: `mail-dir ${e.dir}`, title: e.dir === 'sent' ? 'Sent' : 'Received' }, icon(e.dir === 'sent' ? 'send' : 'inbox')),
       project ? projectIcon(project) : null,
       h('span', { class: 'mail-main' },
         h('span', { class: 'mail-who' }, who,
