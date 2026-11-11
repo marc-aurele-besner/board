@@ -295,8 +295,9 @@ function startQueued(store) {
   const s = newSession(store);
   if (!s) return;
   // Runs once the terminal is on the page, so it starts at the size it is shown.
+  // `--` ends the options, so a flag with an optional value (--worktree [name]) cannot take the prompt.
   const command = project?.devCommand?.trim() || DEFAULT_DEV_COMMAND;
-  requestAnimationFrame(() => run(store, s, `${command} ${shellQuote(prompt)}`, { remember: false }));
+  requestAnimationFrame(() => run(store, s, `${command} -- ${shellQuote(prompt)}`, { remember: false }));
 }
 
 function remember(store, command) {
