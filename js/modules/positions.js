@@ -622,10 +622,34 @@ function mergeCollects(d, found) {
 // What a row needs for reading its collect transactions.
 const posOf = (r) => ({ version: r.version, tokenId: r.tokenId, owner: r.wallet, token0: r.addr0, token1: r.addr1 });
 
-// One position's collects from the node.
-async function nodeCollects(store, chain, node, r) {
+// What each chain's search is doing right now, said under Search coverage: chainId -> text.
+const activity = new Map();
+const clocks = new Map(); // chainId -> the chain's clock, to put dates on the block ranges searched
+function tell(store, chainId, text) {
+  activity.set(chainId, text);
+  store.refresh();
+}
+
+// A block range as dates, from the chain's clock, with the blocks. Dates are estimated from the block time, so a
+// short range shows the hour too.
+function blockSpan(chainId, from, to) {
+  const blocks = `blocks ${from.toLocaleString()}–${to.toLocaleString()}`;
+  const clock = clocks.get(chainId);
+  if (!clock) return blocks;
+  const at = (b) => new Date((clock.time - (clock.head - b) * clock.perBlock) * 1000);
+  const a = at(from);
+  const b = at(to);
+  const opts = b - a < 2 * DAY_MS ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric', year: 'numeric' };
+  return `${a.toLocaleString(undefined, opts)} – ${b.toLocaleString(undefined, opts)} (${blocks})`;
+}
+
+// One position's collects from the node. step names it among the chain's positions ("2 of 7").
+async function nodeCollects(store, chain, node, r, step) {
+  const label = `Position ${step}: ${r.pair} #${r.tokenId} (${r.version})`;
   const prev = store.get(COLLECTION)?.history?.[r.ref];
-  const s = await positionHistory(chain, node, { version: r.version, tokenId: r.tokenId, liquidity: r.liq, pool: r.pool }, prev);
+  tell(store, chain.id, `${label} · reading new blocks`);
+  const s = await positionHistory(chain, node, { version: r.version, tokenId: r.tokenId, liquidity: r.liq, pool: r.pool }, prev,
+    ({ dir, from, to }) => tell(store, chain.id, `${label} · ${dir === 'new' ? 'new blocks' : 'searching back'}, ${blockSpan(chain.id, from, to)}`));
   const found = [];
   if (r.version === 'v3') {
     for (const e of collectFees(s.events)) {
@@ -635,9 +659,10 @@ async function nodeCollects(store, chain, node, r) {
   } else {
     // Transactions read before and found to collect nothing are not read again.
     const checked = new Set(prev?.node === node ? prev.checked ?? [] : []);
-    const txs = new Map(s.events.filter((e) => e.kind !== 'add' && e.time).map((e) => [e.tx, e.time]));
-    for (const [tx, time] of txs) {
-      if (checked.has(tx) || !wanted(store, r.ref, tx, 3)) continue;
+    const txs = [...new Map(s.events.filter((e) => e.kind !== 'add' && e.time).map((e) => [e.tx, e.time]))]
+      .filter(([tx]) => !checked.has(tx) && wanted(store, r.ref, tx, 3));
+    for (const [i, [tx, time]] of txs.entries()) {
+      tell(store, chain.id, `${label} · reading what transaction ${i + 1} of ${txs.length} collected (${new Date(time * 1000).toLocaleString()})`);
       const res = await collectTx(chain, nodeSource(node), node, tx, posOf(r));
       if (!res || res.level > 1) checked.add(tx);
       if (res && (res.f0 > 0 || res.f1 > 0) && wanted(store, r.ref, tx, res.level)) found.push(await collectEntry(chain, r, tx, time, res.f0, res.f1, res.level, 'chain'));
@@ -664,16 +689,20 @@ async function etherscanCollects(store, chain, node, key, wallets, rows) {
     let more = true;
     // cut: transactions were left for the next load. With no budget left, the last load's answer stands.
     let cut = budget <= 0 && !saved.caughtUp;
+    const who = `Etherscan: wallet ${shortAddress(wallet)}`;
     while (more && budget > 0) {
       const start = block;
+      tell(store, chain.id, `${who} · listing its position transactions from block ${start.toLocaleString()}`);
       const page = await walletPositionTxs(key, chain, wallet, start);
       const todo = page.txs.filter((t) => !checked.has(t.tx));
-      for (const t of todo) {
+      const count = Math.min(todo.length, budget);
+      for (const [i, t] of todo.entries()) {
         if (budget <= 0) {
           cut = true;
           break;
         }
         budget--;
+        tell(store, chain.id, `${who} · reading transaction ${i + 1} of ${count} (${new Date(t.time * 1000).toLocaleString()})`);
         const receipt = await src.call('eth_getTransactionReceipt', [t.tx]);
         for (const p of await positionsInReceipt(chain, node, receipt)) {
           const r = byRef.get(refOf(p.version, chain.id, p.tokenId));
@@ -720,9 +749,14 @@ async function loadHistory(store, only = null) {
     const chain = chainOf(chainId);
     const { node } = chainSettings(cfg, chain);
     try {
-      for (const r of rows) {
+      try {
+        clocks.set(chainId, await chainClock(node));
+      } catch {
+        // Without the clock, the ranges are said in blocks only.
+      }
+      for (const [i, r] of rows.entries()) {
         try {
-          await nodeCollects(store, chain, node, r);
+          await nodeCollects(store, chain, node, r, `${i + 1} of ${rows.length}`);
         } catch {
           // This position keeps the other readings until its history can be read.
         }
@@ -736,6 +770,7 @@ async function loadHistory(store, only = null) {
       }
     } finally {
       searching.delete(chainId);
+      activity.delete(chainId);
       store.refresh();
     }
   }));
@@ -1539,7 +1574,13 @@ function coverageCard(store) {
     view.coverageOpen ? null : [h('strong', { class: 'lp-coverage-pct' }, coveragePct(cov.pct)), meter(cov.pct)],
     h('span', { class: 'muted small lp-coverage-recap' }, view.coverageOpen ? status : `${cov.done}/${cov.total} positions · ${status}`),
     h('span', { class: 'sort-mark' }, icon(view.coverageOpen ? 'chevron-up' : 'chevron-down')));
-  if (!view.coverageOpen) return h('section', { class: 'card lp-coverage collapsed', title: COVERAGE_TITLE }, toggle);
+  // What each chain is searching now, one line per chain.
+  const now = (chainId) => (activity.has(chainId) ? h('p', { class: 'muted small lp-coverage-now' }, activity.get(chainId)) : null);
+  if (!view.coverageOpen) {
+    return h('section', { class: 'card lp-coverage collapsed', title: COVERAGE_TITLE },
+      toggle,
+      [...activity.keys()].map((id) => h('p', { class: 'muted small lp-coverage-now' }, h('strong', null, `${chainOf(id)?.name ?? id}: `), activity.get(id))));
+  }
   return h('section', { class: 'card stack lp-coverage', title: COVERAGE_TITLE },
     toggle,
     h('div', { class: 'lp-coverage-all' },
@@ -1560,7 +1601,8 @@ function coverageCard(store) {
             title: searching.has(c.chainId) ? `Searching ${c.name}…` : `Search ${c.name} further back for collects now, without waiting for the next load`,
             'aria-label': `Search ${c.name} further`,
             onclick: () => loadHistory(store, c.chainId),
-          }, refreshIcon(searching.has(c.chainId))))))
+          }, refreshIcon(searching.has(c.chainId))),
+          now(c.chainId))))
       : null);
 }
 
