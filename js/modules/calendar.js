@@ -1,9 +1,11 @@
 // Calendar: the events of every connected Google account, by day, week or month, with task deadlines on the same days.
 // Events of the range on screen show from the browser's cache at once, then are read again when the cache is stale. Settings → Google Calendar lists the accounts.
-import { h, icon, refreshIcon, notice, statusOf, empty } from '../ui.js';
-import { projectIcon, projectTree, labelsOf, underLabel } from './projects.js';
+import { h, icon, refreshIcon, notice, statusOf } from '../ui.js';
+import { projectIcon, projectTree, labelsOf, labelColor, underLabel } from './projects.js';
 import { setupBanner } from '../integrations.js';
-import { calendarAccounts, calendarEvents, cachedCalendarEvents, CALENDAR_TTL, connectCalendar, isCalendarConnected, setCalendar, eventDate, calendarProject, calendarLabel } from '../gcal.js';
+import { calendarAccounts, calendarEvents, cachedCalendarEvents, CALENDAR_TTL, connectCalendar, isCalendarConnected, setCalendar, setCalendarAccount, eventDate, calendarProject, calendarLabel } from '../gcal.js';
+import { accountAvatar } from '../google.js';
+import { pickChip, pickTree } from '../inline.js';
 import { makeTask } from '../capture.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
@@ -12,7 +14,9 @@ const MODES = [['day', 'Day'], ['week', 'Week'], ['month', 'Month']];
 const MONTH_CELL = 3; // events listed in a month cell before "+N more"
 
 // View state. date: the day the view is anchored on, YYYY-MM-DD.
-const view = { mode: 'week', date: '', project: 'all', tasks: true };
+// mini: the month the small calendar shows when paged away from the main view. scroll: the time grid's position, kept
+// across redraws.
+const view = { mode: 'week', date: '', project: 'all', tasks: true, mini: '', scroll: null };
 // The last read: the range and calendars it covered, so a change of either reads again. at: when the oldest of its
 // events was read from Google; checked: when the board last asked, so a stale view refreshes itself once per TTL.
 const read = { key: '', busy: false, events: [], errors: [], waiting: [], at: 0, checked: 0 };
@@ -171,49 +175,147 @@ const taskChip = (t) =>
   h('a', { class: 'cal-chip cal-task', href: `#/todos?filter=${t.projectId ?? 'personal'}`, title: `Task due: ${t.text}` },
     icon('check-square'), h('span', { class: 'cal-chip-text' }, t.text));
 
-function dayHead(d, { long = false, onclick } = {}) {
-  const today = d.toDateString() === new Date().toDateString();
-  return h('button', { type: 'button', class: today ? 'cal-day-head today' : 'cal-day-head', onclick, title: 'Show this day' },
-    h('span', { class: 'cal-weekday' }, d.toLocaleDateString([], { weekday: long ? 'long' : 'short' })),
-    h('span', { class: 'cal-date' }, d.getDate()));
-}
-
 const openDay = (store, d) => () => {
   view.mode = 'day';
   view.date = isoOf(d);
   store.refresh();
 };
 
-function dayView(store, d, events, tasks) {
-  const list = events.filter((e) => onDay(e, d));
-  const due = tasks.filter((t) => t.due === isoOf(d));
-  if (!list.length && !due.length) return h('div', { class: 'card' }, empty('Nothing on this day.'));
-  return h('section', { class: 'card' },
-    h('ul', { class: 'cal-agenda' },
-      list.map((e) =>
-        h('li', null,
-          h('button', { type: 'button', class: 'cal-agenda-row', style: { '--c': e.color || 'var(--accent)' }, onclick: () => openEvent(store, e) },
-            h('span', { class: 'cal-agenda-time' }, e.allDay ? 'All day' : `${clock(eventDate(e.start))} – ${clock(eventDate(e.end || e.start))}`),
-            h('span', { class: 'gcal-swatch' }),
-            h('span', { class: 'grow cal-agenda-text' },
-              h('strong', null, e.title),
-              h('span', { class: 'muted small' }, [e.location, e.calendar].filter(Boolean).join(' · ')))))),
-      due.map((t) => h('li', null, taskChip(t)))));
+// --- Time grid (day and week), laid out as Google Calendar does ---
+
+const HOUR = 48; // px per hour
+const DAY_MS = 86400000;
+// Whole-day events, and timed ones that last a day or more, go in the strip above the hours.
+const isLong = (e) => e.allDay || eventDate(e.end || e.start) - eventDate(e.start) >= DAY_MS;
+const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+// Days between two midnights; rounded, so a daylight-saving change does not shift a column.
+const dayIndex = (from, d) => Math.round((midnight(d) - from) / DAY_MS);
+const hourLabel = (hour) => new Date(2000, 0, 1, hour).toLocaleTimeString([], { hour: 'numeric' });
+// "2 PM" or "2:30 PM": the minutes only when there are some, as Google's grid shows them.
+const shortClock = (d) => d.toLocaleTimeString([], { hour: 'numeric', ...(d.getMinutes() ? { minute: '2-digit' } : {}) });
+
+// The part of each timed event that falls on day `d`, in hours from midnight.
+function segmentsOf(timed, d) {
+  const next = addDays(d, 1);
+  const hoursOf = (x) => (x >= next ? 24 : x <= d ? 0 : x.getHours() + x.getMinutes() / 60);
+  return timed.filter((e) => onDay(e, d)).map((e) => {
+    const top = Math.min(hoursOf(eventDate(e.start)), 23.5);
+    return { e, top, bottom: Math.max(hoursOf(eventDate(e.end || e.start)), top + 0.5) };
+  });
 }
 
-function weekView(store, from, events, tasks) {
-  return h('div', { class: 'cal-week' },
-    Array.from({ length: 7 }, (_, i) => {
-      const d = addDays(from, i);
-      const list = events.filter((e) => onDay(e, d));
-      const due = tasks.filter((t) => t.due === isoOf(d));
-      return h('section', { class: 'card cal-col' },
-        dayHead(d, { onclick: openDay(store, d) }),
-        h('div', { class: 'cal-items' },
-          list.map((e) => eventChip(store, e)),
-          due.map(taskChip),
-          !list.length && !due.length ? h('span', { class: 'muted small cal-free' }, 'Free') : null));
-    }));
+// Events that overlap share the width: each takes the first free column of its cluster.
+function placeSegments(segs) {
+  segs.sort((x, y) => x.top - y.top || y.bottom - x.bottom);
+  let cluster = [];
+  let ends = [];
+  let clusterEnd = -1;
+  const close = () => {
+    for (const s of cluster) s.cols = ends.length;
+    cluster = [];
+    ends = [];
+  };
+  for (const s of segs) {
+    if (s.top >= clusterEnd) close();
+    let col = ends.findIndex((end) => end <= s.top);
+    if (col === -1) col = ends.push(s.bottom) - 1;
+    else ends[col] = s.bottom;
+    s.col = col;
+    cluster.push(s);
+    clusterEnd = Math.max(clusterEnd, s.bottom);
+  }
+  close();
+  return segs;
+}
+
+function timedBlock(store, s) {
+  const { e } = s;
+  const short = s.bottom - s.top < 0.75;
+  return h('button', {
+    type: 'button',
+    class: short ? 'cal-event short' : 'cal-event',
+    style: {
+      '--c': e.color || 'var(--accent)',
+      top: `${s.top * HOUR}px`,
+      height: `${(s.bottom - s.top) * HOUR - 2}px`,
+      left: `${(s.col / s.cols) * 100}%`,
+      width: `calc(${100 / s.cols}% - 3px)`,
+    },
+    title: `${e.title} · ${whenOf(e)}`,
+    onclick: () => openEvent(store, e),
+  },
+    h('span', { class: 'cal-event-title' }, e.title),
+    h('span', { class: 'cal-event-time' }, `${shortClock(eventDate(e.start))} – ${shortClock(eventDate(e.end || e.start))}`),
+    e.location && !short ? h('span', { class: 'cal-event-place' }, e.location) : null);
+}
+
+function gridView(store, from, days, events, tasks) {
+  const dates = Array.from({ length: days }, (_, i) => addDays(from, i));
+  const today = new Date();
+  const cols = { '--days': days };
+
+  // The strip above the hours: multi-day bars span their columns; deadlines sit on their day.
+  const bars = events.filter(isLong).map((e) => {
+    const start = eventDate(e.start);
+    const end = eventDate(e.end || e.start);
+    const first = Math.max(0, dayIndex(from, start));
+    const after = e.allDay || end.getTime() === midnight(end).getTime() ? dayIndex(from, end) : dayIndex(from, end) + 1;
+    const last = Math.min(days, Math.max(first + 1, after));
+    return h('button', {
+      type: 'button',
+      class: ['cal-bar', start < from ? 'cut-start' : '', after > days ? 'cut-end' : ''].filter(Boolean).join(' '),
+      style: { '--c': e.color || 'var(--accent)', gridColumn: `${first + 1} / ${last + 1}` },
+      title: `${e.title} · ${whenOf(e)}`,
+      onclick: () => openEvent(store, e),
+    }, h('span', { class: 'cal-chip-text' }, e.title));
+  });
+  const due = tasks.map((t) => {
+    const chip = taskChip(t);
+    chip.style.gridColumn = String(dayIndex(from, eventDate(t.due)) + 1);
+    return chip;
+  });
+  const timed = events.filter((e) => !isLong(e));
+  const nowHours = today.getHours() + today.getMinutes() / 60;
+
+  return h('section', { class: 'card cal-grid' },
+    h('div', { class: 'cal-grid-row cal-grid-head', style: cols },
+      h('span', { class: 'cal-gutter-head' }),
+      dates.map((d) => h('button', {
+        type: 'button',
+        class: d.toDateString() === today.toDateString() ? 'cal-grid-day today' : 'cal-grid-day',
+        onclick: openDay(store, d),
+        title: 'Show this day',
+      },
+        h('span', { class: 'cal-weekday' }, d.toLocaleDateString([], { weekday: 'short' })),
+        h('span', { class: 'cal-grid-date' }, d.getDate())))),
+    bars.length || due.length
+      ? h('div', { class: 'cal-grid-row cal-grid-strip', style: cols },
+          h('span', { class: 'cal-gutter-head muted small' }, 'All day'),
+          h('div', { class: 'cal-strip' }, bars, due))
+      : null,
+    h('div', { class: 'cal-grid-scroll', onscroll: (ev) => { view.scroll = ev.currentTarget.scrollTop; } },
+      h('div', { class: 'cal-grid-row cal-grid-body', style: { ...cols, '--hour': `${HOUR}px`, height: `${24 * HOUR}px` } },
+        h('div', { class: 'cal-gutter' },
+          Array.from({ length: 23 }, (_, i) => h('span', { class: 'cal-hour', style: { top: `${(i + 1) * HOUR}px` } }, hourLabel(i + 1)))),
+        dates.map((d) => {
+          const isToday = d.toDateString() === today.toDateString();
+          return h('div', { class: isToday ? 'cal-day-col today' : 'cal-day-col' },
+            placeSegments(segmentsOf(timed, d)).map((sg) => timedBlock(store, sg)),
+            isToday ? h('div', { class: 'cal-now', style: { top: `${nowHours * HOUR}px` }, 'aria-hidden': 'true' }) : null);
+        }))));
+}
+
+// Once the grid is on the page: back where it was, or two hours before now, or at 7 in the morning.
+function scrollGrid(root, from, days) {
+  const el = root.querySelector('.cal-grid-scroll');
+  if (!el) return;
+  const now = new Date();
+  const showsToday = now >= from && now < addDays(from, days);
+  const top = view.scroll ?? Math.max(0, (showsToday ? now.getHours() - 2 : 7) * HOUR);
+  // The page is drawn before the shell puts it on screen, and a detached element cannot scroll.
+  requestAnimationFrame(() => {
+    el.scrollTop = top;
+  });
 }
 
 function monthView(store, from, to, month, events, tasks) {
@@ -235,20 +337,72 @@ function monthView(store, from, to, month, events, tasks) {
       })));
 }
 
-// The calendars of every account, as chips that show or hide them.
-function legend(store, accounts) {
-  const all = accounts.flatMap((a) => a.calendars.map((c) => ({ a, c })));
+// The calendars of every account as a searchable tree: each account (with its Google picture) and its calendars.
+function calendarFilter(store, accounts) {
+  const all = accounts.flatMap((a) => a.calendars);
   if (!all.length) return null;
-  return h('div', { class: 'cal-legend', role: 'group', 'aria-label': 'Calendars' },
-    all.map(({ a, c }) =>
-      h('button', {
+  const on = all.filter((c) => c.on).length;
+  return pickTree({
+    key: 'cal-calendars',
+    label: on === all.length ? 'All calendars' : on ? `${on} of ${all.length} calendars` : 'No calendar',
+    ariaLabel: 'Calendars shown',
+    // Read again on each paint, so a tick shows at once.
+    getOptions: () => calendarAccounts(store).flatMap((a) => {
+      const shown = a.calendars.filter((c) => c.on).length;
+      return [
+        { value: { account: a.email }, label: a.email, depth: 0, checked: a.calendars.length > 0 && shown === a.calendars.length, mixed: shown > 0, lead: () => accountAvatar(a.email) },
+        ...a.calendars.map((c) => ({
+          value: { account: a.email, id: c.id },
+          label: c.name,
+          depth: 1,
+          checked: c.on,
+          lead: () => h('span', { class: 'gcal-swatch', style: { '--c': c.color || 'var(--accent)' } }),
+        })),
+      ];
+    }),
+    // Ticking an account shows or hides all of its calendars.
+    onToggle: ({ account, id }, next) => {
+      if (id) return setCalendar(store, account, id, { on: next });
+      const a = calendarAccounts(store).find((x) => x.email === account);
+      if (a) setCalendarAccount(store, account, { calendars: a.calendars.map((c) => ({ ...c, on: next })) });
+    },
+  });
+}
+
+// A small month to jump to any day, as in Google's side column. Its arrows page through months on their own.
+function miniMonth(store, d, from, to) {
+  const month = view.mini ? eventDate(view.mini) : new Date(d.getFullYear(), d.getMonth(), 1);
+  const [first, last] = rangeOf('month', month);
+  const days = [];
+  for (let x = first; x < last; x = addDays(x, 1)) days.push(x);
+  const today = new Date().toDateString();
+  const page = (n) => () => {
+    view.mini = isoOf(new Date(month.getFullYear(), month.getMonth() + n, 1));
+    store.refresh();
+  };
+  return h('div', { class: 'cal-mini' },
+    h('div', { class: 'cal-mini-head' },
+      h('strong', null, month.toLocaleDateString([], { month: 'long', year: 'numeric' })),
+      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Previous month', onclick: page(-1) }, icon('chevron-left')),
+      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Next month', onclick: page(1) }, icon('chevron-right'))),
+    h('div', { class: 'cal-mini-grid', 'aria-hidden': 'true' },
+      days.slice(0, 7).map((x) => h('span', { class: 'muted' }, x.toLocaleDateString([], { weekday: 'narrow' })))),
+    h('div', { class: 'cal-mini-grid' },
+      days.map((x) => h('button', {
         type: 'button',
-        class: c.on ? 'cal-toggle on' : 'cal-toggle',
-        style: { '--c': c.color || 'var(--accent)' },
-        'aria-pressed': String(c.on),
-        title: `${c.name} · ${a.email}`,
-        onclick: () => setCalendar(store, a.email, c.id, { on: !c.on }),
-      }, h('span', { class: 'gcal-swatch' }), c.name)));
+        class: [
+          'cal-mini-day',
+          x.getMonth() === month.getMonth() ? '' : 'outside',
+          x.toDateString() === today ? 'today' : '',
+          x >= from && x < to ? 'in-range' : '',
+        ].filter(Boolean).join(' '),
+        'aria-label': x.toLocaleDateString([], { dateStyle: 'full' }),
+        onclick: () => {
+          view.date = isoOf(x);
+          view.mini = '';
+          store.refresh();
+        },
+      }, x.getDate()))));
 }
 
 // --- Page ---
@@ -273,7 +427,8 @@ function draw(root, store) {
   // Events carry their calendar's label; tasks only have their project's.
   const byProject = (x) => view.project === 'all' ||
     (labelFilter ? underLabel(projects, x.projectId, x.labelId ?? null, labelFilter) : x.projectId === view.project);
-  const events = read.key === key ? read.events.filter(byProject) : [];
+  // Before the new read lands, the cache stands in: a redraw that waits for an open picker would otherwise show nothing.
+  const events = (read.key === key ? read.events : cachedCalendarEvents(store, from, to).events).filter(byProject);
   const tasks = view.tasks
     ? store.get('todos').items.filter((t) => t.due && statusOf(t) !== 'done' && t.due >= isoOf(from) && t.due < isoOf(to)).filter(byProject)
     : [];
@@ -285,30 +440,58 @@ function draw(root, store) {
     ...projects.filter((p) => linked.has(p.id)).flatMap(labelsOf),
   ]);
 
+  // Moving the main view brings the small month back to it.
+  const go = (move) => () => {
+    move();
+    view.mini = '';
+    store.refresh();
+  };
   const toolbar = h('div', { class: 'row between cal-toolbar' },
-    h('div', { class: 'row' },
-      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Previous', title: 'Previous', onclick: () => { step(-1); store.refresh(); } }, icon('chevron-left')),
-      h('button', { type: 'button', class: 'btn-small', onclick: () => { view.date = ''; store.refresh(); } }, 'Today'),
-      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Next', title: 'Next', onclick: () => { step(1); store.refresh(); } }, icon('chevron-right')),
+    h('div', { class: 'row cal-nav' },
+      h('button', { type: 'button', class: 'btn-small cal-today', onclick: go(() => { view.date = ''; }) }, 'Today'),
+      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Previous', title: 'Previous', onclick: go(() => step(-1)) }, icon('chevron-left')),
+      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Next', title: 'Next', onclick: go(() => step(1)) }, icon('chevron-right')),
       h('h3', { class: 'cal-title' }, titleOf(view.mode, d))),
-    h('div', { class: 'row' },
-      h('select', { 'aria-label': 'Project', onchange: (e) => { view.project = e.target.value; store.refresh(); } },
-        h('option', { value: 'all', selected: view.project === 'all' }, 'All projects'),
-        projects.filter((p) => linked.has(p.id) || p.id === view.project).map((p) => h('option', { value: p.id, selected: p.id === view.project }, p.name)),
-        labels.some((c) => linkedLabels.has(c.id) || c.id === labelFilter)
-          ? h('optgroup', { label: 'Project labels' },
-              labels.filter((c) => linkedLabels.has(c.id) || c.id === labelFilter)
-                .map((c) => h('option', { value: `label:${c.id}`, selected: c.id === labelFilter }, c.name)))
-          : null),
-      h('label', { class: 'check row' },
-        h('input', { type: 'checkbox', checked: view.tasks, onchange: (e) => { view.tasks = e.target.checked; store.refresh(); } }), 'Task deadlines'),
+    h('div', { class: 'row cal-actions' },
+      read.key === key && read.at ? h('span', { class: 'muted small', title: new Date(read.at).toLocaleString() }, `Updated ${ago(read.at)}`) : null,
       h('button', {
         type: 'button',
-        class: 'btn-small',
+        class: 'icon-btn',
+        title: read.busy ? 'Reading…' : 'Read again from Google',
+        'aria-label': 'Refresh',
         disabled: read.busy || !connected.length,
         onclick: () => load(store, key, from, to, { maxAge: 0 }),
-      }, refreshIcon(read.busy), read.busy ? 'Reading…' : 'Refresh'),
-      read.key === key && read.at ? h('span', { class: 'muted small', title: new Date(read.at).toLocaleString() }, `Updated ${ago(read.at)}`) : null));
+      }, refreshIcon(read.busy)),
+      h('div', { class: 'segmented cal-modes', role: 'group', 'aria-label': 'View' },
+        MODES.map(([k, label]) => h('button', {
+          type: 'button',
+          class: view.mode === k ? 'seg active' : 'seg',
+          'aria-pressed': String(view.mode === k),
+          onclick: () => { view.mode = k; store.refresh(); },
+        }, label)))));
+
+  // The side column: a small month, then the filters. On a phone the month is hidden and the filters sit in a row.
+  // Projects that have a calendar, then project labels in their colours.
+  const choices = [
+    ...projects.filter((p) => linked.has(p.id) || p.id === view.project).map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
+    ...labels.filter((c) => linkedLabels.has(c.id) || c.id === labelFilter).map((c) => ({ value: `label:${c.id}`, label: c.name, color: labelColor(c) })),
+  ];
+  const side = h('aside', { class: 'cal-side' },
+    miniMonth(store, d, from, to),
+    h('div', { class: 'cal-filters' },
+      calendarFilter(store, accounts),
+      choices.length
+        ? pickChip({
+            value: view.project === 'all' ? null : view.project,
+            options: choices,
+            nullable: true,
+            nullLabel: 'All projects',
+            className: 'cal-project-pick',
+            onPick: (v) => { view.project = v ?? 'all'; store.refresh(); },
+          })
+        : null,
+      h('label', { class: 'check row' },
+        h('input', { type: 'checkbox', checked: view.tasks, onchange: (e) => { view.tasks = e.target.checked; store.refresh(); } }), 'Task deadlines')));
 
   const offline = accounts.filter((a) => !isCalendarConnected(a.email));
   const banners = [
@@ -324,27 +507,21 @@ function draw(root, store) {
     read.key === key && read.errors.length ? notice({ text: read.errors.join('\n') }) : null,
   ].filter(Boolean);
 
-  const body = view.mode === 'day' ? dayView(store, d, events, tasks)
-    : view.mode === 'week' ? weekView(store, from, events, tasks)
-      : monthView(store, from, to, d.getMonth(), events, tasks);
+  const days = view.mode === 'day' ? 1 : 7;
+  const body = view.mode === 'month'
+    ? monthView(store, from, to, d.getMonth(), events, tasks)
+    : gridView(store, from, days, events, tasks);
 
   root.replaceChildren(
     h('div', { class: 'stack-lg calendar' },
-      h('header', { class: 'row between' },
-        h('div', null,
-          h('h2', null, 'Calendar'),
-          h('p', { class: 'muted small' }, 'Your Google calendars side by side, with task deadlines on their days. Read-only.')),
-        h('div', { class: 'segmented cal-modes', role: 'group', 'aria-label': 'View' },
-          MODES.map(([k, label]) => h('button', {
-            type: 'button',
-            class: view.mode === k ? 'seg active' : 'seg',
-            'aria-pressed': String(view.mode === k),
-            onclick: () => { view.mode = k; store.refresh(); },
-          }, label)))),
+      h('header', null,
+        h('h2', null, 'Calendar'),
+        h('p', { class: 'muted small' }, 'Your Google calendars side by side, with task deadlines on their days. Read-only.')),
       ...banners,
-      legend(store, accounts),
-      toolbar,
-      body));
+      h('div', { class: 'cal-layout' },
+        side,
+        h('div', { class: 'stack cal-main' }, toolbar, body))));
+  if (view.mode !== 'month') scrollGrid(root, from, days);
 }
 
 export default {
