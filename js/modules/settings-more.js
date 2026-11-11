@@ -100,17 +100,20 @@ function calendarAccount(store, account, projects, clientId) {
         : h('button', { type: 'button', class: 'btn-small', disabled: !clientId, onclick: reconnect }, 'Connect'),
       h('button', { type: 'button', class: 'icon-btn', title: 'Remove account', 'aria-label': `Remove ${account.email}`, onclick: () => { removeCalendarAccount(store, account.email); sayRow(''); } }, icon('x'))),
     result(key),
-    h('div', { class: 'gcal-defaults' },
-      h('span', { class: 'muted small' }, 'For all its calendars'),
-      h('label', { class: 'gcal-default' }, h('span', { class: 'muted small' }, 'Project'),
-        projectPick(projects, account.projectId, 'No project', (projectId) => setCalendarAccount(store, account.email, { projectId }))),
-      h('label', { class: 'gcal-default' }, h('span', { class: 'muted small' }, 'Project label'),
-        labelPick(store, account.labelId, 'No label', (labelId) => setCalendarAccount(store, account.email, { labelId })))),
     h('ul', { class: 'resend-list' },
+      h('li', { class: 'resend-row resend-head gcal-row', 'aria-hidden': 'true' }, h('span', null, 'Calendar'), h('span', null, 'Project'), h('span', null, 'Project label')),
+      // The account's own project and label sit in the same columns as its calendars', as the default they inherit.
+      h('li', { class: 'resend-row has-key gcal-row gcal-account-row' },
+        h('div', { class: 'resend-name' },
+          icon('calendar'),
+          h('div', null, h('strong', null, 'All calendars'), h('div', { class: 'muted small' }, 'Used by any calendar without its own'))),
+        h('div', { class: 'resend-key' },
+          projectPick(projects, account.projectId, 'No project', (projectId) => setCalendarAccount(store, account.email, { projectId }))),
+        h('div', { class: 'resend-actions' },
+          labelPick(store, account.labelId, 'No label', (labelId) => setCalendarAccount(store, account.email, { labelId })))),
       account.calendars.length
-        ? [h('li', { class: 'resend-row resend-head', 'aria-hidden': 'true' }, h('span', null, 'Calendar'), h('span', null, 'Project'), h('span', null, 'Project label')),
-            ...account.calendars.map((c) => calendarRow(store, account, c, projects))]
-        : [h('li', { class: 'empty' }, 'No calendars read yet. Connect to read them.')]));
+        ? account.calendars.map((c) => calendarRow(store, account, c, projects))
+        : h('li', { class: 'empty' }, 'No calendars read yet. Connect to read them.')));
 }
 
 // The accounts the Calendar section reads, each with its calendars. Shown under the Client ID on the Google Calendar page.
