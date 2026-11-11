@@ -15,7 +15,7 @@ const EVERY = [[15, '15 minutes'], [60, 'hour'], [360, '6 hours'], [1440, 'day']
 const STATUS = { up: ['Up', 'done'], slow: ['Slow', 'medium'], down: ['Down', 'high'] };
 
 // View state: the tab, the project shown in the metadata preview, and which sites are being checked now.
-const view = { tab: 'health', project: '', busy: new Set(), openDns: new Set() };
+const view = { tab: 'health', project: '', busy: new Set(), openDns: new Set(), openFile: '' };
 
 const pillOf = (text, tone) => h('span', { class: `pill tone-${tone}` }, text);
 const timeOf = (at) => (at ? new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never');
@@ -267,24 +267,88 @@ function dnsTab(store, sites) {
 const crawlTask = (store, p, name, why) => () =>
   openTaskDialog(store, p, { text: `Add ${name === 'Sitemap' ? 'a sitemap' : name} to ${hostOf(p.website)}`, description: why });
 
-// What each file is for, and what is worth knowing about it once found.
+const kb = (n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`);
+
+// [key, name, short name for the table, what it is for, needed by most sites, what is worth knowing about it once found].
 const CRAWL_FILES = [
-  ['robots', 'robots.txt', 'Tells crawlers what they may read.', (f) => [
+  ['robots', 'robots.txt', 'robots', 'Tells crawlers what they may read.', true, (f) => [
     f.blocksSearch ? pillOf('Blocks Google or Bing', 'high') : f.blocksAll ? pillOf('Blocks unnamed crawlers', 'medium') : pillOf('Search engines allowed', 'done'),
     f.aiBlocked?.length ? `AI crawlers blocked: ${f.aiBlocked.join(', ')}` : 'No AI crawler blocked by name',
     f.sitemaps?.length ? `Points to ${f.sitemaps.length} sitemap${f.sitemaps.length === 1 ? '' : 's'}` : 'Names no sitemap',
   ]],
-  ['sitemap', 'Sitemap', 'Lists the pages search engines should find.', (f) => [
+  ['sitemap', 'Sitemap', 'sitemap', 'Lists the pages search engines should find.', true, (f) => [
     f.indexes ? `Index of ${f.indexes} sitemap${f.indexes === 1 ? '' : 's'}` : `${f.urls} page${f.urls === 1 ? '' : 's'}`,
     f.lastmod ? `Last changed ${f.lastmod}` : 'No change dates',
-    h('a', { href: f.url, target: '_blank', rel: 'noopener', class: 'small' }, f.url),
   ]],
-  ['llms', 'llms.txt', 'A short guide to the site for AI assistants.', (f) => [f.title ? `Titled “${f.title}”` : 'No title line']],
-  ['security', 'security.txt', 'Says where to report a security problem.', (f) => [
+  ['llms', 'llms.txt', 'llms', 'A short guide to the site for AI assistants.', true, (f) => [f.title ? `Titled “${f.title}”` : 'No title line']],
+  ['llmsFull', 'llms-full.txt', 'llms-full', 'The whole documentation in one file, for AI assistants.', false, (f) => [kb(f.size ?? 0)]],
+  ['security', 'security.txt', 'security', 'Says where to report a security problem.', true, (f) => [
     f.contact?.length ? `Contact: ${f.contact.join(', ')}` : 'No contact',
     !f.expires ? 'No expiry date' : daysUntil(f.expires) < 0 ? pillOf(`Expired on ${f.expires}`, 'high') : `Valid until ${f.expires}`,
   ]],
+  ['humans', 'humans.txt', 'humans', 'Credits the people behind the site.', false, null],
+  ['ads', 'ads.txt', 'ads', 'Lists who may sell ads on the site. Only needed with ads.', false, null],
+  ['manifest', 'Web app manifest', 'manifest', 'Lets the site be installed as an app, with its name and icons.', false, null],
+  ['aasa', 'Apple app site association', 'apple', 'Opens links in the site’s iOS app.', false, null],
+  ['assetlinks', 'Android asset links', 'android', 'Opens links in the site’s Android app.', false, null],
 ];
+const CORE = CRAWL_FILES.filter((x) => x[4]);
+const fileOf = (key) => CRAWL_FILES.find(([k]) => k === key);
+// Files saved before a kind was added have no entry; they read as unread until the next read.
+const crawlFile = (c, key) => c?.[key] ?? { found: false, unread: 'Read again to check this file.' };
+const issuesOf = (f) => (f.checks ?? []).filter(([level]) => level !== 'ok');
+
+function checksPill(f) {
+  if (!f.checks) return null;
+  const errors = f.checks.filter(([l]) => l === 'error').length;
+  const warns = f.checks.filter(([l]) => l === 'warn').length;
+  return errors ? pillOf(`${errors} error${errors === 1 ? '' : 's'}`, 'high') : warns ? pillOf(`${warns} warning${warns === 1 ? '' : 's'}`, 'medium') : pillOf('Looks right', 'done');
+}
+
+// A found file is green, or amber when its format check found an error. A missing optional file is an empty circle.
+function fileTick(store, p, key, f, onOpen) {
+  const [, name, , why, core] = fileOf(key);
+  if (f.unread) return h('span', { class: 'tick todo', title: `${name}: ${f.unread}` }, icon('clock'));
+  if (f.found) {
+    const bad = (f.checks ?? []).some(([l]) => l === 'error');
+    return h('button', { type: 'button', class: `tick ${bad ? 'warn' : 'ok'}`, title: `${name} found${bad ? ', with errors' : ''} · show the file`, 'aria-label': `Show ${name}`, onclick: onOpen }, icon(bad ? 'alert' : 'check'));
+  }
+  return core ? tick(false, `${name} missing`, crawlTask(store, p, name, why)) : h('button', { type: 'button', class: 'tick todo', title: `${name} not found (optional) · create a task`, 'aria-label': `${name}: create a task`, onclick: crawlTask(store, p, name, why) });
+}
+
+// The file itself, with what its format check found. Shown under the row it belongs to.
+function filePreview(store, p, key, f) {
+  const [, name, , why] = fileOf(key);
+  const host = hostOf(p.website);
+  if (!f.found) {
+    return h('div', { class: 'file-preview stack' },
+      h('p', { class: 'small' }, f.unread ? `Could not be read: ${f.unread}` : f.note ?? (f.status ? `Not found: ${f.url} answered ${f.status}.` : 'Not found.')),
+      h('p', { class: 'muted small' }, why),
+      f.unread ? null : h('div', null, h('button', { type: 'button', class: 'btn-small', onclick: crawlTask(store, p, name, why) }, icon('plus'), 'Create a task to add it')));
+  }
+  const issues = issuesOf(f);
+  const cut = f.size && f.raw && f.size > f.raw.length;
+  return h('div', { class: 'file-preview stack' },
+    h('div', { class: 'row between' },
+      h('a', { href: f.url, target: '_blank', rel: 'noopener', class: 'small file-url' }, f.url),
+      h('span', { class: 'muted small' }, [f.size ? kb(f.size) : '', cut ? `first ${f.raw.length.toLocaleString()} characters shown` : ''].filter(Boolean).join(' · '))),
+    f.checks
+      ? h('ul', { class: 'file-checks' }, f.checks.map(([level, text]) => h('li', { class: `lvl-${level}` }, icon(level === 'ok' ? 'check' : level === 'warn' ? 'alert' : 'x'), h('span', null, text))))
+      : h('p', { class: 'muted small' }, 'Read again to check its format.'),
+    issues.length
+      ? h('div', null, h('button', {
+          type: 'button',
+          class: 'btn-small',
+          onclick: () => openTaskDialog(store, p, { text: `Fix ${name} on ${host}`, description: `The format check of ${f.url} found:\n${issues.map(([, t]) => `- ${t}`).join('\n')}`, priority: issues.some(([l]) => l === 'error') ? 'medium' : 'low' }),
+        }, icon('plus'), `Create a task for ${issues.length === 1 ? 'this issue' : `these ${issues.length} issues`}`))
+      : null,
+    h('pre', { class: 'file-raw' }, (f.raw ?? '').split('\n').map((line) => h('span', { class: 'line' }, `${line}\n`))));
+}
+
+const toggleFile = (store, ref) => () => {
+  view.openFile = view.openFile === ref ? '' : ref;
+  store.refresh();
+};
 
 function crawlTab(store, sites) {
   const p = pickedSite(sites);
@@ -296,18 +360,19 @@ function crawlTab(store, sites) {
   if (!c?.robots) {
     return h('div', { class: 'stack-lg' }, siteChips(store, sites, p),
       c?.error ? notice({ text: c.error }) : null,
-      h('div', { class: 'card stack' }, h('p', { class: 'muted' }, `Read the files on ${host} that crawlers and AI assistants look for.`), h('div', null, read)));
+      h('div', { class: 'card stack' }, h('p', { class: 'muted' }, `Read the files on ${host} that crawlers, AI assistants and app stores look for.`), h('div', null, read)));
   }
-  const missing = CRAWL_FILES.filter(([k]) => !c[k].found && !c[k].unread).map(([, name]) => name);
-  const present = CRAWL_FILES.filter(([k]) => c[k].found).length;
+  const missing = CORE.filter(([k]) => !crawlFile(c, k).found && !crawlFile(c, k).unread).map(([, name]) => name);
+  const present = CORE.filter(([k]) => crawlFile(c, k).found).length;
+  const extras = CRAWL_FILES.filter(([k, , , , core]) => !core && crawlFile(c, k).found).length;
   return h('div', { class: 'stack-lg' }, siteChips(store, sites, p),
     c.robots.blocksSearch
       ? notice({ text: `robots.txt on ${host} blocks search engines from the whole site, so it drops out of search results.`, actions: [taskCell(store, p, 'crawl', `Let search engines crawl ${host}`)] })
       : null,
     h('section', { class: 'card stack' },
       h('div', { class: 'row between' }, h('h3', null, `Files found on ${host}`), read),
-      h('div', { class: 'meter' }, h('span', { style: { width: `${(present / CRAWL_FILES.length) * 100}%` } })),
-      h('p', { class: 'muted small' }, `${present} of ${CRAWL_FILES.length} files present · read ${timeOf(c.at)}${c.error ? ` · last try failed: ${c.error}` : ''}`),
+      h('div', { class: 'meter' }, h('span', { style: { width: `${(present / CORE.length) * 100}%` } })),
+      h('p', { class: 'muted small' }, `${present} of ${CORE.length} key files present, ${extras} of ${CRAWL_FILES.length - CORE.length} optional ones · read ${timeOf(c.at)}${c.error ? ` · last try failed: ${c.error}` : ''}`),
       missing.length
         ? h('div', null, h('button', {
             type: 'button',
@@ -318,17 +383,53 @@ function crawlTab(store, sites) {
             },
           }, 'Create a task for the missing files'))
         : null),
-    h('div', { class: 'crawl-grid' }, CRAWL_FILES.map(([key, name, why, facts]) => {
-      const f = c[key];
-      return h('article', { class: 'card stack' },
-        h('div', { class: 'row' }, tick(f.found, `${name} ${f.found ? 'found' : f.unread ? 'unread' : 'missing'}`, f.unread ? null : crawlTask(store, p, name, why)), h('strong', null, name)),
-        h('p', { class: 'muted small' }, why),
-        f.found
-          ? h('ul', { class: 'crawl-facts' }, facts(f).map((x) => h('li', null, x)))
-          : h('p', { class: 'small' }, f.unread ? `Could not be read: ${f.unread}` : f.note ?? (f.status ? `Not found (the site answered ${f.status}).` : 'Not found.')),
-        f.found ? h('details', null, h('summary', { class: 'muted small' }, 'Show the file'), h('pre', { class: 'readme' }, f.raw)) : null);
+    h('div', { class: 'card file-list' }, CRAWL_FILES.map(([key, name, , why, core, facts]) => {
+      const f = crawlFile(c, key);
+      const open = view.openFile === key;
+      const summary = f.found ? (facts ? facts(f) : [(f.checks ?? []).find(([l]) => l === 'ok')?.[1] ?? 'Found']) : [f.unread ? 'Unread' : core ? 'Missing' : 'Not found (optional)'];
+      return h('div', { class: open ? 'file-item open' : 'file-item' },
+        h('div', { class: 'file-row' },
+          fileTick(store, p, key, f, toggleFile(store, key)),
+          h('button', { type: 'button', class: 'file-name', 'aria-expanded': String(open), onclick: toggleFile(store, key) },
+            h('strong', null, name),
+            h('span', { class: 'muted small' }, why)),
+          h('div', { class: 'file-facts small' }, summary.map((x) => h('span', null, x))),
+          f.found ? checksPill(f) : h('span'),
+          h('button', { type: 'button', class: 'icon-btn file-chevron', 'aria-label': `${open ? 'Hide' : 'Show'} ${name}`, onclick: toggleFile(store, key) }, icon('chevron'))),
+        open ? filePreview(store, p, key, f) : null);
     })),
-    h('p', { class: 'muted small' }, 'The files are read through r.jina.ai, the page reader also used for share tags; only their addresses are sent. Long files are shown in part.'));
+    h('p', { class: 'muted small' }, 'The files are read through r.jina.ai, the page reader also used for share tags; only their addresses are sent. Long files are shown in part, but checked in full.'));
+}
+
+// The "All" table. A file's tick opens it under its site's row.
+function crawlAll(store, sites) {
+  const cols = CRAWL_FILES.length + 3;
+  return h('div', { class: 'stack-lg' }, siteChips(store, sites, null),
+    h('div', { class: 'card mon-scroll' },
+      h('table', { class: 'mon-table tool-table crawl-table' },
+        h('thead', null, h('tr', null, ['Site', ...CRAWL_FILES.map(([, name, short]) => h('span', { title: name }, short)), 'Read', ''].map((t) => h('th', null, t)))),
+        h('tbody', null, sites.flatMap((p) => {
+          const c = siteData(store, p.id).crawl;
+          const busy = view.busy.has(p.id) || view.busy.has('all');
+          const cells = c?.robots
+            ? CRAWL_FILES.map(([k]) => {
+                const ref = `${p.id}:${k}`;
+                return h('td', { class: view.openFile === ref ? 'picked' : '' }, fileTick(store, p, k, crawlFile(c, k), toggleFile(store, ref)),
+                  k === 'robots' && c.robots.blocksSearch ? pillOf('Blocks search', 'high') : null);
+              })
+            : [h('td', { colspan: CRAWL_FILES.length }, h('span', { class: 'muted small' }, busy ? 'Reading…' : c?.error ?? 'Not read yet'))];
+          const openKey = c?.robots && view.openFile.startsWith(`${p.id}:`) ? view.openFile.slice(p.id.length + 1) : '';
+          return [
+            h('tr', { class: openKey ? 'has-preview' : '' }, siteCell(store, p), ...cells, h('td', { class: 'muted small' }, c?.at ? timeOf(c.at) : ''), h('td', null, againButton(store, p, 'crawl', busy))),
+            openKey && fileOf(openKey)
+              ? h('tr', { class: 'preview-row' }, h('td', { colspan: cols },
+                  h('div', { class: 'row between' }, h('strong', null, `${fileOf(openKey)[1]} on ${hostOf(p.website)}`),
+                    h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close the preview', onclick: toggleFile(store, view.openFile) }, icon('x'))),
+                  filePreview(store, p, openKey, crawlFile(c, openKey))))
+              : null,
+          ].filter(Boolean);
+        })))),
+    h('p', { class: 'muted small' }, 'Click a file’s mark to open it under its site. Hollow circles are optional files the site does not have.'));
 }
 
 // --- Metadata preview ---
@@ -387,22 +488,6 @@ const readAll = (store, part, label) =>
 
 const againButton = (store, p, part, busy) =>
   h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Read again', 'aria-label': `Read ${hostOf(p.website)} again`, onclick: () => check(store, p, [part]) }, refreshIcon(busy));
-
-function crawlAll(store, sites) {
-  return h('div', { class: 'stack-lg' }, siteChips(store, sites, null),
-    h('div', { class: 'card mon-scroll' },
-      h('table', { class: 'mon-table tool-table' },
-        h('thead', null, h('tr', null, ['Site', ...CRAWL_FILES.map(([, name]) => name), 'Read', ''].map((t) => h('th', null, t)))),
-        h('tbody', null, sites.map((p) => {
-          const c = siteData(store, p.id).crawl;
-          const busy = view.busy.has(p.id) || view.busy.has('all');
-          const cells = c?.robots
-            ? CRAWL_FILES.map(([k, name, why]) => h('td', null, c[k].unread ? h('span', { class: 'muted small' }, 'Unread') : tick(c[k].found, `${name} ${c[k].found ? 'found' : 'missing'}`, crawlTask(store, p, name, why)),
-                k === 'robots' && c.robots.blocksSearch ? pillOf('Blocks search', 'high') : null))
-            : [h('td', { colspan: CRAWL_FILES.length }, h('span', { class: 'muted small' }, busy ? 'Reading…' : c?.error ?? 'Not read yet'))];
-          return h('tr', null, siteCell(store, p), ...cells, h('td', { class: 'muted small' }, c?.at ? timeOf(c.at) : ''), h('td', null, againButton(store, p, 'crawl', busy)));
-        })))));
-}
 
 // What a task for a missing share tag says.
 const metaTask = (store, p, tag) => () =>

@@ -205,16 +205,39 @@ export async function checkDns(host) {
 
 // --- Crawl files ---
 
-const RAW_KEEP = 4000; // characters of each file kept, enough to read it without bloating tools.json
+const RAW_KEEP = 5000; // characters of each file kept, enough to preview it without bloating tools.json
 // Crawlers that train or answer with AI, reported when robots.txt names them in a group that blocks the site.
 const AI_BOTS = ['GPTBot', 'ClaudeBot', 'Google-Extended', 'PerplexityBot', 'CCBot'];
+const READS_AT_ONCE = 3;
+
+// The reader allows a few requests at a time without a key; the rest wait their turn.
+let reading = 0;
+const queue = [];
+async function inTurn(work) {
+  if (reading >= READS_AT_ONCE) await new Promise((resolve) => queue.push(resolve));
+  reading += 1;
+  try {
+    return await work();
+  } finally {
+    reading -= 1;
+    queue.shift()?.();
+  }
+}
 
 // A file read through the page reader. Its JSON answer carries the site's own status, which the plain answer hides.
+// A busy reader (429) is asked again after a pause.
 async function readFile(url) {
-  const res = await timed(`${READER}${url}`, { headers: { accept: 'application/json', 'X-Return-Format': 'text' } });
-  if (!res.ok) throw new Error(`The page reader answered ${res.status}.`);
-  const { data = {} } = await res.json();
-  return { status: data.httpStatus ?? 200, text: String(data.text ?? '').trim() };
+  for (let attempt = 0; ; attempt += 1) {
+    const res = await inTurn(() => timed(`${READER}${url}`, { headers: { accept: 'application/json', 'X-Return-Format': 'text' } }));
+    if (res.status === 429 && attempt < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 4000 * (attempt + 1)));
+      continue;
+    }
+    if (res.status === 429) throw new Error('The page reader is busy. Try again in a minute.');
+    if (!res.ok) throw new Error(`The page reader answered ${res.status}.`);
+    const { data = {} } = await res.json();
+    return { status: data.httpStatus ?? 200, text: String(data.text ?? '').trim() };
+  }
 }
 
 // Many sites answer every address with their home page, so a file counts as found only if it looks like one.
@@ -263,29 +286,204 @@ function parseRobots(text) {
   };
 }
 
+// --- Format checks ---
+// Each check is [level, text], level being "ok", "warn" or "error". They run on the whole file, not on the part kept.
+
+const isHtml = (t) => /^\s*(<!doctype html|<html)\b/i.test(t);
+const looksJson = (t) => /^\s*[[{]/.test(t);
+const parseJson = (t) => {
+  try {
+    return [JSON.parse(t), ''];
+  } catch (err) {
+    return [null, err.message];
+  }
+};
+const DAY = 86400000;
+
+function lintRobots(text, website) {
+  const out = [];
+  const KNOWN = ['user-agent', 'allow', 'disallow', 'sitemap', 'crawl-delay', 'host', 'clean-param', 'request-rate', 'visit-time', 'noindex'];
+  let agent = false;
+  const unknown = new Set();
+  let orphan = 0;
+  for (const line of text.split('\n')) {
+    const bare = line.replace(/#.*/, '').trim();
+    if (!bare) continue;
+    const m = bare.match(/^([A-Za-z-]+)\s*:\s*(.*)$/);
+    if (!m) {
+      unknown.add(bare.slice(0, 30));
+      continue;
+    }
+    const key = m[1].toLowerCase();
+    if (!KNOWN.includes(key)) unknown.add(m[1]);
+    if (key === 'user-agent') agent = true;
+    else if ((key === 'allow' || key === 'disallow') && !agent) orphan += 1;
+    if (key === 'sitemap' && m[2] && !/^https?:\/\//i.test(m[2])) out.push(['warn', `Sitemap “${m[2]}” is not a full address; crawlers need one with https://.`]);
+    if (key === 'crawl-delay') out.push(['warn', 'Crawl-delay is ignored by Google.']);
+    if (key === 'noindex') out.push(['warn', 'Noindex in robots.txt is ignored by Google; use a meta tag instead.']);
+  }
+  if (!agent) out.push(['error', 'No User-agent line, so the rules apply to no crawler.']);
+  if (orphan) out.push(['error', `${orphan} rule${orphan === 1 ? '' : 's'} come before any User-agent line and are ignored.`]);
+  if (unknown.size) out.push(['warn', `Lines crawlers do not understand: ${[...unknown].slice(0, 5).join(', ')}${unknown.size > 5 ? '…' : ''}`]);
+  if (text.length > 500 * 1024) out.push(['error', 'Larger than 500 KB; Google reads only the first 500 KB.']);
+  const rules = parseRobots(text);
+  if (rules.blocksSearch) out.push(['error', 'Blocks Google or Bing from the whole site.']);
+  if (!rules.sitemaps.length) out.push(['warn', 'Names no sitemap.']);
+  else if (rules.sitemaps.some((s) => hostOf(s) && hostOf(s) !== hostOf(website))) out.push(['warn', 'Points to a sitemap on another host.']);
+  if (!out.some(([l]) => l === 'error')) out.unshift(['ok', 'Every rule sits under a User-agent line.']);
+  return out;
+}
+
+function lintSitemap(text, website) {
+  const out = [];
+  if (typeof DOMParser !== 'undefined') {
+    const doc = new DOMParser().parseFromString(text, 'application/xml');
+    const err = doc.querySelector('parsererror');
+    if (err) out.push(['error', `Not valid XML: ${err.textContent.split('\n')[0].slice(0, 120)}`]);
+    else out.push(['ok', 'Valid XML.']);
+  }
+  if (!/xmlns\s*=\s*["']http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9["']/.test(text)) out.push(['warn', 'The sitemaps.org namespace is missing from the root element.']);
+  const locs = [...text.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map((m) => m[1]);
+  const entries = (text.match(/<(url|sitemap)\b/g) ?? []).length;
+  if (entries && locs.length < entries) out.push(['error', `${entries - locs.length} entr${entries - locs.length === 1 ? 'y has' : 'ies have'} no <loc>.`]);
+  const relative = locs.filter((l) => !/^https?:\/\//i.test(l)).length;
+  if (relative) out.push(['error', `${relative} address${relative === 1 ? ' is' : 'es are'} not absolute.`]);
+  const host = hostOf(website).replace(/^www\./, '');
+  const other = locs.filter((l) => /^https?:/i.test(l) && hostOf(l).replace(/^www\./, '') !== host).length;
+  if (other) out.push(['warn', `${other} address${other === 1 ? ' points' : 'es point'} to another host.`]);
+  const insecure = locs.filter((l) => /^http:\/\//i.test(l)).length;
+  if (insecure && /^https:/i.test(website)) out.push(['warn', `${insecure} address${insecure === 1 ? ' uses' : 'es use'} http instead of https.`]);
+  if (locs.length > 50000) out.push(['error', 'More than 50,000 addresses; split it into several sitemaps.']);
+  const dates = [...text.matchAll(/<lastmod>\s*([^<\s]+)/g)].map((m) => m[1]);
+  const bad = dates.filter((d) => Number.isNaN(Date.parse(d))).length;
+  if (bad) out.push(['warn', `${bad} change date${bad === 1 ? ' is' : 's are'} not a valid date.`]);
+  if (dates.some((d) => Date.parse(d) > Date.now() + DAY)) out.push(['warn', 'Some change dates are in the future.']);
+  if (!dates.length && entries) out.push(['warn', 'No change dates (<lastmod>), so crawlers cannot tell what is new.']);
+  return out;
+}
+
+function lintLlms(text, full) {
+  const out = [];
+  const first = text.split('\n').find((l) => l.trim());
+  out.push(/^#\s+\S/.test(first ?? '') ? ['ok', 'Starts with a title (# Name).'] : ['error', 'Does not start with a # title.']);
+  if (!full) {
+    if (!/^>\s+\S/m.test(text)) out.push(['warn', 'No summary line (> …) under the title.']);
+    const sections = (text.match(/^##\s+\S/gm) ?? []).length;
+    const links = (text.match(/\[[^\]]+\]\([^)]+\)/g) ?? []).length;
+    out.push(sections ? ['ok', `${sections} section${sections === 1 ? '' : 's'}, ${links} link${links === 1 ? '' : 's'}.`] : ['warn', 'No ## sections listing pages.']);
+    if (!links) out.push(['warn', 'Links to no pages.']);
+  }
+  if (isHtml(text)) out.push(['error', 'Looks like HTML; it should be Markdown.']);
+  return out;
+}
+
+function lintSecurity(text) {
+  const out = [];
+  const contacts = [...text.matchAll(/^\s*contact\s*:\s*(\S+)/gim)].map((m) => m[1]);
+  if (!contacts.length) out.push(['error', 'No Contact line; it is required.']);
+  else if (contacts.some((c) => !/^(mailto:|https:\/\/|tel:)/i.test(c))) out.push(['warn', 'A Contact should start with mailto:, https:// or tel:.']);
+  else out.push(['ok', `Contact: ${contacts.join(', ')}`]);
+  const expires = text.match(/^\s*expires\s*:\s*(\S+)/im)?.[1];
+  if (!expires) out.push(['error', 'No Expires line; it is required.']);
+  else if (Number.isNaN(Date.parse(expires))) out.push(['error', `Expires “${expires}” is not a valid date.`]);
+  else if (Date.parse(expires) < Date.now()) out.push(['error', `Expired on ${expires.slice(0, 10)}.`]);
+  else if (Date.parse(expires) > Date.now() + 366 * DAY) out.push(['warn', 'Expires more than a year ahead; the standard advises less.']);
+  else out.push(['ok', `Valid until ${expires.slice(0, 10)}.`]);
+  if (!/^\s*canonical\s*:/im.test(text)) out.push(['warn', 'No Canonical line saying where the file lives.']);
+  if (!/^-----BEGIN PGP SIGNED MESSAGE-----/m.test(text)) out.push(['ok', 'Not signed (optional).']);
+  return out;
+}
+
+function lintAds(text) {
+  const lines = text.split('\n').map((l) => l.replace(/#.*/, '').trim()).filter(Boolean);
+  const vars = lines.filter((l) => /^[a-z]+=/i.test(l));
+  const records = lines.filter((l) => !/^[a-z]+=/i.test(l));
+  const bad = records.filter((l) => {
+    const f = l.split(',').map((x) => x.trim());
+    return f.length < 3 || !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(f[0]) || !f[1] || !/^(direct|reseller)$/i.test(f[2]);
+  });
+  const out = [[records.length ? 'ok' : 'warn', `${records.length} seller record${records.length === 1 ? '' : 's'}${vars.length ? `, ${vars.length} variable${vars.length === 1 ? '' : 's'}` : ''}.`]];
+  if (bad.length) out.push(['error', `${bad.length} line${bad.length === 1 ? ' does' : 's do'} not follow “domain, account, DIRECT|RESELLER”: ${bad[0].slice(0, 60)}`]);
+  return out;
+}
+
+function lintManifest(text) {
+  const [m, err] = parseJson(text);
+  if (!m) return [['error', `Not valid JSON: ${err}`]];
+  const out = [['ok', 'Valid JSON.']];
+  if (!m.name && !m.short_name) out.push(['error', 'No name or short_name.']);
+  const sizes = (m.icons ?? []).flatMap((i) => String(i.sizes ?? '').split(/\s+/));
+  for (const s of ['192x192', '512x512']) if (!sizes.includes(s)) out.push(['warn', `No ${s} icon, needed to install the site.`]);
+  if (!(m.icons ?? []).some((i) => /maskable/.test(i.purpose ?? ''))) out.push(['warn', 'No maskable icon for Android.']);
+  if (!m.start_url) out.push(['warn', 'No start_url.']);
+  if (!m.display) out.push(['warn', 'No display mode (standalone, browser…).']);
+  if (!m.theme_color) out.push(['warn', 'No theme_color.']);
+  return out;
+}
+
+function lintAasa(text) {
+  const [m, err] = parseJson(text);
+  if (!m) return [['error', `Not valid JSON: ${err}`]];
+  const parts = ['applinks', 'webcredentials', 'appclips'].filter((k) => m[k]);
+  return [['ok', 'Valid JSON.'], parts.length ? ['ok', `Declares ${parts.join(', ')}.`] : ['error', 'Declares no applinks, webcredentials or appclips.']];
+}
+
+function lintAssetLinks(text) {
+  const [m, err] = parseJson(text);
+  if (!m) return [['error', `Not valid JSON: ${err}`]];
+  if (!Array.isArray(m)) return [['error', 'Should be a list ([…]) of statements.']];
+  const bad = m.filter((s) => !Array.isArray(s.relation) || !s.target?.namespace || (s.target.namespace === 'android_app' && (!s.target.package_name || !s.target.sha256_cert_fingerprints?.length)));
+  return [['ok', `Valid JSON, ${m.length} statement${m.length === 1 ? '' : 's'}.`], ...(bad.length ? [['error', `${bad.length} statement${bad.length === 1 ? ' lacks' : 's lack'} a relation, target or app fingerprint.`]] : [])];
+}
+
+// [key, path, does the answer look like this file, its format checks]. The sitemap's address comes from robots.txt.
+const CRAWL = [
+  ['robots', '/robots.txt', (t) => /^\s*(user-agent|sitemap|disallow|allow)\s*:/im.test(t), lintRobots],
+  ['sitemap', '/sitemap.xml', (t) => /<(urlset|sitemapindex)\b/.test(t), lintSitemap],
+  ['llms', '/llms.txt', (t) => /^\s*#\s+\S/.test(t) && !isHtml(t), (t) => lintLlms(t, false)],
+  ['llmsFull', '/llms-full.txt', (t) => /^\s*#\s+\S/.test(t) && !isHtml(t), (t) => lintLlms(t, true)],
+  ['security', '/.well-known/security.txt', (t) => /^\s*(contact|expires)\s*:/im.test(t), lintSecurity],
+  ['humans', '/humans.txt', (t) => t.length > 0 && !isHtml(t), (t) => [['ok', `${t.split('\n').filter((l) => l.trim()).length} lines.`]]],
+  ['ads', '/ads.txt', (t) => /^[^#\n]*,\s*[^,\n]+,\s*(direct|reseller)/im.test(t) || /^\s*(contact|subdomain|ownerdomain|managerdomain)\s*=/im.test(t), lintAds],
+  ['manifest', '/manifest.json', (t) => looksJson(t) && !isHtml(t), lintManifest],
+  ['aasa', '/.well-known/apple-app-site-association', looksJson, lintAasa],
+  ['assetlinks', '/.well-known/assetlinks.json', looksJson, lintAssetLinks],
+];
+export const CRAWL_KEYS = CRAWL.map(([k]) => k);
+
 export async function readCrawlFiles(website) {
   const origin = new URL(website).origin;
-  const [robots, llms, security] = await Promise.all([
-    readKind(`${origin}/robots.txt`, (t) => /^\s*(user-agent|sitemap|disallow|allow)\s*:/im.test(t)),
-    readKind(`${origin}/llms.txt`, (t) => /^#\s+\S/.test(t)),
-    readKind(`${origin}/.well-known/security.txt`, (t) => /^\s*contact\s*:/im.test(t)),
-  ]);
-  const rules = robots.found ? parseRobots(robots.raw) : { sitemaps: [], blocksSearch: false, blocksAll: false, aiBlocked: [] };
-  const sitemap = await readKind(rules.sitemaps[0] ?? `${origin}/sitemap.xml`, (t) => /<(urlset|sitemapindex)\b/.test(t));
+  const check = async ([key, path, looksRight, lint], url = `${origin}${path}`) => {
+    const f = await readKind(url, looksRight);
+    if (f.found) {
+      f.checks = lint(f.text, website);
+      f.size = f.text.length;
+    }
+    return f;
+  };
+  const byKey = Object.fromEntries(CRAWL.map((c) => [c[0], c]));
+  const robots = await check(byKey.robots);
+  const rules = robots.found ? parseRobots(robots.text) : { sitemaps: [], blocksSearch: false, blocksAll: false, aiBlocked: [] };
+  const rest = await Promise.all(CRAWL.filter(([k]) => k !== 'robots').map((c) =>
+    c[0] === 'sitemap' ? check(c, rules.sitemaps[0] ?? `${origin}/sitemap.xml`) : c[0] === 'manifest'
+      // Sites name the manifest either way; the second name is read only when the first is missing.
+      ? check(c).then((f) => (f.found || f.unread ? f : check(c, `${origin}/site.webmanifest`).then((g) => (g.found ? g : f))))
+      : check(c)));
+  const files = { robots: { ...robots, ...rules }, ...Object.fromEntries(rest.map((f, i) => [CRAWL.filter(([k]) => k !== 'robots')[i][0], f])) };
   // Nothing read at all is a failed lookup, so the last good answer is kept.
-  if ([robots, llms, security, sitemap].every((f) => f.unread)) throw new Error(robots.unread);
+  if (Object.values(files).every((f) => f.unread)) throw new Error(robots.unread);
+  const { sitemap, llms, security } = files;
   if (sitemap.found) {
-    // Counted on the whole file, not on the part kept.
     const lastmods = [...sitemap.text.matchAll(/<lastmod>\s*([^<\s]+)/g)].map((m) => m[1]).sort();
     Object.assign(sitemap, { urls: (sitemap.text.match(/<url\b/g) ?? []).length, indexes: (sitemap.text.match(/<sitemap\b/g) ?? []).length, lastmod: lastmods.at(-1)?.slice(0, 10) ?? '' });
   }
-  for (const file of [robots, sitemap, llms, security]) delete file.text;
-  if (llms.found) llms.title = llms.raw.match(/^#\s+(.+)/)?.[1]?.trim() ?? '';
+  if (llms.found) llms.title = llms.raw.match(/^\s*#\s+(.+)/)?.[1]?.trim() ?? '';
   if (security.found) {
     security.contact = [...security.raw.matchAll(/^\s*contact\s*:\s*(\S+)/gim)].map((m) => m[1]);
     security.expires = security.raw.match(/^\s*expires\s*:\s*(\S+)/im)?.[1]?.slice(0, 10) ?? '';
   }
-  return { robots: { ...robots, ...rules }, sitemap, llms, security };
+  for (const f of Object.values(files)) delete f.text;
+  return files;
 }
 
 // --- Provider status ---
