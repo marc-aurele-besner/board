@@ -1034,6 +1034,31 @@ const bucketLabel = (key, group) => (group === 'month'
   ? new Date(`${key}-01T00:00`).toLocaleDateString(undefined, { month: 'short', year: '2-digit' })
   : new Date(`${key}T00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
 
+// The full name of a bucket, for the chart's tooltip.
+function bucketName(key, group) {
+  if (group === 'month') return new Date(`${key}-01T00:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const date = new Date(`${key}T00:00`).toLocaleDateString(undefined, { weekday: group === 'day' ? 'short' : undefined, month: 'short', day: 'numeric', year: 'numeric' });
+  return group === 'week' ? `Week of ${date}` : date;
+}
+
+// One bar's tooltip: its total, how many collections, and the positions that gave the most.
+function bucketTip(key, group, list) {
+  const total = list.reduce((s, c) => s + (c.usd ?? 0), 0);
+  const byPos = new Map();
+  for (const c of list) {
+    const name = c.pair ? `${c.pair}${c.tokenId ? ` #${c.tokenId}` : ''}` : 'No position';
+    byPos.set(name, (byPos.get(name) ?? 0) + (c.usd ?? 0));
+  }
+  const top = [...byPos].sort((a, b) => b[1] - a[1]);
+  return [
+    h('span', { class: 'muted' }, bucketName(key, group)),
+    h('strong', null, money(total, 'USD')),
+    h('span', { class: 'muted' }, list.length ? plural(list.length, 'collection') : 'No collections'),
+    top.slice(0, 3).map(([name, usd]) => h('span', { class: 'tip-row' }, h('span', null, name), h('span', null, money(usd, 'USD')))),
+    top.length > 3 ? h('span', { class: 'muted' }, `and ${plural(top.length - 3, 'more position')}`) : null,
+  ];
+}
+
 const collectedOf = (store) => store.get(COLLECTION)?.collected ?? [];
 
 // What the log holds per position, in USD, for the closed cards.
@@ -1237,12 +1262,17 @@ function feesView(store) {
   let chart = null;
   if (list.length) {
     const sums = new Map();
+    const groups = new Map();
     for (const c of list) {
       const key = bucketOf(new Date(c.at), view.feeGroup);
       sums.set(key, (sums.get(key) ?? 0) + (c.usd ?? 0));
+      groups.set(key, [...(groups.get(key) ?? []), c]);
     }
     const keys = bucketsBetween(new Date(start), new Date(nowMs), view.feeGroup);
-    chart = barChart(keys.map((k) => bucketLabel(k, view.feeGroup)), [{ name: 'Collected', color: 'var(--accent)', values: keys.map((k) => sums.get(k) ?? 0) }], { format: (v) => money(v, 'USD') });
+    chart = barChart(keys.map((k) => bucketLabel(k, view.feeGroup)), [{ name: 'Collected', color: 'var(--accent)', values: keys.map((k) => sums.get(k) ?? 0) }], {
+      format: (v) => money(v, 'USD'),
+      tip: (i) => bucketTip(keys[i], view.feeGroup, groups.get(keys[i]) ?? []),
+    });
   }
 
   const table = h('div', { class: 'card mon-scroll' },

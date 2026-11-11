@@ -285,6 +285,18 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 /* Charts keep a fixed, readable height; the width follows the page */
 .chart svg { display: block; width: 100%; height: 200px; }
 .chart .axis { font-size: 10px; fill: var(--muted); }
+/* Charts with a tooltip: the hovered bar stays, the others dim */
+.chart.interactive { position: relative; }
+.chart.interactive svg { cursor: crosshair; touch-action: pan-x pan-y; }
+.chart.interactive svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.chart .hit { fill: transparent; }
+.chart .bar { transition: opacity 0.15s ease; }
+.chart.hovering .bar:not(.hot) { opacity: 0.35; }
+.chart-tip { position: absolute; transform: translate(-50%, -100%); pointer-events: none; z-index: 2; min-width: 120px; max-width: 240px; padding: 8px 10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14); font-size: 0.8rem; display: flex; flex-direction: column; gap: 3px; font-variant-numeric: tabular-nums; }
+.chart-tip[hidden] { display: none; }
+.chart-tip strong { font-size: 1rem; }
+.chart-tip .tip-row { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); }
+.chart-tip .tip-row span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.8rem; color: var(--muted); }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .legend-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
