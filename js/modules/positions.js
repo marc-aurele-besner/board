@@ -322,7 +322,7 @@ function savedRows(store, cfg, keys) {
     .filter((r) => wallets.has(r.wallet) || manual.has(r.ref))
     .map((r) => ({ ...r, max: r.max ?? Infinity, staleAt: cache[key].at })));
 }
-const cacheKeys = (chains) => chains.flatMap((c) => [`${c.id}:v3`, `${c.id}:v4`]);
+const cacheKeys = (chains) => chains.flatMap((c) => (c.v4 ? [`${c.id}:v3`, `${c.id}:v4`] : [`${c.id}:v3`]));
 const enabledChains = (cfg) => CHAINS.filter((chain) => chainSettings(cfg, chain).enabled);
 
 // Open positions outside their price range as of the last saved read, for Home. Nothing is read from a chain here.
@@ -410,7 +410,7 @@ async function load(store, { again = false } = {}) {
       };
       await Promise.all([
         part('v3', () => readV3(chain, node, wallets, cfg)),
-        part('v4', () => readV4(chain, node, wallets, cfg, saved.scan?.[chain.id] ?? {})),
+        chain.v4 ? part('v4', () => readV4(chain, node, wallets, cfg, saved.scan?.[chain.id] ?? {})) : null,
       ]);
       state.pending = state.pending.filter((name) => name !== chain.name);
       publish();
@@ -679,7 +679,7 @@ async function loadHistory(store) {
         // This position keeps the other readings until its history can be read.
       }
     }
-    if (!key) return;
+    if (!key || chain.etherscan === false) return;
     try {
       await etherscanCollects(store, chain, node, key, wallets, rows);
       etherscanErrors.delete(chain.name);
