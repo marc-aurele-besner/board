@@ -1155,7 +1155,17 @@ function keepAddFocus() {
 // ---- Fees collected: the log of collections, its averages and a chart over time ----
 
 const DAY_MS = 86400000;
-const FEE_RANGES = { all: [0, 'All time'], 30: [30, '30 days'], 90: [90, '90 days'], 365: [365, '1 year'] };
+const FEE_RANGES = { all: [0, 'All time'], 7: [7, '7 days'], 30: [30, '30 days'], 90: [90, '90 days'], 365: [365, '1 year'], month: [0, 'This month'], lastmonth: [0, 'Last month'] };
+const FEE_RANGE_ORDER = ['all', '7', '30', '90', '365', 'month', 'lastmonth'];
+// A range's start and its end (excluded) in ms; null for no bound. Months are calendar months in local time.
+function feeRangeBounds(key, nowMs) {
+  const now = new Date(nowMs);
+  const monthStart = (back) => new Date(now.getFullYear(), now.getMonth() - back, 1).getTime();
+  if (key === 'month') return [monthStart(0), null];
+  if (key === 'lastmonth') return [monthStart(1), monthStart(0)];
+  const days = FEE_RANGES[key][0];
+  return [days ? nowMs - days * DAY_MS : null, null];
+}
 const FEE_GROUPS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month']];
 
 // Local calendar keys, so a collect late in the evening counts on its own day.
@@ -1557,8 +1567,8 @@ function coverageCard(store) {
 function feesView(store) {
   const all = [...collectedOf(store)].sort((a, b) => b.at.localeCompare(a.at));
   const nowMs = Date.now();
-  const days = FEE_RANGES[view.feeRange][0];
-  const inRange = days ? all.filter((c) => Date.parse(c.at) >= nowMs - days * DAY_MS) : all;
+  const [from, to] = feeRangeBounds(view.feeRange, nowMs);
+  const inRange = all.filter((c) => (from === null || Date.parse(c.at) >= from) && (to === null || Date.parse(c.at) < to));
   // A choice with nothing left in the range falls back to all, so the log never sits empty behind a hidden filter.
   if (!inRange.some((c) => c.chain === view.feeChain)) view.feeChain = 'all';
   if (!inRange.some((c) => tokensOf(c).includes(view.feeToken))) view.feeToken = 'all';
@@ -1571,8 +1581,10 @@ function feesView(store) {
   const unpriced = list.filter((c) => c.usd == null).length;
   // Averages run from the first collection, or the start of the range, to now, so quiet days count too.
   const first = all.length ? Math.min(nowMs, Date.parse(all[all.length - 1].at)) : nowMs;
-  const start = days ? Math.max(nowMs - days * DAY_MS, first) : first;
-  const spanDays = Math.max(1, (nowMs - start) / DAY_MS);
+  // A past range, such as last month, ends at its own end; the others run to now.
+  const end = to === null ? nowMs : Math.min(nowMs, to);
+  const start = from === null ? first : Math.max(from, Math.min(first, end));
+  const spanDays = Math.max(1, (end - start) / DAY_MS);
   const perDay = total / spanDays;
 
   const stat = (label, value, hint = null) => h('div', { class: 'card lp-stat' },
@@ -1597,7 +1609,7 @@ function feesView(store) {
       sums.set(key, (sums.get(key) ?? 0) + (c.usd ?? 0));
       groups.set(key, [...(groups.get(key) ?? []), c]);
     }
-    const keys = bucketsBetween(new Date(start), new Date(nowMs), view.feeGroup);
+    const keys = bucketsBetween(new Date(start), new Date(end - 1), view.feeGroup);
     chart = barChart(keys.map((k) => bucketLabel(k, view.feeGroup)), [{ name: 'Collected', color: 'var(--accent)', values: keys.map((k) => sums.get(k) ?? 0) }], {
       format: (v) => money(v, 'USD'),
       tip: (i) => bucketTip(keys[i], view.feeGroup, groups.get(keys[i]) ?? []),
@@ -1645,7 +1657,7 @@ function feesView(store) {
 
   return h('div', { class: 'stack-lg' },
     h('div', { class: 'row between' },
-      pills(['all', '30', '90', '365'].map((k) => [k, FEE_RANGES[k][1]]), view.feeRange, (k) => { view.feeRange = k; }),
+      pills(FEE_RANGE_ORDER.map((k) => [k, FEE_RANGES[k][1]]), view.feeRange, (k) => { view.feeRange = k; }),
       view.logging ? null : h('button', {
         type: 'button',
         class: 'btn-small',
