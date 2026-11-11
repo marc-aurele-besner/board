@@ -632,12 +632,17 @@ async function etherscanCollects(store, chain, node, key, wallets, rows) {
     let block = saved.block;
     const found = [];
     let more = true;
+    // cut: transactions were left for the next load. With no budget left, the last load's answer stands.
+    let cut = budget <= 0 && !saved.caughtUp;
     while (more && budget > 0) {
       const start = block;
       const page = await walletPositionTxs(key, chain, wallet, start);
       const todo = page.txs.filter((t) => !checked.has(t.tx));
       for (const t of todo) {
-        if (budget <= 0) break;
+        if (budget <= 0) {
+          cut = true;
+          break;
+        }
         budget--;
         const receipt = await src.call('eth_getTransactionReceipt', [t.tx]);
         for (const p of await positionsInReceipt(chain, node, receipt)) {
@@ -652,10 +657,13 @@ async function etherscanCollects(store, chain, node, key, wallets, rows) {
       // The next call starts at the newest block read in full; its transactions already read are skipped.
       if (budget > 0) block = Math.max(block, page.last ?? block);
       more = page.more && budget > 0 && page.last != null && page.last > start;
+      if (page.more && !more) cut = true;
     }
+    // Caught up: every transaction of this wallet to the position managers, back to its first, has been read.
+    const caughtUp = !cut;
     store.update(COLLECTION, (d) => {
       // Only the transactions of the block the next call starts at need remembering.
-      d.etherscan = { ...d.etherscan, [chain.id]: { ...d.etherscan?.[chain.id], [wallet]: { block, checked: [...checked].slice(-200) } } };
+      d.etherscan = { ...d.etherscan, [chain.id]: { ...d.etherscan?.[chain.id], [wallet]: { block, checked: [...checked].slice(-200), caughtUp, at: Date.now() } } };
       if (found.length) mergeCollects(d, found);
     });
   }
@@ -690,6 +698,41 @@ async function loadHistory(store) {
   }));
   historyBusy = false;
   store.refresh();
+}
+
+// How far the search for collects has got, per position, from 0 to 1. A position is covered in full once its
+// event search reached its opening, or once Etherscan read every transaction of its wallet. Until then, the
+// share of blocks searched back toward the earliest block it could have opened at (v4's start, or for v3 the
+// chain's first block, so a v3 search that has not found its opening reads low).
+function searchShare(r, d, cfg) {
+  const ether = String(cfg.etherscan ?? '').trim() && chainOf(r.chainId)?.etherscan !== false;
+  if (ether && d.etherscan?.[r.chainId]?.[r.wallet]?.caughtUp) return 1;
+  const s = d.history?.[r.ref];
+  if (!s) return 0;
+  const floor = s.floor ?? (r.version === 'v4' ? chainOf(r.chainId)?.v4?.start ?? 0 : 0);
+  if (s.reached || s.from <= floor) return 1;
+  const head = s.to;
+  if (!(head > floor)) return 0;
+  return Math.min(1, Math.max(0, (head - s.from + 1) / (head - floor + 1)));
+}
+
+// The search coverage of every position shown, open and closed: per chain and for all of them.
+function collectCoverage(store) {
+  const d = store.get(COLLECTION) ?? {};
+  const cfg = store.get('settings').uniswap ?? {};
+  const chains = new Map();
+  for (const r of state.rows) {
+    const c = chains.get(r.chain) ?? { name: r.chain, chainId: r.chainId, sum: 0, done: 0, total: 0 };
+    const share = searchShare(r, d, cfg);
+    c.sum += share;
+    c.done += share >= 1 ? 1 : 0;
+    c.total += 1;
+    chains.set(r.chain, c);
+  }
+  const list = [...chains.values()].map((c) => ({ ...c, pct: c.sum / c.total })).sort((a, b) => a.pct - b.pct || a.name.localeCompare(b.name));
+  const total = list.reduce((n, c) => n + c.total, 0);
+  const sum = list.reduce((n, c) => n + c.sum, 0);
+  return { chains: list, total, done: list.reduce((n, c) => n + c.done, 0), pct: total ? sum / total : 0 };
 }
 
 // Token logos arrive once, from the token list. The page redraws when they do.
@@ -1130,6 +1173,33 @@ function feeFilters(store, inRange) {
     sources.length > 1 ? select('feeSource', 'Source', [['all', 'All sources'], ...sources.map((k) => [k, `${SOURCE_NAMES[k]} (${count((c) => sourceOf(c) === k)})`])]) : null);
 }
 
+// A share as a percent that only reads 100% when the search is complete.
+const coveragePct = (x) => (x >= 1 ? '100%' : `${Math.min(99.9, Math.floor(x * 1000) / 10)}%`);
+const COVERAGE_TITLE = 'How far the search for collect events has got, over every position shown, open and closed. A position counts in full once its search reached the transaction that opened it, or once Etherscan read every transaction of its wallet. Until then, the share of blocks searched back. Each load searches further.';
+
+// How sure the log is to hold every collect: the search coverage, for all chains and per chain.
+function coverageCard(store) {
+  const cov = collectCoverage(store);
+  if (!cov.total) return null;
+  const busy = historyBusy || loading;
+  const meter = (x) => h('div', { class: 'meter', role: 'presentation' }, h('span', { style: { width: `${x * 100}%` } }));
+  return h('section', { class: 'card stack lp-coverage', title: COVERAGE_TITLE },
+    h('div', { class: 'row between' },
+      h('h3', null, 'Search coverage'),
+      h('span', { class: 'muted small' }, busy ? 'Searching…' : cov.pct >= 1 ? 'Every collect found' : 'Searches further on each load')),
+    h('div', { class: 'lp-coverage-all' },
+      h('strong', null, coveragePct(cov.pct)),
+      meter(cov.pct),
+      h('span', { class: 'muted small' }, `${cov.done} of ${plural(cov.total, 'position')} searched back to their opening`)),
+    cov.chains.length > 1 || cov.chains[0].pct < 1
+      ? h('ul', { class: 'lp-coverage-chains' }, cov.chains.map((c) => h('li', null,
+          h('span', { class: 'chain-chip' }, logo(chainOf(c.chainId)?.logo, c.name, 'xs'), c.name),
+          meter(c.pct),
+          h('strong', null, coveragePct(c.pct)),
+          h('span', { class: 'muted small' }, `${c.done}/${c.total}`))))
+      : null);
+}
+
 function feesView(store) {
   const all = [...collectedOf(store)].sort((a, b) => b.at.localeCompare(a.at));
   const nowMs = Date.now();
@@ -1226,6 +1296,7 @@ function feesView(store) {
       stat('Per week', money(perDay * 7, 'USD')),
       stat('Per month', money(perDay * 30.44, 'USD')),
       stat('Per year', money(perDay * 365, 'USD'))),
+    coverageCard(store),
     etherscanErrors.size
       ? notice({ tone: 'info', text: `Etherscan could not be read for ${[...etherscanErrors].map(([name, text]) => `${name} (${text})`).join(', ')}. Collects there come from the node only.` })
       : null,
