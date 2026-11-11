@@ -38,6 +38,8 @@ js/resend.js          the Inbox's Resend reads: email lists per project key, and
 js/background.js      timers for the above; started once the data folder is open
 js/capture.js         parseTask(), parseMoney() and makeTask(): one place for a task's shape
 js/palette.js         the Cmd/Ctrl+K search palette: jump, or capture a task, a Money entry or a recipe link
+js/search.js          what the full search page (modules/search.js, hidden) looks through, grouped by kind
+js/task-query.js      the Tasks search: words plus #project, !priority, is:status, cat: and due: filters
 js/shortcuts.js       the single-key shortcuts ("g" then a letter) and the sheet that lists them
 js/sample.js          "Explore with sample data": a data folder in memory with placeholder content
 fonts/                bundled typefaces (SIL Open Font License)
