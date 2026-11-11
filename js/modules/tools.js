@@ -6,6 +6,7 @@ import { sitesOf, siteData, checkSite, checkAllSites, runRules, autoTaskFor, rul
 import { makeTask } from '../capture.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
+import { barChart } from '../chart.js';
 
 const COLLECTION = 'tools';
 const TABS = [['health', 'Website health', 'globe'], ['ssl', 'SSL and domains', 'shield'], ['dns', 'DNS and email', 'mail'], ['crawl', 'Crawl files', 'file'], ['meta', 'Metadata preview', 'link'], ['status', 'Provider status', 'activity']];
@@ -15,7 +16,7 @@ const EVERY = [[15, '15 minutes'], [60, 'hour'], [360, '6 hours'], [1440, 'day']
 const STATUS = { up: ['Up', 'done'], slow: ['Slow', 'medium'], down: ['Down', 'high'] };
 
 // View state: the tab, the project shown in the metadata preview, and which sites are being checked now.
-const view = { tab: 'health', project: '', busy: new Set(), openDns: new Set(), openFile: '' };
+const view = { tab: 'health', project: '', busy: new Set(), openDns: new Set(), openFile: '', logLevel: '' };
 
 const pillOf = (text, tone) => h('span', { class: `pill tone-${tone}` }, text);
 const timeOf = (at) => (at ? new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never');
@@ -112,11 +113,120 @@ function daysPill(until) {
 
 // --- Website health ---
 
+const openSite = (store, p) => () => {
+  view.project = p.id;
+  store.refresh();
+};
+const goTab = (store, p, tab) => () => {
+  view.tab = tab;
+  view.project = p.id;
+  store.refresh();
+};
+
+const LEVEL = { error: ['Error', 'high'], warn: ['Warning', 'medium'], info: ['Info', 'done'] };
+const SOURCE = { health: 'Health', ssl: 'SSL', domain: 'Domain', dns: 'DNS', crawl: 'Crawl files', meta: 'Metadata' };
+
+// The site's log, newest first. Checks made before the log existed are filled in from the uptime history.
+function logOf(s) {
+  const log = s.log ?? [];
+  const since = log[0]?.at ?? '9999';
+  const older = (s.history ?? []).filter((c) => c.at < since && (!c.ok || c.ms > 1500))
+    .map((c) => ({ at: c.at, level: c.ok ? 'warn' : 'error', source: 'health', text: c.ok ? `Slow answer: ${c.ms} ms.` : 'Did not answer.' }));
+  return [...older, ...log].reverse();
+}
+
+function siteDetail(store, sites, p) {
+  const s = siteData(store, p.id);
+  const host = hostOf(p.website);
+  const busy = view.busy.has(p.id) || view.busy.has('all');
+  const [label, tone] = STATUS[s.health?.status] ?? ['Not checked', 'plain'];
+  const history = s.history ?? [];
+  const ok = history.filter((c) => c.ok);
+  const up = history.length ? Math.round((ok.length / history.length) * 1000) / 10 : null;
+  const times = ok.map((c) => c.ms).sort((a, b) => a - b);
+  const avg = times.length ? Math.round(times.reduce((a, b) => a + b, 0) / times.length) : null;
+  const p95 = times.length ? times[Math.min(times.length - 1, Math.floor(times.length * 0.95))] : null;
+  const lastDown = [...history].reverse().find((c) => !c.ok);
+  const stat = (value, text) => h('div', null, h('strong', null, value ?? '—'), h('span', { class: 'muted small' }, text));
+  const all = logOf(s);
+  const shown = view.logLevel ? all.filter((e) => e.level === view.logLevel) : all;
+  const count = (level) => all.filter((e) => e.level === level).length;
+  const gaps = emailGaps(s.dns);
+  const crawlCore = s.crawl?.robots ? CORE.filter(([k]) => crawlFile(s.crawl, k).found).length : null;
+  const metaCount = s.meta && !s.meta.error ? ['title', 'description', 'ogTitle', 'ogDescription', 'ogImage', 'ogUrl', 'twitterCard', 'twitterImage'].filter((k) => s.meta[k]).length : null;
+  // One line per other check, each opening its tab on this site.
+  const checks = [
+    ['ssl', 'SSL certificate', s.ssl?.until ? daysPill(s.ssl.until) : null, s.ssl?.until ? `until ${s.ssl.until}${s.ssl.issuer ? ` · ${s.ssl.issuer}` : ''}` : s.ssl?.error ?? 'Not checked yet'],
+    ['ssl', 'Domain', s.domain?.until ? daysPill(s.domain.until) : null, s.domain?.until ? `${s.domain.name} · renews by ${s.domain.until}` : s.domain?.error ?? 'Not checked yet'],
+    ['dns', 'Email records', s.dns?.domain ? pillOf(gaps.length ? `No ${gaps.join(' or ')}` : 'In place', gaps.length ? 'high' : 'done') : null, s.dns?.domain ? `${s.dns.records?.length ?? '—'} DNS records · looked up ${timeOf(s.dns.at)}` : s.dns?.error ?? 'Not looked up yet'],
+    ['crawl', 'Crawl files', crawlCore === null ? null : pillOf(`${crawlCore} of ${CORE.length} key files`, crawlCore === CORE.length ? 'done' : 'medium'), s.crawl?.robots?.blocksSearch ? 'robots.txt blocks search engines' : s.crawl?.at ? `read ${timeOf(s.crawl.at)}` : 'Not read yet'],
+    ['meta', 'Share tags', metaCount === null ? null : pillOf(`${metaCount} of 8 tags`, metaCount === 8 ? 'done' : 'medium'), s.meta?.at ? `read ${timeOf(s.meta.at)}` : 'Not read yet'],
+  ];
+  return h('div', { class: 'stack-lg' }, siteChips(store, sites, p),
+    h('section', { class: `card stack site-detail ${s.health?.status ?? ''}` },
+      h('div', { class: 'row between' },
+        h('div', { class: 'row' },
+          projectIcon(p, 'project-icon large'),
+          h('div', null, h('h3', null, p.name), h('a', { href: p.website, target: '_blank', rel: 'noopener', class: 'small' }, host))),
+        h('div', { class: 'row' },
+          busy ? pillOf('Checking…', 'plain') : pillOf(label, tone),
+          s.health?.status === 'down' || s.health?.status === 'slow' ? taskCell(store, p, 'health', `Look into ${host}: ${s.health.status === 'down' ? 'not answering' : 'slow'}`) : null,
+          h('button', { type: 'button', class: 'btn-small primary', disabled: busy, onclick: () => check(store, p, ['health', 'ssl', 'domain', 'dns']) }, refreshIcon(busy), busy ? 'Checking…' : 'Check everything'))),
+      h('div', { class: 'stats detail-stats' },
+        stat(up === null ? null : `${up}%`, `up, over ${history.length} check${history.length === 1 ? '' : 's'}`),
+        stat(s.health?.ms ? `${s.health.ms} ms` : null, 'last answer'),
+        stat(avg === null ? null : `${avg} ms`, 'average'),
+        stat(p95 === null ? null : `${p95} ms`, '95% answered within'),
+        stat(lastDown ? timeOf(lastDown.at) : 'Never', 'last failed check')),
+      history.length
+        ? barChart(history.map((c) => new Date(c.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })), [
+            { name: 'Answered', color: 'var(--income)', values: history.map((c) => (c.ok && c.ms <= 1500 ? c.ms : 0)) },
+            { name: 'Slow', color: 'var(--warn)', values: history.map((c) => (c.ok && c.ms > 1500 ? c.ms : 0)) },
+          ], { format: (v) => `${v} ms`, tip: (i) => [h('span', { class: 'muted' }, timeOf(history[i].at)), h('strong', null, history[i].ok ? `${history[i].ms} ms${history[i].ms > 1500 ? ' · slow' : ''}` : 'No answer')] })
+        : h('p', { class: 'muted small' }, 'No checks yet. Check now to start the history.'),
+      h('p', { class: 'muted small' }, `Response time of the last ${history.length} checks, oldest first. Gaps are checks that got no answer.`)),
+    h('section', { class: 'card stack' },
+      h('h3', null, 'Other checks'),
+      h('ul', { class: 'detail-checks' }, checks.map(([tab, name, pill, text]) =>
+        h('li', null,
+          h('button', { type: 'button', class: 'btn-link-inline', onclick: goTab(store, p, tab) }, name),
+          pill ?? h('span', { class: 'pill tone-plain' }, '—'),
+          h('span', { class: 'muted small grow' }, text))))),
+    h('section', { class: 'card stack' },
+      h('div', { class: 'row between' },
+        h('h3', null, 'Log'),
+        h('div', { class: 'chips' }, [['', `All ${all.length}`], ['error', `Errors ${count('error')}`], ['warn', `Warnings ${count('warn')}`], ['info', `Info ${count('info')}`]].map(([lvl, text]) =>
+          h('button', { type: 'button', class: view.logLevel === lvl ? 'chip active' : 'chip', onclick: () => { view.logLevel = lvl; store.refresh(); } }, text)))),
+      shown.length
+        ? h('div', { class: 'mon-scroll log-scroll' },
+            h('table', { class: 'mon-table log-table' },
+              h('thead', null, h('tr', null, ['When', 'Level', 'Check', 'What happened'].map((t) => h('th', null, t)))),
+              h('tbody', null, shown.slice(0, 200).map((e) =>
+                h('tr', { class: `lvl-${e.level}` },
+                  h('td', { class: 'muted small nowrap' }, timeOf(e.at)),
+                  h('td', null, pillOf(...LEVEL[e.level] ?? [e.level, 'plain'])),
+                  h('td', { class: 'small' }, SOURCE[e.source] ?? e.source),
+                  h('td', null, e.text))))))
+        : h('p', { class: 'muted small' }, all.length ? 'Nothing at this level.' : 'Nothing went wrong in the checks kept so far.'),
+      s.log?.length
+        ? h('div', null, h('button', {
+            type: 'button',
+            class: 'btn-small',
+            onclick: () => store.update(COLLECTION, (d) => {
+              d.sites[p.id].log = [];
+            }),
+          }, 'Clear the log'))
+        : null));
+}
+
 function healthTab(store, sites) {
+  const picked = pickedSite(sites);
+  if (picked) return siteDetail(store, sites, picked);
   const data = sites.map((p) => [p, siteData(store, p.id)]);
   const countOf = (status) => data.filter(([, s]) => s.health?.status === status).length;
   const stat = (n, label) => h('div', { class: 'card stat' }, h('strong', null, String(n)), h('span', { class: 'muted small' }, label));
   return h('div', { class: 'stack-lg' },
+    siteChips(store, sites, null),
     h('div', { class: 'summary tool-stats' }, stat(countOf('up'), 'up'), stat(countOf('slow'), 'slow'), stat(countOf('down'), 'down'), stat(sites.length, 'sites')),
     h('div', { class: 'site-grid' }, data.map(([p, s]) => {
       const host = hostOf(p.website);
@@ -124,11 +234,14 @@ function healthTab(store, sites) {
       const [label, tone] = STATUS[s.health?.status] ?? ['Not checked', 'plain'];
       const history = s.history ?? [];
       const up = history.length ? Math.round((history.filter((c) => c.ok).length / history.length) * 1000) / 10 : null;
+      const issues = logOf(s).filter((e) => e.level !== 'info' && Date.now() - Date.parse(e.at) < 86400000).length;
       return h('article', { class: `card site-card ${s.health?.status ?? ''}` },
         h('div', { class: 'row between' },
           h('div', { class: 'row' },
             projectIcon(p, 'project-icon large'),
-            h('div', null, h('strong', null, p.name), h('div', null, h('a', { href: p.website, target: '_blank', rel: 'noopener', class: 'small' }, host)))),
+            h('div', null,
+              h('button', { type: 'button', class: 'site-name', title: 'Show details and the log', onclick: openSite(store, p) }, p.name),
+              h('div', null, h('a', { href: p.website, target: '_blank', rel: 'noopener', class: 'small' }, host)))),
           busy ? pillOf('Checking…', 'plain') : pillOf(label, tone)),
         h('div', { class: 'stats' },
           h('div', null, h('strong', null, s.health ? (s.health.status === 'down' ? 'No answer' : 'Answered') : '—'), h('span', { class: 'muted small' }, 'last check')),
@@ -141,6 +254,8 @@ function healthTab(store, sites) {
         h('div', { class: 'row between' },
           h('span', { class: 'muted small' }, `Checked ${timeOf(s.health?.at)}`),
           h('div', { class: 'row' },
+            h('button', { type: 'button', class: 'btn-small', onclick: openSite(store, p) },
+              'Details', issues ? h('span', { class: 'pill tone-medium', title: 'Warnings and errors in the last 24 hours' }, String(issues)) : null),
             h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => check(store, p, ['health']) }, refreshIcon(busy), 'Check now'),
             s.health?.status === 'down' || s.health?.status === 'slow'
               ? taskCell(store, p, 'health', `Look into ${host}: ${s.health.status === 'down' ? 'not answering' : 'slow'}`)
@@ -766,7 +881,7 @@ export default {
   collection: COLLECTION,
   defaults: TOOLS_DEFAULTS,
   render: draw,
-  serialize: () => ({ tab: view.tab === 'health' ? '' : view.tab, project: view.tab === 'meta' || view.tab === 'crawl' ? view.project : '' }),
+  serialize: () => ({ tab: view.tab === 'health' ? '' : view.tab, project: ['meta', 'crawl', 'health'].includes(view.tab) ? view.project : '' }),
   restore: (p = {}) => {
     view.tab = TABS.some(([k]) => k === p.tab) ? p.tab : 'health';
     view.project = p.project || '';

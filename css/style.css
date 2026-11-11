@@ -1271,7 +1271,23 @@ label.check { cursor: pointer; }
 .tool-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--gap); }
 .site-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: var(--gap); }
 .site-card { display: flex; flex-direction: column; gap: 14px; }
-.site-card.down { border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); }
+.site-card.down, .site-detail.down { border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); }
+.site-name { background: none; border: none; padding: 0; min-height: 0; font: inherit; font-weight: 700; color: var(--text); text-align: left; }
+.site-name:hover { background: none; color: var(--accent); text-decoration: underline; }
+.site-card .btn-small .pill { padding: 0 6px; }
+.detail-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--gap); }
+.detail-stats > div { display: flex; flex-direction: column; gap: 2px; }
+.detail-checks { list-style: none; margin: 0; padding: 0; }
+.detail-checks li { display: grid; grid-template-columns: 9rem auto minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.detail-checks li:last-child { border-bottom: none; }
+.detail-checks .btn-link-inline { font-size: 0.9rem; justify-self: start; }
+.log-scroll { max-height: 420px; overflow: auto; }
+.log-table td { vertical-align: top; }
+.log-table .nowrap { white-space: nowrap; }
+.log-table tr.lvl-error td:first-child { box-shadow: inset 3px 0 var(--danger); }
+.log-table tr.lvl-warn td:first-child { box-shadow: inset 3px 0 var(--warn); }
+.log-table tr.lvl-info td:first-child { box-shadow: inset 3px 0 var(--income); }
+@media (max-width: 600px) { .detail-checks li { grid-template-columns: minmax(0, 1fr) auto; } .detail-checks li > .grow { grid-column: 1 / -1; } }
 .task-open { gap: 5px; border-radius: 7px; background: color-mix(in srgb, var(--warn) 16%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent); color: var(--warn); font-weight: 600; white-space: nowrap; }
 .task-open:hover { background: color-mix(in srgb, var(--warn) 26%, transparent); }
 .task-open .icon { width: 13px; height: 13px; }
