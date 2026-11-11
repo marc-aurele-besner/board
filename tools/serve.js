@@ -23,7 +23,7 @@ const TYPES = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
-createServer(async (req, res) => {
+async function serve(req, res) {
   // A reload fetches every module, so only page loads and failures are logged.
   const started = performance.now();
   res.on('finish', () => {
@@ -51,9 +51,21 @@ createServer(async (req, res) => {
   } catch {
     res.writeHead(404).end('Not found');
   }
-})
-  .on('error', (err) => {
-    log.error(err.code === 'EADDRINUSE' ? `Port ${PORT} is in use. Pick another with PORT=<port>.` : err.message);
-    process.exit(1);
-  })
-  .listen(PORT, 'localhost', () => log.info(`Board at http://localhost:${PORT}`));
+}
+
+// "localhost" can mean either address, and the browser tries IPv6 first. Binding only one of them let another
+// server on the other one answer the board's address unnoticed, so both are bound and a clash on either stops here.
+const ADDRESSES = ['127.0.0.1', '::1'];
+// Said once every address is bound, so a clash is never preceded by a ready line.
+let waiting = ADDRESSES.length;
+const ready = () => --waiting === 0 && log.info(`Board at http://localhost:${PORT}`);
+for (const address of ADDRESSES) {
+  createServer(serve)
+    .on('error', (err) => {
+      // A machine without IPv6 has no ::1; IPv4 alone is then the whole of localhost.
+      if (address === '::1' && err.code === 'EADDRNOTAVAIL') return ready();
+      log.error(err.code === 'EADDRINUSE' ? `Port ${PORT} is in use on ${address}. Stop the other server or pick another port with PORT=<port>.` : err.message);
+      process.exit(1);
+    })
+    .listen(PORT, address, ready);
+}
