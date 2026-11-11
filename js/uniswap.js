@@ -59,15 +59,19 @@ export const isNative = (address) => String(address).toLowerCase() === NATIVE;
 // keyed "chainId:address" in lowercase. Fetched once; a token the list does not carry gets a monogram instead.
 const TOKEN_LIST_DIR = 'https://raw.githubusercontent.com/Uniswap/default-token-list/main/src/tokens';
 const TOKEN_LIST_FILE = { 1: 'mainnet', 8453: 'base', 42161: 'arbitrum', 10: 'optimism', 137: 'polygon', 56: 'bnb', 43114: 'avalanche', 130: 'unichain', 4663: 'robinhood', 324: 'zksync' };
+let list = null;
 let logos = null;
-export function tokenLogos() {
-  logos ??= Promise.allSettled(Object.values(TOKEN_LIST_FILE).map(async (file) => {
+// Every token on the lists: { chainId, address, symbol, decimals, logoURI }. A list that fails to load is left out.
+export function tokenList() {
+  list ??= Promise.allSettled(Object.values(TOKEN_LIST_FILE).map(async (file) => {
     const res = await fetch(`${TOKEN_LIST_DIR}/${file}.json`);
     if (!res.ok) throw new Error(String(res.status));
     return res.json();
-  })).then((results) => new Map(results
-    .filter((r) => r.status === 'fulfilled')
-    .flatMap((r) => r.value)
+  })).then((results) => results.filter((r) => r.status === 'fulfilled' && Array.isArray(r.value)).flatMap((r) => r.value));
+  return list;
+}
+export function tokenLogos() {
+  logos ??= tokenList().then((tokens) => new Map(tokens
     .filter((t) => t.logoURI)
     .map((t) => [`${t.chainId}:${t.address.toLowerCase()}`, t.logoURI])
     .concat(CHAINS.map((c) => [`${c.id}:${NATIVE}`, c.native.logo]))));
