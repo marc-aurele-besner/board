@@ -501,7 +501,10 @@ function reachedMint(events, liquidity) {
 // search further back. Collects get their block's time.
 // onRange, when given, hears each block range before it is read: { dir: 'new' | 'back', from, to }, so the page
 // can say what is being searched.
-export async function positionHistory(chain, node, pos, prev, onRange = null) {
+// lanes: how many block ranges are searched at once. Concurrent calls spread over a chain's nodes, so with several
+// nodes each load covers more blocks. The budget grows with the lanes: each node is asked about as often as one
+// node alone would be.
+export async function positionHistory(chain, node, pos, prev, onRange = null, lanes = 1) {
   const head = Number(await rpc(node, 'eth_blockNumber', []));
   const query = await historyQuery(chain, node, pos);
   const floor = pos.version === 'v4' ? chain.v4.start : 0;
@@ -516,35 +519,52 @@ export async function positionHistory(chain, node, pos, prev, onRange = null) {
       s.events.push(e);
     }
   });
-  let calls = HISTORY_CALLS;
+  lanes = Math.max(1, Math.floor(lanes));
+  const budget = HISTORY_CALLS * lanes;
+  let calls = budget;
+  // Reads a batch of neighbouring ranges at once. Only the part next to what is already searched counts: it stops
+  // at the first range that failed, or that the node narrowed (the rest of that range starts the next batch).
+  // Ranges past it are dropped, so the saved search never has a hole. Returns the failed result, if any.
+  const batch = async (dir, windows, keep) => {
+    calls -= windows.length;
+    onRange?.({ dir, from: Math.min(...windows.map((w) => w[0])), to: Math.max(...windows.map((w) => w[1])) });
+    const forward = dir === 'new';
+    const results = await Promise.all(windows.map(([a, b]) => historyIn(node, query, a, b, s.span, forward)));
+    for (const [i, r] of results.entries()) {
+      if (!r.events) return r;
+      add(r.events);
+      s.span = r.span;
+      keep(r);
+      if (forward ? r.to < windows[i][1] : r.from > windows[i][0]) break;
+    }
+    return null;
+  };
 
   // A gap too long for this load skips its oldest part rather than falling behind for good.
-  let cursor = Math.max(s.to + 1, head - s.span * (HISTORY_CALLS / 2) + 1);
+  let cursor = Math.max(s.to + 1, head - s.span * (budget / 2) + 1);
   while (cursor <= head && calls > 0) {
-    calls--;
-    onRange?.({ dir: 'new', from: cursor, to: Math.min(head, cursor + s.span - 1) });
-    const r = await historyIn(node, query, cursor, head, s.span, true);
-    if (!r.events) break;
-    add(r.events);
-    s.span = r.span;
-    s.to = r.to;
-    cursor = r.to + 1;
+    const windows = [];
+    for (let a = cursor; a <= head && windows.length < Math.min(lanes, calls); a += s.span) windows.push([a, Math.min(head, a + s.span - 1)]);
+    const failed = await batch('new', windows, (r) => {
+      s.to = r.to;
+      cursor = r.to + 1;
+    });
+    if (failed) break;
   }
   while (!s.done && calls > 0) {
     if (s.from <= floor || reachedMint(s.events, pos.liquidity)) {
       s.done = true;
       break;
     }
-    calls--;
-    onRange?.({ dir: 'back', from: Math.max(floor, s.from - s.span), to: s.from - 1 });
-    const r = await historyIn(node, query, floor, s.from - 1, s.span, false);
-    if (!r.events) {
-      s.done = r.refused;
+    const windows = [];
+    for (let b = s.from - 1; b >= floor && windows.length < Math.min(lanes, calls); b -= s.span) windows.push([Math.max(floor, b - s.span + 1), b]);
+    const failed = await batch('back', windows, (r) => {
+      s.from = r.from;
+    });
+    if (failed) {
+      s.done = failed.refused;
       break;
     }
-    add(r.events);
-    s.span = r.span;
-    s.from = r.from;
   }
 
   // reached: every block back to the opening (or v4's start) was searched, so no collect can be missing. done
