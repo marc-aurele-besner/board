@@ -469,6 +469,16 @@ function googleField(store, p) {
     : null;
 }
 
+// The Gmail and Google Calendar logos of a project's connected accounts, for the overview rows; hover lists the addresses.
+function googleMarks(store, p) {
+  const marks = [
+    ['gmail', 'Gmail', connectedGmailOf(store, p.id)],
+    ['gcal', 'Google Calendar', connectedCalendarsOf(store, p.id)],
+  ].filter(([, , emails]) => emails.length)
+    .map(([name, label, emails]) => h('span', { class: 'service-mark', title: `${label}: ${emails.join(', ')}`, role: 'img', 'aria-label': `${label} connected` }, icon(name)));
+  return marks.length ? h('span', { class: 'service-marks' }, marks) : null;
+}
+
 function repoTable(store, p) {
   return h('table', { class: 'repo-table' },
     h('thead', null, h('tr', null,
@@ -904,6 +914,7 @@ function projectsRecap(store, projects, items, categories) {
             h('strong', null, p.name),
             labels.length ? h('span', { class: 'muted small' }, labels.map((l) => l.name).join(', ')) : null,
             h('span', { class: 'muted small grow' }, githubLine(p)),
+            googleMarks(store, p),
             h('span', { class: 'count' }, `${openOf(p)} open`));
         }))),
     labelRows.length
