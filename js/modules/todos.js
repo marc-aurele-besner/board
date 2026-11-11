@@ -51,6 +51,10 @@ const view = {
   status: 'open',
   category: '',
   expanded: new Set(),
+  // Ticked tasks, for the batch actions. Not saved: a reload starts with nothing selected.
+  selected: new Set(),
+  // The task last ticked, so Shift+click can tick everything between it and the next one.
+  lastPicked: null,
   dragId: null,
   managingCategories: false,
   creatingProject: false,
@@ -147,17 +151,20 @@ function pasteAsTodo(store, e) {
   addItem(store, lines[first], lines.slice(first + 1).join('\n').trim());
 }
 
-// Every edit to a todo goes through here. A status change also drops the legacy `done` flag.
-function updateItem(store, id, patch) {
+// Every edit to a todo goes through here, one task or a batch. A status change also drops the legacy `done` flag.
+function updateItems(store, ids, patch) {
+  const pick = new Set(ids);
   store.update(COLLECTION, (d) => {
-    const item = d.items.find((i) => i.id === id);
-    if (!item) return;
-    Object.assign(item, patch);
-    if ('status' in patch) delete item.done;
-    // A task that got its project and its deadline no longer waits in "To Organize".
-    if (item.inbox && item.projectId && item.due) delete item.inbox;
+    for (const item of d.items) {
+      if (!pick.has(item.id)) continue;
+      Object.assign(item, patch);
+      if ('status' in patch) delete item.done;
+      // A task that got its project and its deadline no longer waits in "To Organize".
+      if (item.inbox && item.projectId && item.due) delete item.inbox;
+    }
   });
 }
+const updateItem = (store, id, patch) => updateItems(store, [id], patch);
 
 // Deleting is immediate, with a few seconds to take it back.
 function removeItem(store, id) {
@@ -169,6 +176,24 @@ function removeItem(store, id) {
     d.items = d.items.filter((i) => i.id !== id);
   });
   toast('Task deleted', { undo: () => store.update(COLLECTION, (d) => d.items.splice(Math.min(index, d.items.length), 0, removed)) });
+}
+
+// Deleting a batch, with the same few seconds to take it back.
+function removeItems(store, ids) {
+  const pick = new Set(ids);
+  const before = store.get(COLLECTION).items;
+  const count = before.filter((i) => pick.has(i.id)).length;
+  if (!count) return;
+  const snapshot = before.map((i) => ({ item: i, index: before.indexOf(i) })).filter(({ item }) => pick.has(item.id));
+  view.selected.clear();
+  store.update(COLLECTION, (d) => {
+    d.items = d.items.filter((i) => !pick.has(i.id));
+  });
+  toast(`${count} task${count === 1 ? '' : 's'} deleted`, {
+    undo: () => store.update(COLLECTION, (d) => {
+      for (const { item, index } of snapshot) d.items.splice(Math.min(index, d.items.length), 0, item);
+    }),
+  });
 }
 
 // The deadline next to a title: today and late ones stand out.
@@ -412,8 +437,150 @@ function issueControl(store, item, repos) {
   }, icon('repo'));
 }
 
+// A task as Markdown: a checklist line with its status, project and deadline, then its description indented.
+function taskMarkdown(item, projects) {
+  const status = statusOf(item);
+  const project = projects.find((p) => p.id === item.projectId)?.name;
+  const details = [status === 'done' ? '' : label(STATUSES, status), project, item.due ? `due ${item.due}` : ''].filter(Boolean);
+  const head = `- [${status === 'done' ? 'x' : ' '}] ${item.text}${details.length ? ` (${details.join(' · ')})` : ''}`;
+  const desc = (item.description ?? '').trim();
+  return desc ? `${head}\n${desc.split(/\r?\n/).map((l) => `  ${l}`).join('\n')}` : head;
+}
+
+async function copyTasks(store, items) {
+  if (!items.length) return;
+  const text = items.map((i) => taskMarkdown(i, projectsOf(store))).join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(items.length === 1 ? 'Task copied' : `${items.length} tasks copied`);
+  } catch {
+    toast('Could not copy: the browser blocked the clipboard');
+  }
+}
+
+function copyButton(store, item) {
+  return h('button', {
+    type: 'button',
+    class: 'icon-btn copy-btn',
+    title: 'Copy',
+    'aria-label': `Copy "${item.text}"`,
+    onclick: () => copyTasks(store, [item]),
+  }, icon('copy'));
+}
+
+// Marks a task done, or back to "To do" when it already is.
+function doneButton(store, item) {
+  const done = statusOf(item) === 'done';
+  return h('button', {
+    type: 'button',
+    class: done ? 'icon-btn done-btn on' : 'icon-btn done-btn',
+    title: done ? 'Mark as not done' : 'Mark done',
+    'aria-label': done ? `Mark "${item.text}" as not done` : `Mark "${item.text}" done`,
+    'aria-pressed': String(done),
+    onclick: () => updateItem(store, item.id, { status: done ? 'todo' : 'done' }),
+  }, icon('check'));
+}
+
+// The checkbox picks the task for the batch actions. Shift+click picks the whole range from the last one.
+// order: the ids shown, top to bottom.
+function selectBox(store, item, order = []) {
+  return h('input', {
+    type: 'checkbox',
+    class: 'todo-select',
+    checked: view.selected.has(item.id),
+    title: 'Select (Shift+click for a range)',
+    'aria-label': `Select "${item.text}"`,
+    onclick: (e) => {
+      const on = e.currentTarget.checked;
+      const from = order.indexOf(view.lastPicked);
+      const to = order.indexOf(item.id);
+      const ids = e.shiftKey && from >= 0 && to >= 0
+        ? order.slice(Math.min(from, to), Math.max(from, to) + 1)
+        : [item.id];
+      for (const id of ids) on ? view.selected.add(id) : view.selected.delete(id);
+      view.lastPicked = item.id;
+      store.refresh();
+    },
+  });
+}
+
+// Shown while tasks are ticked: change them all at once, copy them, or delete them.
+// A select's first option is its label; picking a value applies it and the select resets on re-render.
+function batchBar(store, visible, projects, categories) {
+  const items = store.get(COLLECTION).items.filter((i) => view.selected.has(i.id));
+  if (!items.length) return null;
+  const ids = items.map((i) => i.id);
+  const apply = (patch) => updateItems(store, ids, patch);
+  const select = (name, options, onPick) =>
+    h('select', {
+      'aria-label': `Set ${name.toLowerCase()} of the selected tasks`,
+      onchange: (e) => {
+        if (e.target.value) onPick(e.target.value);
+      },
+    }, h('option', { value: '' }, `${name}…`), options.map(([v, l]) => h('option', { value: v }, l)));
+  const allShown = visible.length > 0 && visible.every((i) => view.selected.has(i.id));
+  return h('div', { class: 'batch-bar', role: 'toolbar', 'aria-label': 'Selected tasks' },
+    h('strong', null, `${items.length} selected`),
+    allShown
+      ? null
+      : h('button', {
+          type: 'button',
+          class: 'btn-small',
+          onclick: () => {
+            for (const i of visible) view.selected.add(i.id);
+            store.refresh();
+          },
+        }, `Select all ${visible.length} shown`),
+    h('button', { type: 'button', class: 'btn-small', title: 'Mark the selected tasks done', onclick: () => apply({ status: 'done' }) }, icon('check'), 'Done'),
+    select('Status', STATUSES, (v) => apply({ status: v })),
+    select('Priority', PRIORITIES, (v) => apply({ priority: v })),
+    select('Project', [['__personal', 'Personal'], ...[...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => [p.id, p.name])],
+      (v) => apply({ projectId: v === '__personal' ? null : v })),
+    select('Category', [[NO_CATEGORY, 'No category'], ...categories.map((c) => [c, c])],
+      (v) => apply({ category: v === NO_CATEGORY ? '' : v })),
+    h('label', { class: 'inline small' }, 'Deadline',
+      h('input', {
+        type: 'date',
+        class: 'due-input',
+        'aria-label': 'Set the deadline of the selected tasks',
+        onchange: (e) => apply({ due: e.target.value }),
+      })),
+    h('span', { class: 'grow' }),
+    h('button', { type: 'button', class: 'btn-small', title: 'Copy the selected tasks as a Markdown list', onclick: () => copyTasks(store, items) }, icon('copy'), 'Copy'),
+    h('button', { type: 'button', class: 'btn-small danger', onclick: () => removeItems(store, ids) }, icon('trash'), 'Delete'),
+    h('button', {
+      type: 'button',
+      class: 'icon-btn',
+      title: 'Clear the selection',
+      'aria-label': 'Clear the selection',
+      onclick: () => {
+        view.selected.clear();
+        store.refresh();
+      },
+    }, icon('x')));
+}
+
+// Ticks or unticks every task shown, from the table header.
+function selectAllBox(store, visible) {
+  const picked = visible.filter((i) => view.selected.has(i.id)).length;
+  const box = h('input', {
+    type: 'checkbox',
+    class: 'todo-select',
+    checked: visible.length > 0 && picked === visible.length,
+    disabled: !visible.length,
+    title: 'Select all shown',
+    'aria-label': 'Select all shown tasks',
+    onchange: (e) => {
+      for (const i of visible) e.target.checked ? view.selected.add(i.id) : view.selected.delete(i.id);
+      store.refresh();
+    },
+  });
+  box.indeterminate = picked > 0 && picked < visible.length;
+  return box;
+}
+
 // One todo row. Title, description, and the pickers all edit in place.
-// ctx: { store, projects, projectLabel }
+// ctx: { store, projects, projectLabel, order }
 function todoRow(store, item, ctx) {
   const expanded = view.expanded.has(item.id);
   const status = statusOf(item);
@@ -426,7 +593,7 @@ function todoRow(store, item, ctx) {
   if (item.category && !categoryNames.includes(item.category)) categoryNames.push(item.category);
 
   return h('li', {
-    class: status === 'done' ? 'todo-item done' : 'todo-item',
+    class: ['todo-item', status === 'done' ? 'done' : '', view.selected.has(item.id) ? 'selected' : ''].filter(Boolean).join(' '),
     'data-id': item.id,
     ondragstart: (e) => {
       if (!reorderEnabled()) return e.preventDefault();
@@ -467,12 +634,7 @@ function todoRow(store, item, ctx) {
           if (reorderEnabled()) e.currentTarget.closest('li').draggable = true;
         },
       }, icon('grip')),
-      h('input', {
-        type: 'checkbox',
-        checked: status === 'done',
-        'aria-label': `Mark "${item.text}" done`,
-        onchange: (e) => updateItem(store, item.id, { status: e.target.checked ? 'done' : 'todo' }),
-      }),
+      selectBox(store, item, ctx.order),
       h('div', { class: 'todo-title-cell' },
         editText({
           value: item.text,
@@ -492,11 +654,13 @@ function todoRow(store, item, ctx) {
             }, 'Organized')
           : null),
       h('div', { class: 'todo-meta' },
-        pickChip({
-          value: status,
-          options: STATUSES.map(([v, l]) => ({ value: v, label: l, tone: STATUS_TONE[v] })),
-          onPick: (v) => updateItem(store, item.id, { status: v }),
-        }),
+        h('div', { class: 'todo-status' },
+          pickChip({
+            value: status,
+            options: STATUSES.map(([v, l]) => ({ value: v, label: l, tone: STATUS_TONE[v] })),
+            onPick: (v) => updateItem(store, item.id, { status: v }),
+          }),
+          doneButton(store, item)),
         pickChip({
           value: priority,
           options: PRIORITIES.map(([v, l]) => ({ value: v, label: l, tone: v === 'none' ? 'plain' : v })),
@@ -527,6 +691,7 @@ function todoRow(store, item, ctx) {
         hasDescription
           ? h('span', { class: 'desc-indicator', title: 'Has a description', 'aria-label': 'Has a description' }, icon('align-left'))
           : null,
+        copyButton(store, item),
         h('button', {
           type: 'button',
           class: expanded ? 'icon-btn chevron open' : 'icon-btn chevron',
@@ -558,12 +723,12 @@ function todoRow(store, item, ctx) {
 
 // --- Board: one column per status; dragging a card to a column changes its status ---
 
-function boardCard(store, item, projects) {
+function boardCard(store, item, projects, order) {
   const p = projects.find((x) => x.id === item.projectId);
   const priority = item.priority ?? 'none';
   const expanded = view.expanded.has(item.id);
   return h('article', {
-    class: 'kanban-card',
+    class: view.selected.has(item.id) ? 'kanban-card selected' : 'kanban-card',
     draggable: 'true',
     ondragstart: (e) => {
       view.dragId = item.id;
@@ -576,7 +741,9 @@ function boardCard(store, item, projects) {
       e.currentTarget.classList.remove('dragging');
     },
   },
-    editText({ value: item.text, placeholder: 'Untitled', className: 'todo-title', onSave: (text) => updateItem(store, item.id, { text }) }),
+    h('div', { class: 'row kanban-title' },
+      selectBox(store, item, order),
+      editText({ value: item.text, placeholder: 'Untitled', className: 'todo-title', onSave: (text) => updateItem(store, item.id, { text }) })),
     h('div', { class: 'row kanban-meta' },
       p ? h('span', { class: 'row small' }, projectIcon(p), p.name) : h('span', { class: 'muted small' }, 'Personal'),
       priority !== 'none' ? h('span', { class: `pill tone-${priority}` }, label(PRIORITIES, priority)) : null,
@@ -584,13 +751,16 @@ function boardCard(store, item, projects) {
       dueChip(item),
       autoBadge(item)),
     h('div', { class: 'row between' },
-      pickChip({
-        value: statusOf(item),
-        options: STATUSES.map(([v, l]) => ({ value: v, label: l, tone: STATUS_TONE[v] })),
-        onPick: (v) => updateItem(store, item.id, { status: v }),
-      }),
+      h('div', { class: 'todo-status' },
+        pickChip({
+          value: statusOf(item),
+          options: STATUSES.map(([v, l]) => ({ value: v, label: l, tone: STATUS_TONE[v] })),
+          onPick: (v) => updateItem(store, item.id, { status: v }),
+        }),
+        doneButton(store, item)),
       h('div', { class: 'row kanban-actions' },
         item.description ? h('span', { class: 'desc-indicator', title: 'Has a description', 'aria-label': 'Has a description' }, icon('align-left')) : null,
+        copyButton(store, item),
         h('button', {
           type: 'button',
           class: expanded ? 'icon-btn chevron open' : 'icon-btn chevron',
@@ -622,7 +792,7 @@ function boardCard(store, item, projects) {
       : null);
 }
 
-function boardView(store, items, projects) {
+function boardView(store, items, projects, order) {
   return h('div', { class: 'kanban' }, STATUSES.map(([key, name]) => {
     const cards = items.filter((i) => statusOf(i) === key);
     return h('section', {
@@ -641,7 +811,7 @@ function boardView(store, items, projects) {
       },
     },
       h('h3', { class: 'row between' }, h('span', { class: `pill tone-${STATUS_TONE[key]}` }, name), h('span', { class: 'count' }, String(cards.length))),
-      cards.length ? cards.map((item) => boardCard(store, item, projects)) : h('p', { class: 'muted small' }, 'Drop a task here'));
+      cards.length ? cards.map((item) => boardCard(store, item, projects, order)) : h('p', { class: 'muted small' }, 'Drop a task here'));
   }));
 }
 
@@ -1003,7 +1173,10 @@ function draw(root, store) {
   );
   const columnsActive = Object.values(view.colFilter).some(Boolean);
 
-  const rowOf = (item) => todoRow(store, item, { store, projects, projectLabel: view.filter === 'all' ? projectName(item.projectId) : '' });
+  // The selection only holds tasks on screen, so a batch never touches one hidden by a filter or deleted elsewhere.
+  const order = visible.map((i) => i.id);
+  for (const id of view.selected) if (!order.includes(id)) view.selected.delete(id);
+  const rowOf = (item) => todoRow(store, item, { store, projects, order, projectLabel: view.filter === 'all' ? projectName(item.projectId) : '' });
   const grouped = (groups) => h('div', { class: 'todo-groups' },
     groups.filter(([, rows]) => rows.length).map(([name, rows]) =>
       h('section', { class: 'todo-group' },
@@ -1015,7 +1188,7 @@ function draw(root, store) {
       ? `No task matches “${view.query.trim()}”${view.status === 'open' && !matchesQuery.hasStatus ? ' among open tasks. Add is:done to look in completed ones.' : '.'}`
       : columnsActive || view.sort.key ? 'No todo matches these filters.' : 'Nothing matches these filters.');
   } else if (view.layout === 'board') {
-    listBody = boardView(store, visible, projects);
+    listBody = boardView(store, visible, projects, order);
   } else if (view.layout === 'project') {
     listBody = grouped([['Personal', visible.filter((i) => !i.projectId)], ...projectTree(projects).map(({ project: p }) => [p.name, visible.filter((i) => i.projectId === p.id)])]);
   } else if (view.layout === 'status') {
@@ -1194,9 +1367,11 @@ function draw(root, store) {
           }),
           h('button', { class: 'primary', type: 'submit' }, 'Add')),
 
+        batchBar(store, visible, projects, categories),
+
         h('div', { class: view.layout === 'table' ? 'todo-table' : 'todo-table no-columns' },
           h('div', { class: 'todo-row todo-head' },
-            h('span'), h('span'),
+            h('span'), selectAllBox(store, visible),
             columnHeader(store, 'text', 'Task'),
             columnHeader(store, 'status', 'Status'),
             columnHeader(store, 'priority', 'Priority'),
