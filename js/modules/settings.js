@@ -5,6 +5,7 @@ import { connect, disconnect, isConnected } from '../google.js';
 import { editText, pill } from '../inline.js';
 import { modelChip } from '../model-picker.js';
 import { isAddress, CHAINS, chainSettings, savedNode, parsePosition, addPosition, addedPositions, addedListOf } from '../uniswap.js';
+import { positionFields, positionError } from '../position-input.js';
 import { telegramCard, analyticsCard, searchCard, resendCard, notificationsCard, automationsCard, dataCard } from './settings-more.js';
 
 const COLLECTION = 'settings';
@@ -556,7 +557,7 @@ function uniswapCard(store) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
     const entry = parsePosition(form.get('position'), Number(form.get('chain')), String(form.get('version')));
-    const error = entry ? addPosition(store, entry) : 'Paste a position link from app.uniswap.org, or type the position number and pick its chain and version.';
+    const error = entry ? addPosition(store, entry) : positionError(form.get('position'));
     uniswapView.ok = !error;
     uniswapView.message = error || 'Position added. Open Liquidity Pools to read it.';
     if (!error) e.currentTarget.reset();
@@ -608,11 +609,12 @@ function uniswapCard(store) {
         h('span', null, `${chainName(x.chainId)} · ${x.version} #${x.tokenId}`),
         h('button', { type: 'button', class: 'btn-small', onclick: () => removeAdded(x) }, 'Remove'))))
       : null,
-    h('form', { class: 'row', onsubmit: addAdded },
-      h('input', { name: 'position', placeholder: 'Position link or number', spellcheck: false, 'aria-label': 'Position link or number' }),
-      h('select', { name: 'chain', 'aria-label': 'Chain of the position' }, CHAINS.map((c) => h('option', { value: String(c.id) }, c.name))),
-      h('select', { name: 'version', 'aria-label': 'Uniswap version' }, h('option', { value: 'v4' }, 'v4'), h('option', { value: 'v3' }, 'v3')),
-      h('button', { type: 'submit', class: 'btn-small' }, 'Add position')),
+    (() => {
+      const f = positionFields();
+      return h('form', { class: 'stack', onsubmit: addAdded, onreset: f.reset },
+        h('div', { class: 'row' }, f.input, f.pickers, h('button', { type: 'submit', class: 'btn-small' }, 'Add position')),
+        f.hint);
+    })(),
     h('form', { class: 'stack', onsubmit: saveChains },
       h('p', { class: 'muted small' }, 'Chains: the networks the LP tab reads. A node is the JSON-RPC address to read from. Leave it empty to use the public node shown as the placeholder.'),
       CHAINS.map((chain) => {
