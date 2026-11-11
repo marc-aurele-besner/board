@@ -1190,12 +1190,13 @@ function keepAddFocus() {
 // ---- Fees collected: the log of collections, its averages and a chart over time ----
 
 const DAY_MS = 86400000;
-const FEE_RANGES = { all: [0, 'All time'], 7: [7, '7 days'], 30: [30, '30 days'], 90: [90, '90 days'], 365: [365, '1 year'], month: [0, 'This month'], lastmonth: [0, 'Last month'] };
-const FEE_RANGE_ORDER = ['7', '30', '90', '365', 'month', 'lastmonth', 'all'];
+const FEE_RANGES = { today: [0, 'Today'], all: [0, 'All time'], 7: [7, '7 days'], 30: [30, '30 days'], 90: [90, '90 days'], 365: [365, '1 year'], month: [0, 'This month'], lastmonth: [0, 'Last month'] };
+const FEE_RANGE_ORDER = ['today', '7', '30', '90', '365', 'month', 'lastmonth', 'all'];
 // A range's start and its end (excluded) in ms; null for no bound. Months are calendar months in local time.
 function feeRangeBounds(key, nowMs) {
   const now = new Date(nowMs);
   const monthStart = (back) => new Date(now.getFullYear(), now.getMonth() - back, 1).getTime();
+  if (key === 'today') return [new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime(), null];
   if (key === 'month') return [monthStart(0), null];
   if (key === 'lastmonth') return [monthStart(1), monthStart(0)];
   const days = FEE_RANGES[key][0];
@@ -1611,6 +1612,10 @@ function coverageCard(store) {
 function feesView(store) {
   const all = [...collectedOf(store)].sort((a, b) => b.at.localeCompare(a.at));
   const nowMs = Date.now();
+  const [todayStart] = feeRangeBounds('today', nowMs);
+  const anyToday = all.some((c) => Date.parse(c.at) >= todayStart);
+  // With no range picked, open on Today when something was collected today, else on 7 days.
+  if (view.feeAuto) view.feeRange = anyToday ? 'today' : '7';
   const [from, to] = feeRangeBounds(view.feeRange, nowMs);
   const inRange = all.filter((c) => (from === null || Date.parse(c.at) >= from) && (to === null || Date.parse(c.at) < to));
   // A choice with nothing left in the range falls back to all, so the log never sits empty behind a hidden filter.
@@ -1701,7 +1706,7 @@ function feesView(store) {
 
   return h('div', { class: 'stack-lg' },
     h('div', { class: 'row between' },
-      pills(FEE_RANGE_ORDER.map((k) => [k, FEE_RANGES[k][1]]), view.feeRange, (k) => { view.feeRange = k; view.feeGroup = defaultFeeGroup(k); }),
+      pills(FEE_RANGE_ORDER.filter((k) => k !== 'today' || anyToday || view.feeRange === 'today').map((k) => [k, FEE_RANGES[k][1]]), view.feeRange, (k) => { view.feeRange = k; view.feeAuto = false; view.feeGroup = defaultFeeGroup(k); }),
       view.logging ? null : h('button', {
         type: 'button',
         class: 'btn-small',
@@ -2292,7 +2297,7 @@ export default {
     sort: view.sort === 'value' && view.dir === -1 ? '' : sortName(view.sort, view.dir),
     apr: view.window === '24h' ? '' : view.window,
     tab: view.tab === 'fees' ? 'fees' : '',
-    range: view.feeRange === '7' ? '' : view.feeRange,
+    range: view.feeAuto ? '' : view.feeRange,
     by: view.feeGroup === defaultFeeGroup(view.feeRange) ? '' : view.feeGroup,
     fsort: view.feeSort === 'date' && view.feeDir === -1 ? '' : sortName(view.feeSort, view.feeDir),
     fchain: view.feeChain === 'all' ? '' : view.feeChain,
@@ -2309,7 +2314,8 @@ export default {
     const id = Number(p.chain);
     view.chain = CHAINS.some((c) => c.id === id) ? id : 'all';
     view.tab = p.tab === 'fees' ? 'fees' : 'positions';
-    view.feeRange = Object.hasOwn(FEE_RANGES, p.range) ? p.range : '7';
+    view.feeAuto = !Object.hasOwn(FEE_RANGES, p.range);
+    view.feeRange = view.feeAuto ? '7' : p.range;
     view.feeGroup = FEE_GROUPS.some(([k]) => k === p.by) ? p.by : defaultFeeGroup(view.feeRange);
     const [fkey, fdir] = String(p.fsort ?? '').split('-');
     [view.feeSort, view.feeDir] = Object.hasOwn(FEE_SORTS, fkey) ? [fkey, fdir === 'asc' ? 1 : -1] : ['date', -1];
