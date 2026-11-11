@@ -4,7 +4,7 @@ import { toast } from '../toast.js';
 import { setupBanner } from '../integrations.js';
 import { positionFields, positionError } from '../position-input.js';
 import { poolsChanged } from '../automations.js';
-import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed } from '../uniswap.js';
+import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt } from '../uniswap.js';
 
 const STALE_MS = 10 * 60 * 1000;
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
@@ -166,6 +166,9 @@ function collectsOf(before, rows, now) {
   }
   return out;
 }
+
+// Whether a fee counter entry stands for a collect made at time t (ms): it was seen between two reads around t.
+const coversCollect = (c, t) => t >= Date.parse(c.since) - 60000 && t <= Date.parse(c.at) + 60000;
 
 // Time left before the counter shows a fee APR, or null when it has no baseline yet.
 function counterLeft(r, baselines) {
@@ -381,7 +384,9 @@ async function load(store) {
           }
           // Save as each part lands, so a reload mid-read keeps what was already read.
           store.update(COLLECTION, (d) => {
-            const found = collectsOf(d.cache?.[key], done.rows, Date.now());
+            // A collect already read from the chain is not logged again from the fee counter.
+            const found = collectsOf(d.cache?.[key], done.rows, Date.now())
+              .filter((f) => !(d.collected ?? []).some((c) => c.source === 'chain' && c.ref === f.ref && coversCollect(f, Date.parse(c.at))));
             if (found.length) d.collected = [...(d.collected ?? []), ...found];
             d.cache = { ...d.cache, [key]: { at: Date.now(), rows: done.rows } };
             d.fees = nextBaselines(d.fees, done.rows, Date.now());
@@ -417,7 +422,10 @@ async function load(store) {
     state.pending = [];
     store.refresh();
   }
-  if (state.status === 'ok') loadAprs(store);
+  if (state.status === 'ok') {
+    loadAprs(store);
+    loadHistory(store);
+  }
 }
 
 // Public nodes keep about a day of logs, so what each position earned is also saved per hour (unix hour ->
@@ -515,6 +523,59 @@ async function loadAprs(store) {
     aprAgain = false;
     loadAprs(store);
   }
+}
+
+// v3 collects read from the position manager's events: exact amounts and times, with fees told apart from the
+// liquidity removed. One position at a time per chain, as public nodes limit bursts. A collect read from the chain
+// replaces the fee counter's entry for it; one the user removed is remembered in `hidden`, so it stays removed.
+let historyBusy = false;
+async function loadHistory(store) {
+  if (historyBusy) return;
+  historyBusy = true;
+  const cfg = store.get('settings').uniswap ?? {};
+  const byChain = new Map();
+  for (const r of state.rows.filter((x) => x.version === 'v3' && !x.staleAt && x.liq != null)) byChain.set(r.chainId, [...(byChain.get(r.chainId) ?? []), r]);
+  await Promise.all([...byChain].map(async ([chainId, rows]) => {
+    const chain = chainOf(chainId);
+    const { node } = chainSettings(cfg, chain);
+    for (const r of rows) {
+      try {
+        const s = await positionHistory(chain, node, r.tokenId, r.liq, store.get(COLLECTION)?.history?.[r.ref]);
+        const saved = store.get(COLLECTION) ?? {};
+        const known = new Set([...(saved.collected ?? []).map((c) => c.id), ...(saved.hidden ?? [])]);
+        const found = [];
+        for (const e of collectFees(s.events)) {
+          const id = `chain:${r.chainId}:${e.tx}:${e.index}`;
+          if (known.has(id) || !e.time || (e.f0 === 0n && e.f1 === 0n)) continue;
+          const a0 = Number(e.f0) / 10 ** r.dec0;
+          const a1 = Number(e.f1) / 10 ** r.dec1;
+          let usd = null;
+          try {
+            const p = await usdPricesAt(chain, [r.addr0, r.addr1], e.time);
+            const p0 = p[r.addr0.toLowerCase()];
+            const p1 = p[r.addr1.toLowerCase()];
+            if (p0 != null && p1 != null) usd = a0 * p0 + a1 * p1;
+          } catch {
+            // Logged without a value; the totals leave it out and say so.
+          }
+          found.push({ id, at: new Date(e.time * 1000).toISOString(), source: 'chain', tx: e.tx, ref: r.ref, pair: r.pair, chain: r.chain, tokenId: r.tokenId, a0, a1, sym0: r.sym0, sym1: r.sym1, usd });
+        }
+        store.update(COLLECTION, (d) => {
+          d.history = { ...d.history, [r.ref]: s };
+          if (!found.length) return;
+          const times = found.map((f) => Date.parse(f.at));
+          d.collected = [
+            ...(d.collected ?? []).filter((c) => !(c.source === 'auto' && c.ref === r.ref && times.some((t) => coversCollect(c, t)))),
+            ...found,
+          ];
+        });
+      } catch {
+        // This position keeps the fee counter's entries until its history can be read.
+      }
+    }
+  }));
+  historyBusy = false;
+  store.refresh();
 }
 
 // Token logos arrive once, from the token list. The page redraws when they do.
@@ -795,13 +856,16 @@ function collectedByRef(store) {
   return out;
 }
 
+// A collect read from the chain would be read again, so its id is kept in `hidden`.
 function removeCollect(store, entry) {
   store.update(COLLECTION, (d) => {
     d.collected = (d.collected ?? []).filter((c) => c.id !== entry.id);
+    if (entry.source === 'chain') d.hidden = [...(d.hidden ?? []), entry.id];
   });
   toast('Collection removed.', {
     undo: () => store.update(COLLECTION, (d) => {
       d.collected = [...(d.collected ?? []), entry];
+      d.hidden = (d.hidden ?? []).filter((id) => id !== entry.id);
     }),
   });
 }
@@ -893,12 +957,12 @@ function feesView(store) {
       h('tbody', null, list.map((c) => h('tr', null,
         h('td', { title: c.since ? `Collected between ${new Date(c.since).toLocaleString()} and ${new Date(c.at).toLocaleString()}` : null },
           new Date(c.at).toLocaleDateString(),
-          h('div', { class: 'muted small' }, c.source === 'manual' ? 'Logged by hand' : 'Seen by the board')),
+          h('div', { class: 'muted small', title: c.tx ?? null }, { manual: 'Logged by hand', chain: 'From the chain' }[c.source] ?? 'Seen by the board')),
         h('td', null,
           c.pair ? h('strong', null, c.pair) : h('span', { class: 'muted' }, '—'),
           h('div', { class: 'muted small' }, [c.chain, c.tokenId ? `#${c.tokenId}` : '', c.note].filter(Boolean).join(' · '))),
         h('td', { class: 'small' }, tokenAmounts(c)),
-        h('td', { class: 'num', title: c.source === 'auto' ? 'The unclaimed fees at the read before the collect. Fees earned after that read are not counted.' : null }, usdOrDash(c.usd ?? null)),
+        h('td', { class: 'num', title: { auto: 'The unclaimed fees at the read before the collect. Fees earned after that read are not counted.', chain: 'The fees in this collect, without the liquidity it paid out, at the token prices of that day.' }[c.source] ?? null }, usdOrDash(c.usd ?? null)),
         h('td', null, h('button', {
           type: 'button',
           class: 'icon-btn',
@@ -936,7 +1000,7 @@ function feesView(store) {
       ? table
       : h('div', { class: 'lp-empty' },
           h('span', { class: 'float' }, icon('coins')),
-          h('p', null, all.length ? 'No collections in this range.' : 'No collections yet. When a position\'s unclaimed fees drop between two reads, the board logs what was collected here. You can also log one by hand.')));
+          h('p', null, all.length ? 'No collections in this range.' : 'No collections yet. v3 collects are read from the chain; v4 ones are logged when a position\'s unclaimed fees drop between two reads. You can also log one by hand.')));
 }
 
 // The tab's two views: the positions, and the fees collected from them.
@@ -1143,7 +1207,7 @@ export default {
   short: 'Pools',
   icon: 'droplet',
   collection: COLLECTION,
-  defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [] },
+  defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [], history: {}, hidden: [] },
   render: draw,
   serialize: () => ({
     filter: view.filter === 'all' ? '' : view.filter,
