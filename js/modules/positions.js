@@ -2,6 +2,7 @@ import { h, icon, refreshIcon, money, empty, notice, uid, todayISO } from '../ui
 import { barChart } from '../chart.js';
 import { toast } from '../toast.js';
 import { setupBanner } from '../integrations.js';
+import { positionFields, positionError } from '../position-input.js';
 import { poolsChanged } from '../automations.js';
 import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed } from '../uniswap.js';
 
@@ -730,7 +731,7 @@ function addForm(store) {
     const form = new FormData(e.currentTarget);
     const entry = parsePosition(form.get('position'), Number(form.get('chain')), String(form.get('version')));
     if (!entry) {
-      view.addMessage = 'Paste a position link from app.uniswap.org, or type the position number and pick its chain and version.';
+      view.addMessage = positionError(form.get('position'));
       return store.refresh();
     }
     const error = addPosition(store, entry);
@@ -743,13 +744,14 @@ function addForm(store) {
     store.refresh();
     load(store);
   };
+  const f = positionFields({ placeholder: 'https://app.uniswap.org/positions/v3/base/556505 or 556505', autofocus: true });
   return h('form', { class: 'card panel stack lp-add', onsubmit: submit },
     h('h3', null, 'Add a position'),
-    h('p', { class: 'muted small' }, 'For a position the board does not find: a v3 position held by an address not in your wallets, or a v4 position older than the node keeps. A link from app.uniswap.org names its chain and version. A number needs both picked.'),
-    h('input', { name: 'position', placeholder: 'https://app.uniswap.org/positions/v4/base/123456 or 123456', spellcheck: false, autofocus: true, 'aria-label': 'Position link or number' }),
+    h('p', { class: 'muted small' }, 'For a position the board does not find: a v3 position held by an address not in your wallets, or a v4 position older than the node keeps. Paste its link from app.uniswap.org and the chain and version are read from it. A plain number needs both picked.'),
+    f.input,
+    f.hint,
     h('div', { class: 'row' },
-      h('select', { name: 'chain', 'aria-label': 'Chain of the position' }, CHAINS.map((c) => h('option', { value: String(c.id) }, c.name))),
-      h('select', { name: 'version', 'aria-label': 'Uniswap version' }, h('option', { value: 'v4' }, 'v4'), h('option', { value: 'v3' }, 'v3')),
+      f.pickers,
       h('button', { type: 'submit', class: 'btn-small' }, 'Add'),
       h('button', { type: 'button', class: 'btn-small', onclick: () => { view.adding = false; store.refresh(); } }, 'Cancel')),
     view.addMessage ? notice({ text: view.addMessage }) : null);
