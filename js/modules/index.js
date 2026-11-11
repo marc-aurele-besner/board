@@ -14,4 +14,4 @@ import cron from './cron.js';
 import settings from './settings.js';
 import search from './search.js';
 
-export const modules = [home, todos, calendar, projects, kitchen, money, positions, inbox, monitoring, tools, cron, settings, search];
+export const modules = [home, todos, inbox, calendar, projects, kitchen, money, positions, monitoring, tools, cron, settings, search];
