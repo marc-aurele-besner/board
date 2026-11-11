@@ -53,7 +53,11 @@ export function chainsCard(store) {
     }
     store.update(COLLECTION, (d) => {
       const lp = {};
-      for (const c of chains.filter((x) => x.builtin)) lp[c.id] = { enabled: form.get(`on-${c.id}`) === 'on', node: nodeList(form.get(`node-${c.id}`)) };
+      // The public list left as shown is not saved, so the chain keeps following it when it changes.
+      for (const c of chains.filter((x) => x.builtin)) {
+        const node = nodeList(form.get(`node-${c.id}`));
+        lp[c.id] = { enabled: form.get(`on-${c.id}`) === 'on', node: node === nodeList(c.rpc) ? '' : node };
+      }
       // node: '' drops the Ethereum-only field kept from before the chains list.
       d.uniswap = { wallets: [], ...d.uniswap, chains: lp, node: '' };
       d.blockchains = { ...d.blockchains, custom: customChains(d).map((c) => ({ ...c, rpc: nodeList(form.get(`node-${c.id}`) ?? c.rpc) })) };
@@ -113,7 +117,7 @@ export function chainsCard(store) {
         h('span', { class: 'chain-label' },
           h('strong', null, c.name),
           h('span', { class: 'muted small' }, `ID ${c.id} · ${c.symbol}`, c.builtin ? '' : ' · added'))),
-      h('input', { name: `node-${c.id}`, value: shownList(c.saved), placeholder: c.builtin ? shownList(c.rpc) : 'https://…', title: c.builtin && !c.saved ? `Public nodes: ${shownList(c.rpc)}` : null, spellcheck: false, 'aria-label': `${c.name} node URLs` }),
+      h('input', { name: `node-${c.id}`, value: shownList(c.node), placeholder: c.builtin ? 'Empty uses the public nodes' : 'https://…', title: c.builtin && !c.saved ? 'The public nodes, as no node is set' : null, spellcheck: false, 'aria-label': `${c.name} node URLs` }),
       h('span', { class: 'chain-tools' },
         c.builtin
           ? h('label', { class: 'check small', title: 'Read by the Liquidity Pools tab' }, h('input', { type: 'checkbox', name: `on-${c.id}`, checked: c.lp }), 'LP')
@@ -130,7 +134,7 @@ export function chainsCard(store) {
 
   return h('section', { class: 'card panel' },
     h('h2', null, 'Blockchains'),
-    h('p', { class: 'muted small' }, 'The chains the board reads, for Liquidity Pools and smart contracts. A node is the JSON-RPC address a chain is read from. List several, separated by commas: reads go to the one answering fastest, spread across them, and move off a node that fails or stops answering. Leave it empty to use the public nodes shown as the placeholder. LP marks the chains the Liquidity Pools tab reads. Test asks each node for its chain ID and latest block.'),
+    h('p', { class: 'muted small' }, 'The chains the board reads, for Liquidity Pools and smart contracts. A node is the JSON-RPC address a chain is read from. List several, separated by commas: reads go to the one answering fastest, spread across them, and move off a node that fails or stops answering. Each field lists the nodes in use; built-in chains start with several public ones. Empty a field to go back to them. LP marks the chains the Liquidity Pools tab reads. Test asks each node for its chain ID and latest block.'),
     h('form', { class: 'stack', onsubmit: saveAll },
       h('ul', { class: 'chain-list' }, chains.map(row)),
       h('div', { class: 'row' }, h('button', { type: 'submit', class: 'btn-small' }, 'Save chains'))),
