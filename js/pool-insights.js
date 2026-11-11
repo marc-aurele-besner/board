@@ -1,11 +1,16 @@
 // AI insights on the Liquidity Pools tab: a read of the open positions, in range and out, with what to adjust.
-import { h, icon, money, notice } from './ui.js';
+// The last few reads are saved in the pools collection, so they can be opened again after a reload.
+import { h, icon, money, notice, uid } from './ui.js';
 import { ask, parseJson } from './ai.js';
 import { systemPrompt } from './prompts.js';
 import { setupBanner, hasOpenRouter } from './integrations.js';
 
-// key: the positions the read was asked for, so a changed set is flagged instead of shown as current.
-const insight = { status: 'idle', key: '', at: 0, summary: '', items: [], error: '' };
+const COLLECTION = 'pools';
+const KEEP = 5;
+
+// status and error: the read in progress. run: the saved read shown, by id ('' for the newest).
+// action, range, chain: the filters on the read shown. hidden: the panel folded by the user.
+const insight = { status: 'idle', error: '', run: '', action: 'all', range: 'all', chain: 'all', hidden: false };
 
 // The actions the model may pick, most urgent first; the list is shown in this order.
 const ACTIONS = {
@@ -24,12 +29,15 @@ const EDGE = 10;
 const keyOf = (rows) => rows.map((r) => r.ref).sort().join(',');
 const round = (n, digits = 4) => (Number.isFinite(n) ? Number(n.toPrecision(digits)) : null);
 const pctOf = (n) => (Number.isFinite(n) ? round(n * 100, 3) : null);
-const priceText = (n) => (n >= 1000 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toFixed(2) : n.toPrecision(4));
+const priceText = (n) => (!Number.isFinite(n) ? '∞' : n >= 1000 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toFixed(2) : n.toPrecision(4));
 const nearEdge = (r) => r.inRange && !r.full && r.marker !== null && (r.marker < EDGE || r.marker > 100 - EDGE);
+const whenText = (at) => new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const runsOf = (store) => store.get(COLLECTION)?.insights ?? [];
 
-// The facts the model reads for one position. Distances are worked out here so the model does not have to.
-function factsOf(r) {
-  const below = !r.inRange && r.current < r.min;
+// The facts the model reads for one position, with prices in the pair's base as the board shows it
+// (side: the min, max, current, marker, unit and base after a flip). Distances are worked out here.
+function factsOf(r, side) {
+  const below = !r.inRange && side.current < side.min;
   return {
     id: r.ref,
     pair: r.pair,
@@ -37,22 +45,32 @@ function factsOf(r) {
     feeTierPct: r.feePct,
     status: r.inRange ? 'in range' : below ? 'out of range, price below the range' : 'out of range, price above the range',
     fullRange: r.full,
-    priceUnit: `${r.sym1} per ${r.sym0}`,
-    currentPrice: round(r.current, 6),
-    rangeMin: r.full ? null : round(r.min, 6),
-    rangeMax: r.full || !Number.isFinite(r.max) ? null : round(r.max, 6),
+    priceUnit: `${side.unit} per ${side.base}`,
+    currentPrice: round(side.current, 6),
+    rangeMin: r.full ? null : round(side.min, 6),
+    rangeMax: r.full || !Number.isFinite(side.max) ? null : round(side.max, 6),
     // max / min - 1: how wide the range is.
-    rangeWidthPct: r.full || !(r.min > 0) || !Number.isFinite(r.max) ? null : pctOf(r.max / r.min - 1),
+    rangeWidthPct: r.full || !(side.min > 0) || !Number.isFinite(side.max) ? null : pctOf(side.max / side.min - 1),
     // Where the price sits in the range on a log scale: 0 at the lower edge, 100 at the upper.
-    positionInRangePct: r.inRange && r.marker !== null ? round(r.marker, 3) : null,
+    positionInRangePct: r.inRange && side.marker !== null ? round(side.marker, 3) : null,
     // In range: the move to the nearer edge. Out of range: the move needed to get back in.
-    moveToLowerEdgePct: r.inRange && r.min > 0 ? pctOf(r.min / r.current - 1) : null,
-    moveToUpperEdgePct: r.inRange && Number.isFinite(r.max) ? pctOf(r.max / r.current - 1) : null,
-    moveBackInPct: r.inRange ? null : pctOf((below ? r.min : r.max) / r.current - 1),
+    moveToLowerEdgePct: r.inRange && side.min > 0 ? pctOf(side.min / side.current - 1) : null,
+    moveToUpperEdgePct: r.inRange && Number.isFinite(side.max) ? pctOf(side.max / side.current - 1) : null,
+    moveBackInPct: r.inRange ? null : pctOf((below ? side.min : side.max) / side.current - 1),
     valueUsd: round(r.value, 6),
     unclaimedFeesUsd: round(r.fees, 6),
     feeAprPct: r.apr == null ? null : pctOf(r.apr),
+    token0: r.sym0,
     shareInToken0Pct: r.share0 == null ? null : round(r.share0 * 100, 3),
+  };
+}
+
+// What a saved read keeps of a position, so it still shows once the position changed or closed.
+function snapshotOf(r, side) {
+  return {
+    pair: r.pair, chain: r.chain, feePct: r.feePct, tokenId: r.tokenId, url: r.url ?? '', inRange: r.inRange, full: r.full,
+    sym0: r.sym0, sym1: r.sym1, unit: side.unit, base: side.base,
+    min: side.min, max: Number.isFinite(side.max) ? side.max : null, current: side.current,
   };
 }
 
@@ -77,46 +95,145 @@ function cleanReply(data, rows) {
   return { summary: String(data?.summary ?? '').slice(0, 1200), items };
 }
 
-async function run(store, rows) {
+async function run(store, rows, sideOf) {
   insight.status = 'loading';
-  insight.key = keyOf(rows);
   insight.error = '';
+  insight.hidden = false;
   store.refresh();
   try {
+    const sides = new Map(rows.map((r) => [r.ref, sideOf(r)]));
     const reply = await ask(store, 'task-pools', [
       { role: 'system', content: systemPrompt(store, 'pools') },
-      { role: 'user', content: JSON.stringify({ positions: rows.map(factsOf) }) },
+      { role: 'user', content: JSON.stringify({ positions: rows.map((r) => factsOf(r, sides.get(r.ref))) }) },
     ]);
-    Object.assign(insight, cleanReply(parseJson(reply), rows), { status: 'ok', at: Date.now() });
-    if (!insight.items.length && !insight.summary) throw new Error('The model returned nothing usable. Try again or pick another model in Settings.');
+    const { summary, items } = cleanReply(parseJson(reply), rows);
+    if (!items.length && !summary) throw new Error('The model returned nothing usable. Try again or pick another model in Settings.');
+    const byRef = new Map(rows.map((r) => [r.ref, r]));
+    const saved = {
+      id: uid(),
+      at: Date.now(),
+      key: keyOf(rows),
+      summary,
+      items: items.map((it) => ({ ...it, pos: snapshotOf(byRef.get(it.ref), sides.get(it.ref)) })),
+    };
+    Object.assign(insight, { status: 'idle', run: '', action: 'all', range: 'all', chain: 'all' });
+    store.update(COLLECTION, (d) => {
+      d.insights = [saved, ...(d.insights ?? [])].slice(0, KEEP);
+    });
   } catch (err) {
     insight.status = 'error';
     insight.error = err.message;
+    store.refresh();
   }
-  store.refresh();
 }
 
-function item(r, it) {
+// A saved range in the base the pair is shown in now; a read from before a flip is turned over.
+function inBase(pos, flipped, range) {
+  const unit = flipped ? pos.sym0 : pos.sym1;
+  if (unit === pos.unit || !range) return { ...range, unit: pos.unit, base: pos.base };
+  return {
+    min: range.max == null || !Number.isFinite(range.max) ? 0 : 1 / range.max,
+    max: range.min > 0 ? 1 / range.min : Infinity,
+    current: range.current > 0 ? 1 / range.current : null,
+    unit: pos.base,
+    base: pos.unit,
+  };
+}
+
+function item(it, live, flipped) {
   const [label, tone] = ACTIONS[it.action];
+  const pos = it.pos;
+  const now = inBase(pos, flipped, { min: pos.min, max: pos.max ?? Infinity, current: pos.current });
+  const suggested = it.range ? inBase(pos, flipped, it.range) : null;
+  const changed = live && live.inRange !== pos.inRange;
   return h('li', { class: 'insight-item' },
     h('div', { class: 'insight-top' },
       h('span', { class: `insight-action ${tone}` }, label),
-      h('strong', null, r.pair),
-      h('span', { class: 'muted small' }, `${r.chain} · ${r.feePct}% · #${r.tokenId}`),
-      h('span', { class: r.inRange ? 'status-pill in' : 'status-pill out' }, h('span', { class: 'dot' }), r.inRange ? 'In range' : 'Out of range'),
-      r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn insight-open', title: 'Open on Uniswap', 'aria-label': `Open position ${r.tokenId} on Uniswap` }, icon('link')) : null),
+      h('strong', null, pos.pair),
+      h('span', { class: 'muted small' }, `${pos.chain} · ${pos.feePct}% · #${pos.tokenId}`),
+      h('span', { class: pos.inRange ? 'status-pill in' : 'status-pill out' }, h('span', { class: 'dot' }), pos.inRange ? 'In range' : 'Out of range'),
+      changed ? h('span', { class: 'muted small' }, `now ${live.inRange ? 'in range' : 'out of range'}`) : null,
+      !live ? h('span', { class: 'muted small' }, 'no longer open') : null,
+      pos.url ? h('a', { href: pos.url, target: '_blank', rel: 'noopener', class: 'icon-btn insight-open', title: 'Open on Uniswap', 'aria-label': `Open position ${pos.tokenId} on Uniswap` }, icon('link')) : null),
     it.headline ? h('div', { class: 'insight-headline' }, it.headline) : null,
     it.reason ? h('p', { class: 'muted small' }, it.reason) : null,
-    it.range
+    suggested
       ? h('div', { class: 'insight-range small' },
           h('span', { class: 'muted' }, 'Suggested range'),
-          h('strong', null, `${priceText(it.range.min)} – ${priceText(it.range.max)} ${r.sym1}`),
-          r.full ? null : h('span', { class: 'muted' }, `now ${priceText(r.min)} – ${Number.isFinite(r.max) ? priceText(r.max) : '∞'}`))
+          h('strong', null, `${priceText(suggested.min)} – ${priceText(suggested.max)} ${suggested.unit} per ${suggested.base}`),
+          pos.full ? null : h('span', { class: 'muted' }, `was ${priceText(now.min)} – ${priceText(now.max)}`),
+          now.current ? h('span', { class: 'muted' }, `price ${priceText(now.current)}`) : null)
       : null);
 }
 
+// The chips over a read's list: by action, by range status, and by chain when there are several.
+function filters(store, items) {
+  const chip = (key, value, label, n) => h('button', {
+    type: 'button',
+    class: insight[key] === value ? 'lp-chip active' : 'lp-chip',
+    'aria-pressed': String(insight[key] === value),
+    onclick: () => {
+      insight[key] = value;
+      store.refresh();
+    },
+  }, label, h('span', { class: 'chip-count' }, n));
+  const count = (pred) => items.filter(pred).length;
+  const actions = ORDER.filter((a) => items.some((it) => it.action === a));
+  const chains = [...new Set(items.map((it) => it.pos.chain))].sort((a, b) => a.localeCompare(b));
+  return h('div', { class: 'stack insight-filters' },
+    h('div', { class: 'row lp-filters' },
+      chip('action', 'all', 'All actions', items.length),
+      actions.map((a) => chip('action', a, ACTIONS[a][0], count((it) => it.action === a)))),
+    h('div', { class: 'row lp-filters' },
+      chip('range', 'all', 'Any range', items.length),
+      chip('range', 'in', 'In range', count((it) => it.pos.inRange)),
+      chip('range', 'out', 'Out of range', count((it) => !it.pos.inRange)),
+      chains.length > 1 ? chip('chain', 'all', 'All chains', items.length) : null,
+      chains.length > 1 ? chains.map((c) => chip('chain', c, c, count((it) => it.pos.chain === c))) : null));
+}
+
+// The saved reads as tabs, newest first, each named by its date and time.
+function tabs(store, runs, shown) {
+  if (runs.length < 2) return null;
+  return h('div', { class: 'segmented insight-tabs', role: 'tablist', 'aria-label': 'Saved insights' },
+    runs.map((r, i) => h('button', {
+      type: 'button',
+      role: 'tab',
+      class: r.id === shown.id ? 'seg active' : 'seg',
+      'aria-selected': String(r.id === shown.id),
+      title: i === 0 ? 'The latest read' : `A read from ${whenText(r.at)}`,
+      onclick: () => {
+        insight.run = i === 0 ? '' : r.id;
+        store.refresh();
+      },
+    }, whenText(r.at))));
+}
+
+function runView(store, rows, shown, isFlipped) {
+  const live = new Map(rows.map((r) => [r.ref, r]));
+  const latest = runsOf(store)[0]?.id === shown.id;
+  const items = shown.items
+    .filter((it) => it.pos)
+    .sort((a, b) => ORDER.indexOf(a.action) - ORDER.indexOf(b.action));
+  const picked = items.filter((it) =>
+    (insight.action === 'all' || it.action === insight.action) &&
+    (insight.range === 'all' || (insight.range === 'in') === it.pos.inRange) &&
+    (insight.chain === 'all' || it.pos.chain === insight.chain));
+  return h('div', { class: 'stack' },
+    latest && shown.key !== keyOf(rows)
+      ? notice({ tone: 'info', text: 'The positions changed since this read. Ask again for an up-to-date one.' })
+      : null,
+    shown.summary ? h('p', null, shown.summary) : null,
+    items.length > 1 ? filters(store, items) : null,
+    picked.length
+      ? h('ul', { class: 'insight-list' }, picked.map((it) => item(it, live.get(it.ref), isFlipped(it.pos))))
+      : items.length ? h('p', { class: 'muted small' }, 'No insights match these filters.') : null,
+    h('p', { class: 'muted small' }, `Read ${whenText(shown.at)}. An AI read of the numbers above, not financial advice.`));
+}
+
 // rows: the open positions on screen (closed ones left out), with fee APR when it is known.
-export function insightsPanel(store, rows) {
+// sideOf(r): the row's prices in the base the board shows. isFlipped(pair): whether a pair is shown flipped.
+export function insightsPanel(store, rows, { sideOf, isFlipped }) {
   if (!rows.length) return null;
   const out = rows.filter((r) => !r.inRange);
   const edge = rows.filter(nearEdge);
@@ -127,41 +244,44 @@ export function insightsPanel(store, rows) {
     edge.length ? `${edge.length} near an edge` : '',
   ].filter(Boolean).join(' · ');
 
+  const runs = runsOf(store);
+  const shown = runs.find((r) => r.id === insight.run) ?? runs[0] ?? null;
   const loading = insight.status === 'loading';
-  const done = insight.status === 'ok';
+  const open = !insight.hidden && (shown || insight.status !== 'idle');
   const button = h('button', {
     type: 'button',
     class: 'btn-small',
     disabled: loading || !hasOpenRouter(store),
-    onclick: () => run(store, rows),
-  }, icon('sparkle'), loading ? 'Reading…' : done ? 'Ask again' : 'Get insights');
+    onclick: () => run(store, rows, sideOf),
+  }, icon('sparkle'), loading ? 'Reading…' : runs.length ? 'Ask again' : 'Get insights');
+  const toggle = shown || insight.status === 'error'
+    ? h('button', {
+        type: 'button',
+        class: 'btn-small',
+        onclick: () => {
+          insight.hidden = open;
+          if (insight.status === 'error') insight.status = 'idle';
+          store.refresh();
+        },
+      }, open ? 'Hide' : runs.length > 1 ? `Show ${runs.length} saved` : 'Show')
+    : null;
 
   const head = h('div', { class: 'row between' },
     h('div', null,
       h('h3', { class: 'insight-title' }, icon('sparkle'), 'AI insights'),
       h('p', { class: 'muted small' }, tally)),
-    h('div', { class: 'row' },
-      done || insight.status === 'error'
-        ? h('button', { type: 'button', class: 'btn-small', onclick: () => { insight.status = 'idle'; store.refresh(); } }, 'Hide')
-        : null,
-      button));
+    h('div', { class: 'row' }, toggle, button));
 
-  let body = null;
-  if (!hasOpenRouter(store)) body = setupBanner('openrouter', 'AI insights need an OpenRouter key.');
-  else if (insight.status === 'error') body = notice({ text: insight.error });
-  else if (loading) body = h('p', { class: 'muted small' }, `Reading ${rows.length} position${rows.length === 1 ? '' : 's'}…`);
-  else if (done) {
-    const byRef = new Map(rows.map((r) => [r.ref, r]));
-    const items = insight.items
-      .filter((it) => byRef.has(it.ref))
-      .sort((a, b) => ORDER.indexOf(a.action) - ORDER.indexOf(b.action));
+  // Saved reads stay readable without a key; only a new read needs one.
+  const banner = hasOpenRouter(store) ? null : setupBanner('openrouter', 'AI insights need an OpenRouter key.');
+  let body = banner;
+  if (open) {
     body = h('div', { class: 'stack' },
-      insight.key !== keyOf(rows)
-        ? notice({ tone: 'info', text: 'The positions changed since this read. Ask again for an up-to-date one.' })
-        : null,
-      insight.summary ? h('p', null, insight.summary) : null,
-      items.length ? h('ul', { class: 'insight-list' }, items.map((it) => item(byRef.get(it.ref), it))) : null,
-      h('p', { class: 'muted small' }, `Read ${new Date(insight.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. An AI read of the numbers above, not financial advice.`));
+      banner,
+      insight.status === 'error' ? notice({ text: insight.error }) : null,
+      loading ? h('p', { class: 'muted small' }, `Reading ${rows.length} position${rows.length === 1 ? '' : 's'}…`) : null,
+      shown ? tabs(store, runs, shown) : null,
+      shown ? runView(store, rows, shown, isFlipped) : null);
   }
 
   return h('section', { class: 'card stack lp-insights' }, head, body);

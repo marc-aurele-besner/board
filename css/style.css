@@ -1514,6 +1514,9 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .insight-action.act { color: var(--ai); background: color-mix(in srgb, var(--ai) 14%, transparent); }
 .insight-action.bad { color: var(--expense); background: color-mix(in srgb, var(--expense) 14%, transparent); }
 .insight-range { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; font-variant-numeric: tabular-nums; }
+.insight-tabs { margin: 0; overflow-x: auto; scrollbar-width: none; }
+.insight-tabs .seg { flex: 1 0 auto; min-width: 0; padding: 4px 10px; font-size: 0.85rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.insight-filters { gap: 6px; }
 
 /* Fees collected: how far the search for collects has got. Collapsed, a one-line recap that opens the detail */
 .lp-coverage-toggle { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 0; padding: 0; background: none; border: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }

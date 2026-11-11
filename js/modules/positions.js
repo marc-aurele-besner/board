@@ -2222,7 +2222,10 @@ function draw(root, store) {
       h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Unclaimed fees'), feesEl),
       h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Positions'), h('strong', null, `${byChain.length} · ${inRange} in range`))),
 
-    firstRead ? null : insightsPanel(store, byChain.map(withApr)),
+    firstRead ? null : insightsPanel(store, byChain.map(withApr), {
+      sideOf: (r) => sideOf(r, isFlipped(store, r)),
+      isFlipped: (pair) => isFlipped(store, pair),
+    }),
 
     chainsWithRows.length > 1
       ? h('div', { class: 'row lp-filters lp-chains' },
@@ -2278,7 +2281,7 @@ export default {
   short: 'Pools',
   icon: 'droplet',
   collection: COLLECTION,
-  defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [], history: {}, hidden: [], etherscan: {}, flip: {} },
+  defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [], history: {}, hidden: [], etherscan: {}, flip: {}, insights: [] },
   render: draw,
   serialize: () => ({
     filter: view.filter === 'all' ? '' : view.filter,
