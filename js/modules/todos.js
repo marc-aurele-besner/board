@@ -453,15 +453,21 @@ function taskMarkdown(item, projects) {
   return desc ? `${head}\n${desc.split(/\r?\n/).map((l) => `  ${l}`).join('\n')}` : head;
 }
 
+// A copied task is being handed on, so it moves to "On Deck" (completed ones stay done) and leaves the selection.
 async function copyTasks(store, items) {
   if (!items.length) return;
   const text = items.map((i) => taskMarkdown(i, projectsOf(store))).join('\n');
   try {
     await navigator.clipboard.writeText(text);
-    toast(items.length === 1 ? 'Task copied' : `${items.length} tasks copied`);
   } catch {
     toast('Could not copy: the browser blocked the clipboard');
+    return;
   }
+  for (const i of items) view.selected.delete(i.id);
+  const moving = items.filter((i) => !['done', 'ondeck'].includes(statusOf(i))).map((i) => i.id);
+  if (moving.length) updateItems(store, moving, { status: 'ondeck' });
+  else store.refresh();
+  toast(`${items.length === 1 ? 'Task' : `${items.length} tasks`} copied${moving.length ? ', moved to On Deck' : ''}`);
 }
 
 function copyButton(store, item) {
