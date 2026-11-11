@@ -879,11 +879,21 @@ function hueOf(text) {
 }
 
 // A logo image, or a monogram when there is no image or it fails to load.
+// Logos already shown once are drawn at once on a redraw: no lazy load and no fade, which made them blink.
+const shownLogos = new Set();
 function logo(src, label, cls = '') {
   const monogram = () => h('span', { class: 'mono', style: { '--hue': hueOf(label) }, 'aria-hidden': 'true' }, String(label).slice(0, 2).toUpperCase());
   if (!src) return h('span', { class: `logo ${cls}`, title: label }, monogram());
+  const known = shownLogos.has(src);
   return h('span', { class: `logo ${cls}`, title: label },
-    h('img', { src, alt: '', loading: 'lazy', onerror: (e) => e.currentTarget.replaceWith(monogram()) }));
+    h('img', {
+      src,
+      alt: '',
+      class: known ? null : 'fresh',
+      loading: known ? null : 'lazy',
+      onload: () => shownLogos.add(src),
+      onerror: (e) => e.currentTarget.replaceWith(monogram()),
+    }));
 }
 
 const tokenLogoOf = (row, address) => logoMap.get(`${row.chainId}:${address.toLowerCase()}`) ?? null;
@@ -1076,9 +1086,12 @@ let addEl = null;
 function openAdd(store) {
   view.adding = true;
   store.refresh();
-  // Ready to paste: focused, and any text left in it selected so a paste replaces it.
-  addEl?.elements.position.focus();
-  addEl?.elements.position.select();
+  // Ready to paste: focused, and any text left in it selected so a paste replaces it. The page draws on the next
+  // frame, so this waits for it.
+  requestAnimationFrame(() => {
+    addEl?.elements.position.focus();
+    addEl?.elements.position.select();
+  });
 }
 
 function closeAdd(store) {
@@ -1142,7 +1155,17 @@ function keepAddFocus() {
 // ---- Fees collected: the log of collections, its averages and a chart over time ----
 
 const DAY_MS = 86400000;
-const FEE_RANGES = { all: [0, 'All time'], 30: [30, '30 days'], 90: [90, '90 days'], 365: [365, '1 year'] };
+const FEE_RANGES = { all: [0, 'All time'], 7: [7, '7 days'], 30: [30, '30 days'], 90: [90, '90 days'], 365: [365, '1 year'], month: [0, 'This month'], lastmonth: [0, 'Last month'] };
+const FEE_RANGE_ORDER = ['all', '7', '30', '90', '365', 'month', 'lastmonth'];
+// A range's start and its end (excluded) in ms; null for no bound. Months are calendar months in local time.
+function feeRangeBounds(key, nowMs) {
+  const now = new Date(nowMs);
+  const monthStart = (back) => new Date(now.getFullYear(), now.getMonth() - back, 1).getTime();
+  if (key === 'month') return [monthStart(0), null];
+  if (key === 'lastmonth') return [monthStart(1), monthStart(0)];
+  const days = FEE_RANGES[key][0];
+  return [days ? nowMs - days * DAY_MS : null, null];
+}
 const FEE_GROUPS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month']];
 
 // Local calendar keys, so a collect late in the evening counts on its own day.
@@ -1534,18 +1557,18 @@ function coverageCard(store) {
             class: 'btn-small lp-search-more',
             disabled: searching.has(c.chainId) || loading,
             'aria-busy': searching.has(c.chainId) ? 'true' : null,
-            title: `Search ${c.name} further back for collects now, without waiting for the next load`,
+            title: searching.has(c.chainId) ? `Searching ${c.name}…` : `Search ${c.name} further back for collects now, without waiting for the next load`,
             'aria-label': `Search ${c.name} further`,
             onclick: () => loadHistory(store, c.chainId),
-          }, refreshIcon(searching.has(c.chainId)), searching.has(c.chainId) ? 'Searching…' : 'Search further'))))
+          }, refreshIcon(searching.has(c.chainId))))))
       : null);
 }
 
 function feesView(store) {
   const all = [...collectedOf(store)].sort((a, b) => b.at.localeCompare(a.at));
   const nowMs = Date.now();
-  const days = FEE_RANGES[view.feeRange][0];
-  const inRange = days ? all.filter((c) => Date.parse(c.at) >= nowMs - days * DAY_MS) : all;
+  const [from, to] = feeRangeBounds(view.feeRange, nowMs);
+  const inRange = all.filter((c) => (from === null || Date.parse(c.at) >= from) && (to === null || Date.parse(c.at) < to));
   // A choice with nothing left in the range falls back to all, so the log never sits empty behind a hidden filter.
   if (!inRange.some((c) => c.chain === view.feeChain)) view.feeChain = 'all';
   if (!inRange.some((c) => tokensOf(c).includes(view.feeToken))) view.feeToken = 'all';
@@ -1558,8 +1581,10 @@ function feesView(store) {
   const unpriced = list.filter((c) => c.usd == null).length;
   // Averages run from the first collection, or the start of the range, to now, so quiet days count too.
   const first = all.length ? Math.min(nowMs, Date.parse(all[all.length - 1].at)) : nowMs;
-  const start = days ? Math.max(nowMs - days * DAY_MS, first) : first;
-  const spanDays = Math.max(1, (nowMs - start) / DAY_MS);
+  // A past range, such as last month, ends at its own end; the others run to now.
+  const end = to === null ? nowMs : Math.min(nowMs, to);
+  const start = from === null ? first : Math.max(from, Math.min(first, end));
+  const spanDays = Math.max(1, (end - start) / DAY_MS);
   const perDay = total / spanDays;
 
   const stat = (label, value, hint = null) => h('div', { class: 'card lp-stat' },
@@ -1584,7 +1609,7 @@ function feesView(store) {
       sums.set(key, (sums.get(key) ?? 0) + (c.usd ?? 0));
       groups.set(key, [...(groups.get(key) ?? []), c]);
     }
-    const keys = bucketsBetween(new Date(start), new Date(nowMs), view.feeGroup);
+    const keys = bucketsBetween(new Date(start), new Date(end - 1), view.feeGroup);
     chart = barChart(keys.map((k) => bucketLabel(k, view.feeGroup)), [{ name: 'Collected', color: 'var(--accent)', values: keys.map((k) => sums.get(k) ?? 0) }], {
       format: (v) => money(v, 'USD'),
       tip: (i) => bucketTip(keys[i], view.feeGroup, groups.get(keys[i]) ?? []),
@@ -1604,6 +1629,8 @@ function feesView(store) {
       h('tbody', null, sortCollects([...list], view.feeSort, view.feeDir).map((c) => h('tr', null,
         h('td', { title: c.since ? `Collected between ${new Date(c.since).toLocaleString()} and ${new Date(c.at).toLocaleString()}` : null },
           new Date(c.at).toLocaleDateString(),
+          // One logged by hand is set to noon, a placeholder, so it shows no time.
+          c.source === 'manual' ? null : h('span', { class: 'muted' }, ` ${new Date(c.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`),
           c.level === 1 ? h('div', { class: 'muted small' }, `The ${c.sym0} part could not be read`) : null),
         h('td', null, c.chain
           ? h('span', { class: 'chain-chip' }, logo(CHAINS.find((x) => x.name === c.chain)?.logo, c.chain, 'xs'), c.chain)
@@ -1630,7 +1657,7 @@ function feesView(store) {
 
   return h('div', { class: 'stack-lg' },
     h('div', { class: 'row between' },
-      pills(['all', '30', '90', '365'].map((k) => [k, FEE_RANGES[k][1]]), view.feeRange, (k) => { view.feeRange = k; }),
+      pills(FEE_RANGE_ORDER.map((k) => [k, FEE_RANGES[k][1]]), view.feeRange, (k) => { view.feeRange = k; }),
       view.logging ? null : h('button', {
         type: 'button',
         class: 'btn-small',
@@ -1667,9 +1694,12 @@ function feesView(store) {
 
 // ---- One position in detail: opened from a card, a list row, or a collection in the fee log ----
 
+// The detail page plays its entrance motion once when it opens, not on each redraw while it is shown.
+let detailEnter = false;
 function openDetail(store, ref) {
   view.detailFrom = view.tab === 'fees' ? 'fees' : 'positions';
   view.detail = ref;
+  detailEnter = true;
   if (picker.open) closePicker(store);
   store.refresh();
   window.scrollTo({ top: 0 });
@@ -2000,6 +2030,12 @@ function tabs(store) {
       }, icon(iconName), label)));
 }
 
+function showDetail(root, store) {
+  if (detailEnter) root.classList.add('enter');
+  detailEnter = false;
+  root.replaceChildren(detailView(store, view.detail));
+}
+
 function draw(root, store) {
   keepAddFocus();
   const cfg = store.get('settings').uniswap ?? {};
@@ -2009,7 +2045,7 @@ function draw(root, store) {
     const logged = collectedOf(store).length > 0;
     if (!logged) view.tab = 'positions';
     if (view.detail && logged) {
-      root.replaceChildren(detailView(store, view.detail));
+      showDetail(root, store);
       return;
     }
     root.replaceChildren(h('div', { class: 'stack-lg lp' },
@@ -2033,7 +2069,7 @@ function draw(root, store) {
   }
   askLogos(store);
   if (view.detail) {
-    root.replaceChildren(detailView(store, view.detail));
+    showDetail(root, store);
     return;
   }
 

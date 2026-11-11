@@ -17,7 +17,16 @@ export function createStore(dir, collections) {
     status = next;
     statusListeners.forEach((fn) => fn(next));
   };
-  const notify = () => dataListeners.forEach((fn) => fn());
+  // Renders are coalesced to one per frame: a search or a load saves many times in a burst, and redrawing the page
+  // for each one made it flash.
+  let frame = 0;
+  const notify = () => {
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      dataListeners.forEach((fn) => fn());
+    });
+  };
 
   async function writeDirty() {
     clearTimeout(timer);
