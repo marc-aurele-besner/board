@@ -6,6 +6,7 @@ import { setupBanner, settingsHref } from '../integrations.js';
 import { syncInbox, readEmail, keyedProjects } from '../resend.js';
 import { syncGmail, readGmail, gmailAccounts, gmailProjects, connectGmail, isGmailConnected } from '../gmail.js';
 import { makeTask } from '../capture.js';
+import { pickChip } from '../inline.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 
@@ -471,9 +472,15 @@ function draw(root, store) {
                 : null),
             h('div', { class: 'row inbox-pickers' },
               keyed.length > 1
-                ? h('select', { 'aria-label': 'Project', onchange: (ev) => set({ project: ev.target.value }) },
-                    h('option', { value: 'all' }, 'All projects'),
-                    keyed.map((p) => h('option', { value: p.id, selected: view.project === p.id }, p.name)))
+                // Searchable, with each project's icon, since the list can grow long.
+                ? pickChip({
+                    value: view.project === 'all' ? null : view.project,
+                    options: keyed.map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
+                    nullable: true,
+                    nullLabel: 'All projects',
+                    className: 'inbox-project-pick',
+                    onPick: (v) => set({ project: v ?? 'all' }),
+                  })
                 : null,
               accounts.length && mailboxes.length > 1
                 ? h('select', { 'aria-label': 'Mailbox', onchange: (ev) => set({ mailbox: ev.target.value }) },
