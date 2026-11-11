@@ -1,5 +1,5 @@
 import { h, icon, refreshIcon, money, empty, notice, uid, todayISO, copyable } from '../ui.js';
-import { barChart } from '../chart.js';
+import { barChart, lineChart, legend } from '../chart.js';
 import { toast } from '../toast.js';
 import { setupBanner } from '../integrations.js';
 import { positionFields, positionError } from '../position-input.js';
@@ -1611,6 +1611,262 @@ function coverageCard(store) {
       : null);
 }
 
+// ---- Fees collected insights: outlook, running total, pace, breakdown and calendar ----
+
+// When a bucket ends, in ms, so an estimate can be read at the end of each future bucket.
+function bucketEnd(key, group) {
+  if (group === 'month') {
+    const d = new Date(`${key}-01T00:00`);
+    return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
+  }
+  const d = new Date(`${key}T00:00`);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + (group === 'week' ? 7 : 1)).getTime();
+}
+const sumUsd = (list) => list.reduce((s, c) => s + (c.usd ?? 0), 0);
+const sumBetween = (list, from, to) => sumUsd(list.filter((c) => {
+  const t = Date.parse(c.at);
+  return t >= from && t < to;
+}));
+const signedChange = (now, before) => (before > 0 ? signedPct((now / before - 1) * 100) : now > 0 ? 'New' : '—');
+// The round totals worth a note, from $100 up.
+function nextMilestone(total) {
+  for (let base = 100; base < 1e12; base *= 10) {
+    for (const m of [1, 2.5, 5]) if (base * m > total) return base * m;
+  }
+  return null;
+}
+const shortDate = (ms) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: new Date(ms).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+
+// The outlook tiles: how this range compares with the one before, what the month and year should end on, the
+// next round total, and how often fees get collected.
+function feeOutlook(ctx) {
+  const { list, pool, start, end, from, nowMs, stat } = ctx;
+  const tiles = [];
+  if (from !== null) {
+    const len = end - start;
+    const before = sumBetween(pool, start - len, start);
+    tiles.push(stat('vs the period before', signedChange(sumUsd(list), before), `${money(before, 'USD')} in the ${plural(Math.max(1, Math.round(len / DAY_MS)), 'day')} before`));
+  }
+  // Estimates run at the last 30 days' pace: long enough to smooth a big collect, short enough to follow changes.
+  const rate30 = sumBetween(pool, nowMs - 30 * DAY_MS, nowMs + 1) / 30;
+  const today = new Date(nowMs);
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1).getTime();
+  const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 1).getTime();
+  const yearStart = new Date(today.getFullYear(), 0, 1).getTime();
+  const yearEnd = new Date(today.getFullYear() + 1, 0, 1).getTime();
+  const mtd = sumBetween(pool, monthStart, nowMs + 1);
+  const ytd = sumBetween(pool, yearStart, nowMs + 1);
+  tiles.push(stat('Month-end estimate', money(mtd + rate30 * ((monthEnd - nowMs) / DAY_MS), 'USD'), `${money(mtd, 'USD')} so far, at the 30-day pace`));
+  tiles.push(stat('Year-end estimate', money(ytd + rate30 * ((yearEnd - nowMs) / DAY_MS), 'USD'), `${money(ytd, 'USD')} so far in ${today.getFullYear()}`));
+  const lifetime = sumUsd(pool);
+  const goal = nextMilestone(lifetime);
+  if (goal) {
+    const days = rate30 > 0 ? (goal - lifetime) / rate30 : null;
+    tiles.push(stat(`Next ${money(goal, 'USD')}`, days === null ? '—' : days < 1 ? 'Today' : `~${plural(Math.ceil(days), 'day')}`,
+      days === null ? `${money(lifetime, 'USD')} in all; nothing in the last 30 days` : `${money(goal - lifetime, 'USD')} to go, around ${shortDate(nowMs + days * DAY_MS)}`));
+  }
+  // The usual time between collects, from the days that had one.
+  const collectDays = [...new Set(pool.map((c) => localDay(new Date(c.at))))].sort();
+  if (collectDays.length) {
+    const last = Date.parse(pool.reduce((a, c) => (c.at > a ? c.at : a), pool[0].at));
+    const gaps = collectDays.slice(1).map((d, i) => (Date.parse(`${d}T00:00`) - Date.parse(`${collectDays[i]}T00:00`)) / DAY_MS).sort((a, b) => a - b);
+    const median = gaps.length ? gaps[Math.floor(gaps.length / 2)] : null;
+    const since = Math.floor((nowMs - last) / DAY_MS);
+    tiles.push(stat('Last collect', since < 1 ? 'Today' : `${plural(since, 'day')} ago`, median ? `Usually every ${plural(Math.round(median), 'day')}` : shortDate(last)));
+  }
+  const priced = list.filter((c) => c.usd != null);
+  if (priced.length) {
+    const largest = priced.reduce((a, c) => (a.usd >= c.usd ? a : c));
+    tiles.push(stat('Average collect', money(sumUsd(priced) / priced.length, 'USD'), `Largest ${money(largest.usd, 'USD')} on ${shortDate(Date.parse(largest.at))}`));
+  }
+  return h('div', { class: 'lp-stats' }, tiles);
+}
+
+// The running total over the range, with a dashed estimate past today at the range's own pace.
+function cumulativeChart(ctx) {
+  const { list, start, end, to, perDay, nowMs, group } = ctx;
+  const keys = bucketsBetween(new Date(start), new Date(end - 1), group);
+  const sums = new Map();
+  for (const c of list) {
+    const k = bucketOf(new Date(c.at), group);
+    sums.set(k, (sums.get(k) ?? 0) + (c.usd ?? 0));
+  }
+  let run = 0;
+  const actual = keys.map((k) => (run += sums.get(k) ?? 0));
+  const total = run;
+  // Only a range that runs to now looks ahead: about a third of its length, at least a few buckets.
+  const ahead = to === null && perDay > 0 && keys.length ? Math.max(3, Math.ceil(keys.length / 3)) : 0;
+  const future = [];
+  if (ahead) {
+    const last = keys[keys.length - 1];
+    const d = new Date(`${group === 'month' ? `${last}-01` : last}T00:00`);
+    for (let i = 0; i < ahead; i++) {
+      if (group === 'month') d.setMonth(d.getMonth() + 1);
+      else d.setDate(d.getDate() + (group === 'week' ? 7 : 1));
+      future.push(bucketOf(d, group));
+    }
+  }
+  const all = [...keys, ...future];
+  // The estimate starts on the last real point, so the two lines join.
+  const estimate = all.map((k, i) => (i < keys.length - 1 ? null : i === keys.length - 1 ? total : total + perDay * ((bucketEnd(k, group) - nowMs) / DAY_MS)));
+  const series = [{ name: 'Collected', color: 'var(--accent)', values: [...actual, ...future.map(() => null)], area: true }];
+  if (ahead) series.push({ name: 'Estimate', color: 'var(--income)', values: estimate, dashed: true });
+  const chart = lineChart(all.map((k) => bucketLabel(k, group)), series, {
+    format: (v) => money(v, 'USD'),
+    tip: (i) => [
+      h('span', { class: 'muted' }, bucketName(all[i], group)),
+      i < keys.length
+        ? [h('strong', null, money(actual[i], 'USD')), h('span', { class: 'muted' }, `+${money(sums.get(all[i]) ?? 0, 'USD')} this ${group}`)]
+        : [h('strong', null, money(estimate[i], 'USD')), h('span', { class: 'muted' }, 'Estimate at this range\'s pace')],
+    ],
+  });
+  const note = ahead ? `About ${money(estimate[estimate.length - 1], 'USD')} by the end of ${bucketName(future[future.length - 1], group)}` : money(total, 'USD');
+  return panel('Running total', note, chart, legend(series));
+}
+
+// The pace of fees per day: a short and a long rolling average, so a speed-up or slow-down shows early.
+function paceChart(ctx) {
+  const { pool, end, spanDays } = ctx;
+  const shown = Math.min(365, Math.max(30, Math.round(spanDays)));
+  const daily = new Map();
+  for (const c of pool) {
+    const k = localDay(new Date(c.at));
+    daily.set(k, (daily.get(k) ?? 0) + (c.usd ?? 0));
+  }
+  // 29 days before the first shown day, so the 30-day average is whole from the start.
+  const keys = bucketsBetween(new Date(end - (shown + 29) * DAY_MS), new Date(end - 1), 'day');
+  const vals = keys.map((k) => daily.get(k) ?? 0);
+  const rolling = (n) => vals.map((_, i) => (i < n - 1 ? null : vals.slice(i - n + 1, i + 1).reduce((s, v) => s + v, 0) / n));
+  const r7 = rolling(7).slice(29);
+  const r30 = rolling(30).slice(29);
+  const days = keys.slice(29);
+  if (!days.length) return null;
+  const last7 = r7[r7.length - 1] ?? 0;
+  const last30 = r30[r30.length - 1] ?? 0;
+  const change = last30 > 0 ? (last7 / last30 - 1) * 100 : null;
+  const note = change === null ? 'No collects in the last 30 days'
+    : Math.abs(change) < 10 ? 'Steady: the week matches the month'
+    : `${change > 0 ? 'Speeding up' : 'Slowing down'}: the week is ${signedPct(change)} on the month`;
+  const series = [
+    { name: '7-day average', color: 'var(--accent)', values: r7 },
+    { name: '30-day average', color: 'var(--warn)', values: r30 },
+  ];
+  return panel('Pace per day', note,
+    lineChart(days.map((k) => bucketLabel(k, 'day')), series, {
+      format: (v) => money(v, 'USD'),
+      tip: (i) => [
+        h('span', { class: 'muted' }, bucketName(days[i], 'day')),
+        series.map((sr) => h('span', { class: 'tip-row' },
+          h('span', null, h('span', { class: 'legend-swatch', style: { background: sr.color } }), ` ${sr.name}`),
+          h('strong', null, money(sr.values[i] ?? 0, 'USD')))),
+        h('span', { class: 'tip-row' }, h('span', null, 'Collected that day'), h('span', null, money(daily.get(days[i]) ?? 0, 'USD'))),
+      ],
+    }),
+    legend(series),
+    h('p', { class: 'muted small' }, 'When the 7-day line runs above the 30-day line, fees are coming in faster than usual.'));
+}
+
+const FEE_SPLITS = [['position', 'Position'], ['chain', 'Chain'], ['source', 'Source']];
+// Where the range's fees came from: each position, chain or source with its share, the largest first.
+function breakdown(store, ctx) {
+  const { list } = ctx;
+  const split = view.feeSplit ?? 'position';
+  const groups = new Map();
+  for (const c of list) {
+    const [key, label] = split === 'chain' ? [c.chain || '', c.chain || 'No chain']
+      : split === 'source' ? [sourceOf(c), SOURCE_NAMES[sourceOf(c)]]
+      : [c.ref || c.pair || '', c.pair ? `${c.pair}${c.tokenId ? ` #${c.tokenId}` : ''}` : 'No position'];
+    const g = groups.get(key) ?? { key, label, usd: 0, n: 0, sample: c };
+    g.usd += c.usd ?? 0;
+    g.n++;
+    groups.set(key, g);
+  }
+  const rows = [...groups.values()].sort((a, b) => b.usd - a.usd);
+  const total = sumUsd(list);
+  // Eight rows at most; the rest share one line.
+  const top = rows.slice(0, 8);
+  if (rows.length > 8) {
+    const rest = rows.slice(8);
+    top.push({ key: null, label: plural(rest.length, 'other'), usd: rest.reduce((s, g) => s + g.usd, 0), n: rest.reduce((s, g) => s + g.n, 0) });
+  }
+  const max = Math.max(...top.map((g) => g.usd)) || 1;
+  const pills = h('div', { class: 'row' }, FEE_SPLITS.map(([key, label]) => h('button', {
+    type: 'button',
+    class: split === key ? 'period-btn active' : 'period-btn',
+    'aria-pressed': String(split === key),
+    onclick: () => {
+      view.feeSplit = key;
+      store.refresh();
+    },
+  }, label)));
+  const name = (g) => {
+    if (split === 'chain' && g.key) return h('span', { class: 'chain-chip' }, logo(CHAINS.find((x) => x.name === g.key)?.logo, g.label, 'xs'), g.label);
+    if (split === 'position' && g.sample?.ref) {
+      return h('span', { class: 'lp-pos' }, positionDot(g.sample),
+        h('button', { type: 'button', class: 'link-btn', title: 'See this position', onclick: () => openDetail(store, g.sample.ref) }, g.label));
+    }
+    return h('span', null, g.label);
+  };
+  const share = (usd) => (total > 0 ? pct(usd / total) : '—');
+  const lead = rows[0];
+  return h('section', { class: 'card stack lp-panel' },
+    h('div', { class: 'lp-panel-head' }, h('h3', null, 'Where fees came from'), pills),
+    h('ul', { class: 'fee-split' }, top.map((g) => h('li', null,
+      h('div', { class: 'fee-split-name' }, name(g), h('span', { class: 'muted small' }, plural(g.n, 'collection'))),
+      h('div', { class: 'meter', role: 'presentation' }, h('span', { style: { width: `${(g.usd / max) * 100}%` } })),
+      h('strong', { class: 'num' }, money(g.usd, 'USD')),
+      h('span', { class: 'muted small num' }, share(g.usd))))),
+    lead && rows.length > 1 && total > 0 ? h('p', { class: 'muted small' }, `${lead.label} gave ${share(lead.usd)} of the range.`) : null);
+}
+
+const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+// Each day of the last 26 weeks as a square, darker for more fees: streaks and quiet spells at a glance.
+function feeCalendar(ctx) {
+  const { pool, nowMs } = ctx;
+  const daily = new Map();
+  for (const c of pool) {
+    const k = localDay(new Date(c.at));
+    const d = daily.get(k) ?? { usd: 0, n: 0 };
+    daily.set(k, { usd: d.usd + (c.usd ?? 0), n: d.n + 1 });
+  }
+  const today = new Date(nowMs);
+  const first = new Date(today.getFullYear(), today.getMonth(), today.getDate() - ((today.getDay() + 6) % 7) - 25 * 7);
+  const keys = bucketsBetween(first, today, 'day');
+  const shown = keys.map((k) => daily.get(k)?.usd ?? 0);
+  // Four shades by quartile of the days with fees, so one big day does not wash out the rest.
+  const sorted = shown.filter((v) => v > 0).sort((a, b) => a - b);
+  if (!sorted.length) return panel('Last 26 weeks', null, h('p', { class: 'muted small' }, 'No collects in the last 26 weeks.'));
+  const q = [0.25, 0.5, 0.75].map((p) => sorted[Math.floor(p * (sorted.length - 1))]);
+  const level = (v) => (v <= 0 ? 0 : v <= q[0] ? 1 : v <= q[1] ? 2 : v <= q[2] ? 3 : 4);
+  const byWeekday = WEEKDAYS.map(() => 0);
+  keys.forEach((k, i) => { byWeekday[(new Date(`${k}T00:00`).getDay() + 6) % 7] += shown[i]; });
+  const sum = byWeekday.reduce((s, v) => s + v, 0);
+  const best = byWeekday.indexOf(Math.max(...byWeekday));
+  const grid = h('div', { class: 'fee-cal', role: 'img', 'aria-label': `Fees per day over the last 26 weeks: ${plural(sorted.length, 'day')} with collects` },
+    keys.map((k, i) => {
+      const d = daily.get(k);
+      return h('span', {
+        class: `fee-cal-day l${level(shown[i])}`,
+        title: `${bucketName(k, 'day')}: ${d ? `${money(d.usd, 'USD')} · ${plural(d.n, 'collection')}` : 'no collects'}`,
+      });
+    }));
+  return panel('Last 26 weeks', `${plural(sorted.length, 'day')} with collects`,
+    h('div', { class: 'fee-cal-wrap' },
+      h('div', { class: 'fee-cal-days muted', 'aria-hidden': 'true' }, WEEKDAYS.map((d, i) => h('span', null, i % 2 ? '' : d.slice(0, 3)))),
+      grid),
+    h('div', { class: 'row between muted small' },
+      h('span', null, sum > 0 ? `Most fees on ${WEEKDAYS[best]}s: ${pct(byWeekday[best] / sum)}` : ''),
+      h('span', { class: 'fee-cal-key', 'aria-hidden': 'true' }, 'Less', [0, 1, 2, 3, 4].map((l) => h('span', { class: `fee-cal-day l${l}` })), 'More')));
+}
+
+function feeInsights(store, ctx) {
+  return [
+    h('section', { class: 'stack' }, h('h3', null, 'Outlook'), feeOutlook(ctx)),
+    ctx.list.length ? h('div', { class: 'lp-insight-grid' }, cumulativeChart(ctx), paceChart(ctx)) : null,
+    ctx.list.length ? h('div', { class: 'lp-insight-grid' }, breakdown(store, ctx), feeCalendar(ctx)) : null,
+  ];
+}
+
 function feesView(store) {
   const all = [...collectedOf(store)].sort((a, b) => b.at.localeCompare(a.at));
   const nowMs = Date.now();
@@ -1628,9 +1884,12 @@ function feesView(store) {
   if (!inRange.some((c) => c.chain === view.feeChain)) view.feeChain = 'all';
   if (!inRange.some((c) => tokensOf(c).includes(view.feeToken))) view.feeToken = 'all';
   if (!inRange.some((c) => sourceOf(c) === view.feeSource)) view.feeSource = 'all';
-  const list = inRange.filter((c) => (view.feeChain === 'all' || c.chain === view.feeChain)
+  const matches = (c) => (view.feeChain === 'all' || c.chain === view.feeChain)
     && (view.feeToken === 'all' || tokensOf(c).includes(view.feeToken))
-    && (view.feeSource === 'all' || sourceOf(c) === view.feeSource));
+    && (view.feeSource === 'all' || sourceOf(c) === view.feeSource);
+  const list = inRange.filter(matches);
+  // Every collection with the filters but not the range: the outlook, pace and calendar look past the range.
+  const pool = all.filter(matches);
   const filtered = list.length !== inRange.length;
   const total = list.reduce((s, c) => s + (c.usd ?? 0), 0);
   const unpriced = list.filter((c) => c.usd == null).length;
@@ -1740,6 +1999,7 @@ function feesView(store) {
           h('div', { class: 'row between' }, h('h3', null, 'Over time'), pills(FEE_GROUPS, view.feeGroup, (k) => { view.feeGroup = k; })),
           chart)
       : null,
+    pool.length ? feeInsights(store, { list, pool, start, end, from, to, perDay, spanDays, nowMs, stat, group: view.feeGroup }) : null,
     list.length
       ? table
       : h('div', { class: 'lp-empty' },
