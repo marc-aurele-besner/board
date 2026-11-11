@@ -1076,9 +1076,12 @@ let addEl = null;
 function openAdd(store) {
   view.adding = true;
   store.refresh();
-  // Ready to paste: focused, and any text left in it selected so a paste replaces it.
-  addEl?.elements.position.focus();
-  addEl?.elements.position.select();
+  // Ready to paste: focused, and any text left in it selected so a paste replaces it. The page draws on the next
+  // frame, so this waits for it.
+  requestAnimationFrame(() => {
+    addEl?.elements.position.focus();
+    addEl?.elements.position.select();
+  });
 }
 
 function closeAdd(store) {
