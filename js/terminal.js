@@ -24,10 +24,10 @@ export const listFolder = async (base, path) => (await call(base, `/files?path=$
 // One file: { path, size, text }, or { binary } / { tooLarge } instead of text.
 export const readFile = async (base, path) => (await call(base, `/file?path=${encodeURIComponent(path)}`)).json();
 
-// Runs one command in a terminal of `cols` × `rows` and calls onEvent for each line the runner streams: start,
+// Runs one command in a terminal of `cols` × `rows`, telling it the theme ('light' or 'dark'), and calls onEvent for each line the runner streams: start,
 // out, err, cwd and exit. Aborting `signal` closes the stream, and the runner then stops the command.
-export async function runCommand(base, { command, cwd, cols, rows, signal, onEvent }) {
-  const res = await call(base, '/run', post({ command, cwd, cols, rows }, signal));
+export async function runCommand(base, { command, cwd, cols, rows, theme, signal, onEvent }) {
+  const res = await call(base, '/run', post({ command, cwd, cols, rows, theme }, signal));
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = '';
   for (;;) {

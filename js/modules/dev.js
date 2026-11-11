@@ -7,6 +7,7 @@ import { h, icon, notice, uid } from '../ui.js';
 import { toast } from '../toast.js';
 import { TERMINAL_RUNNER, runnerInfo, runCommand, sendInput } from '../terminal.js';
 import { createTerminal, styleOf, colorOf } from '../vt.js';
+import { readTheme, themedColors } from '../term-colors.js';
 import { explorer, editor, setRoot, hasOpenFiles, baseName } from './dev-files.js';
 
 const COLLECTION = 'dev';
@@ -80,21 +81,27 @@ function closeSession(s) {
 // survive the page being rebuilt. Lines are drawn again only when they changed.
 const drawn = new WeakMap();
 
+// The theme the terminal is drawn in; lines drawn in another one are drawn again.
+let theme = null;
+const currentTheme = () => (theme ??= readTheme());
+
 function spanStyle(key) {
   const s = styleOf(key);
   const cls = [s.cls, s.bold && 'b', s.dim && 'd', s.italic && 'i', s.under && 'u', s.strike && 's'].filter(Boolean).join(' ');
-  let fg = s.fg !== undefined ? colorOf(s.fg) : '';
-  let bg = s.bg !== undefined ? colorOf(s.bg) : '';
-  if (s.inverse) [fg, bg] = [bg || 'var(--surface-2)', fg || 'var(--text)'];
   const style = {};
-  if (fg) style.color = fg;
-  if (bg) style.background = bg;
+  if (s.fg !== undefined || s.bg !== undefined || s.inverse) {
+    // 256-colour indices above the 16 ANSI ones become RGB, which themedColors adapts like any other.
+    const norm = (v) => (typeof v === 'number' && v >= 16 ? colorOf(v) : v);
+    const { fg, bg } = themedColors(norm(s.fg), norm(s.bg), s.inverse, currentTheme());
+    if (fg) style.color = fg;
+    if (bg) style.background = bg;
+  }
   return { class: cls || null, style };
 }
 
 function lineNode(line, cursorX = -1) {
   const was = drawn.get(line);
-  if (was && was.v === line.v && was.cx === cursorX) return was.el;
+  if (was && was.v === line.v && was.cx === cursorX && was.theme === currentTheme().key) return was.el;
   const el = was?.el ?? h('div', { class: 'term-line' });
   const spans = [];
   const end = Math.max(line.cells.length, cursorX + 1);
@@ -113,7 +120,7 @@ function lineNode(line, cursorX = -1) {
     spans.push(key || cursor ? h('span', { ...attrs, class: [attrs.class, cursor && 'term-cursor'].filter(Boolean).join(' ') || null }, text) : text);
   }
   el.replaceChildren(...spans);
-  drawn.set(line, { v: line.v, cx: cursorX, el });
+  drawn.set(line, { v: line.v, cx: cursorX, theme: currentTheme().key, el });
   return el;
 }
 
@@ -121,6 +128,12 @@ function paint(s) {
   if (!s.el) return;
   const { term } = s;
   const { history, screen, out } = s.el;
+  // The theme changed: every line is drawn again in the new colours.
+  if (s.el.theme !== currentTheme().key) {
+    s.el.theme = currentTheme().key;
+    history.replaceChildren(...term.history.map((l) => lineNode(l)));
+    s.el.from = term.trimmed;
+  }
   // History lines never change once scrolled off; only new ones are added, and old ones dropped.
   const drop = Math.min(history.childElementCount, term.trimmed - s.el.from);
   for (let i = 0; i < drop; i++) history.firstChild.remove();
@@ -228,6 +241,9 @@ function elementsOf(store, s) {
   return s.el;
 }
 
+// A command on one line, for the places that show it: a prompt can span several.
+const oneLine = (text) => text.replace(/\s*\n\s*/g, ' ↵ ');
+
 const duration = (ms) => (ms < 1000 ? `${Math.round(ms)}ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`);
 function exitText(exit) {
   if (!exit) return '';
@@ -296,7 +312,7 @@ async function run(store, s, command, { remember: keep = true } = {}) {
     return store.refresh();
   }
   fit(s);
-  s.term.note(`${s.cwd || 'board'} $ ${command}`, 't-cmd');
+  s.term.note(`${s.cwd || 'board'} $ ${oneLine(command)}`, 't-cmd');
   const ctl = new AbortController();
   Object.assign(s, { running: true, abort: ctl, pid: 0, exit: null, command, started: performance.now(), stick: true, browse: -1 });
   // A task's prompt is long and one-off; it would crowd the recent commands.
@@ -309,6 +325,7 @@ async function run(store, s, command, { remember: keep = true } = {}) {
       cwd: s.cwd,
       cols: s.term.cols,
       rows: s.term.rows,
+      theme: currentTheme().dark ? 'dark' : 'light',
       signal: ctl.signal,
       onEvent: (e) => {
         if (e.t === 'start') {
@@ -458,7 +475,7 @@ function terminal(store, s) {
         ? h('button', { type: 'submit', class: 'btn-small danger', title: 'Stop the command and anything it started' }, icon('stop'), 'Stop')
         : h('button', { type: 'submit', class: 'btn-small primary', disabled: !view.info }, icon('play'), 'Run')),
     h('div', { class: 'row between term-status' },
-      h('span', { class: 'muted small' }, s.running ? `Running ${s.command}` : exitText(s.exit) || 'Ready'),
+      h('span', { class: 'muted small term-state', title: s.running ? s.command : null }, s.running ? `Running ${oneLine(s.command)}` : exitText(s.exit) || 'Ready'),
       history.length && !s.running
         ? h('div', { class: 'term-recent', 'aria-label': 'Recent commands' },
             history.slice(0, RECENT_SHOWN).map((c) =>
@@ -497,6 +514,8 @@ function runnerNotice(store) {
 }
 
 function draw(root, store) {
+  // A render follows a theme switch, so the theme is read again.
+  theme = null;
   currentStore = store;
   if (!view.info && !view.infoError && !view.checking) checkRunner(store);
   if (view.pending) {
@@ -528,6 +547,12 @@ function draw(root, store) {
     paint(s);
   });
 }
+
+// The system theme changed (with the board following it): draw the terminals in the new colours.
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  theme = null;
+  schedulePaint();
+});
 
 // A reload ends every stream, which stops the commands; ask first while any are running.
 window.addEventListener('beforeunload', (e) => {
