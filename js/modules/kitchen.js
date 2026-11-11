@@ -1,10 +1,11 @@
-import { h, uid, now, todayISO, empty, icon, notice } from '../ui.js';
+import { h, uid, now, todayISO, empty, icon, notice, progress } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { ask, parseJson } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { makeTask } from '../capture.js';
 import { toast } from '../toast.js';
+import { openDialog } from '../modal.js';
 
 const COLLECTION = 'recipes';
 const STATUSES = [
@@ -152,9 +153,9 @@ function imageCandidates(text) {
   return [...new Set(found)].slice(0, MAX_IMAGE_CANDIDATES);
 }
 
-// Adds a recipe as an idea, with its source link. Its fields come from the model's reading of the page.
-function addImportedRecipe(store, data, url, images) {
-  const id = uid();
+// Adds a recipe as an idea. Its fields come from the model's reading of a page or a photo;
+// `extra` holds where it came from (a source link and its pictures, or the saved photos).
+function addImportedRecipe(store, data, { id = uid(), ...extra } = {}) {
   view.selectedId = id;
   store.update(COLLECTION, (d) =>
     d.recipes.push({
@@ -165,8 +166,8 @@ function addImportedRecipe(store, data, url, images) {
       ingredients: (data.ingredients ?? []).map((x) => String(x).trim()).filter(Boolean),
       steps: (data.steps ?? []).map((x) => String(x).trim()).filter(Boolean),
       notes: String(data.notes ?? '').trim(),
-      source: url,
-      images,
+      images: [],
+      ...extra,
       versions: [],
       created: now(),
     }));
@@ -188,7 +189,7 @@ async function importFromText(store, text, url) {
     const data = parseJson(reply);
     // Only links that were on the page count, so the model cannot add a picture of its own.
     const images = [...new Set((data.images ?? []).map(String))].filter((u) => candidates.includes(u)).slice(0, MAX_RECIPE_IMAGES);
-    addImportedRecipe(store, data, url, images);
+    addImportedRecipe(store, data, { source: url, images });
     importState.status = 'idle';
     importState.pasting = false;
     importState.url = '';
@@ -250,6 +251,149 @@ function importBlock(store) {
           h('textarea', { name: 'text', rows: 5, 'aria-label': 'Recipe text' }),
           h('div', { class: 'row end' }, h('button', { class: 'btn-small primary', type: 'submit' }, 'Import text')))
       : null);
+}
+
+// --- Read a photo of a recipe (handwritten or printed) ---
+
+const MAX_PHOTOS = 4;
+// Long edge in pixels. Enough for handwriting, small enough to keep the call and the saved file light.
+const PHOTO_EDGE = 1600;
+const photoState = { status: 'idle', stage: '', error: '' };
+
+// Draws the photo smaller, as a JPEG. createImageBitmap also applies the camera's rotation.
+async function shrinkPhoto(file) {
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    throw new Error(`“${file.name}” could not be opened. Use a JPG, PNG or WebP photo; export iPhone HEIC photos as JPG first.`);
+  }
+  const scale = Math.min(1, PHOTO_EDGE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Could not prepare the photo.'))), 'image/jpeg', 0.85));
+}
+
+const readAsDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('Could not read the photo.'));
+    reader.readAsDataURL(blob);
+  });
+
+// Several photos are read as the pages of one recipe, in the order they were picked.
+async function readRecipePhotos(store, fileList) {
+  const files = [...fileList].filter((f) => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name));
+  const say = (stage) => {
+    photoState.stage = stage;
+    store.refresh();
+  };
+  photoState.status = 'loading';
+  photoState.error = '';
+  say('Preparing the photo…');
+  try {
+    if (!files.length) throw new Error('Drop a photo of a recipe: JPG, PNG or WebP.');
+    if (files.length > MAX_PHOTOS) toast(`Only the first ${MAX_PHOTOS} photos are read.`);
+    const blobs = await Promise.all(files.slice(0, MAX_PHOTOS).map(shrinkPhoto));
+    const urls = await Promise.all(blobs.map(readAsDataUrl));
+    say('Asking the model to read and rewrite the recipe…');
+    const reply = await ask(store, 'task-recipe-photo', [
+      { role: 'system', content: systemPrompt(store, 'recipe-photo') },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: urls.length > 1 ? `${urls.length} photos of one recipe, in order.` : 'A photo of a recipe.' },
+          ...urls.map((url) => ({ type: 'image_url', image_url: { url } })),
+        ],
+      },
+    ]);
+    const data = parseJson(reply);
+    // The original is kept in the data folder (recipes/), so the handwriting can be checked later.
+    say('Saving the original photo…');
+    const id = uid();
+    let scans = [];
+    try {
+      scans = await Promise.all(blobs.map((blob, i) => store.files.write(`recipes/${id}-${i + 1}.jpg`, blob)));
+    } catch {
+      toast('The recipe was added, but its photo could not be saved.');
+    }
+    addImportedRecipe(store, data, { id, scans });
+    photoState.status = 'idle';
+  } catch (err) {
+    photoState.status = 'error';
+    photoState.error = err.message;
+  }
+  store.refresh();
+}
+
+function photoBlock(store) {
+  if (photoState.status === 'loading') return h('div', { class: 'panel-mini' }, progress(photoState.stage || 'Reading…'));
+  const input = h('input', {
+    type: 'file',
+    accept: 'image/*',
+    multiple: true,
+    class: 'sr-only',
+    'aria-label': 'Choose a photo of a recipe',
+    onchange: (e) => {
+      const files = [...(e.target.files ?? [])];
+      e.target.value = '';
+      if (files.length) readRecipePhotos(store, files);
+    },
+  });
+  const pick = () => input.click();
+  return h('div', { class: 'stack' },
+    input,
+    h('div', {
+      class: 'dropzone k-photo-drop',
+      role: 'button',
+      tabindex: '0',
+      'aria-label': 'Drop a photo of a recipe here, or click to choose one',
+      onclick: pick,
+      onkeydown: (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          pick();
+        }
+      },
+      ondragover: (e) => {
+        e.preventDefault();
+        e.currentTarget.classList.add('over');
+      },
+      ondragleave: (e) => e.currentTarget.classList.remove('over'),
+      ondrop: (e) => {
+        e.preventDefault();
+        e.currentTarget.classList.remove('over');
+        if (e.dataTransfer.files?.length) readRecipePhotos(store, e.dataTransfer.files);
+      },
+    },
+      icon('plus'),
+      h('strong', null, 'Drop a photo of a recipe'),
+      h('span', { class: 'muted small' }, `Handwritten or printed, up to ${MAX_PHOTOS} pages. AI rewrites it as a recipe and keeps the photo.`)),
+    photoState.status === 'error'
+      ? notice({
+          text: photoState.error,
+          actions: [h('button', { type: 'button', class: 'btn-small', onclick: () => { photoState.status = 'idle'; store.refresh(); } }, 'Dismiss')],
+        })
+      : null);
+}
+
+// Opens the photos a recipe was read from, from the data folder.
+async function showScans(store, r) {
+  const body = h('div', { class: 'stack' });
+  openDialog({ title: `${r.title}: original`, wide: true, body });
+  for (const path of r.scans) {
+    try {
+      const url = URL.createObjectURL(await store.files.read(path));
+      body.append(h('img', { class: 'bill-img', src: url, alt: `Original photo of ${r.title}` }));
+    } catch {
+      body.append(empty('This photo is no longer in the data folder.'));
+    }
+  }
 }
 
 // --- Gallery ---
@@ -396,7 +540,7 @@ function gallery(store, recipes) {
             STATUSES.map(([k, l]) => h('option', { value: k }, l))),
           h('button', { class: 'primary', type: 'submit' }, 'Add'))
       : null,
-    h('div', { class: 'r-import' }, importBlock(store)),
+    h('div', { class: 'r-import stack' }, importBlock(store), photoBlock(store)),
     box);
 }
 
@@ -518,6 +662,9 @@ function detailPane(store, r) {
       })),
 
     r.source ? h('a', { href: r.source, target: '_blank', rel: 'noopener', class: 'btn-link' }, 'Open the original recipe') : null,
+    r.scans?.length
+      ? h('div', null, h('button', { type: 'button', class: 'btn-small', onclick: () => showScans(store, r) }, `View the original photo${r.scans.length > 1 ? 's' : ''}`))
+      : null,
     photos(store, r),
     h('div', { class: 'k-grid' },
       block('Ingredients', editText({

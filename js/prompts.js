@@ -55,6 +55,21 @@ export const PROMPTS = [
     text: 'You extract a recipe from web page text. Reply with JSON only: {"title": string, "tags": string[], "ingredients": string[], "steps": string[], "notes": string, "images": string[]}. Ingredients one per item, with quantities. Steps in order. Tags: a few short words such as cuisine or kind of dish. Notes: a short summary of anything special (serves, time, tips). Images: up to {{maxImages}} URLs copied exactly from the "Image URLs" list that show the finished dish or the recipe\'s method; leave out logos, icons, ads and author photos. Leave out page menus, ads and comments.',
   },
   {
+    id: 'recipe-photo',
+    task: 'task-recipe-photo',
+    name: 'Recipe from a photo',
+    where: 'Kitchen → drop a photo of a recipe',
+    text: [
+      'You read photos of recipes, often handwritten cards or notebook pages, and rewrite them cleanly.',
+      'Several photos are pages of the same recipe, in order.',
+      'Reply with JSON only: {"title": string, "tags": string[], "ingredients": string[], "steps": string[], "notes": string}.',
+      'Keep the language of the recipe. Fix spelling and expand abbreviations (c. → cup, tbsp, tsp), but do not change quantities, temperatures or times.',
+      'Ingredients one per item, with quantities. Steps in order, one action each, written as full sentences.',
+      'Tags: a few short words such as cuisine or kind of dish.',
+      'Notes: serves, time and tips written on the page, then any word or number you could not read with certainty, quoted as you read it. Do not invent missing parts.',
+    ].join(' '),
+  },
+  {
     id: 'budget',
     task: 'task-budget',
     name: 'Spending review',

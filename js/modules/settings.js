@@ -27,6 +27,7 @@ export const DEFAULT_TASKS = [
   { id: 'task-cron', name: 'Cron flows', description: 'Default model for the AI steps of Cron flows. A step can pick its own.' },
   { id: 'task-pools', name: 'Pool insights', description: 'Read Uniswap positions in and out of range and suggest range adjustments.' },
   { id: 'task-receipt', name: 'Read bills & screenshots', description: 'Turn a dropped bill or screenshot into money entries. Needs a model that can read images.' },
+  { id: 'task-recipe-photo', name: 'Read recipe photos', description: 'Rewrite a photo of a handwritten or printed recipe as a Kitchen recipe. Needs a model that can read images.' },
 ];
 
 // Adds tasks that were introduced after a user's settings.json was created.
@@ -277,7 +278,7 @@ function modelsPanel(store) {
                 value: t.model,
                 nullable: true,
                 nullLabel: models.default ? `Default: ${models.default}` : 'Use default',
-                requireImages: t.id === 'task-receipt',
+                requireImages: t.id === 'task-receipt' || t.id === 'task-recipe-photo',
                 onPick: (v) => updateTask(store, t.id, { model: v ?? '' }),
               }),
               h('button', {
