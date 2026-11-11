@@ -30,6 +30,9 @@ const say = (store, key, text, ok = true) => {
 const result = (key) => (messages[key] ? h('p', { class: `test-result ${messages[key].ok ? 'ok' : 'error'}`, role: 'status' }, messages[key].text) : null);
 const byName = (a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), undefined, { sensitivity: 'base' });
 
+// A project in the searchable pickers below, with its icon, since the project list can grow long.
+const projectOption = (p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) });
+
 // --- Google Calendar accounts ---
 
 function calendarRow(store, account, cal, projects) {
@@ -42,10 +45,10 @@ function calendarRow(store, account, cal, projects) {
       // Searchable, with each project's icon, since the project list can grow long.
       pickChip({
         value: cal.projectId ?? null,
-        options: projects.map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
+        options: projects.map(projectOption),
         nullable: true,
         nullLabel: 'No project',
-        className: 'field-pick gcal-project-pick',
+        className: 'field-pick project-field-pick',
         onPick: (v) => setCalendar(store, account.email, cal.id, { projectId: v ?? null }),
       })),
     h('div', { class: 'resend-actions' }));
@@ -454,8 +457,13 @@ function gmailRow(store, account, projects, saveAccounts, clientId) {
   return h('li', { class: 'resend-row has-key' },
     h('div', { class: 'resend-name' }, project ? projectIcon(project) : icon('mail'), h('strong', { title: account.email }, account.email)),
     h('div', { class: 'resend-key' },
-      h('select', { 'aria-label': `Project of ${account.email}`, onchange: (e) => setProject(e.target.value) },
-        projects.map((p) => h('option', { value: p.id, selected: p.id === account.projectId }, p.name))),
+      pickChip({
+        value: account.projectId ?? null,
+        options: projects.map(projectOption),
+        placeholder: 'Pick a project',
+        className: 'field-pick project-field-pick',
+        onPick: setProject,
+      }),
       msg ? h('span', { class: `resend-msg small ${msg.ok ? 'ok' : 'error'}`, role: 'status' }, msg.text) : null),
     h('div', { class: 'resend-actions' },
       badge(connected ? 'Connected' : 'Not connected', connected ? 'done' : 'plain'),
@@ -513,8 +521,15 @@ export function gmailCard(store) {
           h('h3', null, 'Add an account'),
           projects.length
             ? h('div', { class: 'svc-actions' },
-                h('select', { 'aria-label': 'Project for the new account', onchange: (e) => { gmailView.project = e.target.value; } },
-                  projects.map((p) => h('option', { value: p.id, selected: p.id === target }, p.name))),
+                pickChip({
+                  value: target,
+                  options: projects.map(projectOption),
+                  className: 'field-pick project-field-pick',
+                  onPick: (v) => {
+                    gmailView.project = v;
+                    store.refresh();
+                  },
+                }),
                 h('button', { type: 'button', class: 'primary', disabled: !clientId, onclick: add }, icon('plus'), 'Add a Gmail account'))
             : empty('No projects yet. Add one in Projects.'),
           clientId ? null : setupBanner('google', 'Add the Google OAuth Client ID first. The same one is used here.'),
