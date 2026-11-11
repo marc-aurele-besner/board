@@ -200,7 +200,14 @@ function runsTab(store) {
 function stepSummary(store, step) {
   if (step.type === 'gather') {
     const label = SOURCES.find(([k]) => k === step.source)?.[1] ?? step.source;
-    return step.source === 'project' ? projectsOf(store).find((p) => p.id === step.projectId)?.name ?? 'Choose a project' : label;
+    const plus = step.append ? '+ ' : '';
+    if (step.source === 'project') return `${plus}${projectsOf(store).find((p) => p.id === step.projectId)?.name ?? 'Choose a project'}`;
+    if (step.source === 'page') {
+      const p = step.projectId ? projectsOf(store).find((x) => x.id === step.projectId) : null;
+      return `${plus}${p ? `${p.name}${step.url ? ` ${step.url}` : ''}` : step.url || (step.projectId ? 'Choose a project' : 'Enter an address')}`;
+    }
+    if (step.source === 'history') return `${plus}Last ${step.count ?? 5} outputs`;
+    return `${plus}${label}`;
   }
   if (step.type === 'ai') return step.model || modelForTask(store, AI_TASK) || 'No model set';
   if (step.type === 'task') return step.title || '{{input}}';
@@ -318,13 +325,32 @@ function stepForm(store, flow, step) {
   const projects = [['', 'Personal'], ...projectsOf(store).map((p) => [p.id, p.name])];
   const vars = h('p', { class: 'muted small' }, 'Use {{input}} for the previous step’s output, {{date}} for today and {{flow}} for the flow’s name.');
   if (step.type === 'gather') {
+    const index = flow.steps.indexOf(step);
+    const about = step.source === 'page'
+      ? 'Read through the r.jina.ai page reader when the flow runs, as text with its headings and links. Long pages are cut at about 12,000 characters.'
+      : step.source === 'history'
+        ? 'The final output of this flow’s last successful runs (not test runs), so the AI can avoid repeating itself.'
+        : step.source === 'text' ? null : 'The data is read from your board when the flow runs, as plain text for the next step.';
     return h('div', { class: 'stack' },
       h('div', { class: 'row cron-fields' },
         field('Source', select(step.source, SOURCES, (source) => set({ source }))),
-        step.source === 'project' ? field('Project', select(step.projectId, [['', 'Choose…'], ...projects.slice(1)], (projectId) => set({ projectId }))) : null),
-      step.source === 'text'
-        ? field('Text', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, step.text))
-        : h('p', { class: 'muted small' }, 'The data is read from your board when the flow runs, as plain text for the next step.'));
+        step.source === 'project' ? field('Project', select(step.projectId, [['', 'Choose…'], ...projects.slice(1)], (projectId) => set({ projectId }))) : null,
+        step.source === 'page' ? field('Project', select(step.projectId, [['', 'None: use the address below'], ...projects.slice(1)], (projectId) => set({ projectId }))) : null,
+        step.source === 'history'
+          ? field('How many runs', h('input', { type: 'number', min: 1, max: 20, value: String(step.count ?? 5), onchange: (e) => set({ count: Math.min(20, Math.max(1, Number(e.target.value) || 5)) }) }))
+          : null),
+      step.source === 'page'
+        ? field(step.projectId ? 'Path on the project’s website (optional)' : 'Address',
+            h('input', { value: step.url ?? '', autocomplete: 'off', placeholder: step.projectId ? '/blog' : 'example.com/blog', onchange: (e) => set({ url: e.target.value.trim() }) }),
+            step.projectId ? 'Empty reads the home page. A path such as /blog reads that page of the site.' : null)
+        : null,
+      step.source === 'text' ? field('Text', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, step.text)) : null,
+      about ? h('p', { class: 'muted small' }, about) : null,
+      index > 0
+        ? h('label', { class: 'check' },
+            h('input', { type: 'checkbox', checked: Boolean(step.append), onchange: (e) => set({ append: e.target.checked }) }),
+            ' Add to the previous step’s output instead of replacing it')
+        : null);
   }
   if (step.type === 'ai') {
     return h('div', { class: 'stack' },

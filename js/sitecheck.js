@@ -242,6 +242,22 @@ async function readFile(url) {
   }
 }
 
+// A page's readable content as Markdown, so headings and links (a blog's post list) survive. For Cron's web page step.
+export async function readPageText(url) {
+  for (let attempt = 0; ; attempt += 1) {
+    const res = await inTurn(() => timed(`${READER}${url}`, { headers: { accept: 'application/json', 'X-Return-Format': 'markdown' } }));
+    if (res.status === 429 && attempt < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 4000 * (attempt + 1)));
+      continue;
+    }
+    if (res.status === 429) throw new Error('The page reader is busy. Try again in a minute.');
+    if (!res.ok) throw new Error(`The page reader answered ${res.status} for ${url}.`);
+    const { data = {} } = await res.json();
+    if (data.httpStatus && data.httpStatus >= 400) throw new Error(`${url} answered ${data.httpStatus}.`);
+    return { title: String(data.title ?? '').trim(), text: String(data.content ?? data.text ?? '').trim() };
+  }
+}
+
 // Many sites answer every address with their home page, so a file counts as found only if it looks like one.
 // A file the reader could not fetch is marked unread rather than missing.
 async function readKind(url, looksRight) {

@@ -6,6 +6,7 @@ import { makeTask } from './capture.js';
 import { notify } from './notifications.js';
 import { calendarEvents, calendarAccounts, eventDate } from './gcal.js';
 import { sitesOf, siteData } from './automations.js';
+import { readPageText } from './sitecheck.js';
 import { openPositions } from './modules/positions.js';
 
 export const COLLECTION = 'cron';
@@ -40,6 +41,8 @@ const NOTHING = {
   sites: 'No site check problems in the last 24 hours.',
   pools: 'No open pool positions.',
   'pools-out': 'Every pool position is in range.',
+  page: 'The page had no readable text.',
+  history: 'Nothing yet: this is the first run.',
 };
 
 export const SOURCES = [
@@ -52,14 +55,19 @@ export const SOURCES = [
   ['sites', 'Site check problems (last 24 hours)'],
   ['pools', 'Liquidity pool positions'],
   ['pools-out', 'Pool positions out of range'],
+  ['page', 'A web page (a project’s site, its blog, any address)'],
+  ['history', 'Past outputs of this flow'],
   ['text', 'Fixed text'],
 ];
+
+// How much of a page is passed on, so one long page does not crowd out the rest of the prompt.
+const PAGE_CHARS = 12000;
 
 export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export function makeStep(type) {
   const base = { id: uid(), type };
-  if (type === 'gather') return { ...base, source: 'open', projectId: '', text: '' };
+  if (type === 'gather') return { ...base, source: 'open', projectId: '', text: '', url: '', count: 5, append: false };
   if (type === 'ai') return { ...base, prompt: 'Summarize this in five bullet points:\n\n{{input}}', system: '', model: '' };
   if (type === 'task') return { ...base, title: '{{flow}} · {{date}}', projectId: '', priority: 'none', due: '' };
   if (type === 'stop') return { ...base, when: 'nothing', text: '' };
@@ -159,6 +167,86 @@ export const TEMPLATES = [
       { type: 'gather', source: 'spending' },
       { type: 'ai', prompt: 'Spending so far this month:\n\n{{input}}\n\nGive three concrete ways to spend less next month.' },
       { type: 'task', title: 'Monthly money check ({{date}})', priority: 'medium' },
+    ],
+  },
+  {
+    name: 'Website content ideas',
+    about: 'Reads a project’s website and drafts three pieces of content it does not have yet. Choose the project first.',
+    schedule: { every: 'weekly', time: '09:00', weekday: 1 },
+    steps: [
+      { type: 'gather', source: 'page' },
+      { type: 'gather', source: 'history', count: 4, append: true },
+      {
+        type: 'ai',
+        prompt: 'Below is the current content of a website, then the content ideas suggested for it before.\n\n{{input}}\n\n'
+          + 'Suggest three new pieces of content this website does not cover yet: a page, a section or an FAQ entry. Do not repeat earlier ideas. '
+          + 'For each, give a title, who it is for, and a ready-to-paste draft of 150 to 250 words in the site’s own tone. '
+          + 'Do not invent facts, prices or numbers; where a draft needs one, leave a [placeholder]. '
+          + 'Start your answer with a one-line summary of the three ideas.',
+      },
+      { type: 'task', title: 'Website content: {{input}}' },
+    ],
+  },
+  {
+    name: 'Blog post draft',
+    about: 'Reads a project’s website and its blog, then drafts a post on a topic the blog has not covered. Choose the project, and the blog’s path if it is not /blog.',
+    schedule: { every: 'weekly', time: '09:00', weekday: 4 },
+    steps: [
+      { type: 'gather', source: 'page' },
+      { type: 'gather', source: 'page', url: '/blog', append: true },
+      { type: 'gather', source: 'history', count: 6, append: true },
+      {
+        type: 'ai',
+        prompt: 'Below is a website, then its blog index with the posts already published, then the drafts written for it before.\n\n{{input}}\n\n'
+          + 'Write one new blog post for this site, on a topic neither the blog nor the earlier drafts cover, that its readers would search for. '
+          + 'Reply in Markdown: the post title alone on the first line (no # sign), then a one-sentence summary, then the post, 800 to 1,200 words with ## subheadings, '
+          + 'ending with a short call to action that fits the site. Match the tone of the existing posts. '
+          + 'Do not invent facts, quotes, customers or numbers; where the post needs one, leave a [placeholder].',
+      },
+      { type: 'task', title: 'Blog draft: {{input}}' },
+    ],
+  },
+  {
+    name: 'Social posts (project or org)',
+    about: 'Drafts an X post and a LinkedIn post for a project, from its description and website. Choose the project in both data steps.',
+    schedule: { every: 'days', time: '10:00', days: [1, 3, 5] },
+    steps: [
+      { type: 'gather', source: 'project' },
+      { type: 'gather', source: 'page', append: true },
+      { type: 'gather', source: 'history', count: 10, append: true },
+      {
+        type: 'ai',
+        prompt: 'You write social posts for the organization or product described below. After it come the posts written before.\n\n{{input}}\n\n'
+          + 'Pick one topic the earlier posts have not used, and write:\n'
+          + '1. An X (Twitter) post of at most 280 characters, plain and specific, with at most one hashtag.\n'
+          + '2. A LinkedIn post of 80 to 150 words: a hook on the first line, one concrete point, and a question or call to action at the end.\n'
+          + 'No emoji unless the brand clearly uses them. Do not invent facts, customers or numbers; leave a [placeholder] instead. '
+          + 'Start your answer with the topic on one line, then the two posts under the headings “X” and “LinkedIn”.',
+      },
+      { type: 'task', title: 'Social posts: {{input}}' },
+    ],
+  },
+  {
+    name: 'Social posts (personal)',
+    about: 'Drafts an X post and a LinkedIn post for your own account. Fill in the first step with who you are and what you post about.',
+    schedule: { every: 'days', time: '08:30', days: [2, 4] },
+    steps: [
+      {
+        type: 'gather',
+        source: 'text',
+        text: 'About me: (who you are and what you work on)\nAudience: (who you want to reach)\nTopics: (three to five topics you post about)\nTone: (for example plain, practical, a little dry)',
+      },
+      { type: 'gather', source: 'history', count: 10, append: true },
+      {
+        type: 'ai',
+        prompt: 'You help a person write posts for their own social accounts. Below is who they are, then the posts written before.\n\n{{input}}\n\n'
+          + 'Pick one of their topics from an angle the earlier posts have not used, and write, in the first person:\n'
+          + '1. An X (Twitter) post of at most 280 characters.\n'
+          + '2. A LinkedIn post of 80 to 150 words with a hook on the first line and a question at the end.\n'
+          + 'Sound like a person, not a brand. Do not invent experiences, events or numbers; where a post needs one, leave a [placeholder] for them to fill. '
+          + 'Start your answer with the topic on one line, then the two posts under the headings “X” and “LinkedIn”.',
+      },
+      { type: 'task', title: 'Social posts: {{input}}' },
     ],
   },
 ];
@@ -302,8 +390,38 @@ function taskLines(store, list) {
   return list.map((t) => `- ${t.text} [${nameOf(t.projectId)}${t.priority && t.priority !== 'none' ? `, ${t.priority}` : ''}${t.due ? `, due ${t.due}` : ''}]`).join('\n');
 }
 
+// The page a web page step reads: a project's website, a path on it (/blog), or any address.
+export function pageUrl(store, step) {
+  const raw = String(step.url ?? '').trim();
+  if (step.projectId) {
+    const p = store.get('projects').projects.find((x) => x.id === step.projectId);
+    if (!p) throw new Error('Choose a project for this step.');
+    if (!p.website) throw new Error(`${p.name} has no website. Add one in Projects.`);
+    try {
+      return raw ? new URL(raw, p.website).href : p.website;
+    } catch {
+      throw new Error(`“${raw}” is not a path or address.`);
+    }
+  }
+  if (!raw) throw new Error('Choose a project or enter the address of the page to read.');
+  return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+}
+
 // The source's data as plain text, or '' when it found nothing.
-async function gather(store, step) {
+async function gather(store, step, flow) {
+  if (step.source === 'page') {
+    const url = pageUrl(store, step);
+    const { title, text } = await readPageText(url);
+    const cut = text.length > PAGE_CHARS ? `${text.slice(0, PAGE_CHARS)}\n\n[The rest of the page was cut.]` : text;
+    return cut ? `Page: ${title || url} (${url})\n\n${cut}` : '';
+  }
+  if (step.source === 'history') {
+    const count = Math.min(20, Math.max(1, Number(step.count) || 5));
+    const past = store.get(COLLECTION).runs.filter((r) => r.flowId === flow.id && r.status === 'ok' && !r.dry).slice(0, count);
+    // The start of each is enough to avoid repeating a topic, and keeps a long blog post from filling the prompt.
+    const excerpt = (text) => (text.length > 800 ? `${text.slice(0, 800)}…` : text);
+    return past.map((r) => `### ${r.at.slice(0, 10)}\n${excerpt(r.steps.at(-1)?.output ?? '')}`).join('\n\n');
+  }
   const open = store.get('todos').items.filter((t) => statusOf(t) !== 'done');
   if (step.source === 'open') return taskLines(store, open);
   if (step.source === 'due') {
@@ -383,9 +501,13 @@ export function stopLabel(step) {
 async function runStep(store, flow, step, input, ctx) {
   const vars = { input, date: todayISO(), flow: flow.name };
   if (step.type === 'gather') {
-    const text = await gather(store, step);
+    const text = await gather(store, step, flow);
     ctx.nothing = !text.trim();
-    return text || NOTHING[step.source] || '';
+    const body = text || NOTHING[step.source] || '';
+    // Appended under a heading, so a prompt can tell the website, its blog and past outputs apart.
+    if (!step.append || !input.trim()) return body;
+    const label = SOURCES.find(([k]) => k === step.source)?.[1] ?? step.source;
+    return `${input}\n\n## ${label}\n\n${body}`;
   }
   if (step.type === 'stop') {
     ctx.stop = stopsOn(step, input, ctx.nothing);
