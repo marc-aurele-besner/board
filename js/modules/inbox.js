@@ -538,7 +538,7 @@ function draw(root, store) {
     hasMail ? null : setupBanner('resend', 'Add a Resend API key to a project, or a Gmail account, to see emails here.', {
       actions: [h('a', { href: settingsHref('gmail'), class: 'btn-small' }, 'Add a Gmail account')],
     }),
-    // Gmail sign-ins last about an hour; an account not signed in this session waits for a click.
+    // An account never connected, or signed out by Google, waits for a click.
     read.waiting.filter((a) => !isGmailConnected(a)).length
       ? notice({
           tone: 'info',

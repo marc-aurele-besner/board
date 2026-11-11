@@ -9,6 +9,7 @@ import { migrateLegacyProjects, migrateProjectShape } from './modules/projects.j
 import { bell, COLLECTION as NOTIFICATIONS, DEFAULTS as NOTIFICATION_DEFAULTS } from './notifications.js';
 import { openPalette } from './palette.js';
 import { startBackground } from './background.js';
+import { GOOGLE, GOOGLE_DEFAULTS, useGoogleStore } from './google.js';
 import { JUMPS, openShortcuts } from './shortcuts.js';
 import { sampleFolder } from './sample.js';
 import { toast } from './toast.js';
@@ -43,10 +44,12 @@ function toggleTheme() {
   render();
 }
 
-// One file per section, plus notifications.json, which belongs to the top bar and not to a section.
+// One file per section, plus notifications.json (the top bar's) and google.json, which belong to no section.
 const collectionDefaults = () => ({
   ...Object.fromEntries(modules.filter((m) => m.collection).map((m) => [m.collection, m.defaults])),
   [NOTIFICATIONS]: NOTIFICATION_DEFAULTS,
+  // Google sign-ins, account pictures and the calendar cache, shared by Gmail, Calendar, Analytics and Search Console.
+  [GOOGLE]: GOOGLE_DEFAULTS,
 });
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 // The URL is #/<section>?<view params>. The params restore each section's view after a refresh.
@@ -203,6 +206,7 @@ async function open(handle) {
     return renderConnect();
   }
   store = next;
+  useGoogleStore(store);
   configure(store.get('settings').github);
   migrateLegacyProjects(store);
   migrateProjectShape(store);

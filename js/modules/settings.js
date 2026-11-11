@@ -1,5 +1,6 @@
 import { h, icon, refreshIcon, empty, notice, copyable } from '../ui.js';
 import { toast } from '../toast.js';
+import { redirectUri } from '../google.js';
 import { manualRate, setManualRate, clearCachedRates, PROVIDERS, providerId, setProvider, fallbackOn, setFallback, testProvider, lastSource } from '../fx.js';
 import { configure, checkGithubToken, orgAvatar } from '../github.js';
 import { editText } from '../inline.js';
@@ -432,10 +433,10 @@ function exchangeCard(store) {
 // --- Google Calendar ---
 
 function googleCard(store) {
-  const clientId = store.get(COLLECTION).google?.clientId ?? '';
-  const save = (value) => {
+  const { clientId = '', clientSecret = '' } = store.get(COLLECTION).google ?? {};
+  const save = (fields) => {
     store.update(COLLECTION, (d) => {
-      d.google = { ...d.google, clientId: value };
+      d.google = { ...d.google, ...fields };
     });
   };
   const accounts = store.get(COLLECTION).gcal?.accounts?.length ?? 0;
@@ -445,7 +446,7 @@ function googleCard(store) {
       h('header', { class: 'panel-head' },
         h('div', null,
           h('h2', null, 'Google Calendar'),
-          h('p', { class: 'muted' }, 'Shows the events of one or more Google accounts in Calendar and the next two days on Home, read-only. Events are not stored on disk. Each connection lasts about an hour, then you connect again. Gmail, Analytics and Search Console use the same Client ID.')),
+          h('p', { class: 'muted' }, 'Shows the events of one or more Google accounts in Calendar and the next two days on Home, read-only. Each account connects once: its sign-in is kept in google.json in the data folder and renewed before it expires, so every browser profile that opens the folder is connected. Gmail, Analytics and Search Console use the same Client ID and secret.')),
         h('div', { class: 'row' },
           clientId
             ? h('span', { class: 'pill tone-done' }, accounts ? `${accounts} account${accounts === 1 ? '' : 's'}` : 'Client ID set')
@@ -460,14 +461,16 @@ function googleCard(store) {
             ['APIs & Services → OAuth consent screen: choose External, and add each Google account you will connect as a test user.'],
             ['APIs & Services → Credentials → Create credentials → OAuth client ID → Web application.'],
             ['Under Authorized JavaScript origins, add the address you open the board at: ', copyable(location.origin), '.'],
-            ['Copy the Client ID (it ends in .apps.googleusercontent.com), paste it here, then add your accounts below.'],
+            ['Under Authorized redirect URIs, add ', copyable(redirectUri()), '.'],
+            ['Copy the Client ID (it ends in .apps.googleusercontent.com) and the Client secret, paste them here, then add your accounts below.'],
           ].map((s) => h('li', null, h('span', { class: 'step-text' }, s))))),
 
         h('form', {
           class: 'svc-section',
           onsubmit: (e) => {
             e.preventDefault();
-            save(new FormData(e.currentTarget).get('clientId').trim());
+            const form = new FormData(e.currentTarget);
+            save({ clientId: form.get('clientId').trim(), clientSecret: form.get('clientSecret').trim() });
           },
         },
           h('h3', null, 'OAuth Client ID'),
@@ -475,6 +478,16 @@ function googleCard(store) {
             name: 'clientId',
             value: clientId,
             placeholder: '123456789-abc….apps.googleusercontent.com',
+            autocomplete: 'off',
+            spellcheck: false,
+          }),
+          h('h3', null, 'OAuth Client secret'),
+          h('p', { class: 'muted small' }, 'Lets the board renew each sign-in by itself. Saved in settings.json and sent only to Google.'),
+          h('input', {
+            name: 'clientSecret',
+            type: 'password',
+            value: clientSecret,
+            placeholder: 'GOCSPX-…',
             autocomplete: 'off',
             spellcheck: false,
           }),
@@ -931,7 +944,7 @@ export default {
   icon: 'settings',
   hidden: true, // opened from the gear in the top bar
   collection: COLLECTION,
-  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, blockchains: { custom: [] }, contracts: [], telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '', relay: '' }, resend: { relay: '', keys: {} }, gmail: { accounts: [] }, gcal: { accounts: [] }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) }, prompts: {} },
+  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '', clientSecret: '' }, uniswap: { wallets: [], chains: {} }, blockchains: { custom: [] }, contracts: [], telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '', relay: '' }, resend: { relay: '', keys: {} }, gmail: { accounts: [] }, gcal: { accounts: [] }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) }, prompts: {} },
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),
   restore: (p = {}) => {

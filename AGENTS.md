@@ -18,6 +18,7 @@ A personal command center that runs locally. It is plain HTML, CSS and JavaScrip
 
 ```
 index.html            entry point; inline script applies the saved theme before paint
+oauth.html            where Google's sign-in comes back; hands the code to the board's tab
 css/style.css         design tokens (light and dark) and all styles
 js/app.js             shell: folder connection, router, top nav, theme toggle
 js/storage.js         File System Access API wrapper; remembers the folder in IndexedDB
@@ -41,6 +42,7 @@ js/multicall.js       Multicall3: many read-only calls in one request
 js/balances.js        native and token balances of the DeFi wallets (DeFi → Wallets)
 js/aave.js            Aave v3 supply, debt and health factor of the DeFi wallets (DeFi → Lending / Borrowing)
 js/resend.js          the Inbox's Resend reads: email lists per project key, and one email's body
+js/google.js          every Google sign-in, kept in google.json and renewed before it expires; account pictures
 js/gmail.js           the Inbox's Gmail reads: one sign-in per account, its email list, and one email's body
 js/gcal.js            Calendar's Google reads: one sign-in per account, its calendar list, and the events of a range
 js/background.js      timers for the above; started once the data folder is open

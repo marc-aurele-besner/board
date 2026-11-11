@@ -170,7 +170,7 @@ export function analyticsTab(store, view, w) {
   const props = settings.analytics?.properties ?? {};
   if (!isConnected('analytics')) {
     return setupBanner('analytics', settings.google?.clientId
-      ? 'Connect Google Analytics to see visitors and page views for each project website. The connection lasts about an hour.'
+      ? 'Connect Google Analytics to see visitors and page views for each project website.'
       : 'Google Analytics needs a Google OAuth Client ID and a property for each project.');
   }
   const sites = sitesOf(store).filter((p) => props[p.id]);
@@ -224,7 +224,7 @@ export function searchTab(store, view, w) {
   if (engine === 'google' ? !isConnected('search') : !bingKey) {
     return h('div', { class: 'stack-lg' }, engines,
       setupBanner('search', engine === 'google'
-        ? 'Connect Google Search Console to see clicks, impressions and queries. The connection lasts about an hour.'
+        ? 'Connect Google Search Console to see clicks, impressions and queries.'
         : 'Add a Bing Webmaster API key to see clicks, impressions and queries from Bing.'));
   }
   const sites = sitesOf(store);
