@@ -10,6 +10,7 @@ import { calendarAccountsCard, telegramCard, analyticsCard, searchCard, resendCa
 import { promptsCard } from './settings-prompts.js';
 import { labelsCard } from './settings-labels.js';
 import { chainsCard } from './settings-chains.js';
+import { contractsCard } from './settings-contracts.js';
 import { logo } from './positions.js';
 
 const COLLECTION = 'settings';
@@ -50,6 +51,7 @@ const SECTION_GROUPS = [
       ['google', 'Google Calendar', 'calendar'],
       ['uniswap', 'Uniswap', 'wallet'],
       ['blockchains', 'Blockchains', 'cube'],
+      ['contracts', 'Smart contracts', 'code'],
       ['telegram', 'Telegram', 'send'],
       ['analytics', 'Google Analytics', 'activity'],
       ['search', 'Search consoles', 'search'],
@@ -883,6 +885,7 @@ function draw(root, store) {
         : view.section === 'appearance' ? appearanceCard(store)
         : view.section === 'uniswap' ? uniswapCard(store)
         : view.section === 'blockchains' ? chainsCard(store)
+        : view.section === 'contracts' ? contractsCard(store)
         : view.section === 'categories' ? labelsCard(store)
         : view.section === 'telegram' ? telegramCard(store)
         : view.section === 'analytics' ? analyticsCard(store)
@@ -924,7 +927,7 @@ export default {
   icon: 'settings',
   hidden: true, // opened from the gear in the top bar
   collection: COLLECTION,
-  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, blockchains: { custom: [] }, telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '', relay: '' }, resend: { relay: '', keys: {} }, gmail: { accounts: [] }, gcal: { accounts: [] }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) }, prompts: {} },
+  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, blockchains: { custom: [] }, contracts: [], telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '', relay: '' }, resend: { relay: '', keys: {} }, gmail: { accounts: [] }, gcal: { accounts: [] }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) }, prompts: {} },
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),
   restore: (p = {}) => {
