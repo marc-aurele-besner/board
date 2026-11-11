@@ -1766,13 +1766,28 @@ function paceChart(ctx) {
     h('p', { class: 'muted small' }, 'When the 7-day line runs above the 30-day line, fees are coming in faster than usual.'));
 }
 
-const FEE_SPLITS = [['position', 'Position'], ['chain', 'Chain'], ['source', 'Source']];
+const FEE_SPLITS = [['position', 'Position'], ['chain', 'Chain'], ['token', 'Token'], ['source', 'Source']];
+// A collection's USD value split between its tokens: by their value at the position's current prices when the
+// amounts and prices are known, else all to the only token collected, else evenly. amount is null when not logged.
+function tokenShares(c) {
+  const usd = c.usd ?? 0;
+  if (c.a0 != null && c.sym0) {
+    const row = state.rows.find((r) => r.ref === c.ref);
+    const v0 = row?.p0 != null ? c.a0 * row.p0 : null;
+    const v1 = row?.p1 != null ? c.a1 * row.p1 : null;
+    const w0 = v0 != null && v1 != null && v0 + v1 > 0 ? v0 / (v0 + v1) : !c.a1 ? 1 : !c.a0 ? 0 : 0.5;
+    return [{ sym: c.sym0, usd: usd * w0, amount: c.a0 }, { sym: c.sym1, usd: usd * (1 - w0), amount: c.a1 }];
+  }
+  const syms = tokensOf(c);
+  return syms.map((sym) => ({ sym, usd: usd / syms.length, amount: null }));
+}
+
 // Where the range's fees came from: each position, chain or source with its share, the largest first.
 function breakdown(store, ctx) {
   const { list } = ctx;
   const split = view.feeSplit ?? 'position';
   const groups = new Map();
-  for (const c of list) {
+  for (const c of split === 'token' ? [] : list) {
     const [key, label] = split === 'chain' ? [c.chain || '', c.chain || 'No chain']
       : split === 'source' ? [sourceOf(c), SOURCE_NAMES[sourceOf(c)]]
       : [c.ref || c.pair || '', c.pair ? `${c.pair}${c.tokenId ? ` #${c.tokenId}` : ''}` : 'No position'];
@@ -1780,6 +1795,16 @@ function breakdown(store, ctx) {
     g.usd += c.usd ?? 0;
     g.n++;
     groups.set(key, g);
+  }
+  // A collection counts once for each of its tokens. amount: the token's total, while every collection logged it.
+  for (const c of split === 'token' ? list : []) {
+    for (const t of tokenShares(c)) {
+      const g = groups.get(t.sym) ?? { key: t.sym, label: t.sym, usd: 0, n: 0, sample: c, amount: 0 };
+      g.usd += t.usd;
+      g.n++;
+      g.amount = g.amount == null || t.amount == null ? null : g.amount + t.amount;
+      groups.set(t.sym, g);
+    }
   }
   const rows = [...groups.values()].sort((a, b) => b.usd - a.usd);
   const total = sumUsd(list);
@@ -1800,6 +1825,7 @@ function breakdown(store, ctx) {
     },
   }, label)));
   const name = (g) => {
+    if (split === 'token' && g.key) return h('span', { class: 'lp-token' }, logo(tokenLogoIn(list, g.key), g.label, 'xs'), g.label);
     if (split === 'chain' && g.key) return h('span', { class: 'chain-chip' }, logo(CHAINS.find((x) => x.name === g.key)?.logo, g.label, 'xs'), g.label);
     if (split === 'position' && g.sample?.ref) {
       return h('span', { class: 'lp-pos' }, positionDot(g.sample),
@@ -1812,11 +1838,13 @@ function breakdown(store, ctx) {
   return h('section', { class: 'card stack lp-panel' },
     h('div', { class: 'lp-panel-head' }, h('h3', null, 'Where fees came from'), pills),
     h('ul', { class: 'fee-split' }, top.map((g) => h('li', null,
-      h('div', { class: 'fee-split-name' }, name(g), h('span', { class: 'muted small' }, plural(g.n, 'collection'))),
+      h('div', { class: 'fee-split-name' }, name(g),
+        h('span', { class: 'muted small' }, g.amount ? `${amount(g.amount)} ${g.label} · ${plural(g.n, 'collection')}` : plural(g.n, 'collection'))),
       h('div', { class: 'meter', role: 'presentation' }, h('span', { style: { width: `${(g.usd / max) * 100}%` } })),
       h('strong', { class: 'num' }, money(g.usd, 'USD')),
       h('span', { class: 'muted small num' }, share(g.usd))))),
-    lead && rows.length > 1 && total > 0 ? h('p', { class: 'muted small' }, `${lead.label} gave ${share(lead.usd)} of the range.`) : null);
+    lead && rows.length > 1 && total > 0 ? h('p', { class: 'muted small' }, `${lead.label} gave ${share(lead.usd)} of the range.`) : null,
+    split === 'token' ? h('p', { class: 'muted small' }, 'Each collection\'s value is split between its two tokens at the position\'s current prices.') : null);
 }
 
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
