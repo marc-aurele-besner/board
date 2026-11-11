@@ -18,20 +18,29 @@ export const EXPLORERS = {
 
 export const customChains = (settings) => settings?.blockchains?.custom ?? [];
 
-// One shape for both kinds. node: the address actually read from; saved: the one typed in Settings, or ''.
+// A chain's explorers, saved like its nodes: one line of addresses separated by spaces. The first is the one linked to.
+const withExplorers = (chain, saved) => {
+  const explorers = nodeUrls(saved).map((u) => u.replace(/\/+$/, ''));
+  return { ...chain, explorers, explorer: explorers[0] ?? '' };
+};
+
+// One shape for both kinds. node: the addresses actually read from; saved: the ones typed in Settings, or ''.
+// A built-in chain's explorers are its own unless Settings replaced them (defaultExplorer is what it goes back to).
 export function allChains(settings) {
   const uni = settings?.uniswap;
   const builtin = CHAINS.map((c) => {
     const s = chainSettings(uni, c);
-    return { id: c.id, name: c.name, logo: c.logo, symbol: c.native.symbol, explorer: EXPLORERS[c.id] ?? '', rpc: c.rpc, saved: savedNode(uni, c), node: s.node, lp: s.enabled, builtin: true };
+    const defaultExplorer = EXPLORERS[c.id] ?? '';
+    return withExplorers({ id: c.id, name: c.name, logo: c.logo, symbol: c.native.symbol, defaultExplorer, rpc: c.rpc, saved: savedNode(uni, c), node: s.node, lp: s.enabled, builtin: true },
+      uni?.chains?.[c.id]?.explorer || defaultExplorer);
   });
-  const custom = customChains(settings).map((c) => ({ id: c.id, name: c.name, logo: '', symbol: c.symbol || 'ETH', explorer: c.explorer || '', rpc: c.rpc, saved: c.rpc, node: c.rpc, lp: false, builtin: false }));
+  const custom = customChains(settings).map((c) => withExplorers({ id: c.id, name: c.name, logo: '', symbol: c.symbol || 'ETH', defaultExplorer: '', rpc: c.rpc, saved: c.rpc, node: c.rpc, lp: false, builtin: false }, c.explorer));
   return [...builtin, ...custom];
 }
 
 export const chainById = (settings, id) => allChains(settings).find((c) => c.id === Number(id)) ?? null;
 
-export const explorerUrl = (chain, kind, id) => (chain?.explorer && id ? `${chain.explorer.replace(/\/+$/, '')}/${kind}/${id}` : null);
+export const explorerUrl = (chain, kind, id, explorer = chain?.explorer) => (explorer && id ? `${explorer}/${kind}/${id}` : null);
 
 const isUrl = (s) => /^https?:\/\/\S+$/i.test(s);
 // One address, or several separated by spaces or commas.

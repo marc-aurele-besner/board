@@ -7,7 +7,7 @@ import { positionFields, positionError } from '../position-input.js';
 import { poolsChanged } from '../automations.js';
 import { insightsPanel } from '../pool-insights.js';
 import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey } from '../uniswap.js';
-import { EXPLORERS } from '../chains.js';
+import { chainById, explorerUrl } from '../chains.js';
 
 const STALE_MS = 10 * 60 * 1000;
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
@@ -2097,7 +2097,7 @@ function closeDetail(store) {
   store.refresh();
 }
 
-const explorerLink = (chainId, kind, id) => (EXPLORERS[chainId] && /^0x[0-9a-fA-F]{40}$/.test(id ?? '') ? `${EXPLORERS[chainId]}/${kind}/${id}` : null);
+const explorerLink = (store, chainId, kind, id) => (/^0x[0-9a-fA-F]{40}$/.test(id ?? '') ? explorerUrl(chainById(store.get('settings'), chainId), kind, id) : null);
 
 // The row for a position: as read now, or from any saved read, so a position whose wallet was removed still
 // shows its range and holdings, marked as from that read.
@@ -2277,7 +2277,7 @@ function detailFacts(store, r) {
   const cfg = store.get('settings').uniswap ?? {};
   const address = (kind, id, label = shortAddress(id)) => h('span', { class: 'row lp-addr' },
     copyable(id, { label }),
-    explorerLink(r.chainId, kind, id) ? h('a', { href: explorerLink(r.chainId, kind, id), target: '_blank', rel: 'noopener', class: 'icon-btn', title: 'Open in the block explorer', 'aria-label': `Open ${label} in the block explorer` }, icon('link')) : null);
+    explorerLink(store, r.chainId, kind, id) ? h('a', { href: explorerLink(store, r.chainId, kind, id), target: '_blank', rel: 'noopener', class: 'icon-btn', title: 'Open in the block explorer', 'aria-label': `Open ${label} in the block explorer` }, icon('link')) : null);
   const share = searchShare(r, d, cfg);
   const facts = [
     ['Chain', h('span', { class: 'chain-chip' }, logo(chainOf(r.chainId)?.logo, r.chain, 'xs'), r.chain)],
@@ -2351,8 +2351,8 @@ function detailView(store, ref) {
       r ? h('div', { class: 'lp-hero-value' }, h('span', { class: 'muted small' }, 'Value'), h('strong', null, usdOrDash(r.value))) : null,
       h('div', { class: 'row' },
         r?.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'btn-small' }, icon('link'), 'Uniswap') : null,
-        r && explorerLink(r.chainId, 'address', r.wallet)
-          ? h('a', { href: explorerLink(r.chainId, 'address', r.wallet), target: '_blank', rel: 'noopener', class: 'btn-small', title: 'Open the wallet in the block explorer' }, icon('globe'), 'Wallet')
+        r && explorerLink(store, r.chainId, 'address', r.wallet)
+          ? h('a', { href: explorerLink(store, r.chainId, 'address', r.wallet), target: '_blank', rel: 'noopener', class: 'btn-small', title: 'Open the wallet in the block explorer' }, icon('globe'), 'Wallet')
           : null)));
 
   return h('div', { class: 'stack-lg lp lp-detail' },
