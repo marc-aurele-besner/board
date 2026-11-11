@@ -273,6 +273,9 @@ async function checkRunner(store) {
 // A shell word: single quotes keep newlines, quotes and $ in the prompt as typed.
 const shellQuote = (text) => `'${text.replace(/'/g, `'\\''`)}'`;
 
+// The command a task is handed to; a project can set its own in its Dev command field.
+export const DEFAULT_DEV_COMMAND = 'claude --dangerously-skip-permissions --worktree';
+
 // Opens Dev with a new terminal that runs claude on a prompt, in the project's folder when it has one.
 // The command waits for the runner to answer, so it also works when Dev was not open yet.
 export function startClaudeSession({ prompt, projectId = '' }) {
@@ -292,7 +295,8 @@ function startQueued(store) {
   const s = newSession(store);
   if (!s) return;
   // Runs once the terminal is on the page, so it starts at the size it is shown.
-  requestAnimationFrame(() => run(store, s, `claude ${shellQuote(prompt)}`, { remember: false }));
+  const command = project?.devCommand?.trim() || DEFAULT_DEV_COMMAND;
+  requestAnimationFrame(() => run(store, s, `${command} ${shellQuote(prompt)}`, { remember: false }));
 }
 
 function remember(store, command) {
