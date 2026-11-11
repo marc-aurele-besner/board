@@ -1208,6 +1208,13 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .chip-pick.scope-pick .opt-plain { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A label shows as a pill; the row's 40% pill cap would measure against the picker and crop it. */
 .label-list .chip-pick.scope-pick .pill { max-width: 100%; }
+/* A category scoped to labels: all its labels in one field with the picker's outline, so none reads apart. */
+.scope-field { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 34px; max-width: 100%; padding: 3px 4px 3px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.label-list .scope-field .pill { max-width: 12rem; }
+.scope-field .chip-pick.scope-add { padding: 2px 6px; }
+.scope-field .scope-change { background: none; border: none; min-height: 0; padding: 4px; border-radius: 6px; color: var(--muted); }
+.scope-field .scope-change:hover { background: var(--surface-2); color: var(--text); }
+.scope-field .scope-change .icon { width: 14px; height: 14px; }
 .label-list li.is-hidden .pill { opacity: 0.5; }
 /* The grip is a button so it takes focus and the arrow keys; it should still look like the bare handle. */
 .label-list .grip { background: none; border: none; min-height: 0; padding: 4px 2px; border-radius: 4px; }

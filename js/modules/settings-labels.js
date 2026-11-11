@@ -168,46 +168,48 @@ function scopeValue(c) {
   return 'all';
 }
 
-// Picking a label for a category already scoped to labels swaps its first label and keeps the others.
-function setScope(store, c, value) {
+// Where a category applies. A label scope shows every label as a pill in one field, with a + to add another and
+// a chevron to change the scope; any other scope is the plain picker.
+function scopeField(store, c) {
   const ids = categoryLabelIds(c);
-  if (value.startsWith('category:') && ids.length > 1) {
-    return editTaskCategory(store, c, { projectCategoryIds: [...new Set([value.slice(9), ...ids.slice(1)])] });
-  }
-  editTaskCategory(store, c, parseScope(value));
-}
-
-// For a category scoped to labels: its other labels, each removable, and a chip to add one more.
-function moreLabels(store, c) {
-  const ids = categoryLabelIds(c);
-  if (!ids.length) return null;
+  if (!ids.length) return scopePicker(store, scopeValue(c), (v) => editTaskCategory(store, c, parseScope(v)));
   const labels = store.get('projects').categories ?? [];
   const setIds = (next) => editTaskCategory(store, c, { projectCategoryIds: next });
   const free = labels.filter((l) => !ids.includes(l.id));
-  return [
-    ids.slice(1).map((id) => {
+  return h('div', { class: 'scope-field' },
+    ids.map((id) => {
       const l = labels.find((x) => x.id === id);
       if (!l) return null;
+      // The last label stays: a label scope with none would apply to no project.
       return h('span', { class: 'pill tone-custom pill-x', style: { '--c': labelColor(l) } },
         l.name,
-        h('button', {
-          type: 'button',
-          class: 'pill-remove',
-          'aria-label': `Remove label ${l.name} from ${c.name}`,
-          onclick: () => setIds(ids.filter((x) => x !== id)),
-        }, icon('x')));
+        ids.length > 1
+          ? h('button', {
+              type: 'button',
+              class: 'pill-remove',
+              'aria-label': `Remove label ${l.name} from ${c.name}`,
+              onclick: () => setIds(ids.filter((x) => x !== id)),
+            }, icon('x'))
+          : null);
     }),
     free.length
       ? pickChip({
           value: null,
           options: free.map((l) => ({ value: l.id, label: l.name, color: labelColor(l) })),
           placeholder: '+ Label',
+          className: 'scope-add',
           onPick: (id) => {
             if (id) setIds([...ids, id]);
           },
         })
       : null,
-  ];
+    pickButton({
+      label: '',
+      title: `Change where ${c.name} applies`,
+      className: 'scope-change',
+      options: scopeOptions(store),
+      onPick: (v) => editTaskCategory(store, c, parseScope(v)),
+    }));
 }
 
 // Options for the searchable scope picker: every project label in its colour, and every project with its icon.
@@ -327,8 +329,7 @@ function taskCategoriesSection(store) {
             colorPicker({ value: c.color ?? '', name: c.name, onPick: (color) => editTaskCategory(store, c, { color }), onClear: () => editTaskCategory(store, c, { color: '' }) }),
             editText({ value: c.name, placeholder: 'Name', className: 'label-name', onSave: (name) => editTaskCategory(store, c, { name: name.trim() }) }),
             pill(c.name, { color: c.color }),
-            scopePicker(store, scopeValue(c), (v) => setScope(store, c, v)),
-            moreLabels(store, c),
+            scopeField(store, c),
             promoteControl(store, c),
             h('span', { class: 'grow' }),
             h('span', { class: 'muted small' }, plural(taskCategoryUse(store, c.name), 'task')),
