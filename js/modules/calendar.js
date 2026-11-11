@@ -1,9 +1,9 @@
 // Calendar: the events of every connected Google account, by day, week or month, with task deadlines on the same days.
 // Events of the range on screen show from the browser's cache at once, then are read again when the cache is stale. Settings → Google Calendar lists the accounts.
 import { h, icon, refreshIcon, notice, statusOf, empty } from '../ui.js';
-import { projectIcon, projectTree } from './projects.js';
+import { projectIcon, projectTree, labelsOf, underLabel } from './projects.js';
 import { setupBanner } from '../integrations.js';
-import { calendarAccounts, calendarEvents, cachedCalendarEvents, CALENDAR_TTL, connectCalendar, isCalendarConnected, setCalendar, eventDate, calendarProject, calendarCategory } from '../gcal.js';
+import { calendarAccounts, calendarEvents, cachedCalendarEvents, CALENDAR_TTL, connectCalendar, isCalendarConnected, setCalendar, eventDate, calendarProject, calendarLabel } from '../gcal.js';
 import { makeTask } from '../capture.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
@@ -93,7 +93,7 @@ function plainText(html) {
 export function eventAsTask(store, e) {
   const description = [whenOf(e), e.location, e.link].filter(Boolean).join('\n');
   store.update('todos', (d) =>
-    d.items.push(makeTask({ text: e.title, description, due: isoOf(eventDate(e.start)), projectId: e.projectId ?? null, category: e.category ?? '' })));
+    d.items.push(makeTask({ text: e.title, description, due: isoOf(eventDate(e.start)), projectId: e.projectId ?? null })));
   toast(`Task added: ${e.title}`);
 }
 
@@ -101,7 +101,7 @@ export function eventAsTask(store, e) {
 
 // What a read depends on: the range, the shown calendars and which accounts are connected.
 function keyOf(store, from, to) {
-  const shown = calendarAccounts(store).map((a) => `${a.email}:${isCalendarConnected(a.email)}:${a.calendars.filter((c) => c.on).map((c) => `${c.id}=${calendarProject(a, c) ?? ''}/${calendarCategory(a, c)}`).join(',')}`);
+  const shown = calendarAccounts(store).map((a) => `${a.email}:${isCalendarConnected(a.email)}:${a.calendars.filter((c) => c.on).map((c) => `${c.id}=${calendarProject(a, c) ?? ''}/${calendarLabel(a, c) ?? ''}`).join(',')}`);
   return `${isoOf(from)}|${isoOf(to)}|${shown.join(';')}`;
 }
 
@@ -258,7 +258,10 @@ function draw(root, store) {
   const clientId = settings.google?.clientId ?? '';
   const accounts = calendarAccounts(store);
   const projects = projectTree(store.get('projects').projects).map(({ project }) => project);
-  if (view.project !== 'all' && !projects.some((p) => p.id === view.project)) view.project = 'all';
+  const labels = store.get('projects').categories ?? [];
+  // The filter is a project id, or "label:<id>" for a project label.
+  const labelFilter = view.project.startsWith('label:') ? view.project.slice(6) : null;
+  if (view.project !== 'all' && !(labelFilter ? labels.some((c) => c.id === labelFilter) : projects.some((p) => p.id === view.project))) view.project = 'all';
 
   const d = anchor();
   const [from, to] = rangeOf(view.mode, d);
@@ -267,13 +270,20 @@ function draw(root, store) {
   const stale = connected.length && !read.busy && Date.now() - read.checked > CALENDAR_TTL;
   if (accounts.length && (key !== read.key || stale)) queueMicrotask(() => load(store, key, from, to));
 
-  const byProject = (x) => view.project === 'all' || x.projectId === view.project;
+  // Events carry their calendar's label; tasks only have their project's.
+  const byProject = (x) => view.project === 'all' ||
+    (labelFilter ? underLabel(projects, x.projectId, x.labelId ?? null, labelFilter) : x.projectId === view.project);
   const events = read.key === key ? read.events.filter(byProject) : [];
   const tasks = view.tasks
     ? store.get('todos').items.filter((t) => t.due && statusOf(t) !== 'done' && t.due >= isoOf(from) && t.due < isoOf(to)).filter(byProject)
     : [];
   // Projects that have a calendar, for the filter; tasks of any project still follow it.
   const linked = new Set(accounts.flatMap((a) => a.calendars.map((c) => calendarProject(a, c))).filter(Boolean));
+  // Labels a calendar carries, or one of its projects does.
+  const linkedLabels = new Set([
+    ...accounts.flatMap((a) => a.calendars.map((c) => calendarLabel(a, c))).filter(Boolean),
+    ...projects.filter((p) => linked.has(p.id)).flatMap(labelsOf),
+  ]);
 
   const toolbar = h('div', { class: 'row between cal-toolbar' },
     h('div', { class: 'row' },
@@ -284,7 +294,12 @@ function draw(root, store) {
     h('div', { class: 'row' },
       h('select', { 'aria-label': 'Project', onchange: (e) => { view.project = e.target.value; store.refresh(); } },
         h('option', { value: 'all', selected: view.project === 'all' }, 'All projects'),
-        projects.filter((p) => linked.has(p.id) || p.id === view.project).map((p) => h('option', { value: p.id, selected: p.id === view.project }, p.name))),
+        projects.filter((p) => linked.has(p.id) || p.id === view.project).map((p) => h('option', { value: p.id, selected: p.id === view.project }, p.name)),
+        labels.some((c) => linkedLabels.has(c.id) || c.id === labelFilter)
+          ? h('optgroup', { label: 'Project labels' },
+              labels.filter((c) => linkedLabels.has(c.id) || c.id === labelFilter)
+                .map((c) => h('option', { value: `label:${c.id}`, selected: c.id === labelFilter }, c.name)))
+          : null),
       h('label', { class: 'check row' },
         h('input', { type: 'checkbox', checked: view.tasks, onchange: (e) => { view.tasks = e.target.checked; store.refresh(); } }), 'Task deadlines'),
       h('button', {
