@@ -29,7 +29,9 @@ js/modules/index.js   registry of sections (the nav is built from this list)
 js/modules/*.js       one file per section (todos, projects, kitchen, money, tools, ...)
 js/notifications.js   the bell, its drawer, and notify(); saved in notifications.json
 js/automations.js     site checks and the rules that turn their results into tasks
-js/terminal.js        Dev's calls to the command runner: runner info, and one command's streamed output
+js/terminal.js        Dev's calls to the command runner: info, folders and files, a command's streamed output, keys
+js/vt.js              the terminal emulator Dev draws command output with (cursor moves, colours, alternate screen)
+js/highlight.js       syntax colours for the Dev file reader, per language, with no dependency
 js/sitecheck.js       the lookups behind Tools (health, domain, certificate, share tags)
 js/telegram.js        tasks from Telegram messages, read while the board is open
 js/ai.js              the one OpenRouter call; logs each call's input, output and details to usage.json
@@ -59,7 +61,7 @@ tools/start.js        one command for the board: starts serve.js and relays.js t
 tools/log.js          terminal lines prefixed with each runner's name
 tools/serve.js        local static server with no-cache headers; no dependencies
 tools/relays.js       local relays for Bing's and Resend's APIs (Inbox), which send no CORS header
-tools/terminal.js     the Dev section's command runner: runs shell commands, streams their output; localhost only
+tools/terminal.js     the Dev section's runner: commands in a pseudo-terminal, typed keys, read-only file reads; localhost only
 ```
 
 ## Conventions
