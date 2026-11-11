@@ -3,13 +3,12 @@
 import { h, icon, empty, notice, copyable } from '../ui.js';
 import { chainById, explorerUrl } from '../chains.js';
 import { readsOf, writesOf, parseInput, parseUnits, show, signature, isPayable } from '../abi.js';
-import { contractsOf, readFunction, sendFunction, waitForReceipt, hasWallet, walletAccount, connectWallet } from '../contracts.js';
+import { contractsOf, readFunction, sendFunction, waitForReceipt, hasWallet, walletAccount, connectWallet, disconnectWallet } from '../contracts.js';
 import { logo } from './positions.js';
 
 // contract: the one shown. results: "contractId:signature" -> { busy, ok, value | error | hash, receipt }.
 // inputs: what was typed in each function's fields when it was last run, so a failed call keeps them.
-// account: the wallet account shared with the page, once known.
-const view = { contract: '', results: {}, inputs: {}, account: null, walletError: '' };
+const view = { contract: '', results: {}, inputs: {}, walletError: '' };
 
 const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const keyOf = (c, fn) => `${c.id}:${signature(fn)}`;
@@ -61,7 +60,6 @@ async function send(store, settings, c, fn, form) {
   setResult(store, key, { busy: true, note: 'Confirm in your wallet…' });
   try {
     const hash = await sendFunction(settings, c, fn, args, value);
-    view.account = await walletAccount().catch(() => view.account);
     setResult(store, key, { busy: true, hash, note: 'Sent. Waiting for it to land…' });
     const receipt = await waitForReceipt(settings, c, hash);
     setResult(store, key, receipt ? { ok: receipt.ok, hash, note: receipt.ok ? `Confirmed in block ${receipt.block.toLocaleString()}.` : `Reverted in block ${receipt.block.toLocaleString()}.` } : { ok: true, hash, note: 'Sent. Not landed after five minutes; check the explorer.' });
@@ -113,34 +111,34 @@ function fnCard(store, settings, c, chain, fn, write) {
       h('input', { name: `arg-${i}`, value: typed[`arg-${i}`] ?? '', placeholder: /\[|tuple/.test(p.type) ? 'JSON, like [1, 2]' : p.type, spellcheck: false, autocomplete: 'off' }))),
     payable ? h('label', null, h('span', null, `Value in ${chain?.symbol ?? 'ETH'}`), h('input', { name: 'value', value: typed.value ?? '', placeholder: '0.0', inputmode: 'decimal', autocomplete: 'off' })) : null,
     h('div', { class: 'row' },
-      h('button', { type: 'submit', class: write ? 'btn-small primary' : 'btn-small', disabled: r?.busy }, write ? 'Send' : inputs.length ? 'Call' : 'Read'),
+      h('button', { type: 'submit', class: write ? 'btn-small primary' : 'btn-small', disabled: r?.busy || (write && !walletAccount()), title: write && !walletAccount() ? 'Connect a wallet to send' : null }, write ? 'Send' : inputs.length ? 'Call' : 'Read'),
       resultView(chain, fn, r))));
 }
 
 function walletBar(store, chain) {
   if (!hasWallet()) return notice({ tone: 'info', text: 'Writes need a browser wallet, such as MetaMask or Rabby. Reads work without one.' });
-  if (view.account === null) {
-    view.account = '';
-    walletAccount().then((a) => {
-      view.account = a;
-      if (a) store.refresh();
-    }).catch(() => {});
-  }
+  const account = walletAccount();
   const connect = async () => {
     try {
-      view.account = await connectWallet();
+      await connectWallet();
       view.walletError = '';
     } catch (err) {
       view.walletError = err?.code === 4001 ? 'Connection rejected in the wallet.' : err.message;
     }
     store.refresh();
   };
+  const disconnect = () => {
+    disconnectWallet();
+    store.refresh();
+  };
   return h('div', { class: 'row wallet-connect' },
     icon('wallet'),
-    view.account
-      ? h('span', { class: 'small' }, 'Wallet ', copyable(view.account, { label: short(view.account) }), ` · writes are sent on ${chain?.name ?? 'the contract\'s chain'}, and the wallet asks before each one.`)
-      : h('span', { class: 'small muted' }, 'Wallet not connected. Sending a write connects it.'),
-    view.account ? null : h('button', { type: 'button', class: 'btn-small', onclick: connect }, 'Connect wallet'),
+    account
+      ? h('span', { class: 'small' }, 'Wallet ', copyable(account, { label: short(account) }), ` · writes are sent on ${chain?.name ?? 'the contract\'s chain'}, and the wallet asks before each one.`)
+      : h('span', { class: 'small muted' }, 'Connect a wallet to send writes.'),
+    account
+      ? h('button', { type: 'button', class: 'btn-small', onclick: disconnect }, 'Disconnect')
+      : h('button', { type: 'button', class: 'btn-small primary', onclick: connect }, 'Connect wallet'),
     view.walletError ? h('span', { class: 'small bad' }, view.walletError) : null);
 }
 

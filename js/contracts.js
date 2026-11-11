@@ -27,15 +27,18 @@ export async function readFunction(settings, contract, fn, args) {
 const wallet = () => globalThis.ethereum ?? null;
 export const hasWallet = () => Boolean(wallet());
 
-// The account the wallet already shares with the page, without asking.
-export async function walletAccount() {
-  if (!wallet()) return '';
-  return (await wallet().request({ method: 'eth_accounts' }))?.[0] ?? '';
-}
+// The account connected with the button, for this page load. Nothing asks the wallet before that click.
+let account = '';
+export const walletAccount = () => account;
 
 export async function connectWallet() {
   if (!wallet()) throw new Error('No browser wallet found. Install one, such as MetaMask or Rabby, and reload.');
-  return (await wallet().request({ method: 'eth_requestAccounts' }))?.[0] ?? '';
+  account = (await wallet().request({ method: 'eth_requestAccounts' }))?.[0] ?? '';
+  return account;
+}
+
+export function disconnectWallet() {
+  account = '';
 }
 
 // Moves the wallet to the contract's chain, and adds the chain to it when it does not know it.
@@ -57,7 +60,8 @@ async function onChain(chain) {
 export async function sendFunction(settings, contract, fn, args, value = 0n) {
   const chain = chainById(settings, contract.chainId);
   if (!chain) throw new Error(`Chain ${contract.chainId} is not in Settings → Blockchains.`);
-  const from = await connectWallet();
+  if (!account) throw new Error('Connect a wallet first.');
+  const from = account;
   await onChain(chain);
   const tx = { from, to: contract.address, data: encodeCall(fn, args) };
   if (value) tx.value = `0x${value.toString(16)}`;
