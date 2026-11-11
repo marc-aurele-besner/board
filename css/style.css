@@ -1209,6 +1209,12 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 /* A label shows as a pill; the row's 40% pill cap would measure against the picker and crop it. */
 .label-list .chip-pick.scope-pick .pill { max-width: 100%; }
 .label-list li.is-hidden .pill { opacity: 0.5; }
+/* The grip is a button so it takes focus and the arrow keys; it should still look like the bare handle. */
+.label-list .grip { background: none; border: none; min-height: 0; padding: 4px 2px; border-radius: 4px; }
+.label-list li.dragging { opacity: 0.4; }
+.label-list li.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.label-list li.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.label-head h3 { margin: 0; }
 .label-add { margin-bottom: 4px; }
 .label-add input { font-size: 16px; }
 

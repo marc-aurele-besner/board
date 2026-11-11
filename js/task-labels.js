@@ -1,7 +1,8 @@
 // Task statuses and category colours, with the names and colours set in Settings → Labels.
 // The seven status keys are fixed: search (is:), the board columns, the sort order and automations rely on them.
-// Only a status's name, colour and whether pickers offer it can change. todos.json keeps the overrides as
-// `statuses: { [key]: { name, color, hidden } }`, and a category's colour as `color` on the category.
+// Only a status's name, colour, place in the pickers and whether pickers offer it can change. todos.json keeps the
+// overrides as `statuses: { [key]: { name, color, hidden } }` and the order as `statusOrder: [key]`, and a category's
+// colour as `color` on the category.
 
 // [key, default name, palette tone], in picker order.
 export const STATUSES = [
@@ -19,10 +20,19 @@ export const ALWAYS_SHOWN = ['todo', 'done'];
 
 const sameLower = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-// [{ key, name, defaultName, tone, color, hidden }] with the saved overrides applied.
+// The saved order, with any key it lacks (or an unknown one) falling back to the default order.
+function orderedStatuses(order) {
+  const rank = (key) => {
+    const i = (order ?? []).indexOf(key);
+    return i < 0 ? 100 + STATUSES.findIndex(([k]) => k === key) : i;
+  };
+  return [...STATUSES].sort((a, b) => rank(a[0]) - rank(b[0]));
+}
+
+// [{ key, name, defaultName, tone, color, hidden }] with the saved overrides and order applied.
 export function taskStatuses(store) {
-  const own = store.get('todos').statuses ?? {};
-  return STATUSES.map(([key, defaultName, tone]) => ({
+  const { statuses: own = {}, statusOrder } = store.get('todos');
+  return orderedStatuses(statusOrder).map(([key, defaultName, tone]) => ({
     key,
     name: own[key]?.name || defaultName,
     defaultName,
@@ -42,6 +52,14 @@ export function statusOptions(store, current = null) {
   return taskStatuses(store)
     .filter((s) => !s.hidden || s.key === current)
     .map((s) => ({ value: s.key, label: s.name, ...statusLook(s) }));
+}
+
+// Task category names in their saved order, then any name only a task carries, A to Z.
+export function taskCategoryNames(store) {
+  const { categories = [], items = [] } = store.get('todos');
+  const saved = categories.map((c) => c.name);
+  const extra = [...new Set(items.map((i) => i.category).filter((n) => n && !saved.includes(n)))];
+  return [...saved, ...extra.sort((a, b) => a.localeCompare(b))];
 }
 
 // The colour of a task category, matched by name since tasks store the name. '' when it has none.
