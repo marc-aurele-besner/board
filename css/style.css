@@ -851,6 +851,8 @@ button.danger { color: var(--danger); }
 .links a { color: var(--accent); word-break: break-all; }
 .project-icon { width: 16px; height: 16px; flex: none; border-radius: 4px; object-fit: contain; }
 .project-icon.large { width: 24px; height: 24px; }
+.gh-link { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.gh-link .icon { width: 16px; height: 16px; flex: none; }
 input[type="color"] { width: 56px; height: 38px; padding: 3px; cursor: pointer; }
 h2.row { gap: 10px; flex-wrap: nowrap; }
 
@@ -958,7 +960,7 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 /* Organization keys */
 .org-keys { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .org-keys li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-.org-keys .project-icon, .org-keys > li > svg { width: 18px; height: 18px; }
+.org-keys .project-icon, .org-keys > li > .icon { width: 18px; height: 18px; }
 .org-keys .org-missing { color: var(--warn); }
 .org-keys code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .org-key-form { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr) auto; gap: 8px; align-items: center; }

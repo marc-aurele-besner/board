@@ -1,6 +1,6 @@
 import { h, icon, refreshIcon, empty, notice, todayISO, copyable } from '../ui.js';
 import { fetchDayRate, manualRate, setManualRate, clearCachedRates } from '../fx.js';
-import { configure, checkGithubToken } from '../github.js';
+import { configure, checkGithubToken, orgAvatar } from '../github.js';
 import { connect, disconnect, isConnected } from '../google.js';
 import { editText, pill } from '../inline.js';
 import { modelChip } from '../model-picker.js';
@@ -8,11 +8,9 @@ import { isAddress, CHAINS, chainSettings, savedNode, parsePosition, addPosition
 import { positionFields, positionError } from '../position-input.js';
 import { telegramCard, analyticsCard, searchCard, resendCard, notificationsCard, automationsCard, dataCard } from './settings-more.js';
 import { promptsCard } from './settings-prompts.js';
-import { projectIcon } from './projects.js';
 import { logo } from './positions.js';
 
 const COLLECTION = 'settings';
-const byName = (a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), undefined, { sensitivity: 'base' });
 const OPENROUTER_CHECK = 'https://openrouter.ai/api/v1/auth/key';
 const OPENROUTER_MODELS = 'https://openrouter.ai/api/v1/models';
 
@@ -787,14 +785,6 @@ function knownOrgs(store) {
   return [...names.values()];
 }
 
-// The project an organization belongs to, for its logo: the first by name that sets it or links one of its repos.
-function orgProject(store, name) {
-  const key = name.toLowerCase();
-  const owns = (p) => String(p.github?.org ?? '').trim().toLowerCase() === key
-    || (p.github?.repos ?? []).some((repo) => String(repo).split('/')[0].toLowerCase() === key);
-  return [...store.get('projects').projects].sort(byName).find(owns) ?? null;
-}
-
 function orgKeysCard(store) {
   const orgs = store.get(COLLECTION).github?.orgs ?? [];
   const tokenFor = (name) => orgs.find((x) => x.org.toLowerCase() === name.toLowerCase());
@@ -835,9 +825,8 @@ function orgKeysCard(store) {
     ? h('ul', { class: 'org-keys' },
         all.map((name) => {
           const entry = tokenFor(name);
-          const project = orgProject(store, name);
           return h('li', null,
-            project ? projectIcon(project) : icon('github'),
+            orgAvatar(name),
             h('strong', null, name),
             h('span', { class: entry ? 'muted small' : 'org-missing small' }, entry ? 'Token saved' : 'No token'),
             entry ? h('code', { class: 'muted small' }, mask(entry.token)) : null,

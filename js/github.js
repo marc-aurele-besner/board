@@ -2,6 +2,8 @@
 // Unauthenticated requests are limited to 60 per hour per IP, and each repo costs two
 // requests. Results are cached in memory and in localStorage for 15 minutes.
 
+import { h, icon } from './ui.js';
+
 const TTL_MS = 15 * 60 * 1000;
 const API = 'https://api.github.com';
 const memory = new Map(); // "owner/repo" -> { status: 'loading' | 'ok' | 'error', issues?, prs?, error?, at? }
@@ -14,6 +16,26 @@ const headers = (repo) => {
   const t = tokenFor(repo);
   return { Accept: 'application/vnd.github+json', ...(t ? { Authorization: `Bearer ${t}` } : {}) };
 };
+
+// The avatar of a GitHub organization (or user). github.com/<name>.png redirects to the image, so it
+// costs no API request. The GitHub mark stands in when it fails to load.
+export function orgAvatar(name, className = 'project-icon') {
+  return h('img', {
+    class: `${className} org-avatar`,
+    src: `https://github.com/${encodeURIComponent(name)}.png?size=64`,
+    alt: '',
+    loading: 'lazy',
+    referrerpolicy: 'no-referrer',
+    onerror: (e) => e.currentTarget.replaceWith(icon('github')),
+  });
+}
+
+// A link to an organization, or to one of its repos ('owner/repo'), led by the owner's avatar.
+export function githubLink(path) {
+  return h('a', { class: 'gh-link', href: `https://github.com/${path}`, target: '_blank', rel: 'noopener' },
+    orgAvatar(String(path).split('/')[0]),
+    h('span', null, path));
+}
 
 // Called on startup and whenever a key changes. Cached results may be stale for the new keys, so they are dropped.
 export function configure(github) {

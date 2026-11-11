@@ -1,5 +1,5 @@
 import { h, uid, now, icon, refreshIcon, empty, statusOf, notice } from '../ui.js';
-import { repoStats, refreshRepo, openItems } from '../github.js';
+import { repoStats, refreshRepo, openItems, githubLink } from '../github.js';
 import { ask } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
@@ -231,8 +231,10 @@ function updateProject(store, id, patch) {
         if (!repos.includes(repo)) repos.push(repo);
       }
     }
+    // A pasted repo names its owner, so an empty org is filled from the first repo.
+    const owner = patch.repos !== undefined && !org && repos.length ? repos[0].split('/')[0] : org;
     const { org: _org, repos: _repos, ...rest } = patch;
-    patch = { ...rest, github: { org, repos } };
+    patch = { ...rest, github: { org: owner, repos } };
   }
   if (patch.iconUrl !== undefined) {
     const iconUrl = patch.iconUrl.trim();
@@ -451,7 +453,7 @@ function repoTable(store, p) {
       const s = repoStats(r, onRepoChange);
       const ok = s.status === 'ok';
       return h('tr', null,
-        h('td', null, h('a', { href: `https://github.com/${r}`, target: '_blank', rel: 'noopener' }, r)),
+        h('td', null, githubLink(r)),
         h('td', { class: 'num' }, ok ? String(s.issues) : '—'),
         h('td', { class: 'num' }, ok ? String(s.prs) : '—'),
         h('td', { class: 'muted' }, s.status === 'loading' ? 'Loading…' : s.status === 'error' ? s.error : ''),
@@ -763,7 +765,8 @@ function projectView(store, p, items, categories) {
           placeholder: 'my-org or github.com/my-org',
           allowEmpty: true,
           onSave: (org) => updateProject(store, p.id, { org }),
-        })),
+        }),
+        p.github.org ? githubLink(p.github.org) : null),
       h('section', { class: 'pp-block' },
         h('h3', null, 'Repositories'),
         editText({
