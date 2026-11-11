@@ -30,14 +30,14 @@ Deleting a task, a Money entry, a bill, a recipe or a recipe iteration shows **U
 Browsers only allow the folder picker on a secure origin, so serve the folder locally:
 
 ```sh
-bunx serve .
+bun tools/serve.js
 # or
-python3 -m http.server 8000
+node tools/serve.js
 ```
 
-Then open `http://localhost:<port>` in **Chrome or Edge**. The File System Access API is not available in Firefox or Safari.
+Then open `http://localhost:8000` in **Chrome or Edge** (`PORT=<port>` picks another port). The File System Access API is not available in Firefox or Safari.
 
-`bunx serve` revalidates every file on reload, so the browser always runs the code you just edited. `python3 -m http.server` sends no cache headers, so Chrome reuses the modules it cached earlier and keeps running the old code after a reload: with that server, hard reload the page (Cmd+Shift+R) after every change.
+`tools/serve.js` has no dependencies and marks every file `no-cache`, so the browser always runs the code you just edited. Any other static server works too, but `python3 -m http.server` sends no cache headers, so Chrome reuses the modules it cached earlier and keeps running the old code after a reload: with that server, hard reload the page (Cmd+Shift+R) after every change.
 
 On first launch, choose a data folder. Pick a folder **outside this repo** (for example `~/Documents/board-data`). The app writes `todos.json`, `recipes.json` and `finance.json` there. On later visits, click **Reconnect** once to re-grant permission.
 
