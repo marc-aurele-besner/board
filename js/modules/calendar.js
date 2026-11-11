@@ -3,7 +3,7 @@
 import { h, icon, refreshIcon, notice, statusOf, empty } from '../ui.js';
 import { projectIcon, projectTree } from './projects.js';
 import { setupBanner } from '../integrations.js';
-import { calendarAccounts, calendarEvents, cachedCalendarEvents, CALENDAR_TTL, connectCalendar, isCalendarConnected, setCalendar, eventDate } from '../gcal.js';
+import { calendarAccounts, calendarEvents, cachedCalendarEvents, CALENDAR_TTL, connectCalendar, isCalendarConnected, setCalendar, eventDate, calendarProject, calendarCategory } from '../gcal.js';
 import { makeTask } from '../capture.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
@@ -93,7 +93,7 @@ function plainText(html) {
 export function eventAsTask(store, e) {
   const description = [whenOf(e), e.location, e.link].filter(Boolean).join('\n');
   store.update('todos', (d) =>
-    d.items.push(makeTask({ text: e.title, description, due: isoOf(eventDate(e.start)), projectId: e.projectId ?? null })));
+    d.items.push(makeTask({ text: e.title, description, due: isoOf(eventDate(e.start)), projectId: e.projectId ?? null, category: e.category ?? '' })));
   toast(`Task added: ${e.title}`);
 }
 
@@ -101,7 +101,7 @@ export function eventAsTask(store, e) {
 
 // What a read depends on: the range, the shown calendars and which accounts are connected.
 function keyOf(store, from, to) {
-  const shown = calendarAccounts(store).map((a) => `${a.email}:${isCalendarConnected(a.email)}:${a.calendars.filter((c) => c.on).map((c) => `${c.id}=${c.projectId ?? ''}`).join(',')}`);
+  const shown = calendarAccounts(store).map((a) => `${a.email}:${isCalendarConnected(a.email)}:${a.calendars.filter((c) => c.on).map((c) => `${c.id}=${calendarProject(a, c) ?? ''}/${calendarCategory(a, c)}`).join(',')}`);
   return `${isoOf(from)}|${isoOf(to)}|${shown.join(';')}`;
 }
 
@@ -273,7 +273,7 @@ function draw(root, store) {
     ? store.get('todos').items.filter((t) => t.due && statusOf(t) !== 'done' && t.due >= isoOf(from) && t.due < isoOf(to)).filter(byProject)
     : [];
   // Projects that have a calendar, for the filter; tasks of any project still follow it.
-  const linked = new Set(accounts.flatMap((a) => a.calendars.map((c) => c.projectId)).filter(Boolean));
+  const linked = new Set(accounts.flatMap((a) => a.calendars.map((c) => calendarProject(a, c))).filter(Boolean));
 
   const toolbar = h('div', { class: 'row between cal-toolbar' },
     h('div', { class: 'row' },

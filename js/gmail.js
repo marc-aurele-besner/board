@@ -1,5 +1,5 @@
-// Gmail, read-only, straight from the browser. Each account signs in on its own and belongs to one project,
-// so a project can have several. Tokens live in memory only and last about an hour, like the other Google ones.
+// Gmail, read-only, straight from the browser. Each account signs in on its own and may belong to a project (a
+// project can have several) and give a task category to tasks made from its mail; both are optional. Tokens live in memory only and last about an hour, like the other Google ones.
 import { loadGis } from './google.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
@@ -128,7 +128,7 @@ const rowOf = (account, m, dir, known) => ({
   source: 'gmail',
   account: account.email,
   msgId: m.id,
-  projectId: account.projectId,
+  projectId: account.projectId ?? null,
   dir,
   from: headerOf(m.payload, 'From'),
   to: splitAddresses(headerOf(m.payload, 'To')),
@@ -161,13 +161,13 @@ export async function syncGmail(store) {
         fresh.push(...messages.map((m) => rowOf(account, m, dir, known)));
       }
     } catch (err) {
-      errors.push({ projectIds: [account.projectId], text: `${account.email}: ${err.message}` });
+      errors.push({ projectIds: account.projectId ? [account.projectId] : [], text: `${account.email}: ${err.message}` });
     }
   }
 
   let added = 0;
   store.update('inbox', (d) => {
-    const owner = new Map(accounts.map((a) => [a.email, a.projectId]));
+    const owner = new Map(accounts.map((a) => [a.email, a.projectId ?? null]));
     const byId = new Map(d.emails.map((e) => [e.id, e]));
     for (const r of fresh) {
       if (byId.has(r.id)) continue;

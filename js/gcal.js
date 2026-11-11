@@ -1,7 +1,8 @@
 // Google Calendar, read-only, straight from the browser. Like Gmail, each account signs in on its own, so several
 // accounts can be shown side by side. Tokens live in memory only and last about an hour.
-// settings.json keeps gcal: { accounts: [{ email, calendars: [{ id, name, color, on, projectId }] }] }. Events are cached
-// in this browser only (localStorage), so a reload shows the last read at once and Google is asked again when it is stale.
+// settings.json keeps gcal: { accounts: [{ email, projectId, category, calendars: [{ id, name, color, on, projectId, category }] }] }.
+// The account's project and category are optional defaults; a calendar's own ones win. Events are cached in this
+// browser only (localStorage), so a reload shows the last read at once and Google is asked again when it is stale.
 import { loadGis } from './google.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
@@ -43,11 +44,11 @@ function cacheRead(address, calendarId, from, to, events) {
 function fromCache(account, cal, from, to) {
   const hit = cachedReads(account.email, cal.id).find((r) => r.from <= from.getTime() && r.to >= to.getTime());
   if (!hit) return null;
-  // Same overlap rule as Google's timeMin/timeMax. The calendar's name and project are taken from settings, as they may
+  // Same overlap rule as Google's timeMin/timeMax. The calendar's name, project and category are taken from settings, as they may
   // have changed since the read.
   const events = hit.events
     .filter((e) => eventDate(e.start) < to && eventDate(e.end || e.start) > from)
-    .map((e) => ({ ...e, calendar: cal.name, projectId: cal.projectId ?? null }));
+    .map((e) => ({ ...e, calendar: cal.name, projectId: calendarProject(account, cal), category: calendarCategory(account, cal) }));
   return { at: hit.at, events };
 }
 
@@ -143,7 +144,7 @@ export async function syncCalendarList(store, address) {
     const old = new Map((before?.calendars ?? []).map((c) => [c.id, c]));
     const calendars = fresh.map((c) => {
       const kept = old.get(c.id);
-      return { id: c.id, name: c.name, color: c.color, on: kept ? kept.on : !c.hidden, projectId: kept?.projectId ?? null };
+      return { id: c.id, name: c.name, color: c.color, on: kept ? kept.on : !c.hidden, projectId: kept?.projectId ?? null, category: kept?.category ?? '' };
     });
     return before ? accounts.map((a) => (a.email === address ? { ...a, calendars } : a)) : [...accounts, { email: address, calendars }];
   });
@@ -155,7 +156,15 @@ export const removeCalendarAccount = (store, address) => {
   saveAccounts(store, (accounts) => accounts.filter((a) => a.email !== address));
 };
 
-// Changes one calendar's saved fields: { on } or { projectId }.
+// Changes an account's saved fields: { projectId } or { category }.
+export const setCalendarAccount = (store, address, patch) => saveAccounts(store, (accounts) =>
+  accounts.map((a) => (a.email === address ? { ...a, ...patch } : a)));
+
+// The project and task category a calendar's events carry: its own, else its account's. Both may be empty.
+export const calendarProject = (account, cal) => cal.projectId ?? account.projectId ?? null;
+export const calendarCategory = (account, cal) => cal.category || account.category || '';
+
+// Changes one calendar's saved fields: { on }, { projectId } or { category }.
 export const setCalendar = (store, address, calendarId, patch) => saveAccounts(store, (accounts) =>
   accounts.map((a) => (a.email !== address ? a : { ...a, calendars: a.calendars.map((c) => (c.id === calendarId ? { ...c, ...patch } : c)) })));
 
@@ -165,7 +174,8 @@ const eventOf = (account, cal, e) => ({
   calendarId: cal.id,
   calendar: cal.name,
   color: e.backgroundColor || cal.color,
-  projectId: cal.projectId ?? null,
+  projectId: calendarProject(account, cal),
+  category: calendarCategory(account, cal),
   title: e.summary ?? '(no title)',
   // All-day events give dates; their end date is the day after the last one.
   start: e.start?.dateTime ?? e.start?.date ?? '',
