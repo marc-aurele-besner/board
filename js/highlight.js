@@ -15,12 +15,15 @@ const C_LIKE = {
 
 const NUMBER = /(?:0[xX][\da-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|(?:\d[\d_]*\.?[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d+)?)n?\b/y;
 const WORD = /[A-Za-z_$][\w$]*/y;
+// A name given an arrow function (`const draw = (root) =>`), coloured as a function like a declared one.
+const ARROW = /^\s*=\s*(?:async\s*)?(?:\([^()]*\)|[\w$]+)\s*=>/;
 
 const LANGS = {
   js: {
     rules: [...C_LIKE.comments.map((r) => ['comment', r]), ['string', /`(?:\\[\s\S]|[^`\\])*`?/y], ...C_LIKE.strings.map((r) => ['string', r]), ['meta', /@[\w.]+/y], ['number', NUMBER]],
     keywords: JS_KEYWORDS,
     types: true,
+    js: true,
   },
   json: {
     rules: [['property', /"(?:\\.|[^"\\\n])*"(?=\s*:)/y], ['string', /"(?:\\.|[^"\\\n])*"?/y], ['comment', /\/\/[^\n]*/y], ['number', /-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/y]],
@@ -145,6 +148,8 @@ function tokens(text, lang) {
         if (def.keywords.has(key)) cls = 'keyword';
         else if (LITERALS.has(value)) cls = 'literal';
         else if (!def.plainWords && /^\s*\(/.test(text.slice(i + value.length, i + value.length + 3))) cls = 'function';
+        else if (def.js && ARROW.test(text.slice(i + value.length, i + value.length + 120))) cls = 'function';
+        else if (def.js && /^\s*:(?!:)/.test(text.slice(i + value.length, i + value.length + 4)) && /[{,]\s*$/.test(text.slice(Math.max(0, i - 40), i))) cls = 'property';
         else if (def.types && /^[A-Z][a-z]/.test(value)) cls = 'type';
       }
       push(cls, value);
