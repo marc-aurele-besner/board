@@ -8,6 +8,7 @@ import { poolsChanged } from '../automations.js';
 import { insightsPanel } from '../pool-insights.js';
 import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey } from '../uniswap.js';
 import { chainById, explorerUrl, etherscanKey } from '../chains.js';
+import { walletsTab, walletsView } from './defi-wallets.js';
 
 const STALE_MS = 10 * 60 * 1000;
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
