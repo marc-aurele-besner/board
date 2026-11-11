@@ -1,6 +1,6 @@
 // Gmail, read-only, straight from the browser. Each account signs in on its own and may belong to a project (a
-// project can have several) and carry a project label for the Inbox filter; both are optional. Tokens live in memory only and last about an hour, like the other Google ones.
-import { loadGis, PROFILE_SCOPE, rememberPicture } from './google.js';
+// project can have several) and carry a project label for the Inbox filter; both are optional. Tokens last about an hour and survive a reload (see accountTokens).
+import { loadGis, PROFILE_SCOPE, rememberPicture, accountTokens } from './google.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me';
@@ -12,7 +12,7 @@ const KEEP = 1000;
 const PARALLEL = 5;
 const HEADERS = ['From', 'To', 'Cc', 'Subject', 'Date'];
 
-const tokens = new Map(); // address -> { value, expiresAt }
+const tokens = accountTokens('gmail'); // address -> { value, expiresAt, scope }, kept until it expires
 
 export const gmailAccounts = (store) => store.get('settings').gmail?.accounts ?? [];
 export const isGmailConnected = (address) => (tokens.get(address)?.expiresAt ?? 0) > Date.now();

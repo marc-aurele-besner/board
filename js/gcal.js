@@ -1,16 +1,16 @@
 // Google Calendar, read-only, straight from the browser. Like Gmail, each account signs in on its own, so several
-// accounts can be shown side by side. Tokens live in memory only and last about an hour.
+// accounts can be shown side by side. Tokens last about an hour and survive a reload (see accountTokens).
 // settings.json keeps gcal: { accounts: [{ email, projectId, labelId, calendars: [{ id, name, color, on, projectId, labelId }] }] }.
 // The account's project and project label are optional defaults; a calendar's own ones win. Events are cached in this
 // browser only (localStorage), so a reload shows the last read at once and Google is asked again when it is stale.
-import { loadGis, PROFILE_SCOPE, rememberPicture } from './google.js';
+import { loadGis, PROFILE_SCOPE, rememberPicture, accountTokens } from './google.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
 const API = 'https://www.googleapis.com/calendar/v3';
 const PAGE = 250;
 const MAX_PAGES = 4;
 
-const tokens = new Map(); // address -> { value, expiresAt }
+const tokens = accountTokens('gcal'); // address -> { value, expiresAt, scope }, kept until it expires
 
 // --- Event cache ---
 // One localStorage entry per calendar, holding its last few reads: [{ from, to, at, events }], newest first.
