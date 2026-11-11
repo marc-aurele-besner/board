@@ -78,7 +78,7 @@ Nothing runs on a server, and everything automatic runs only while the board is 
 | Website health | the project's own website | a plain request for its home page |
 | Domain expiry | `rdap.org` (the registries' lookup protocol) | the domain name |
 | SSL expiry | `api.certspotter.com`, then `crt.sh` (public certificate logs) | the host name |
-| DNS and email | `cloudflare-dns.com` (DNS over HTTPS) | the domain name, and the `_dmarc` and common DKIM names under it |
+| DNS and email | `cloudflare-dns.com` (DNS over HTTPS) | the domain name, the site's host and `www`, and the `_dmarc`, MTA-STS, TLS reporting, BIMI and common DKIM names under it |
 | Provider status | each followed status page (Statuspage's public `/api/v2/summary.json`) | nothing but the request itself |
 | Metadata preview, crawl files, recipe import | `r.jina.ai` (page reader) | the page or file address |
 | Cron AI steps | `openrouter.ai`, with your key | the step's prompt, which includes whatever the earlier steps gathered from the board (task titles, a project's description, spending totals) |

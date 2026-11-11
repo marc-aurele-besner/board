@@ -122,43 +122,84 @@ export async function readMeta(website) {
 // --- DNS and email ---
 
 const DOH = 'https://cloudflare-dns.com/dns-query';
-const DNS_TYPES = { A: 1, NS: 2, MX: 15, TXT: 16, AAAA: 28, CAA: 257 };
+const DNS_TYPES = { A: 1, NS: 2, CNAME: 5, SOA: 6, MX: 15, TXT: 16, AAAA: 28, SRV: 33, HTTPS: 65, CAA: 257 };
+const TYPE_NAME = Object.fromEntries(Object.entries(DNS_TYPES).map(([k, v]) => [v, k]));
 // DKIM keys live under a selector the sender picks, which DNS cannot list, so the common ones are tried.
-const DKIM_SELECTORS = ['google', 'default', 'selector1', 'selector2', 'k1', 's1', 'mail'];
+const DKIM_SELECTORS = ['google', 'default', 'selector1', 'selector2', 'k1', 'k2', 's1', 's2', 'mail', 'dkim', 'resend', 'mandrill', 'zoho', 'protonmail', 'fm1'];
+// Mail policy names other than DKIM: MTA-STS, TLS reporting and BIMI.
+const MAIL_NAMES = ['_mta-sts', '_smtp._tls', 'default._bimi'];
 
 // A TXT answer can be split into several quoted strings; joined, they are the record.
 const txtOf = (data) => (data.match(/"(?:[^"\\]|\\.)*"/g) ?? [data]).map((x) => x.replace(/^"|"$/g, '')).join('');
 
-async function resolve(name, type) {
+// Every answer to one question, including the CNAME steps that led to it.
+async function query(name, type) {
   const res = await timed(`${DOH}?name=${encodeURIComponent(name)}&type=${type}`, { headers: { accept: 'application/dns-json' } });
   if (!res.ok) throw new Error(`The DNS lookup answered ${res.status}.`);
   const data = await res.json();
   // Status 3 is "no such name": an answer, not a failure.
   if (data.Status !== 0 && data.Status !== 3) throw new Error(`The DNS lookup failed for ${name}.`);
-  return (data.Answer ?? []).filter((a) => a.type === DNS_TYPES[type]).map((a) => (type === 'TXT' ? txtOf(a.data) : a.data));
+  return (data.Answer ?? []).map((a) => ({
+    name: a.name.replace(/\.$/, ''),
+    type: TYPE_NAME[a.type] ?? `TYPE${a.type}`,
+    ttl: a.TTL,
+    data: a.type === DNS_TYPES.TXT ? txtOf(a.data) : a.data,
+  }));
 }
 
+// DNS has no "list everything" question, so the usual types are asked for the domain, the site's host,
+// www, and the names mail services use. `records` keeps every answer once.
 export async function checkDns(host) {
   const domain = registrable(host);
-  const [a, aaaa, caa, mx, ns, txt, dmarcTxt, ...dkim] = await Promise.all([
-    resolve(host, 'A'), resolve(host, 'AAAA'), resolve(domain, 'CAA'), resolve(domain, 'MX'), resolve(domain, 'NS'), resolve(domain, 'TXT'),
-    resolve(`_dmarc.${domain}`, 'TXT'),
-    ...DKIM_SELECTORS.map((sel) => resolve(`${sel}._domainkey.${domain}`, 'TXT').catch(() => [])),
-  ]);
-  const spf = txt.find((t) => /^v=spf1\b/i.test(t)) ?? '';
-  const dmarc = dmarcTxt.find((t) => /^v=DMARC1\b/i.test(t)) ?? '';
+  const www = `www.${domain}`;
+  const core = ['A', 'AAAA', 'NS', 'MX', 'TXT', 'SOA', 'CAA', 'HTTPS'].map((t) => [domain, t]);
+  const extra = [
+    ...(host !== domain ? ['A', 'AAAA', 'CNAME', 'TXT', 'HTTPS'].map((t) => [host, t]) : []),
+    ...(host !== www ? ['A', 'AAAA', 'CNAME'].map((t) => [www, t]) : []),
+    [`_dmarc.${domain}`, 'TXT'],
+    ...MAIL_NAMES.map((n) => [`${n}.${domain}`, 'TXT']),
+    ...DKIM_SELECTORS.map((sel) => [`${sel}._domainkey.${domain}`, 'TXT']),
+  ];
+  // The domain's own answers must come back; the other names may fail on their own.
+  const answers = await Promise.all([...core.map(([n, t]) => query(n, t)), ...extra.map(([n, t]) => query(n, t).catch(() => []))]);
+  const seen = new Map();
+  for (const a of answers.flat()) seen.set(`${a.name}|${a.type}|${a.data}`, a);
+  const all = [...seen.values()];
+  // A name's records may sit at the end of its CNAME chain (a host on a platform, a DKIM key kept by the mail service).
+  const endOf = (name) => {
+    let end = name;
+    for (let i = 0; i < 8; i += 1) {
+      const next = all.find((r) => r.name === end && r.type === 'CNAME');
+      if (!next) break;
+      end = next.data.replace(/\.$/, '');
+    }
+    return end;
+  };
+  const of = (name, type) => {
+    const end = type === 'CNAME' ? name : endOf(name);
+    return all.filter((r) => r.name === end && r.type === type).map((r) => r.data);
+  };
+  const order = Object.keys(DNS_TYPES);
+  const rank = (name) => (name === domain ? 0 : name === host ? 1 : name === www ? 2 : name.endsWith(`.${domain}`) ? 3 : 4);
+  const records = all.sort((x, y) => rank(x.name) - rank(y.name) || x.name.localeCompare(y.name) || order.indexOf(x.type) - order.indexOf(y.type));
+  const spf = of(domain, 'TXT').find((t) => /^v=spf1\b/i.test(t)) ?? '';
+  const dmarc = of(`_dmarc.${domain}`, 'TXT').find((t) => /^v=DMARC1\b/i.test(t)) ?? '';
+  const mx = of(domain, 'MX');
+  const caa = of(domain, 'CAA');
+  const ns = of(domain, 'NS');
   return {
     domain,
-    a,
-    aaaa,
+    a: of(host, 'A'),
+    aaaa: of(host, 'AAAA'),
     caa,
+    records,
     ns: ns.map((n) => n.replace(/\.$/, '')),
     // "10 mx.example.com." becomes "mx.example.com", lowest preference first. A null MX ("0 .") says the domain takes no mail.
     mx: mx.map((m) => m.split(' ')).sort((x, y) => Number(x[0]) - Number(y[0])).map((m) => (m[1] ?? m[0]).replace(/\.$/, '')).filter(Boolean),
     spf: { record: spf, all: spf.match(/[~?+-]?all\b/i)?.[0] ?? '' },
     dmarc: { record: dmarc, policy: dmarc.match(/\bp=(\w+)/i)?.[1]?.toLowerCase() ?? '' },
     // An empty key ("p=") is a revoked selector, often a wildcard answering for every name.
-    dkim: DKIM_SELECTORS.filter((_, i) => dkim[i].some((t) => /\bp=[A-Za-z0-9+/]/.test(t))),
+    dkim: DKIM_SELECTORS.filter((sel) => of(`${sel}._domainkey.${domain}`, 'TXT').some((t) => /\bp=[A-Za-z0-9+/]/.test(t))),
   };
 }
 

@@ -15,7 +15,7 @@ const EVERY = [[15, '15 minutes'], [60, 'hour'], [360, '6 hours'], [1440, 'day']
 const STATUS = { up: ['Up', 'done'], slow: ['Slow', 'medium'], down: ['Down', 'high'] };
 
 // View state: the tab, the project shown in the metadata preview, and which sites are being checked now.
-const view = { tab: 'health', project: '', busy: new Set() };
+const view = { tab: 'health', project: '', busy: new Set(), openDns: new Set() };
 
 const pillOf = (text, tone) => h('span', { class: `pill tone-${tone}` }, text);
 const timeOf = (at) => (at ? new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never');
@@ -186,6 +186,29 @@ function sslTab(store, sites) {
 const SPF_ALL = { '-all': ['Strict', 'done'], '~all': ['Soft fail', 'done'], '?all': ['Neutral', 'medium'], '+all': ['Anyone may send', 'high'], all: ['Anyone may send', 'high'] };
 const DMARC_POLICY = { reject: ['Reject', 'done'], quarantine: ['Quarantine', 'done'], none: ['Monitor only', 'medium'] };
 
+const ttlOf = (s) => (s >= 86400 && s % 86400 === 0 ? `${s / 86400} d` : s >= 3600 && s % 3600 === 0 ? `${s / 3600} h` : s >= 60 && s % 60 === 0 ? `${s / 60} min` : `${s} s`);
+// "@" for the domain itself and "www" for www.example.com, as DNS dashboards show them.
+const relName = (name, domain) => (name === domain ? '@' : name.endsWith(`.${domain}`) ? name.slice(0, -domain.length - 1) : name);
+
+// Every record the lookup found, one row each, with a count per type above.
+function recordTable(d) {
+  const counts = d.records.reduce((m, r) => m.set(r.type, (m.get(r.type) ?? 0) + 1), new Map());
+  return h('div', { class: 'stack dns-all' },
+    h('div', { class: 'chips' }, [...counts].map(([type, n]) => h('span', { class: 'pill tone-plain' }, `${n} ${type}`))),
+    d.records.length
+      ? h('div', { class: 'mon-scroll' },
+          h('table', { class: 'mon-table dns-table' },
+            h('thead', null, h('tr', null, ['Name', 'Type', 'TTL', 'Value'].map((t) => h('th', null, t)))),
+            h('tbody', null, d.records.map((r) =>
+              h('tr', null,
+                h('td', { title: r.name }, h('code', null, relName(r.name, d.domain))),
+                h('td', null, h('span', { class: `dns-type t-${r.type.toLowerCase()}` }, r.type)),
+                h('td', { class: 'num muted small' }, ttlOf(r.ttl)),
+                h('td', { class: 'dns-value' }, h('code', null, r.data)))))))
+      : h('p', { class: 'muted small' }, 'No records found.'),
+    h('p', { class: 'muted small' }, `DNS cannot list every name under a domain, so this asks for ${d.domain}, the site’s host, www, _dmarc, MTA-STS, TLS reporting, BIMI and common DKIM selectors. Records on other names are not shown.`));
+}
+
 function dnsTab(store, sites) {
   const email = ruleOf(store, 'email');
   return h('div', { class: 'stack-lg' },
@@ -225,9 +248,14 @@ function dnsTab(store, sites) {
               again),
             h('tr', { class: 'dns-raw' },
               h('td', { colspan: 8 },
-                h('details', null,
-                  h('summary', { class: 'muted small' }, `Records for ${d.domain} · looked up ${timeOf(d.at)}${d.error ? ` · last try failed: ${d.error}` : ''}`),
-                  h('dl', { class: 'dns-records' }, records.flatMap(([k, v]) => [h('dt', null, k), h('dd', null, v.filter(Boolean).length ? v.filter(Boolean).map((x) => h('code', null, x)) : h('span', { class: 'muted small' }, 'None'))]))))),
+                h('details', { open: view.openDns.has(p.id), ontoggle: (e) => (e.currentTarget.open ? view.openDns.add(p.id) : view.openDns.delete(p.id)) },
+                  h('summary', { class: 'small' },
+                    h('strong', null, d.records ? `All ${d.records.length} records` : 'Records'),
+                    h('span', { class: 'muted' }, ` for ${d.domain} · looked up ${timeOf(d.at)}${d.error ? ` · last try failed: ${d.error}` : ''}`)),
+                  d.records
+                    ? recordTable(d)
+                    : [h('p', { class: 'muted small' }, 'Look up again to see every record, with CNAME and TXT.'),
+                        h('dl', { class: 'dns-records' }, records.flatMap(([k, v]) => [h('dt', null, k), h('dd', null, v.filter(Boolean).length ? v.filter(Boolean).map((x) => h('code', null, x)) : h('span', { class: 'muted small' }, 'None'))]))]))),
           ];
         })))),
     h('p', { class: 'muted small' }, 'Records come from Cloudflare’s public DNS resolver (DNS over HTTPS); only the domain names are sent. DKIM keys sit under a name the mail service picks, so only common selectors are tried: “None found” does not mean the domain signs nothing.'));

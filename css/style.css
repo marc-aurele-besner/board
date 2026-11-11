@@ -1295,6 +1295,19 @@ label.check { cursor: pointer; }
 .dns-records dt { font-weight: 600; font-size: 0.85rem; }
 .dns-records dd { margin: 0; display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .dns-records code { font-size: 0.8rem; overflow-wrap: anywhere; background: var(--surface-2); border-radius: 4px; padding: 1px 6px; }
+.dns-raw summary strong { color: var(--accent); }
+.dns-all { margin-top: 10px; }
+.dns-table { font-size: 0.85rem; }
+.dns-table td { vertical-align: top; }
+.dns-table code { font-size: 0.8rem; }
+.dns-value { min-width: 240px; overflow-wrap: anywhere; word-break: break-all; }
+.dns-type { --c: var(--muted); display: inline-block; min-width: 52px; text-align: center; font: 600 0.72rem ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 6px; border-radius: 4px; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
+.dns-type.t-a, .dns-type.t-aaaa { --c: var(--accent); }
+.dns-type.t-cname { --c: var(--ai); }
+.dns-type.t-txt { --c: var(--income); }
+.dns-type.t-mx { --c: var(--warn); }
+.dns-type.t-ns, .dns-type.t-soa { --c: var(--info); }
+.dns-type.t-caa, .dns-type.t-https { --c: var(--expense); }
 .meter { height: 6px; border-radius: 6px; background: var(--surface-2); overflow: hidden; }
 .meter span { display: block; height: 100%; border-radius: 6px; background: var(--accent); }
 .meta-grid { display: grid; grid-template-columns: minmax(300px, 480px) minmax(0, 1fr); gap: var(--gap); align-items: start; }
