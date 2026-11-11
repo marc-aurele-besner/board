@@ -49,7 +49,8 @@ const SECTION_GROUPS = [
       ['github', 'GitHub', 'github'],
       ['openrouter', 'OpenRouter', 'key'],
       ['google', 'Google Calendar', 'calendar'],
-      ['uniswap', 'DeFi wallets', 'wallet'],
+      ['wallets', 'Wallets', 'wallet'],
+      ['uniswap', 'Uniswap', 'droplet'],
       ['blockchains', 'Blockchains', 'cube'],
       ['contracts', 'Smart contracts', 'code'],
       ['telegram', 'Telegram', 'send'],
@@ -545,36 +546,59 @@ function addedList(store, added, remove) {
     }));
 }
 
-// Public wallet addresses whose Uniswap positions the LP tab reads, positions added by hand, and the chains and
-// nodes to read them from.
-function uniswapCard(store) {
-  const cfg = store.get(COLLECTION).uniswap ?? { wallets: [], chains: {} };
-  const wallets = cfg.wallets ?? [];
-  const added = addedPositions(cfg);
-  const save = (patch) => {
-    store.update(COLLECTION, (d) => {
-      d.uniswap = { wallets: [], chains: {}, ...d.uniswap, ...patch };
-    });
-    store.refresh();
-  };
+const walletsView = { message: '', ok: null };
+
+// Saves into settings.uniswap, where the wallet list was first kept, so older data folders keep their wallets.
+const saveUniswap = (store, patch) => {
+  store.update(COLLECTION, (d) => {
+    d.uniswap = { wallets: [], chains: {}, ...d.uniswap, ...patch };
+  });
+  store.refresh();
+};
+
+// Public wallet addresses that every DeFi tab reads: Liquidity Pools, Wallets and Lending / Borrowing.
+function walletsCard(store) {
+  const wallets = store.get(COLLECTION).uniswap?.wallets ?? [];
+  const save = (patch) => saveUniswap(store, patch);
   const addWallet = (e) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
     const address = String(form.get('address') ?? '').trim();
     if (!isAddress(address)) {
-      uniswapView.ok = false;
-      uniswapView.message = 'That is not an Ethereum address. It starts with 0x and has 40 hex characters.';
+      walletsView.ok = false;
+      walletsView.message = 'That is not an Ethereum address. It starts with 0x and has 40 hex characters.';
     } else if (wallets.some((w) => w.address.toLowerCase() === address.toLowerCase())) {
-      uniswapView.ok = false;
-      uniswapView.message = 'That address is already in the list.';
+      walletsView.ok = false;
+      walletsView.message = 'That address is already in the list.';
     } else {
       save({ wallets: [...wallets, { address, label: String(form.get('label') ?? '').trim() }] });
       e.currentTarget.reset();
-      uniswapView.ok = true;
-      uniswapView.message = 'Wallet added. Open LP positions to read it.';
+      walletsView.ok = true;
+      walletsView.message = 'Wallet added. Open DeFi to read it.';
     }
     store.refresh();
   };
+
+  return h('section', { class: 'card panel' },
+    h('h2', null, 'Wallets'),
+    h('p', { class: 'muted small' }, 'Add the public address of each wallet to follow. DeFi reads them for Uniswap positions, wallet balances and Aave lending. The board only reads them. It never asks for a key and never signs anything.'),
+    wallets.length
+      ? h('ul', { class: 'stack' }, wallets.map((w, i) => h('li', { class: 'row between' },
+        h('span', null, w.label ? `${w.label} · ` : '', copyable(w.address)),
+        h('button', { type: 'button', class: 'btn-small', onclick: () => save({ wallets: wallets.filter((_, j) => j !== i) }) }, 'Remove'))))
+      : h('p', { class: 'muted small' }, 'No wallets yet.'),
+    h('form', { class: 'row', onsubmit: addWallet },
+      h('input', { name: 'label', placeholder: 'Label (optional)', 'aria-label': 'Wallet label' }),
+      h('input', { name: 'address', placeholder: '0x…', spellcheck: false, 'aria-label': 'Wallet address' }),
+      h('button', { type: 'submit', class: 'btn-small' }, 'Add wallet')),
+    walletsView.message ? notice({ tone: walletsView.ok ? 'info' : 'error', text: walletsView.message }) : null);
+}
+
+// Uniswap positions added by hand, for those the board does not find in the wallets.
+function uniswapCard(store) {
+  const cfg = store.get(COLLECTION).uniswap ?? { wallets: [], chains: {} };
+  const added = addedPositions(cfg);
+  const save = (patch) => saveUniswap(store, patch);
   // A position the board does not find: a link from the Uniswap app, or a number with its chain and version.
   const addAdded = (e) => {
     e.preventDefault();
@@ -592,18 +616,10 @@ function uniswapCard(store) {
   };
 
   return h('section', { class: 'card panel' },
-    h('h2', null, 'DeFi wallets'),
-    h('p', { class: 'muted small' }, 'Add the public address of each wallet to follow. DeFi reads this list for its Uniswap positions and its wallet balances. The board only reads them. It never asks for a key and never signs anything.'),
-    wallets.length
-      ? h('ul', { class: 'stack' }, wallets.map((w, i) => h('li', { class: 'row between' },
-        h('span', null, w.label ? `${w.label} · ` : '', copyable(w.address)),
-        h('button', { type: 'button', class: 'btn-small', onclick: () => save({ wallets: wallets.filter((_, j) => j !== i) }) }, 'Remove'))))
-      : h('p', { class: 'muted small' }, 'No wallets yet.'),
-    h('form', { class: 'row', onsubmit: addWallet },
-      h('input', { name: 'label', placeholder: 'Label (optional)', 'aria-label': 'Wallet label' }),
-      h('input', { name: 'address', placeholder: '0x…', spellcheck: false, 'aria-label': 'Wallet address' }),
-      h('button', { type: 'submit', class: 'btn-small' }, 'Add wallet')),
-    h('p', { class: 'muted small' }, 'Positions added by hand: a v3 position held by an address that is not in the list, or a v4 position the board does not find. v4 positions are found by searching each wallet\'s history on the chain, and most public nodes only search recent blocks. The Liquidity Pools tab has the same Add position button.'),
+    h('h2', null, 'Uniswap'),
+    h('p', { class: 'muted small' }, 'Uniswap v3 and v4 positions are read from the wallets in ',
+      h('button', { type: 'button', class: 'btn-link-inline', onclick: () => { view.section = 'wallets'; store.refresh(); } }, 'Wallets'), '.'),
+    h('p', { class: 'muted small' }, 'Positions added by hand: a v3 position held by an address that is not in Wallets, or a v4 position the board does not find. v4 positions are found by searching each wallet\'s history on the chain, and most public nodes only search recent blocks. The Liquidity Pools tab has the same Add position button.'),
     added.length ? addedList(store, added, removeAdded) : null,
     (() => {
       const f = positionFields();
@@ -870,6 +886,7 @@ function draw(root, store) {
       : view.section === 'google' ? googleCard(store)
         : view.section === 'exchange' ? exchangeCard(store)
         : view.section === 'appearance' ? appearanceCard(store)
+        : view.section === 'wallets' ? walletsCard(store)
         : view.section === 'uniswap' ? uniswapCard(store)
         : view.section === 'blockchains' ? chainsCard(store)
         : view.section === 'contracts' ? contractsCard(store)

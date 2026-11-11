@@ -119,7 +119,7 @@ export function lendingTab(store, ui) {
   const wallets = walletsOf(store);
   const chains = aaveChains(cfg);
   if (!wallets.length) {
-    return { subtitle: 'Aave lending and borrowing positions of your wallets.', actions: [], body: setupBanner('uniswap', 'Add a wallet address in Settings to see its Aave positions.') };
+    return { subtitle: 'Aave lending and borrowing positions of your wallets.', actions: [], body: setupBanner('wallets', 'Add a wallet address in Settings to see its Aave positions.') };
   }
   if (state.status === 'idle' && !state.rows.length) state.rows = savedRows(store, chains, wallets);
   if (state.status === 'idle' || (state.status === 'ok' && Date.now() - state.at > STALE_MS)) setTimeout(() => load(store), 0);
