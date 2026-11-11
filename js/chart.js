@@ -115,7 +115,12 @@ export function lineChart(labels, series, { format = (v) => v.toLocaleString(), 
       });
     }
     labels.forEach((label, i) => {
-      if (i % every === 0) body += `<text x="${xOf(i).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="axis">${esc(label)}</text>`;
+      if (i % every) return;
+      // A label too close to an edge is anchored inside, so it is not cut off.
+      const half = (String(label).length * 6) / 2;
+      const anchor = xOf(i) < half ? 'start' : xOf(i) > W - half ? 'end' : 'middle';
+      const x = anchor === 'start' ? 0 : anchor === 'end' ? W : xOf(i);
+      body += `<text x="${x.toFixed(1)}" y="${H - 6}" text-anchor="${anchor}" class="axis">${esc(label)}</text>`;
     });
     body += `<line x1="0" x2="${W}" y1="${H - PAD}" y2="${H - PAD}" class="baseline"/>`;
     labels.forEach((_, i) => { body += `<rect class="hit" data-i="${i}" x="${(i * slot).toFixed(1)}" y="0" width="${slot.toFixed(1)}" height="${H - PAD}"/>`; });
