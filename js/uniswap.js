@@ -9,6 +9,7 @@ const ETH_LOGO = trustLogo('ethereum');
 
 // The chains the LP tab reads. Each address is Uniswap's own deployment on that chain, checked on-chain.
 // The same address is not used on every chain, so every chain carries its own.
+// v4 is left out on a chain Uniswap has not deployed v4 to.
 // v4.start is the first block worth searching for v4 positions (the deployment, or a day before it).
 // span is the widest block range the default node accepts in one log search.
 const ETH = { symbol: 'ETH', coingecko: 'ethereum', logo: ETH_LOGO };
@@ -839,6 +840,9 @@ export const addedPositions = (cfg) => [
 ];
 export const addedListOf = (version) => (version === 'v3' ? 'v3ids' : 'v4ids');
 
+// Whether the board reads positions of this Uniswap version on the chain.
+export const hasVersion = (chain, version) => version === 'v3' || (version === 'v4' && Boolean(chain.v4));
+
 // Reads a Uniswap app link (…/positions/<v3|v4>/<chain>/<id>), which names its chain, version and number.
 // Returns null for text that is not such a link, and { slug } alone when the link names a chain the board does not read.
 export function readLink(text) {
@@ -846,7 +850,8 @@ export function readLink(text) {
   if (!m) return null;
   const slug = m[2].toLowerCase();
   const chain = CHAINS.find((c) => c.app === slug);
-  return chain ? { chainId: chain.id, version: m[1].toLowerCase(), tokenId: m[3], slug } : { slug };
+  const version = m[1].toLowerCase();
+  return chain && hasVersion(chain, version) ? { chainId: chain.id, version, tokenId: m[3], slug } : { slug, version };
 }
 
 // Reads what was typed to add a position: a Uniswap app link, or a plain number, which takes the chain and version
@@ -855,7 +860,8 @@ export function parsePosition(text, chainId, version) {
   const link = readLink(text);
   if (link) return link.chainId ? { chainId: link.chainId, version: link.version, tokenId: link.tokenId } : null;
   const s = String(text ?? '').trim();
-  return /^\d+$/.test(s) && CHAINS.some((c) => c.id === chainId) && ['v3', 'v4'].includes(version) ? { chainId, version, tokenId: s } : null;
+  const chain = CHAINS.find((c) => c.id === chainId);
+  return /^\d+$/.test(s) && chain && hasVersion(chain, version) ? { chainId, version, tokenId: s } : null;
 }
 
 // Adds a parsed position to the settings. Returns an error message, or '' when it was added.
