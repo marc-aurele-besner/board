@@ -1001,6 +1001,7 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .status-pill.out { color: var(--expense); background: color-mix(in srgb, var(--expense) 12%, transparent); }
 .status-pill.closed { color: var(--muted); background: var(--surface-2); }
 .pool-card.is-closed { opacity: 0.8; }
+.lp-tabs { align-self: flex-start; }
 .pool-card.is-closed .range-band { opacity: 0.4; }
 .outdated-pill { display: inline-flex; align-items: center; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
 .status-pill .dot { position: relative; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -1166,8 +1167,8 @@ label.check { cursor: pointer; }
 .palette-foot { margin: 0; padding: 0 8px 4px; }
 
 /* Segmented controls that sit in a row instead of filling it */
-.r-tabs, .r-layout, .lp-layout { margin: 0; flex: none; }
-.r-tabs .seg, .r-layout .seg, .lp-layout .seg { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; white-space: nowrap; }
+.r-tabs, .r-layout, .lp-layout, .lp-tabs { margin: 0; flex: none; }
+.r-tabs .seg, .r-layout .seg, .lp-layout .seg, .lp-tabs .seg { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; white-space: nowrap; }
 
 /* Kitchen: a searchable gallery, as cards or as a list */
 .r-bar { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; }

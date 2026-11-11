@@ -625,7 +625,7 @@ function poolStat(label, value, title = null) {
 }
 
 // One position as a card: the pair, its chain and fee, the range, the value and the token split.
-function poolCard(r, i) {
+function poolCard(r, i, collected) {
   const chain = chainOf(r.chainId);
   return h('article', { class: `pool-card ${r.closed ? 'is-closed' : r.inRange ? 'is-in' : 'is-out'}${i === null ? '' : ' enter'}`, style: { '--i': i ?? 0 } },
     h('header', { class: 'pool-head' },
@@ -645,7 +645,9 @@ function poolCard(r, i) {
     h('div', { class: 'pool-stats' },
       poolStat('Value', usdOrDash(r.value)),
       poolStat('Unclaimed fees', usdOrDash(r.fees)),
-      poolStat(`Fee APR · ${WINDOWS[view.window][1]}`, aprText(r), aprTitle(r))),
+      r.closed
+        ? poolStat('Fees collected', collected.has(r.ref) ? money(collected.get(r.ref), 'USD') : '—', 'The collections of this position in the fee log')
+        : poolStat(`Fee APR · ${WINDOWS[view.window][1]}`, aprText(r), aprTitle(r))),
     distribution(r),
     h('footer', { class: 'pool-foot muted small' },
       h('span', null, r.owner),
@@ -753,14 +755,218 @@ function addForm(store) {
     view.addMessage ? notice({ text: view.addMessage }) : null);
 }
 
+// ---- Fees collected: the log of collections, its averages and a chart over time ----
+
+const DAY_MS = 86400000;
+const FEE_RANGES = { all: [0, 'All time'], 30: [30, '30 days'], 90: [90, '90 days'], 365: [365, '1 year'] };
+const FEE_GROUPS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month']];
+
+// Local calendar keys, so a collect late in the evening counts on its own day.
+const localDay = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+function bucketOf(date, group) {
+  if (group === 'month') return localDay(date).slice(0, 7);
+  if (group === 'week') return localDay(new Date(date.getFullYear(), date.getMonth(), date.getDate() - ((date.getDay() + 6) % 7))); // its Monday
+  return localDay(date);
+}
+// Every bucket from the first to the last, so quiet days or months show as gaps rather than vanishing.
+function bucketsBetween(from, to, group) {
+  const keys = [];
+  const d = new Date(from.getFullYear(), from.getMonth(), group === 'month' ? 1 : from.getDate());
+  if (group === 'week') d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  while (d <= to && keys.length < 2000) {
+    keys.push(bucketOf(d, group));
+    if (group === 'month') d.setMonth(d.getMonth() + 1);
+    else d.setDate(d.getDate() + (group === 'week' ? 7 : 1));
+  }
+  return keys;
+}
+const bucketLabel = (key, group) => (group === 'month'
+  ? new Date(`${key}-01T00:00`).toLocaleDateString(undefined, { month: 'short', year: '2-digit' })
+  : new Date(`${key}T00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+
+const collectedOf = (store) => store.get(COLLECTION)?.collected ?? [];
+
+// What the log holds per position, in USD, for the closed cards.
+function collectedByRef(store) {
+  const out = new Map();
+  for (const c of collectedOf(store)) if (c.ref) out.set(c.ref, (out.get(c.ref) ?? 0) + (c.usd ?? 0));
+  return out;
+}
+
+function removeCollect(store, entry) {
+  store.update(COLLECTION, (d) => {
+    d.collected = (d.collected ?? []).filter((c) => c.id !== entry.id);
+  });
+  toast('Collection removed.', {
+    undo: () => store.update(COLLECTION, (d) => {
+      d.collected = [...(d.collected ?? []), entry];
+    }),
+  });
+}
+
+// Logs a collection by hand: one the board did not see, such as a collect with no read before it.
+function logForm(store) {
+  const rows = [...state.rows].sort((a, b) => a.pair.localeCompare(b.pair));
+  const submit = (e) => {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const usd = Number(String(form.get('usd')).replace(/[$,\s]/g, ''));
+    const date = String(form.get('date'));
+    if (!(usd > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      view.logMessage = 'Enter the date and the amount collected in USD.';
+      return store.refresh();
+    }
+    const r = rows.find((x) => x.ref === form.get('ref'));
+    const note = String(form.get('note') ?? '').trim();
+    // Noon local time, so the entry stays on its day in any time zone.
+    const at = new Date(`${date}T12:00`).toISOString();
+    view.logging = false;
+    view.logMessage = '';
+    store.update(COLLECTION, (d) => {
+      d.collected = [...(d.collected ?? []), {
+        id: uid(), at, source: 'manual', usd, note,
+        ...(r ? { ref: r.ref, pair: r.pair, chain: r.chain, tokenId: r.tokenId } : {}),
+      }];
+    });
+  };
+  return h('form', { class: 'card panel stack lp-add', onsubmit: submit },
+    h('h3', null, 'Log a collection'),
+    h('p', { class: 'muted small' }, 'For a collection the board did not see. A collect between two reads is logged by itself.'),
+    h('div', { class: 'row' },
+      h('input', { type: 'date', name: 'date', value: todayISO(), max: todayISO(), 'aria-label': 'Date collected' }),
+      h('input', { name: 'usd', inputmode: 'decimal', placeholder: 'Amount in USD', autofocus: true, 'aria-label': 'Amount collected in USD' })),
+    h('select', { name: 'ref', 'aria-label': 'Position' },
+      h('option', { value: '' }, 'No position'),
+      rows.map((r) => h('option', { value: r.ref }, `${r.pair} · ${r.chain} · #${r.tokenId}${r.closed ? ' (closed)' : ''}`))),
+    h('input', { name: 'note', placeholder: 'Note (optional)', 'aria-label': 'Note' }),
+    h('div', { class: 'row' },
+      h('button', { type: 'submit', class: 'btn-small' }, 'Log'),
+      h('button', { type: 'button', class: 'btn-small', onclick: () => { view.logging = false; store.refresh(); } }, 'Cancel')),
+    view.logMessage ? notice({ text: view.logMessage }) : null);
+}
+
+const tokenAmounts = (c) => (c.a0 != null ? `${amount(c.a0)} ${c.sym0} · ${amount(c.a1)} ${c.sym1}` : '');
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+function feesView(store) {
+  const all = [...collectedOf(store)].sort((a, b) => b.at.localeCompare(a.at));
+  const nowMs = Date.now();
+  const days = FEE_RANGES[view.feeRange][0];
+  const list = days ? all.filter((c) => Date.parse(c.at) >= nowMs - days * DAY_MS) : all;
+  const total = list.reduce((s, c) => s + (c.usd ?? 0), 0);
+  const unpriced = list.filter((c) => c.usd == null).length;
+  // Averages run from the first collection, or the start of the range, to now, so quiet days count too.
+  const first = all.length ? Math.min(nowMs, Date.parse(all[all.length - 1].at)) : nowMs;
+  const start = days ? Math.max(nowMs - days * DAY_MS, first) : first;
+  const spanDays = Math.max(1, (nowMs - start) / DAY_MS);
+  const perDay = total / spanDays;
+
+  const stat = (label, value, hint = null) => h('div', { class: 'card lp-stat' },
+    h('span', { class: 'muted' }, label), h('strong', null, value), hint ? h('span', { class: 'muted small' }, hint) : null);
+  const pills = (items, current, set) => h('div', { class: 'row lp-filters' }, items.map(([key, label]) =>
+    h('button', {
+      type: 'button',
+      class: current === key ? 'period-btn active' : 'period-btn',
+      'aria-pressed': String(current === key),
+      onclick: () => {
+        set(key);
+        store.refresh();
+      },
+    }, label)));
+
+  let chart = null;
+  if (list.length) {
+    const sums = new Map();
+    for (const c of list) {
+      const key = bucketOf(new Date(c.at), view.feeGroup);
+      sums.set(key, (sums.get(key) ?? 0) + (c.usd ?? 0));
+    }
+    const keys = bucketsBetween(new Date(start), new Date(nowMs), view.feeGroup);
+    chart = barChart(keys.map((k) => bucketLabel(k, view.feeGroup)), [{ name: 'Collected', color: 'var(--accent)', values: keys.map((k) => sums.get(k) ?? 0) }], { format: (v) => money(v, 'USD') });
+  }
+
+  const table = h('div', { class: 'card mon-scroll' },
+    h('table', { class: 'mon-table' },
+      h('thead', null, h('tr', null, h('th', null, 'Date'), h('th', null, 'Position'), h('th', null, 'Tokens'), h('th', { class: 'num' }, 'Value'), h('th', null, ''))),
+      h('tbody', null, list.map((c) => h('tr', null,
+        h('td', { title: c.since ? `Collected between ${new Date(c.since).toLocaleString()} and ${new Date(c.at).toLocaleString()}` : null },
+          new Date(c.at).toLocaleDateString(),
+          h('div', { class: 'muted small' }, c.source === 'manual' ? 'Logged by hand' : 'Seen by the board')),
+        h('td', null,
+          c.pair ? h('strong', null, c.pair) : h('span', { class: 'muted' }, '—'),
+          h('div', { class: 'muted small' }, [c.chain, c.tokenId ? `#${c.tokenId}` : '', c.note].filter(Boolean).join(' · '))),
+        h('td', { class: 'small' }, tokenAmounts(c)),
+        h('td', { class: 'num', title: c.source === 'auto' ? 'The unclaimed fees at the read before the collect. Fees earned after that read are not counted.' : null }, usdOrDash(c.usd ?? null)),
+        h('td', null, h('button', {
+          type: 'button',
+          class: 'icon-btn',
+          title: 'Remove',
+          'aria-label': `Remove the collection of ${new Date(c.at).toLocaleDateString()}`,
+          onclick: () => removeCollect(store, c),
+        }, icon('trash'))))))));
+
+  return h('div', { class: 'stack-lg' },
+    h('div', { class: 'row between' },
+      pills(['all', '30', '90', '365'].map((k) => [k, FEE_RANGES[k][1]]), view.feeRange, (k) => { view.feeRange = k; }),
+      view.logging ? null : h('button', {
+        type: 'button',
+        class: 'btn-small',
+        onclick: () => {
+          view.logging = true;
+          view.logMessage = '';
+          store.refresh();
+        },
+      }, icon('plus'), 'Log a collection')),
+    view.logging ? logForm(store) : null,
+    h('div', { class: 'lp-stats' },
+      stat('Collected', money(total, 'USD'), plural(list.length, 'collection')),
+      stat('Per day', money(perDay, 'USD'), `over ${plural(Math.round(spanDays), 'day')}`),
+      stat('Per week', money(perDay * 7, 'USD')),
+      stat('Per month', money(perDay * 30.44, 'USD')),
+      stat('Per year', money(perDay * 365, 'USD'))),
+    unpriced ? h('p', { class: 'muted small' }, `${plural(unpriced, 'collection')} without a USD value (prices were unavailable) ${unpriced === 1 ? 'is' : 'are'} left out of the totals.`) : null,
+    list.length
+      ? h('section', { class: 'card stack' },
+          h('div', { class: 'row between' }, h('h3', null, 'Over time'), pills(FEE_GROUPS, view.feeGroup, (k) => { view.feeGroup = k; })),
+          chart)
+      : null,
+    list.length
+      ? table
+      : h('div', { class: 'lp-empty' },
+          h('span', { class: 'float' }, icon('coins')),
+          h('p', null, all.length ? 'No collections in this range.' : 'No collections yet. When a position\'s unclaimed fees drop between two reads, the board logs what was collected here. You can also log one by hand.')));
+}
+
+// The tab's two views: the positions, and the fees collected from them.
+function tabs(store) {
+  return h('div', { class: 'segmented lp-tabs', role: 'tablist', 'aria-label': 'Liquidity Pools view' },
+    [['positions', 'Positions', 'droplet'], ['fees', 'Fees collected', 'coins']].map(([key, label, iconName]) =>
+      h('button', {
+        type: 'button',
+        role: 'tab',
+        class: view.tab === key ? 'seg active' : 'seg',
+        'aria-selected': String(view.tab === key),
+        onclick: () => {
+          view.tab = key;
+          store.refresh();
+        },
+      }, icon(iconName), label)));
+}
+
 function draw(root, store) {
   const cfg = store.get('settings').uniswap ?? {};
   const wallets = (cfg.wallets ?? []).filter((w) => isAddress(w.address));
   if (!wallets.length && !addedPositions(cfg).length) {
+    // The log of collections stays reachable once there is one, even with no wallet left.
+    const logged = collectedOf(store).length > 0;
+    if (!logged) view.tab = 'positions';
     return root.replaceChildren(h('div', { class: 'stack-lg' },
       h('h2', null, 'Liquidity Pools'),
-      setupBanner('uniswap', 'Add a wallet address in Settings to see its Uniswap positions.'),
-      view.adding ? addForm(store) : h('button', { type: 'button', class: 'btn-small', onclick: () => openAdd(store) }, icon('plus'), 'Add a position by link or number')));
+      logged ? tabs(store) : null,
+      view.tab === 'fees'
+        ? feesView(store)
+        : [setupBanner('uniswap', 'Add a wallet address in Settings to see its Uniswap positions.'),
+            view.adding ? addForm(store) : h('button', { type: 'button', class: 'btn-small', onclick: () => openAdd(store) }, icon('plus'), 'Add a position by link or number')]));
   }
   // Until the first read lands, show what the last one saved.
   if (state.status === 'idle' && !state.rows.length) {
@@ -840,9 +1046,10 @@ function draw(root, store) {
   } else if (shown.length) {
     // Rows new to the screen slide in, one after another; the rest stay still.
     let order = 0;
+    const collected = collectedByRef(store);
     body = view.layout === 'list'
       ? poolTable(shown, store)
-      : h('div', { class: 'lp-grid' }, shown.map((r) => poolCard(r, seen.has(r.ref) ? null : order++)));
+      : h('div', { class: 'lp-grid' }, shown.map((r) => poolCard(r, seen.has(r.ref) ? null : order++, collected)));
     shown.forEach((r) => seen.add(r.ref));
   } else {
     const filtered = view.filter !== 'all' || view.chain !== 'all';
@@ -874,6 +1081,8 @@ function draw(root, store) {
     state.status === 'error' ? notice({ text: `The positions could not be read: ${state.error}` }) : null,
     chainCount === 0 ? notice({ tone: 'info', text: 'No chains are selected. Pick the chains to read in Settings.' }) : null,
 
+    tabs(store),
+    view.tab === 'fees' ? feesView(store) : [
     h('div', { class: 'lp-stats' },
       h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Total liquidity'), valueEl),
       h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Unclaimed fees'), feesEl),
@@ -921,7 +1130,7 @@ function draw(root, store) {
             },
           }, icon(iconName), label))))),
 
-    body));
+    body]));
 
   for (const run of counters) run();
 }
@@ -940,6 +1149,9 @@ export default {
     view: view.layout === 'list' ? 'list' : '',
     sort: view.sort === 'value' && view.dir === -1 ? '' : sortName(view.sort, view.dir),
     apr: view.window === '24h' ? '' : view.window,
+    tab: view.tab === 'fees' ? 'fees' : '',
+    range: view.feeRange === 'all' ? '' : view.feeRange,
+    by: view.feeGroup === 'month' ? '' : view.feeGroup,
   }),
   restore: (p = {}) => {
     view.filter = ['in', 'out', 'closed'].includes(p.filter) ? p.filter : 'all';
@@ -948,5 +1160,8 @@ export default {
     view.window = Object.hasOwn(WINDOWS, p.apr) ? p.apr : '24h';
     const id = Number(p.chain);
     view.chain = CHAINS.some((c) => c.id === id) ? id : 'all';
+    view.tab = p.tab === 'fees' ? 'fees' : 'positions';
+    view.feeRange = Object.hasOwn(FEE_RANGES, p.range) ? p.range : 'all';
+    view.feeGroup = ['day', 'week'].includes(p.by) ? p.by : 'month';
   },
 };
