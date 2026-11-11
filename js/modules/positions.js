@@ -881,7 +881,7 @@ function hueOf(text) {
 // A logo image, or a monogram when there is no image or it fails to load.
 // Logos already shown once are drawn at once on a redraw: no lazy load and no fade, which made them blink.
 const shownLogos = new Set();
-function logo(src, label, cls = '') {
+export function logo(src, label, cls = '') {
   const monogram = () => h('span', { class: 'mono', style: { '--hue': hueOf(label) }, 'aria-hidden': 'true' }, String(label).slice(0, 2).toUpperCase());
   if (!src) return h('span', { class: `logo ${cls}`, title: label }, monogram());
   const known = shownLogos.has(src);
