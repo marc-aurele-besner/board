@@ -416,6 +416,37 @@ function issueControl(store, item, repos) {
   }, icon('repo'));
 }
 
+// A task as Markdown: a checklist line with its status, project and deadline, then its description indented.
+function taskMarkdown(item, projects) {
+  const status = statusOf(item);
+  const project = projects.find((p) => p.id === item.projectId)?.name;
+  const details = [status === 'done' ? '' : label(STATUSES, status), project, item.due ? `due ${item.due}` : ''].filter(Boolean);
+  const head = `- [${status === 'done' ? 'x' : ' '}] ${item.text}${details.length ? ` (${details.join(' · ')})` : ''}`;
+  const desc = (item.description ?? '').trim();
+  return desc ? `${head}\n${desc.split(/\r?\n/).map((l) => `  ${l}`).join('\n')}` : head;
+}
+
+async function copyTasks(store, items) {
+  if (!items.length) return;
+  const text = items.map((i) => taskMarkdown(i, projectsOf(store))).join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(items.length === 1 ? 'Task copied' : `${items.length} tasks copied`);
+  } catch {
+    toast('Could not copy: the browser blocked the clipboard');
+  }
+}
+
+function copyButton(store, item) {
+  return h('button', {
+    type: 'button',
+    class: 'icon-btn copy-btn',
+    title: 'Copy',
+    'aria-label': `Copy "${item.text}"`,
+    onclick: () => copyTasks(store, [item]),
+  }, icon('copy'));
+}
+
 // Marks a task done, or back to "To do" when it already is.
 function doneButton(store, item) {
   const done = statusOf(item) === 'done';
@@ -564,6 +595,7 @@ function todoRow(store, item, ctx) {
         hasDescription
           ? h('span', { class: 'desc-indicator', title: 'Has a description', 'aria-label': 'Has a description' }, icon('align-left'))
           : null,
+        copyButton(store, item),
         h('button', {
           type: 'button',
           class: expanded ? 'icon-btn chevron open' : 'icon-btn chevron',
@@ -628,6 +660,7 @@ function boardCard(store, item, projects) {
       }),
       h('div', { class: 'row kanban-actions' },
         item.description ? h('span', { class: 'desc-indicator', title: 'Has a description', 'aria-label': 'Has a description' }, icon('align-left')) : null,
+        copyButton(store, item),
         h('button', {
           type: 'button',
           class: expanded ? 'icon-btn chevron open' : 'icon-btn chevron',
