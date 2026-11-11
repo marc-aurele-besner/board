@@ -1,7 +1,7 @@
 // Settings sections for Google Calendar accounts, Telegram, Google Analytics, the search consoles, Resend, Gmail, notifications and automations.
 import { h, icon, empty, notice, statusOf, copyable } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
-import { connect, isConnected } from '../google.js';
+import { connect, isConnected, accountAvatar } from '../google.js';
 import { checkBot, findChat, pollTelegram, hasTelegram } from '../telegram.js';
 import { propertyName, checkBing, BING_RELAY } from '../webstats.js';
 import { checkResend, resendSettings, RESEND_RELAY } from '../resend.js';
@@ -93,7 +93,7 @@ function calendarAccount(store, account, projects, clientId) {
   };
   return h('div', { class: 'svc-section' },
     h('div', { class: 'row between' },
-      h('h3', { class: 'grow' }, account.email),
+      h('h3', { class: 'grow row' }, accountAvatar(account.email, 'account-avatar large'), account.email),
       badge(connected ? 'Connected' : 'Not connected', connected ? 'done' : 'plain'),
       connected
         ? h('button', { type: 'button', class: 'btn-small', onclick: () => { disconnectCalendar(account.email); sayRow('Disconnected.'); } }, 'Disconnect')
@@ -485,9 +485,8 @@ function gmailRow(store, account, projects, saveAccounts, clientId) {
     });
     sayRow('');
   };
-  const project = projects.find((p) => p.id === account.projectId);
   return h('li', { class: 'resend-row has-key' },
-    h('div', { class: 'resend-name' }, project ? projectIcon(project) : icon('mail'), h('strong', { title: account.email }, account.email)),
+    h('div', { class: 'resend-name' }, accountAvatar(account.email), h('strong', { title: account.email }, account.email)),
     h('div', { class: 'resend-key' },
       h('div', { class: 'gmail-picks' },
         projectPick(projects, account.projectId, 'No project', setProject),

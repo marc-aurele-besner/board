@@ -3,7 +3,7 @@
 // settings.json keeps gcal: { accounts: [{ email, projectId, labelId, calendars: [{ id, name, color, on, projectId, labelId }] }] }.
 // The account's project and project label are optional defaults; a calendar's own ones win. Events are cached in this
 // browser only (localStorage), so a reload shows the last read at once and Google is asked again when it is stale.
-import { loadGis } from './google.js';
+import { loadGis, PROFILE_SCOPE, rememberPicture } from './google.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
 const API = 'https://www.googleapis.com/calendar/v3';
@@ -104,14 +104,15 @@ export async function connectCalendar(clientId, address = '') {
   const value = await new Promise((resolve, reject) => {
     const client = window.google.accounts.oauth2.initTokenClient({
       client_id: clientId,
-      scope: SCOPE,
+      // The profile is only read for the account's picture.
+      scope: `${SCOPE} ${PROFILE_SCOPE}`,
       // Other Google services granted earlier are not mixed into a calendar account's token.
       include_granted_scopes: false,
       ...(address ? { login_hint: address } : {}),
       callback: (resp) => {
         if (resp.error) return reject(new Error(resp.error_description || resp.error));
         if (!String(resp.scope ?? '').split(' ').includes(SCOPE)) return reject(new Error('Google did not grant calendar access. Tick its box on the consent screen.'));
-        resolve({ value: resp.access_token, expiresAt: Date.now() + (Number(resp.expires_in) - 60) * 1000 });
+        resolve({ value: resp.access_token, expiresAt: Date.now() + (Number(resp.expires_in) - 60) * 1000, scope: resp.scope });
       },
       error_callback: (err) => reject(new Error(err?.message || 'Google sign-in was closed.')),
     });
@@ -122,6 +123,7 @@ export async function connectCalendar(clientId, address = '') {
   const signedIn = String(id ?? '').toLowerCase();
   if (address && signedIn !== address) throw new Error(`You signed in as ${signedIn}, not ${address}.`);
   tokens.set(signedIn, value);
+  await rememberPicture(signedIn, value.value, value.scope);
   return signedIn;
 }
 

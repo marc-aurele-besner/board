@@ -2147,3 +2147,9 @@ button.sum-line:hover { background: var(--surface-2); }
 .sum-line-name { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .sum-line-name > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sum-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Google account avatars: the account's picture, or its first letter. */
+.account-avatar { flex: none; width: 20px; height: 20px; border-radius: 50%; object-fit: cover; background: var(--surface-2); }
+.account-avatar.is-letter { display: inline-flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 600; color: var(--accent-text); background: var(--accent); }
+.account-avatar.large { width: 28px; height: 28px; font-size: 0.85rem; }
+.opt-plain .account-avatar { width: 16px; height: 16px; font-size: 0.6rem; }

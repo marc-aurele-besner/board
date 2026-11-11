@@ -99,6 +99,7 @@ Nothing runs on a server, and everything automatic runs only while the board is 
 | Liquidity Pools AI insights | `openrouter.ai`, with your key | for each open position shown: its pair, chain, fee tier, price range, current price, value, unclaimed fees, fee APR and token split |
 | Telegram | `api.telegram.org` | your bot token, and the messages you exchange with your bot |
 | Calendar | Google Calendar API (`www.googleapis.com/calendar`), with your own OAuth Client ID | a read-only sign-in per account that lasts about an hour, to list its calendars and read the events of the range on screen |
+| Account pictures (Gmail, Calendar) | Google's profile endpoint (`www.googleapis.com/oauth2/v3/userinfo`) at sign-in, then the picture from `googleusercontent.com` | the account's sign-in token; the picture's address is kept in this browser only |
 | Analytics, Search Console | Google, with your own OAuth Client ID | a read-only sign-in that lasts about an hour |
 | Liquidity Pools | each chain's node (public nodes by default, or the ones you set; each call goes to one of them) | your wallet addresses and the position numbers |
 | DeFi → Wallets | each chain's node, as above | your wallet addresses and the token addresses checked |
