@@ -37,7 +37,7 @@ function get(key, path, relay) {
       try {
         res = await fetch(base + path, { headers: { Authorization: `Bearer ${key}` } });
       } catch {
-        throw new Error(`Could not reach the Resend relay at ${base}. Start it with: bun tools/start.js`);
+        throw new Error(`Could not reach the Resend relay at ${base}. Start it with: bun start`);
       }
       const body = await res.json().catch(() => null);
       if (res.ok) return body;

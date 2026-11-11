@@ -1,12 +1,14 @@
-// Static server for the board, with no dependencies: `bun tools/serve.js` (or `node tools/serve.js`). PORT changes the port.
+// Static server for the board, with no dependencies: `bun run serve` (or `node tools/serve.js`). PORT changes the port.
 // Every response says `no-cache`, so the browser revalidates each module on reload and runs the code just edited.
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { logger } from './log.js';
 
 const PORT = Number(process.env.PORT) || 8000;
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const log = logger('board');
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -22,6 +24,12 @@ const TYPES = {
 };
 
 createServer(async (req, res) => {
+  // A reload fetches every module, so only page loads and failures are logged.
+  const started = performance.now();
+  res.on('finish', () => {
+    const page = /^\/(index\.html)?$/.test(new URL(req.url, 'http://board').pathname);
+    if (page || res.statusCode >= 400) log.request(req.method, new URL(req.url, 'http://board').pathname, res.statusCode, performance.now() - started);
+  });
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405).end();
     return;
@@ -45,7 +53,7 @@ createServer(async (req, res) => {
   }
 })
   .on('error', (err) => {
-    console.error(err.code === 'EADDRINUSE' ? `Port ${PORT} is in use. Pick another with PORT=<port>.` : err.message);
+    log.error(err.code === 'EADDRINUSE' ? `Port ${PORT} is in use. Pick another with PORT=<port>.` : err.message);
     process.exit(1);
   })
-  .listen(PORT, 'localhost', () => console.log(`Board at http://localhost:${PORT}`));
+  .listen(PORT, 'localhost', () => log.info(`Board at http://localhost:${PORT}`));
