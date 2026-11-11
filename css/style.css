@@ -104,6 +104,10 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
 .head-title h2 { margin: 0; }
 .head-actions { gap: 8px 10px; flex-wrap: wrap; justify-content: flex-end; }
 .head-actions .muted { margin-left: auto; }
+.todo-search { flex-direction: row; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--muted); flex: 1 1 200px; max-width: 320px; }
+.todo-search:focus-within, .todo-search.active { border-color: var(--accent); }
+.todo-search input { border: none; background: none; padding: 6px 0; }
+.todo-search input:focus { outline: none; }
 .meta-inline { gap: 6px; flex-wrap: wrap; }
 .tree-row { display: flex; align-items: center; gap: 2px; border-radius: 8px; }
 .tree-row > .nav-item { flex: 1; min-width: 0; }

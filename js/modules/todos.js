@@ -9,6 +9,7 @@ import { openDialog } from '../modal.js';
 import { ask, parseJson } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
+import { taskMatcher, QUERY_HINT } from '../task-query.js';
 
 const COLLECTION = 'todos';
 const STATUSES = [
@@ -42,8 +43,10 @@ const STATUS_GROUP_ORDER = ['doing', 'review', 'ondeck', 'todo', 'blocked', 'pau
 // View state lives here so it survives re-renders.
 // filter: one of SMART_LISTS, or a project id. status: a STATUS_FILTERS key. category: '' means any.
 // sort: { key, dir }. colFilter: per-column filters. An empty value means "any".
+// query: the search box, read by taskMatcher (words plus #project, !priority, is:status, cat:, due: tokens).
 const view = {
   layout: 'table',
+  query: '',
   filter: 'all',
   status: 'open',
   category: '',
@@ -895,6 +898,36 @@ function categoriesManager(store) {
 
 // --- Page ---
 
+// The search re-renders after a short pause; the shell keeps focus and the caret in the box across the render.
+let searchTimer = null;
+function searchBox(store) {
+  const input = h('input', {
+    type: 'search',
+    value: view.query,
+    placeholder: 'Search tasks',
+    title: `Search tasks: ${QUERY_HINT}`,
+    'aria-label': 'Search tasks',
+    autocomplete: 'off',
+    oninput: (e) => {
+      clearTimeout(searchTimer);
+      const value = e.target.value;
+      searchTimer = setTimeout(() => {
+        view.query = value;
+        store.refresh();
+      }, 180);
+    },
+    onkeydown: (e) => {
+      if (e.key === 'Escape' && view.query) {
+        e.stopPropagation();
+        clearTimeout(searchTimer);
+        view.query = '';
+        store.refresh();
+      }
+    },
+  });
+  return h('label', { class: view.query ? 'todo-search active' : 'todo-search' }, icon('search'), input);
+}
+
 function draw(root, store) {
   const projects = projectsOf(store);
   const { items } = store.get(COLLECTION);
@@ -944,8 +977,10 @@ function draw(root, store) {
   };
 
   // Filters first, then the sort. Manual order is kept when no sort is active.
+  // A search that names a status (is:done) overrides the "Show" filter, so done tasks can be found.
+  const matchesQuery = taskMatcher(view.query, projects);
   const visible = sortItems(
-    items.filter((i) => matchesFilter(i) && matchesStatus(i) && matchesCategory(i) && matchesColumns(i)),
+    items.filter((i) => matchesFilter(i) && (matchesQuery.hasStatus || matchesStatus(i)) && matchesCategory(i) && matchesColumns(i) && matchesQuery(i)),
     projects,
   );
   const columnsActive = Object.values(view.colFilter).some(Boolean);
@@ -958,7 +993,9 @@ function draw(root, store) {
         h('ul', { class: 'todo-list' }, rows.map(rowOf)))));
   let listBody;
   if (!visible.length) {
-    listBody = h('p', { class: 'empty' }, columnsActive || view.sort.key ? 'No todo matches these filters.' : 'Nothing matches these filters.');
+    listBody = h('p', { class: 'empty' }, matchesQuery.active
+      ? `No task matches “${view.query.trim()}”${view.status === 'open' && !matchesQuery.hasStatus ? ' among open tasks. Add is:done to look in completed ones.' : '.'}`
+      : columnsActive || view.sort.key ? 'No todo matches these filters.' : 'Nothing matches these filters.');
   } else if (view.layout === 'board') {
     listBody = boardView(store, visible, projects);
   } else if (view.layout === 'project') {
@@ -1060,6 +1097,7 @@ function draw(root, store) {
               : null,
             isProjectFilter(view.filter) ? projectMeta(store, projects.find((p) => p.id === view.filter)) : null),
           h('div', { class: 'row head-actions' },
+            searchBox(store),
             h('label', { class: 'inline' }, 'Show',
               h('select', {
                 value: view.status,
@@ -1163,6 +1201,7 @@ export default {
   serialize: () => ({
     view: view.layout === 'table' ? '' : view.layout,
     filter: view.filter,
+    q: view.query,
     status: view.status,
     category: view.category,
     more: view.showProject ? '1' : '',
@@ -1171,6 +1210,7 @@ export default {
   restore: (p = {}) => {
     view.layout = LAYOUTS.some(([k]) => k === p.view) ? p.view : 'table';
     view.filter = p.filter || 'all';
+    view.query = p.q || '';
     view.status = p.status || 'open';
     view.category = p.category || '';
     view.showProject = p.more === '1';
