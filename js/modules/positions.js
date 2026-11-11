@@ -679,7 +679,7 @@ async function loadHistory(store) {
         // This position keeps the other readings until its history can be read.
       }
     }
-    if (!key) return;
+    if (!key || chain.etherscan === false) return;
     try {
       await etherscanCollects(store, chain, node, key, wallets, rows);
       etherscanErrors.delete(chain.name);

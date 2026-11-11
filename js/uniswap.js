@@ -9,7 +9,7 @@ const ETH_LOGO = trustLogo('ethereum');
 
 // The chains the LP tab reads. Each address is Uniswap's own deployment on that chain, checked on-chain.
 // The same address is not used on every chain, so every chain carries its own.
-// v4 is left out on a chain Uniswap has not deployed v4 to.
+// v4 is left out on a chain Uniswap has not deployed v4 to. etherscan: false marks a chain Etherscan's API does not cover.
 // v4.start is the first block worth searching for v4 positions (the deployment, or a day before it).
 // span is the widest block range the default node accepts in one log search.
 const ETH = { symbol: 'ETH', coingecko: 'ethereum', logo: ETH_LOGO };
@@ -32,6 +32,7 @@ export const CHAINS = [
     v4: { positions: '0x4529a01c7a0410167c5740c487a8de60232617bf', stateView: '0x86e8631a016f9068c3f085faf484ee3f5fdee8f2', start: 6819679 } },
   { id: 4663, name: 'Robinhood Chain', rpc: 'https://rpc.mainnet.chain.robinhood.com', span: 10000000, prices: 'robinhood', app: 'robinhood', logo: ETH_LOGO, native: ETH, factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa', positions: '0x73991a25c818bf1f1128deaab1492d45638de0d3',
     v4: { positions: '0x58daec3116aae6d93017baaea7749052e8a04fa7', stateView: '0xf3334192d15450cdd385c8b70e03f9a6bd9e673b', start: 9506 } },
+  { id: 324, name: 'ZKsync Era', rpc: 'https://mainnet.era.zksync.io', span: 50000, prices: 'era', app: 'zksync', logo: trustLogo('zksync'), native: ETH, factory: '0x8FdA5a7a8dCA67BBcDd10F02Fa0649A937215422', positions: '0x0616e5762c1E7Dc3723c50663dF10a162D690a86', etherscan: false },
 ];
 
 // v4 pools hold the chain's native coin directly, as the zero address.
@@ -41,7 +42,7 @@ export const isNative = (address) => String(address).toLowerCase() === NATIVE;
 // Token logos from Uniswap's default token list, one file per chain on GitHub (which allows browser reads),
 // keyed "chainId:address" in lowercase. Fetched once; a token the list does not carry gets a monogram instead.
 const TOKEN_LIST_DIR = 'https://raw.githubusercontent.com/Uniswap/default-token-list/main/src/tokens';
-const TOKEN_LIST_FILE = { 1: 'mainnet', 8453: 'base', 42161: 'arbitrum', 10: 'optimism', 137: 'polygon', 56: 'bnb', 43114: 'avalanche', 130: 'unichain', 4663: 'robinhood' };
+const TOKEN_LIST_FILE = { 1: 'mainnet', 8453: 'base', 42161: 'arbitrum', 10: 'optimism', 137: 'polygon', 56: 'bnb', 43114: 'avalanche', 130: 'unichain', 4663: 'robinhood', 324: 'zksync' };
 let logos = null;
 export function tokenLogos() {
   logos ??= Promise.allSettled(Object.values(TOKEN_LIST_FILE).map(async (file) => {
