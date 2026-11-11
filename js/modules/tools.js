@@ -7,9 +7,10 @@ import { makeTask } from '../capture.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
 import { barChart } from '../chart.js';
+import { contractsTab, contractsSerialize, contractsRestore } from './tools-contracts.js';
 
 const COLLECTION = 'tools';
-const TABS = [['health', 'Website health', 'globe'], ['ssl', 'SSL and domains', 'shield'], ['dns', 'DNS and email', 'mail'], ['crawl', 'Crawl files', 'file'], ['meta', 'Metadata preview', 'link'], ['status', 'Provider status', 'activity']];
+const TABS = [['health', 'Website health', 'globe'], ['ssl', 'SSL and domains', 'shield'], ['dns', 'DNS and email', 'mail'], ['crawl', 'Crawl files', 'file'], ['meta', 'Metadata preview', 'link'], ['status', 'Provider status', 'activity'], ['contracts', 'Contracts', 'code']];
 // What "Check all now" looks up on each tab.
 const TAB_PARTS = { health: ['health'], ssl: ['ssl', 'domain'], dns: ['dns'], crawl: ['crawl'] };
 const EVERY = [[15, '15 minutes'], [60, 'hour'], [360, '6 hours'], [1440, 'day']];
@@ -886,15 +887,17 @@ function draw(root, store) {
   const all = view.busy.has('all');
   // Provider status follows outside services, so it works before any project has a website.
   const status = view.tab === 'status';
-  const body = status ? statusTab(store) : !sites.length
+  // Contracts are saved in Settings, not tied to a website.
+  const contracts = view.tab === 'contracts';
+  const body = contracts ? contractsTab(store) : status ? statusTab(store) : !sites.length
     ? h('div', { class: 'card stack' }, empty('No project has a website yet. Add one on a project page and it appears here.'), h('div', null, h('a', { href: '#/projects', class: 'btn-link' }, 'Open Projects')))
     : view.tab === 'ssl' ? sslTab(store, sites) : view.tab === 'dns' ? dnsTab(store, sites) : view.tab === 'crawl' ? crawlTab(store, sites) : view.tab === 'meta' ? metaTab(store, sites) : healthTab(store, sites);
 
   root.replaceChildren(
     h('div', { class: 'stack-lg tools' },
       h('header', { class: 'row between' },
-        h('div', null, h('h2', null, 'Tools'), h('p', { class: 'muted small' }, 'Checks that run against the website of each project, and the services they rely on, while the board is open.')),
-        (sites.length || (status && store.get(COLLECTION).providers.length)) && view.tab !== 'meta'
+        h('div', null, h('h2', null, 'Tools'), h('p', { class: 'muted small' }, contracts ? 'Read and write the smart contracts saved in Settings.' : 'Checks that run against the website of each project, and the services they rely on, while the board is open.')),
+        !contracts && (sites.length || (status && store.get(COLLECTION).providers.length)) && view.tab !== 'meta'
           ? h('div', { class: 'row' },
               h('label', { class: 'inline' }, 'Check every',
                 h('select', {
@@ -944,9 +947,10 @@ export default {
   collection: COLLECTION,
   defaults: TOOLS_DEFAULTS,
   render: draw,
-  serialize: () => ({ tab: view.tab === 'health' ? '' : view.tab, project: ['meta', 'crawl', 'health'].includes(view.tab) ? view.project : '' }),
+  serialize: () => ({ tab: view.tab === 'health' ? '' : view.tab, project: ['meta', 'crawl', 'health'].includes(view.tab) ? view.project : '', contract: view.tab === 'contracts' ? contractsSerialize() : '' }),
   restore: (p = {}) => {
     view.tab = TABS.some(([k]) => k === p.tab) ? p.tab : 'health';
     view.project = p.project || '';
+    contractsRestore(p.contract);
   },
 };

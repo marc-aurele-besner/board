@@ -33,6 +33,9 @@ js/telegram.js        tasks from Telegram messages, read while the board is open
 js/ai.js              the one OpenRouter call; logs each call's input, output and details to usage.json
 js/prompts.js         the system prompt of every AI feature; Settings → Prompts overrides them
 js/chart.js           SVG bar charts with a hover tooltip
+js/chains.js          every chain the board reads: the built-in ones and those added in Settings → Blockchains
+js/abi.js             Solidity ABI encoding and decoding: calls, answers and event logs
+js/contracts.js       saved smart contracts: reads through the node, writes through the browser wallet, activity
 js/pool-insights.js   the Liquidity Pools AI insights: in and out of range positions, and what to adjust
 js/resend.js          the Inbox's Resend reads: email lists per project key, and one email's body
 js/gmail.js           the Inbox's Gmail reads: one sign-in per account, its email list, and one email's body
