@@ -145,7 +145,7 @@ async function eventsOf(account, cal, from, to) {
   return out;
 }
 
-// Events of every shown calendar of every connected account between two dates, in start order.
+// Events of every shown calendar of every connected account between two dates, in day order.
 // Returns { events, errors: [text], waiting: [addresses not connected this session] }.
 export async function calendarEvents(store, from, to) {
   const events = [];
@@ -164,7 +164,9 @@ export async function calendarEvents(store, from, to) {
       }
     }));
   }));
-  events.sort((a, b) => Number(b.allDay) - Number(a.allDay) || new Date(a.start) - new Date(b.start));
+  // By day, then all-day events first, then by time.
+  events.sort((a, b) => eventDate(a.start).setHours(0, 0, 0, 0) - eventDate(b.start).setHours(0, 0, 0, 0)
+    || Number(b.allDay) - Number(a.allDay) || eventDate(a.start) - eventDate(b.start));
   return { events, errors, waiting };
 }
 
