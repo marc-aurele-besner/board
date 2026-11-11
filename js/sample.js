@@ -51,6 +51,10 @@ function collections() {
     ({ id, text, description: '', status, priority, category: '', projectId, due: '', created: at, ...more });
   const entry = (id, offset, type, amount, category, note, projectId = null) =>
     ({ id, date: day(offset), type, amount, tax: 0, billId: '', currency: 'USD', category, note, projectId, source: '', created: at });
+  const mail = (id, dir, hoursAgo, from, subject, more = {}) => ({
+    id, dir, from, to: ['Atlas <hello@example.com>'], cc: [], subject, status: '', projectId: 'p-atlas', taskId: null,
+    at: new Date(Date.now() - hoursAgo * 3600000).toISOString(), ...more,
+  });
   const site = (up, sslDays) => ({
     health: { status: up ? 'up' : 'down', ms: up ? 182 : 0, at },
     history: Array.from({ length: 30 }, (_, i) => ({ at, ok: up || i < 28, ms: 150 + i * 3 })),
@@ -100,6 +104,18 @@ function collections() {
       ],
     },
     tools: { every: 60, sites: { 'p-atlas': site(true, 64), 'p-docs': site(false, 9) } },
+    inbox: {
+      syncedAt: at,
+      emails: [
+        mail('m1', 'received', 1, 'Sam Rivera <sam@example.net>', 'Re: Pricing page feedback', { unread: true }),
+        mail('m2', 'sent', 5, 'Atlas <hello@example.com>', 'Pricing page feedback', { to: ['Sam Rivera <sam@example.net>'], status: 'opened' }),
+        mail('m3', 'received', 8, 'Billing <billing@example.org>', 'Your invoice is ready', { unread: true, starred: true }),
+        mail('m4', 'sent', 26, 'Atlas <hello@example.com>', 'Welcome to Atlas', { to: ['new.user@example.net'], status: 'delivered' }),
+        mail('m5', 'received', 30, 'Alex Kim <alex@example.net>', 'Question about the docs', { projectId: 'p-docs', to: ['help@docs.example.com'] }),
+        mail('m6', 'sent', 50, 'Atlas <hello@example.com>', 'Password reset', { to: ['someone@example.net'], status: 'bounced' }),
+        mail('m7', 'received', 200, 'Newsletter <news@example.org>', 'This month in web design', { archived: true }),
+      ],
+    },
     notifications: {
       prefs: {},
       items: [
