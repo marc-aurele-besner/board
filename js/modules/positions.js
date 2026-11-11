@@ -10,9 +10,9 @@ const APR_MIN_MS = 6 * 60 * 60 * 1000;
 const MAX_TICK = 887272; // the widest possible range: a "full range" position
 
 // View state: which rows are shown.
-// layout: 'cards' or 'list'. sort: one of the SORTS keys.
+// layout: 'cards' or 'list'. sort: one of the SORTS keys; dir: 1 low to high, -1 high to low.
 // adding: the form to add a position by hand is open; addMessage is its last error.
-const view = { filter: 'all', chain: 'all', layout: 'cards', sort: 'value', adding: false, addMessage: '' };
+const view = { filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, addMessage: '' };
 // Loaded positions and the state of the last load. shallow: chains whose node would not search back to v4's start.
 // stale: chains shown from the last good read because this one failed, with when that read was.
 // pending: chains still being read in the current load.
@@ -115,21 +115,53 @@ function feeApr(r, baselines) {
   return (earned / r.value) * (YEAR_MS / elapsed);
 }
 
-// Position numbers only grow, so a higher number is a newer position on the same contract.
-const byNumber = (a, b) => {
-  const x = BigInt(a.tokenId);
-  const y = BigInt(b.tokenId);
-  return x === y ? 0 : x > y ? 1 : -1;
-};
-// Rows without the number sorted on go last, whatever the direction.
-const desc = (key) => (a, b) => (a[key] == null ? 1 : 0) - (b[key] == null ? 1 : 0) || (b[key] ?? 0) - (a[key] ?? 0);
+// How safely a position sits in its range: full range first, then the room to the nearer edge, out of range last.
+const rangeRoom = (r) => (r.full ? 101 : !r.inRange ? -1 : r.marker === null ? 0 : Math.min(r.marker, 100 - r.marker));
+
+// What each sort reads from a row, and the direction it starts in. Position numbers only grow, so a higher
+// number is a newer position on the same contract.
 const SORTS = {
-  value: { label: 'Value', compare: desc('value') },
-  fees: { label: 'Unclaimed fees', compare: desc('fees') },
-  apr: { label: 'Fee APR', compare: desc('apr') },
-  newest: { label: 'Newest', compare: (a, b) => byNumber(b, a) },
-  oldest: { label: 'Oldest', compare: byNumber },
+  value: { value: (r) => r.value, dir: -1 },
+  fees: { value: (r) => r.fees, dir: -1 },
+  apr: { value: (r) => r.apr, dir: -1 },
+  number: { value: (r) => BigInt(r.tokenId), dir: -1 },
+  pool: { value: (r) => r.pair, dir: 1 },
+  chain: { value: (r) => r.chain, dir: 1 },
+  range: { value: rangeRoom, dir: -1 },
+  split: { value: (r) => r.share0, dir: -1 },
 };
+// The choices in the Sort menu. Sorting by a table column that is not here adds it to the menu as it is.
+const PRESETS = [['value', -1, 'Value'], ['fees', -1, 'Unclaimed fees'], ['apr', -1, 'Fee APR'], ['number', -1, 'Newest'], ['number', 1, 'Oldest']];
+const SORT_NAMES = { pool: 'Pool', chain: 'Chain', range: 'Price range', split: 'Distribution', value: 'Value', fees: 'Unclaimed fees', apr: 'Fee APR', number: 'Number' };
+
+// Rows without the value sorted on go last, whatever the direction. Ties fall back to the newest first.
+function sortRows(rows, key, dir) {
+  const read = SORTS[key].value;
+  const cmp = (a, b) => (typeof a === 'string' ? a.localeCompare(b) : a < b ? -1 : a > b ? 1 : 0);
+  const newest = SORTS.number.value;
+  return rows.sort((x, y) => {
+    const a = read(x);
+    const b = read(y);
+    const missing = (a == null ? 1 : 0) - (b == null ? 1 : 0);
+    if (missing) return missing;
+    return (a == null ? 0 : dir * cmp(a, b)) || cmp(newest(y), newest(x));
+  });
+}
+
+// A table header that sorts by its column; a second click flips the direction.
+function sortHead(store, key, label, attrs = {}) {
+  const on = view.sort === key;
+  return h('th', { ...attrs, 'aria-sort': on ? (view.dir > 0 ? 'ascending' : 'descending') : null },
+    h('button', {
+      type: 'button',
+      class: 'mon-sort',
+      onclick: () => {
+        view.dir = on ? -view.dir : SORTS[key].dir;
+        view.sort = key;
+        store.refresh();
+      },
+    }, label, h('span', { class: 'sort-mark' }, icon(on && view.dir > 0 ? 'chevron-up' : 'chevron-down'))));
+}
 
 // Finds and reads one chain's v4 positions: those the search found for each wallet, and those added by hand.
 // saved is the search state the last load kept for this chain, keyed by lowercase wallet address.
@@ -381,6 +413,24 @@ function outdatedPill(r) {
   return null;
 }
 
+// A sort as text, "value-desc", for the menu and the address. The first names (newest, oldest, fees, apr) still read.
+const sortName = (key, dir) => `${key}-${dir > 0 ? 'asc' : 'desc'}`;
+function parseSort(text = '') {
+  const old = { newest: ['number', -1], oldest: ['number', 1] }[text];
+  if (old) return old;
+  const [key, d] = String(text).split('-');
+  if (!Object.hasOwn(SORTS, key)) return ['value', -1];
+  return [key, d === 'asc' ? 1 : d === 'desc' ? -1 : SORTS[key].dir];
+}
+function sortOptions() {
+  const current = sortName(view.sort, view.dir);
+  const options = PRESETS.map(([key, dir, label]) => [sortName(key, dir), label]);
+  if (!options.some(([name]) => name === current)) {
+    options.push([current, `${SORT_NAMES[view.sort]} ${view.dir > 0 ? '↑' : '↓'}`]);
+  }
+  return options.map(([name, label]) => h('option', { value: name, selected: name === current }, label));
+}
+
 const APR_TITLE = 'Fees earned since the board started counting, as a yearly rate of the value. Shown after 6 hours, and counted again from zero when fees are collected.';
 
 function poolStat(label, value) {
@@ -447,12 +497,18 @@ function updatedText() {
 }
 
 // The same positions as a table, for comparing many at once.
-function poolTable(rows) {
+function poolTable(rows, store) {
   return h('div', { class: 'card mon-scroll' },
     h('table', { class: 'mon-table lp-table' },
       h('thead', null, h('tr', null,
-        h('th', null, 'Pool'), h('th', null, 'Chain'), h('th', null, 'Price range'), h('th', null, 'Distribution'),
-        h('th', { class: 'num' }, 'Value'), h('th', { class: 'num' }, 'Unclaimed fees'), h('th', { class: 'num', title: APR_TITLE }, 'Fee APR'), h('th', null, ''))),
+        sortHead(store, 'pool', 'Pool'),
+        sortHead(store, 'chain', 'Chain'),
+        sortHead(store, 'range', 'Price range', { title: 'Full range first, then by room to the nearer edge, out of range last' }),
+        sortHead(store, 'split', 'Distribution', { title: `By the share of the first token` }),
+        sortHead(store, 'value', 'Value', { class: 'num' }),
+        sortHead(store, 'fees', 'Unclaimed fees', { class: 'num' }),
+        sortHead(store, 'apr', 'Fee APR', { class: 'num', title: APR_TITLE }),
+        h('th', null, ''))),
       h('tbody', null, rows.map((r) =>
         h('tr', null,
           h('td', null, h('div', { class: 'row' },
@@ -538,9 +594,8 @@ function draw(root, store) {
   const byChain = view.chain === 'all' ? all : all.filter((r) => r.chainId === view.chain);
   const inRange = byChain.filter((r) => r.inRange).length;
   const baselines = store.get(COLLECTION)?.fees ?? {};
-  const shown = (view.filter === 'in' ? byChain.filter((r) => r.inRange) : view.filter === 'out' ? byChain.filter((r) => !r.inRange) : byChain)
-    .map((r) => ({ ...r, apr: feeApr(r, baselines) }))
-    .sort(SORTS[view.sort].compare);
+  const shown = sortRows((view.filter === 'in' ? byChain.filter((r) => r.inRange) : view.filter === 'out' ? byChain.filter((r) => !r.inRange) : byChain)
+    .map((r) => ({ ...r, apr: feeApr(r, baselines) })), view.sort, view.dir);
   const totalValue = byChain.reduce((s, r) => s + (r.value ?? 0), 0);
   const totalFees = byChain.reduce((s, r) => s + (r.fees ?? 0), 0);
   const totalValueKnown = byChain.some((r) => r.value !== null);
@@ -591,7 +646,7 @@ function draw(root, store) {
     // Rows new to the screen slide in, one after another; the rest stay still.
     let order = 0;
     body = view.layout === 'list'
-      ? poolTable(shown)
+      ? poolTable(shown, store)
       : h('div', { class: 'lp-grid' }, shown.map((r) => poolCard(r, seen.has(r.ref) ? null : order++)));
     shown.forEach((r) => seen.add(r.ref));
   } else {
@@ -645,10 +700,10 @@ function draw(root, store) {
         h('select', {
           'aria-label': 'Sort positions',
           onchange: (e) => {
-            view.sort = e.target.value;
+            [view.sort, view.dir] = parseSort(e.target.value);
             store.refresh();
           },
-        }, Object.entries(SORTS).map(([key, s]) => h('option', { value: key, selected: view.sort === key }, s.label)))),
+        }, sortOptions())),
       h('div', { class: 'segmented lp-layout', role: 'group', 'aria-label': 'View' },
         [['cards', 'Cards', 'cards'], ['list', 'List', 'list']].map(([key, label, iconName]) =>
           h('button', {
@@ -678,12 +733,12 @@ export default {
     filter: view.filter === 'all' ? '' : view.filter,
     chain: view.chain === 'all' ? '' : String(view.chain),
     view: view.layout === 'list' ? 'list' : '',
-    sort: view.sort === 'value' ? '' : view.sort,
+    sort: view.sort === 'value' && view.dir === -1 ? '' : sortName(view.sort, view.dir),
   }),
   restore: (p = {}) => {
     view.filter = ['in', 'out'].includes(p.filter) ? p.filter : 'all';
     view.layout = p.view === 'list' ? 'list' : 'cards';
-    view.sort = Object.hasOwn(SORTS, p.sort) ? p.sort : 'value';
+    [view.sort, view.dir] = parseSort(p.sort);
     const id = Number(p.chain);
     view.chain = CHAINS.some((c) => c.id === id) ? id : 'all';
   },
