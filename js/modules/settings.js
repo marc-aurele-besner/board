@@ -6,7 +6,7 @@ import { editText, pill } from '../inline.js';
 import { modelChip } from '../model-picker.js';
 import { isAddress, CHAINS, chainSettings, savedNode, parsePosition, addPosition, addedPositions, addedListOf, tokenLogos } from '../uniswap.js';
 import { positionFields, positionError } from '../position-input.js';
-import { telegramCard, analyticsCard, searchCard, resendCard, notificationsCard, automationsCard, dataCard } from './settings-more.js';
+import { telegramCard, analyticsCard, searchCard, resendCard, gmailCard, notificationsCard, automationsCard, dataCard } from './settings-more.js';
 import { promptsCard } from './settings-prompts.js';
 import { logo } from './positions.js';
 
@@ -50,6 +50,7 @@ const SECTION_GROUPS = [
       ['analytics', 'Google Analytics', 'activity'],
       ['search', 'Search consoles', 'search'],
       ['resend', 'Resend', 'mail'],
+      ['gmail', 'Gmail', 'inbox'],
     ],
   },
   {
@@ -966,6 +967,7 @@ function draw(root, store) {
         : view.section === 'analytics' ? analyticsCard(store)
         : view.section === 'search' ? searchCard(store)
         : view.section === 'resend' ? resendCard(store)
+        : view.section === 'gmail' ? gmailCard(store)
         : view.section === 'notifications' ? notificationsCard(store)
         : view.section === 'automations' ? automationsCard(store)
         : view.section === 'data' ? dataCard(store)
@@ -1001,7 +1003,7 @@ export default {
   icon: 'settings',
   hidden: true, // opened from the gear in the top bar
   collection: COLLECTION,
-  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '', relay: '' }, resend: { relay: '', keys: {} }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) }, prompts: {} },
+  defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '' }, uniswap: { wallets: [], chains: {} }, telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '', relay: '' }, resend: { relay: '', keys: {} }, gmail: { accounts: [] }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) }, prompts: {} },
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),
   restore: (p = {}) => {

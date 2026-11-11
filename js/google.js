@@ -12,7 +12,8 @@ const EVENTS = 'https://www.googleapis.com/calendar/v3/calendars/primary/events'
 let token = null; // { value, expiresAt, scopes: Set }
 let loading = null;
 
-function loadGis() {
+// Gmail (js/gmail.js) signs in to each of its accounts with the same library.
+export function loadGis() {
   if (window.google?.accounts?.oauth2) return Promise.resolve();
   loading ??= new Promise((resolve, reject) => {
     const script = document.createElement('script');

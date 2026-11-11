@@ -138,10 +138,12 @@ export async function syncInbox(store) {
     }
     const live = new Set(projects.map((p) => p.id));
     const perProject = new Map();
+    // Rows with a source (Gmail) are kept and trimmed by their own reader.
     d.emails = [...byId.values()]
-      .filter((e) => live.has(e.projectId))
+      .filter((e) => e.source || live.has(e.projectId))
       .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
       .filter((e) => {
+        if (e.source) return true;
         const n = (perProject.get(e.projectId) ?? 0) + 1;
         perProject.set(e.projectId, n);
         return n <= KEEP;

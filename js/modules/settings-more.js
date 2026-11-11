@@ -1,10 +1,11 @@
-// Settings sections for Telegram, Google Analytics, the search consoles, Resend, notifications and automations.
+// Settings sections for Telegram, Google Analytics, the search consoles, Resend, Gmail, notifications and automations.
 import { h, icon, empty, notice, statusOf, copyable } from '../ui.js';
 import { editText } from '../inline.js';
 import { connect, isConnected } from '../google.js';
 import { checkBot, findChat, pollTelegram, hasTelegram } from '../telegram.js';
 import { propertyName, checkBing, BING_RELAY } from '../webstats.js';
 import { checkResend, resendSettings, RESEND_RELAY } from '../resend.js';
+import { connectGmail, disconnectGmail, isGmailConnected, gmailAccounts } from '../gmail.js';
 import { KINDS, prefOf, setPref } from '../notifications.js';
 import { RULES, ruleOf, sitesOf } from '../automations.js';
 import { hostOf } from '../sitecheck.js';
@@ -347,6 +348,111 @@ export function resendCard(store) {
             })
           : null),
       list));
+}
+
+// --- Gmail ---
+
+// The project a newly added account goes to.
+const gmailView = { project: '' };
+
+function gmailRow(store, account, projects, saveAccounts, clientId) {
+  const msg = messages[`gmail:${account.email}`];
+  const connected = isGmailConnected(account.email);
+  const sayRow = (text, ok) => say(store, `gmail:${account.email}`, text, ok);
+  const setProject = (projectId) => {
+    saveAccounts(gmailAccounts(store).map((a) => (a.email === account.email ? { ...a, projectId } : a)));
+    // Saved mail follows the account to its new project.
+    store.update('inbox', (d) => {
+      for (const e of d.emails) if (e.source === 'gmail' && e.account === account.email) e.projectId = projectId;
+    });
+  };
+  const remove = () => {
+    disconnectGmail(account.email);
+    saveAccounts(gmailAccounts(store).filter((a) => a.email !== account.email));
+    store.update('inbox', (d) => {
+      d.emails = d.emails.filter((e) => !(e.source === 'gmail' && e.account === account.email));
+    });
+    sayRow('');
+  };
+  const project = projects.find((p) => p.id === account.projectId);
+  return h('li', { class: 'resend-row has-key' },
+    h('div', { class: 'resend-name' }, project ? projectIcon(project) : icon('mail'), h('strong', { title: account.email }, account.email)),
+    h('div', { class: 'resend-key' },
+      h('select', { 'aria-label': `Project of ${account.email}`, onchange: (e) => setProject(e.target.value) },
+        projects.map((p) => h('option', { value: p.id, selected: p.id === account.projectId }, p.name))),
+      msg ? h('span', { class: `resend-msg small ${msg.ok ? 'ok' : 'error'}`, role: 'status' }, msg.text) : null),
+    h('div', { class: 'resend-actions' },
+      badge(connected ? 'Connected' : 'Not connected', connected ? 'done' : 'plain'),
+      connected
+        ? h('button', { type: 'button', class: 'btn-small', onclick: () => { disconnectGmail(account.email); sayRow('Disconnected.'); } }, 'Disconnect')
+        : h('button', {
+            type: 'button',
+            class: 'btn-small',
+            disabled: !clientId,
+            onclick: () => {
+              sayRow('Waiting for Google…');
+              connectGmail(clientId, account.email).then(() => sayRow('Connected.')).catch((err) => sayRow(err.message, false));
+            },
+          }, 'Connect'),
+      h('button', { type: 'button', class: 'icon-btn', title: 'Remove account', 'aria-label': `Remove ${account.email}`, onclick: remove }, icon('x'))));
+}
+
+export function gmailCard(store) {
+  const clientId = store.get('settings').google?.clientId ?? '';
+  const accounts = gmailAccounts(store);
+  const projects = projectTree(store.get('projects').projects).map(({ project }) => project);
+  const saveAccounts = (list) => store.update('settings', (d) => {
+    d.gmail = { ...d.gmail, accounts: list };
+  });
+  const target = projects.some((p) => p.id === gmailView.project) ? gmailView.project : projects[0]?.id ?? '';
+  const add = () => {
+    const projectId = target;
+    say(store, 'gmail', 'Waiting for Google…');
+    connectGmail(clientId)
+      .then((email) => {
+        if (gmailAccounts(store).some((a) => a.email === email)) return say(store, 'gmail', `${email} is already added. It is connected again.`);
+        saveAccounts([...gmailAccounts(store), { email, projectId }]);
+        say(store, 'gmail', `Added ${email}. Its mail shows in the Inbox.`);
+      })
+      .catch((err) => say(store, 'gmail', err.message, false));
+  };
+  // Accounts grouped by project, in project order.
+  const order = new Map(projects.map((p, i) => [p.id, i]));
+  const sorted = [...accounts].sort((a, b) => (order.get(a.projectId) ?? 1e9) - (order.get(b.projectId) ?? 1e9) || a.email.localeCompare(b.email));
+
+  return h('div', { class: 'stack-lg' },
+    h('section', { class: 'card panel' },
+      head('Gmail', 'The Inbox lists the mail each project receives and sends through Gmail, read-only. A project can have several accounts. Each account signs in on its own; nothing but the list of addresses is saved, and the connection lasts about an hour.',
+        badge(accounts.length ? `${accounts.length} account${accounts.length === 1 ? '' : 's'}` : 'Not set', accounts.length ? 'doing' : 'plain')),
+      h('div', { class: 'cred-body' },
+        h('div', { class: 'svc-section' },
+          h('h3', null, 'Setup'),
+          steps([
+            ['Set the OAuth Client ID under ', h('a', { href: '#/settings?section=google' }, 'Google Calendar'), ' first. Gmail uses the same one.'],
+            ['In Google Cloud Console, enable the ', link('https://console.cloud.google.com/apis/library/gmail.googleapis.com', 'Gmail API'), ' for that project.'],
+            'On the OAuth consent screen, add each Gmail address you will connect as a test user. Gmail access is restricted, so the app stays in Testing.',
+            'Pick a project, press Add a Gmail account, choose the account and allow “View your email messages and settings”.',
+          ])),
+        h('div', { class: 'svc-section' },
+          h('h3', null, 'Add an account'),
+          projects.length
+            ? h('div', { class: 'svc-actions' },
+                h('select', { 'aria-label': 'Project for the new account', onchange: (e) => { gmailView.project = e.target.value; } },
+                  projects.map((p) => h('option', { value: p.id, selected: p.id === target }, p.name))),
+                h('button', { type: 'button', class: 'primary', disabled: !clientId, onclick: add }, icon('plus'), 'Add a Gmail account'))
+            : empty('No projects yet. Add one in Projects.'),
+          clientId ? null : setupBanner('google', 'Add the Google OAuth Client ID first. The same one is used here.'),
+          result('gmail')))),
+    h('section', { class: 'card panel' },
+      h('header', { class: 'panel-head' },
+        h('div', null,
+          h('h2', null, 'Accounts'),
+          h('p', { class: 'muted' }, 'Change an account’s project and its saved mail moves with it. Removing an account removes its mail from the Inbox.'))),
+      h('ul', { class: 'resend-list' },
+        sorted.length
+          ? [h('li', { class: 'resend-row resend-head', 'aria-hidden': 'true' }, h('span', null, 'Account'), h('span', null, 'Project'), h('span')),
+              ...sorted.map((a) => gmailRow(store, a, projects, saveAccounts, clientId))]
+          : [h('li', { class: 'empty' }, 'No Gmail account yet.')])));
 }
 
 // --- Data folder ---

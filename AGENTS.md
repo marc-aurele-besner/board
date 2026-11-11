@@ -35,6 +35,7 @@ js/prompts.js         the system prompt of every AI feature; Settings → Prompt
 js/chart.js           SVG bar charts with a hover tooltip
 js/pool-insights.js   the Liquidity Pools AI insights: in and out of range positions, and what to adjust
 js/resend.js          the Inbox's Resend reads: email lists per project key, and one email's body
+js/gmail.js           the Inbox's Gmail reads: one sign-in per account, its email list, and one email's body
 js/background.js      timers for the above; started once the data folder is open
 js/capture.js         parseTask(), parseMoney() and makeTask(): one place for a task's shape
 js/palette.js         the Cmd/Ctrl+K search palette: jump, or capture a task, a Money entry or a recipe link
