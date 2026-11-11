@@ -56,7 +56,7 @@ function addTask(store, p, kind, text, due = '') {
 function taskCell(store, p, kind, text, due) {
   const ref = refOf(store, p, kind);
   return autoTaskFor(store, kind, ref)
-    ? h('a', { href: '#/todos?filter=auto', class: 'btn-link' }, 'Task open')
+    ? h('a', { href: '#/todos?filter=auto', class: 'btn-small task-open', title: 'A task for this is open. Show it in Tasks.' }, icon('check-square'), 'Task open')
     : h('button', { type: 'button', class: 'btn-small', onclick: () => addTask(store, p, kind, text, due) }, 'Create task');
 }
 

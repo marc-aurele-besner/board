@@ -1272,6 +1272,9 @@ label.check { cursor: pointer; }
 .site-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: var(--gap); }
 .site-card { display: flex; flex-direction: column; gap: 14px; }
 .site-card.down { border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); }
+.task-open { gap: 5px; border-radius: 7px; background: color-mix(in srgb, var(--warn) 16%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent); color: var(--warn); font-weight: 600; white-space: nowrap; }
+.task-open:hover { background: color-mix(in srgb, var(--warn) 26%, transparent); }
+.task-open .icon { width: 13px; height: 13px; }
 .follow-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .follow-form input { flex: 1 1 180px; min-width: 0; }
 .up-bars { display: flex; gap: 2px; height: 26px; }
