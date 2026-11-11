@@ -36,6 +36,14 @@ const categoryById = (categories, id) => categories.find((c) => c.id === id) ?? 
 // Labels are many-to-many: a project can carry several. `categoryId` is the older single-category field.
 export const labelsOf = (p) => p.labels ?? (p.categoryId ? [p.categoryId] : []);
 
+// Whether a thing with a project and maybe its own label (a calendar, a Gmail account) falls under a project label:
+// its own label is it, or its project carries it.
+export function underLabel(projects, projectId, ownLabelId, labelId) {
+  if (ownLabelId === labelId) return true;
+  const project = projectId ? projects.find((p) => p.id === projectId) : null;
+  return Boolean(project && labelsOf(project).includes(labelId));
+}
+
 // Every project below the given one, at any depth. Used to stop a project becoming its own ancestor.
 export function descendantIds(projects, id) {
   const out = new Set();

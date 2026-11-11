@@ -1,5 +1,5 @@
 // Gmail, read-only, straight from the browser. Each account signs in on its own and may belong to a project (a
-// project can have several) and give a task category to tasks made from its mail; both are optional. Tokens live in memory only and last about an hour, like the other Google ones.
+// project can have several) and carry a project label for the Inbox filter; both are optional. Tokens live in memory only and last about an hour, like the other Google ones.
 import { loadGis } from './google.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';

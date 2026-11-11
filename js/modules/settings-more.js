@@ -7,11 +7,10 @@ import { propertyName, checkBing, BING_RELAY } from '../webstats.js';
 import { checkResend, resendSettings, RESEND_RELAY } from '../resend.js';
 import { connectGmail, disconnectGmail, isGmailConnected, gmailAccounts } from '../gmail.js';
 import { calendarAccounts, connectCalendar, disconnectCalendar, isCalendarConnected, syncCalendarList, removeCalendarAccount, setCalendar, setCalendarAccount } from '../gcal.js';
-import { taskCategoryNames, categoryColor } from '../task-labels.js';
 import { KINDS, prefOf, setPref } from '../notifications.js';
 import { RULES, ruleOf, sitesOf } from '../automations.js';
 import { hostOf } from '../sitecheck.js';
-import { projectIcon, projectTree } from './projects.js';
+import { projectIcon, projectTree, labelColor } from './projects.js';
 import { setupBanner } from '../integrations.js';
 
 const link = (href, text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
@@ -34,7 +33,7 @@ const byName = (a, b) => String(a.name ?? '').localeCompare(String(b.name ?? '')
 // A project in the searchable pickers below, with its icon, since the project list can grow long.
 const projectOption = (p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) });
 
-// Optional project and task-category pickers for an account or a calendar. Empty is a choice: `none` names it.
+// Optional project and project-label pickers for an account or a calendar. Empty is a choice: `none` names it.
 function projectPick(projects, value, none, onPick) {
   return pickChip({
     value: value ?? null,
@@ -46,14 +45,19 @@ function projectPick(projects, value, none, onPick) {
   });
 }
 
-function categoryPick(store, value, none, onPick) {
+// Project labels in their colours. A label that was deleted since reads as none.
+const projectLabels = (store) => store.get('projects').categories ?? [];
+const labelName = (store, id) => projectLabels(store).find((c) => c.id === id)?.name ?? '';
+
+function labelPick(store, value, none, onPick) {
+  const labels = projectLabels(store);
   return pickChip({
-    value: value || null,
-    options: taskCategoryNames(store).map((name) => ({ value: name, label: name, color: categoryColor(store, name) || undefined })),
+    value: labels.some((c) => c.id === value) ? value : null,
+    options: labels.map((c) => ({ value: c.id, label: c.name, color: labelColor(c) })),
     nullable: true,
     nullLabel: none,
     className: 'field-pick project-field-pick',
-    onPick: (v) => onPick(v ?? ''),
+    onPick: (v) => onPick(v ?? null),
   });
 }
 
@@ -61,18 +65,19 @@ function categoryPick(store, value, none, onPick) {
 
 function calendarRow(store, account, cal, projects) {
   const accountProject = projects.find((p) => p.id === account.projectId);
+  const accountLabel = labelName(store, account.labelId);
   return h('li', { class: 'resend-row has-key gcal-row' },
     h('label', { class: 'resend-name check' },
       h('input', { type: 'checkbox', checked: cal.on, 'aria-label': `Show ${cal.name}`, onchange: (e) => setCalendar(store, account.email, cal.id, { on: e.target.checked }) }),
       h('span', { class: 'gcal-swatch', style: { '--c': cal.color || 'var(--accent)' } }),
       h('strong', { title: cal.id }, cal.name)),
-    // Left empty, a calendar takes the account's project and category.
+    // Left empty, a calendar takes the account's project and label.
     h('div', { class: 'resend-key' },
       projectPick(projects, cal.projectId, accountProject ? `Account’s: ${accountProject.name}` : 'No project',
         (projectId) => setCalendar(store, account.email, cal.id, { projectId }))),
     h('div', { class: 'resend-actions' },
-      categoryPick(store, cal.category, account.category ? `Account’s: ${account.category}` : 'No category',
-        (category) => setCalendar(store, account.email, cal.id, { category }))));
+      labelPick(store, cal.labelId, accountLabel ? `Account’s: ${accountLabel}` : 'No label',
+        (labelId) => setCalendar(store, account.email, cal.id, { labelId }))));
 }
 
 function calendarAccount(store, account, projects, clientId) {
@@ -99,11 +104,11 @@ function calendarAccount(store, account, projects, clientId) {
       h('span', { class: 'muted small' }, 'For all its calendars'),
       h('label', { class: 'gcal-default' }, h('span', { class: 'muted small' }, 'Project'),
         projectPick(projects, account.projectId, 'No project', (projectId) => setCalendarAccount(store, account.email, { projectId }))),
-      h('label', { class: 'gcal-default' }, h('span', { class: 'muted small' }, 'Category'),
-        categoryPick(store, account.category, 'No category', (category) => setCalendarAccount(store, account.email, { category })))),
+      h('label', { class: 'gcal-default' }, h('span', { class: 'muted small' }, 'Project label'),
+        labelPick(store, account.labelId, 'No label', (labelId) => setCalendarAccount(store, account.email, { labelId })))),
     h('ul', { class: 'resend-list' },
       account.calendars.length
-        ? [h('li', { class: 'resend-row resend-head', 'aria-hidden': 'true' }, h('span', null, 'Calendar'), h('span', null, 'Project'), h('span', null, 'Category')),
+        ? [h('li', { class: 'resend-row resend-head', 'aria-hidden': 'true' }, h('span', null, 'Calendar'), h('span', null, 'Project'), h('span', null, 'Project label')),
             ...account.calendars.map((c) => calendarRow(store, account, c, projects))]
         : [h('li', { class: 'empty' }, 'No calendars read yet. Connect to read them.')]));
 }
@@ -124,7 +129,7 @@ export function calendarAccountsCard(store) {
       .catch((err) => say(store, 'gcal', err.message, false));
   };
   return h('section', { class: 'card panel' },
-    head('Accounts', 'Each Google account signs in on its own, so work and personal calendars can sit side by side. Untick a calendar to hide it. A project and a category are optional: set on an account, they apply to each of its calendars that has none of its own. A calendar with a project can be filtered by it, and a task made from one of its events gets that project and category. Only the addresses and calendar choices are saved.',
+    head('Accounts', 'Each Google account signs in on its own, so work and personal calendars can sit side by side. Untick a calendar to hide it. A project and a project label are optional: set on an account, they apply to each of its calendars that has none of its own. Calendar can be filtered by either, and a task made from an event gets its calendar’s project. Only the addresses and calendar choices are saved.',
       badge(accounts.length ? `${accounts.length} account${accounts.length === 1 ? '' : 's'}` : 'None', accounts.length ? 'doing' : 'plain')),
     h('div', { class: 'stack-lg' },
       h('div', { class: 'svc-section' },
@@ -486,8 +491,8 @@ function gmailRow(store, account, projects, saveAccounts, clientId) {
     h('div', { class: 'resend-key' },
       h('div', { class: 'gmail-picks' },
         projectPick(projects, account.projectId, 'No project', setProject),
-        categoryPick(store, account.category, 'No category', (category) =>
-          saveAccounts(gmailAccounts(store).map((a) => (a.email === account.email ? { ...a, category } : a))))),
+        labelPick(store, account.labelId, 'No label', (labelId) =>
+          saveAccounts(gmailAccounts(store).map((a) => (a.email === account.email ? { ...a, labelId } : a))))),
       msg ? h('span', { class: `resend-msg small ${msg.ok ? 'ok' : 'error'}`, role: 'status' }, msg.text) : null),
     h('div', { class: 'resend-actions' },
       badge(connected ? 'Connected' : 'Not connected', connected ? 'done' : 'plain'),
@@ -558,10 +563,10 @@ export function gmailCard(store) {
       h('header', { class: 'panel-head' },
         h('div', null,
           h('h2', null, 'Accounts'),
-          h('p', { class: 'muted' }, 'A project and a category are optional. Change an account’s project and its saved mail moves with it; a task made from its mail starts with its project and category. Removing an account removes its mail from the Inbox.'))),
+          h('p', { class: 'muted' }, 'A project and a project label are optional; the Inbox can be filtered by either. Change an account’s project and its saved mail moves with it. Removing an account removes its mail from the Inbox.'))),
       h('ul', { class: 'resend-list' },
         sorted.length
-          ? [h('li', { class: 'resend-row resend-head', 'aria-hidden': 'true' }, h('span', null, 'Account'), h('span', null, 'Project and category'), h('span')),
+          ? [h('li', { class: 'resend-row resend-head', 'aria-hidden': 'true' }, h('span', null, 'Account'), h('span', null, 'Project and label'), h('span')),
               ...sorted.map((a) => gmailRow(store, a, projects, saveAccounts, clientId))]
           : [h('li', { class: 'empty' }, 'No Gmail account yet.')])));
 }

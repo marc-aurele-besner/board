@@ -1,12 +1,11 @@
 // Inbox: every email sent and received through Resend and Gmail, for every project that has a key or an account.
 // Laid out like a mail client: received mail lands in the Inbox; sent, starred and archived mail have their own folders.
 import { h, icon, refreshIcon, notice, statusOf } from '../ui.js';
-import { projectIcon, projectTree } from './projects.js';
+import { projectIcon, projectTree, labelsOf, labelColor, underLabel } from './projects.js';
 import { setupBanner, settingsHref } from '../integrations.js';
 import { syncInbox, readEmail, keyedProjects } from '../resend.js';
 import { syncGmail, readGmail, gmailAccounts, gmailProjects, connectGmail, isGmailConnected } from '../gmail.js';
 import { makeTask } from '../capture.js';
-import { taskCategoryNames } from '../task-labels.js';
 import { pickChip } from '../inline.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
@@ -149,10 +148,7 @@ function plainText(body) {
 // A task from an email, filled in for its project and editable before it is added. The email keeps the task's id.
 function openTaskDialog(store, e) {
   const projects = projectTree(store.get('projects').projects).map(({ project }) => project);
-  // A Gmail account's category is the starting choice; one no longer in the list is still offered.
-  const category = e.source === 'gmail' ? gmailAccounts(store).find((a) => a.email === e.account)?.category ?? '' : '';
-  const categories = [...new Set([...taskCategoryNames(store), category].filter(Boolean))];
-  const head =`${e.dir === 'sent' ? `Sent to ${e.to.join(', ')}` : `From ${e.from}`} · ${fullDate(e.at)}`;
+  const head = `${e.dir === 'sent' ? `Sent to ${e.to.join(', ')}` : `From ${e.from}`} · ${fullDate(e.at)}`;
   const description = h('textarea', { name: 'description', rows: 6 }, head);
   let edited = false;
   description.addEventListener('input', () => {
@@ -180,7 +176,6 @@ function openTaskDialog(store, e) {
           text: title,
           description: String(f.get('description') ?? '').trim(),
           projectId,
-          category: String(f.get('category') ?? ''),
           priority: String(f.get('priority')),
           due: String(f.get('due') ?? ''),
           email: { id: e.id, dir: e.dir },
@@ -200,9 +195,6 @@ function openTaskDialog(store, e) {
         h('label', null, 'Project', h('select', { name: 'project' },
           h('option', { value: '' }, 'Personal'),
           projects.map((x) => h('option', { value: x.id, selected: x.id === e.projectId }, x.name)))),
-        h('label', null, 'Category', h('select', { name: 'category' },
-          h('option', { value: '' }, 'No category'),
-          categories.map((c) => h('option', { value: c, selected: c === category }, c)))),
         h('label', null, 'Priority', h('select', { name: 'priority' },
           [['none', 'No priority'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']].map(([v, l]) => h('option', { value: v, selected: v === 'medium' }, l)))),
         h('label', null, 'Due', h('input', { name: 'due', type: 'date' }))),
@@ -391,7 +383,19 @@ function draw(root, store) {
   const folder = FOLDERS.find(([key]) => key === view.folder) ?? FOLDERS[0];
   const mailboxes = [...(resendKeyed.length || emails.some((e) => !e.source) ? [['resend', 'Resend']] : []), ...accounts.map((a) => [a.email, a.email])];
   if (!mailboxes.some(([key]) => key === view.mailbox)) view.mailbox = 'all';
-  const byProject = emails.filter((e) => (view.project === 'all' || e.projectId === view.project) && (view.mailbox === 'all' || mailboxOf(e) === view.mailbox));
+  // The project filter is a project id, or "label:<id>" for a project label: Gmail mail can carry its account's label.
+  const labels = store.get('projects').categories ?? [];
+  const allProjects = store.get('projects').projects;
+  const labelOfAccount = new Map(accounts.map((a) => [a.email, a.labelId ?? null]));
+  const labelFilter = view.project.startsWith('label:') ? view.project.slice(6) : null;
+  if (labelFilter && !labels.some((c) => c.id === labelFilter)) view.project = 'all';
+  const inProject = (e) => view.project === 'all' ||
+    (labelFilter ? underLabel(allProjects, e.projectId, e.source === 'gmail' ? labelOfAccount.get(e.account) ?? null : null, labelFilter) : e.projectId === view.project);
+  const byProject = emails.filter((e) => inProject(e) && (view.mailbox === 'all' || mailboxOf(e) === view.mailbox));
+  // Labels the filter offers: those of projects with mail, and those set on a Gmail account.
+  const labelOptions = labels
+    .filter((c) => keyed.some((p) => labelsOf(p).includes(c.id)) || accounts.some((a) => a.labelId === c.id))
+    .map((c) => ({ value: `label:${c.id}`, label: c.name, color: labelColor(c) }));
   const threads = threadsOf(byProject);
   const inFolder = byProject.filter(folder[3]);
   const statuses = [...new Set(inFolder.map((e) => e.status).filter(Boolean))];
@@ -481,11 +485,11 @@ function draw(root, store) {
                 ? h('button', { type: 'button', class: 'btn-small', onclick: () => patch(store, unread.map((e) => e.id), { unread: false }) }, icon('check'), 'Mark all read')
                 : null),
             h('div', { class: 'row inbox-pickers' },
-              keyed.length > 1
-                // Searchable, with each project's icon, since the list can grow long.
+              keyed.length > 1 || labelOptions.length
+                // Searchable, with each project's icon, since the list can grow long; project labels follow in their colours.
                 ? pickChip({
                     value: view.project === 'all' ? null : view.project,
-                    options: keyed.map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
+                    options: [...keyed.map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })), ...labelOptions],
                     nullable: true,
                     nullLabel: 'All projects',
                     className: 'inbox-project-pick',
