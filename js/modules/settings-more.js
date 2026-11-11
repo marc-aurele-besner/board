@@ -240,7 +240,7 @@ export function analyticsCard(store) {
     d.analytics = { ...d.analytics, properties: { ...(d.analytics?.properties ?? {}), [id]: value } };
   });
   return h('section', { class: 'card panel' },
-    head('Google Analytics', 'Visitors and page views for each project website, shown in Monitoring. Read-only. It uses the same Google OAuth Client ID as Calendar, with one more permission, and the connection lasts about an hour.',
+    head('Google Analytics', 'Visitors and page views for each project website, shown in Monitoring. Read-only. It uses the same Google OAuth Client ID as Calendar, with one more permission. It stays connected: the sign-in is kept in google.json in the data folder and renewed by itself.',
       badge(isConnected('analytics') ? 'Connected' : 'Not connected', isConnected('analytics') ? 'done' : 'plain')),
     h('div', { class: 'cred-body' },
       h('div', { class: 'svc-section' },
@@ -538,7 +538,7 @@ export function gmailCard(store) {
 
   return h('div', { class: 'stack-lg' },
     h('section', { class: 'card panel' },
-      head('Gmail', 'The Inbox lists the mail each project receives and sends through Gmail, read-only. A project can have several accounts. Each account signs in on its own; nothing but the list of addresses is saved, and the connection lasts about an hour.',
+      head('Gmail', 'The Inbox lists the mail each project receives and sends through Gmail, read-only. A project can have several accounts. Each account signs in on its own; the list of addresses is saved in settings.json and each sign-in in google.json, where the board renews it by itself.',
         badge(accounts.length ? `${accounts.length} account${accounts.length === 1 ? '' : 's'}` : 'Not set', accounts.length ? 'doing' : 'plain')),
       h('div', { class: 'cred-body' },
         h('div', { class: 'svc-section' },

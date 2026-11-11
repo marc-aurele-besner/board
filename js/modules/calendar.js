@@ -500,7 +500,7 @@ function draw(root, store) {
     clientId && offline.length
       ? notice({
           tone: 'info',
-          text: connected.length ? 'Some accounts are not connected this session.' : 'Connect your accounts to read their events. A connection lasts about an hour.',
+          text: connected.length ? 'Some accounts are not connected.' : 'Connect your accounts to read their events. They stay connected.',
           actions: offline.map((a) => h('button', { type: 'button', class: 'btn-small', onclick: () => connectAccount(store, clientId, a.email) }, icon('plus'), a.email)),
         })
       : null,
