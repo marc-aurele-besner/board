@@ -103,6 +103,13 @@ function collections() {
         entry('e4', 0, 'income', 4200, 'Salary', 'Monthly pay'),
       ],
     },
+    // A few fee collections, so the Fees collected view of Liquidity Pools has something to chart.
+    pools: {
+      collected: [[-2, 41.2], [-9, 37.5], [-16, 52.8], [-30, 18.4], [-44, 60.1], [-58, 33.9], [-75, 47.3]].map(([offset, usd], i) => ({
+        id: `fc${i}`, at: `${day(offset)}T12:00:00.000Z`, source: i % 3 ? 'auto' : 'manual', usd,
+        ref: '8453:v4:100001', pair: 'ETH / USDC', chain: 'Base', tokenId: '100001', note: '',
+      })),
+    },
     tools: { every: 60, sites: { 'p-atlas': site(true, 64), 'p-docs': site(false, 9) } },
     inbox: {
       syncedAt: at,
