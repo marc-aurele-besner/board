@@ -2498,6 +2498,9 @@ function draw(root, store) {
     firstRead ? null : insightsPanel(store, byChain.map(withApr), {
       sideOf: (r) => sideOf(r, isFlipped(store, r)),
       isFlipped: (pair) => isFlipped(store, pair),
+      logo,
+      // The open row's logos when it is still read; a saved read of a closed position falls back to the symbols.
+      tokenLogos: (pos, row) => (row ? [tokenLogoOf(row, row.addr0), tokenLogoOf(row, row.addr1)] : [symbolLogo(pos.sym0), symbolLogo(pos.sym1)]),
     }),
 
     chainsWithRows.length > 1
