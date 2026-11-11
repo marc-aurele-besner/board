@@ -11,6 +11,7 @@ const SECTIONS = {
   analytics: ['analytics', 'Google Analytics'],
   search: ['search', 'Search consoles'],
   resend: ['resend', 'Resend'],
+  gmail: ['gmail', 'Gmail'],
 };
 
 export const settingsHref = (key) => `#/settings?section=${SECTIONS[key][0]}`;
