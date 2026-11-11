@@ -13,6 +13,7 @@ import { withoutLabel } from '../task-labels.js';
 import { connectedGmailOf } from '../gmail.js';
 import { connectedCalendarsOf } from '../gcal.js';
 import { resendSettings } from '../resend.js';
+import { DEFAULT_DEV_COMMAND } from './dev.js';
 
 const COLLECTION = 'projects';
 const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
@@ -142,6 +143,8 @@ export function makeProject(existingCount, fields = {}) {
     website: '',
     // The project's folder on this machine, where the Dev section opens its terminals.
     localPath: '',
+    // What Dev runs when a task is handed to it; empty uses DEFAULT_DEV_COMMAND.
+    devCommand: '',
     labels: [],
     parentId: null,
     github: { org: '', repos: [] },
@@ -805,6 +808,15 @@ function projectView(store, p, items, categories) {
           onSave: (localPath) => updateProject(store, p.id, { localPath }),
         }),
         p.localPath ? h('a', { href: `#/dev?project=${p.id}`, class: 'muted small' }, 'Open a terminal here') : null),
+      h('section', { class: 'pp-block' },
+        h('h3', null, 'Dev command'),
+        editText({
+          value: p.devCommand ?? '',
+          placeholder: DEFAULT_DEV_COMMAND,
+          allowEmpty: true,
+          onSave: (devCommand) => updateProject(store, p.id, { devCommand: devCommand.trim() }),
+        }),
+        h('span', { class: 'muted small' }, 'Runs with the task as its prompt when a task goes to Dev. Empty uses the default.')),
       h('section', { class: 'pp-block' },
         h('h3', null, 'Icon'),
         h('div', { class: 'pp-icon-row' },
