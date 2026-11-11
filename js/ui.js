@@ -110,6 +110,8 @@ const ICON_PATHS = {
   // Brand marks: the g-* classes take the Google colors from the theme tokens.
   gmail: '<g class="brand-mark"><path class="g-blue" d="M2 7v11a1.5 1.5 0 0 0 1.5 1.5H6V10z"/><path class="g-green" d="M22 7v11a1.5 1.5 0 0 1-1.5 1.5H18V10z"/><path class="g-red" d="M6 10V5.27l6 4.5 6-4.5V10l-6 4.5z"/><path class="g-red" d="M2 7.25c0-2.05 2.34-3.22 3.98-1.99L6 5.27V10L2 7z"/><path class="g-yellow" d="M22 7.25c0-2.05-2.34-3.22-3.98-1.99L18 5.27V10l4-3z"/></g>',
   gcal: '<g class="brand-mark"><path class="g-blue" d="M3 6a3 3 0 0 1 3-3h12v3H6v12H3z"/><path class="g-blue" d="M18 3a3 3 0 0 1 3 3h-3z"/><path class="g-yellow" d="M18 6h3v12h-3z"/><path class="g-green" d="M6 18h12v3H6z"/><path class="g-blue" d="M3 18h3v3a3 3 0 0 1-3-3z"/><path class="g-red" d="M18 18h3l-3 3z"/><path class="g-blue" d="M8.5 8.5h7v2h-7zM8.5 12.5h4.5v2H8.5z"/></g>',
+  // Resend: a tile with the R, drawn in the text and surface colors so it reads in both themes.
+  resend: '<g class="brand-mark"><rect class="r-tile" x="2" y="2" width="20" height="20" rx="5"/><path class="r-letter" d="M9 17V7h3.5a3 3 0 0 1 0 6H9m3.5 0L16 17"/></g>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
   coins: '<circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/>',
   cpu: '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/>',

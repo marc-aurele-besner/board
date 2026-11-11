@@ -12,6 +12,7 @@ import { makeTask } from '../capture.js';
 import { withoutLabel } from '../task-labels.js';
 import { connectedGmailOf } from '../gmail.js';
 import { connectedCalendarsOf } from '../gcal.js';
+import { resendSettings } from '../resend.js';
 
 const COLLECTION = 'projects';
 const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
@@ -469,13 +470,15 @@ function googleField(store, p) {
     : null;
 }
 
-// The Gmail and Google Calendar logos of a project's connected accounts, for the overview rows; hover lists the addresses.
-function googleMarks(store, p) {
+// The logos of a project's connected services, for the overview rows: Gmail and Google Calendar (hover lists the addresses) and Resend.
+function serviceMarks(store, p) {
+  const mark = (name, title, label) => h('span', { class: 'service-mark', title, role: 'img', 'aria-label': `${label} connected` }, icon(name));
   const marks = [
     ['gmail', 'Gmail', connectedGmailOf(store, p.id)],
     ['gcal', 'Google Calendar', connectedCalendarsOf(store, p.id)],
   ].filter(([, , emails]) => emails.length)
-    .map(([name, label, emails]) => h('span', { class: 'service-mark', title: `${label}: ${emails.join(', ')}`, role: 'img', 'aria-label': `${label} connected` }, icon(name)));
+    .map(([name, label, emails]) => mark(name, `${label}: ${emails.join(', ')}`, label));
+  if (resendSettings(store).keys?.[p.id]) marks.push(mark('resend', 'Resend key set up', 'Resend'));
   return marks.length ? h('span', { class: 'service-marks' }, marks) : null;
 }
 
@@ -914,7 +917,7 @@ function projectsRecap(store, projects, items, categories) {
             h('strong', null, p.name),
             labels.length ? h('span', { class: 'muted small' }, labels.map((l) => l.name).join(', ')) : null,
             h('span', { class: 'muted small grow' }, githubLine(p)),
-            googleMarks(store, p),
+            serviceMarks(store, p),
             h('span', { class: 'count' }, `${openOf(p)} open`));
         }))),
     labelRows.length
