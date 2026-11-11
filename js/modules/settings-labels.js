@@ -1,10 +1,10 @@
 // Settings → Labels: task statuses and categories, project labels and Money categories in one place. Each can be
 // recoloured and renamed; deleting one that is in use moves what uses it to another label or category first.
 import { h, icon, empty, notice, uid, statusOf } from '../ui.js';
-import { editText, pill } from '../inline.js';
+import { editText, pill, pickChip, pickButton } from '../inline.js';
 import { openDialog } from '../modal.js';
 import { colorPicker, SWATCHES } from '../color-picker.js';
-import { labelsOf, labelColor } from './projects.js';
+import { labelsOf, labelColor, projectIcon } from './projects.js';
 import { taskStatuses, statusLook, ALWAYS_SHOWN } from '../task-labels.js';
 
 const UNCATEGORIZED = 'Uncategorized';
@@ -14,6 +14,8 @@ const list = (parts) => (parts.length > 1 ? `${parts.slice(0, -1).join(', ')} an
 
 // The last error per section, shown above its list.
 const labelsView = { tasks: '', projects: '', money: '' };
+// Where a new task category applies, picked beside the add form. Kept here so a re-render does not reset it.
+let newTaskCategoryScope = 'all';
 
 // --- Task statuses ---
 
@@ -78,18 +80,50 @@ function scopeValue(c) {
   return 'all';
 }
 
+// Options for the searchable scope picker: every project label in its colour, and every project with its icon.
 function scopeOptions(store) {
   const { projects, categories } = store.get('projects');
   return [
-    h('option', { value: 'all' }, 'All projects'),
-    projects.length
-      ? h('optgroup', { label: 'One project' },
-          [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => h('option', { value: `project:${p.id}` }, p.name)))
-      : null,
-    categories.length
-      ? h('optgroup', { label: 'Projects with a label' }, categories.map((c) => h('option', { value: `category:${c.id}` }, c.name)))
-      : null,
+    { value: 'all', label: 'All projects', plainIcon: () => icon('globe') },
+    ...[...categories].sort((a, b) => a.name.localeCompare(b.name))
+      .map((c) => ({ value: `category:${c.id}`, label: c.name, color: labelColor(c) })),
+    ...[...projects].sort((a, b) => a.name.localeCompare(b.name))
+      .map((p) => ({ value: `project:${p.id}`, label: p.name, plainIcon: () => projectIcon(p) })),
   ];
+}
+
+function scopePicker(store, value, onPick) {
+  return pickChip({ value, options: scopeOptions(store), placeholder: 'Where it applies', className: 'scope-pick', onPick });
+}
+
+// The wider scopes a category can move up to: from one project to one of that project's labels or to all
+// projects, and from a label to all projects.
+function promoteTargets(store, c) {
+  const options = scopeOptions(store);
+  if (c.scope === 'project') {
+    const project = store.get('projects').projects.find((p) => p.id === c.projectId);
+    const labels = project ? labelsOf(project).map((id) => `category:${id}`) : [];
+    // The project's labels come first: they are the next level up, before all projects.
+    return [...options.filter((o) => labels.includes(o.value)), ...options.filter((o) => o.value === 'all')];
+  }
+  if (c.scope === 'projectCategory') return options.filter((o) => o.value === 'all');
+  return [];
+}
+
+function promoteControl(store, c) {
+  const targets = promoteTargets(store, c);
+  if (!targets.length) return null;
+  const promote = (value) => editTaskCategory(store, c, parseScope(value));
+  if (targets.length === 1) {
+    const [only] = targets;
+    return h('button', {
+      type: 'button',
+      class: 'btn-small',
+      title: `Make ${c.name} apply to ${only.value === 'all' ? 'all projects' : `every ${only.label} project`}`,
+      onclick: () => promote(only.value),
+    }, icon('arrow-up'), 'Promote');
+  }
+  return pickButton({ label: 'Promote', title: `Make ${c.name} apply more widely`, options: targets, onPick: promote });
 }
 
 function addTaskCategory(store, name, scope) {
@@ -143,10 +177,9 @@ function confirmDeleteTaskCategory(store, cat) {
 
 function taskCategoriesSection(store) {
   const cats = [...taskCategories(store)].sort((a, b) => a.name.localeCompare(b.name));
-  const scopeSelect = (attrs) => h('select', attrs, scopeOptions(store));
   return h('div', { class: 'svc-section' },
     h('h3', null, 'Task categories'),
-    h('p', { class: 'muted small' }, 'Categories sort tasks within a project (errands, bugs, ideas…). A general one applies to every project; scope one to a single project, or to every project with a label. Renaming one renames it on its tasks.'),
+    h('p', { class: 'muted small' }, 'Categories sort tasks within a project (errands, bugs, ideas…). A general one applies to every project; scope one to a single project, or to every project with a label. Promote one to widen it, from a project to that project’s label or to all projects. Renaming one renames it on its tasks.'),
     labelsView.tasks ? notice({ tone: 'error', text: labelsView.tasks }) : null,
     cats.length
       ? h('ul', { class: 'label-list' }, cats.map((c) =>
@@ -154,13 +187,17 @@ function taskCategoriesSection(store) {
             colorPicker({ value: c.color ?? '', name: c.name, onPick: (color) => editTaskCategory(store, c, { color }), onClear: () => editTaskCategory(store, c, { color: '' }) }),
             editText({ value: c.name, placeholder: 'Name', className: 'label-name', onSave: (name) => editTaskCategory(store, c, { name: name.trim() }) }),
             pill(c.name, { color: c.color }),
-            scopeSelect({ value: scopeValue(c), 'aria-label': `Where ${c.name} applies`, onchange: (e) => editTaskCategory(store, c, parseScope(e.target.value)) }),
+            scopePicker(store, scopeValue(c), (v) => editTaskCategory(store, c, parseScope(v))),
+            promoteControl(store, c),
             h('span', { class: 'grow' }),
             h('span', { class: 'muted small' }, plural(taskCategoryUse(store, c.name), 'task')),
             h('button', { type: 'button', class: 'btn-small danger', 'aria-label': `Delete ${c.name}`, onclick: () => confirmDeleteTaskCategory(store, c) }, icon('x'), 'Delete'))))
       : empty('No task categories yet.'),
-    addForm('New task category, e.g. Errands', (name, form) => addTaskCategory(store, name, form.elements.scope.value),
-      scopeSelect({ name: 'scope', 'aria-label': 'Where it applies' })));
+    addForm('New task category, e.g. Errands', (name) => addTaskCategory(store, name, newTaskCategoryScope),
+      scopePicker(store, newTaskCategoryScope, (v) => {
+        newTaskCategoryScope = v;
+        store.refresh();
+      })));
 }
 
 // --- Project labels ---
