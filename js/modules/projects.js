@@ -458,13 +458,14 @@ function projectList(store, projects, items, categories) {
     }));
 }
 
-// The Gmail and Google Calendar accounts connected to a project, one logo and address each; nothing when none are.
+// The Gmail and Google Calendar accounts connected to a project, one logo and address each, plus Resend when it has a key; nothing when none are.
 function googleField(store, p) {
   const badges = [
     ['gmail', 'Gmail', connectedGmailOf(store, p.id)],
     ['gcal', 'Google Calendar', connectedCalendarsOf(store, p.id)],
   ].flatMap(([name, label, emails]) => emails.map((email) =>
     h('span', { class: 'service-badge', title: `${label}: ${email}` }, icon(name), h('span', { class: 'sr-only' }, `${label}: `), email)));
+  if (resendSettings(store).keys?.[p.id]) badges.push(h('span', { class: 'service-badge', title: 'Resend key set up' }, icon('resend'), 'Resend'));
   return badges.length
     ? h('div', { class: 'pp-field' }, h('span', { class: 'pp-label' }, 'Connected'), h('div', { class: 'pp-chips' }, badges))
     : null;
