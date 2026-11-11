@@ -1,4 +1,4 @@
-import { h, uid, icon, statusOf, empty, notice, todayISO } from '../ui.js';
+import { h, uid, icon, statusOf, notice, todayISO } from '../ui.js';
 import { makeTask } from '../capture.js';
 import { AUTO_SOURCES } from '../automations.js';
 import { toast } from '../toast.js';
@@ -51,9 +51,7 @@ const view = {
   lastPicked: null,
   dragId: null,
   dragStatus: null,
-  managingCategories: false,
   creatingProject: false,
-  catError: '',
   showProject: false,
   sort: { ...DEFAULT_SORT },
   colFilter: { text: '', status: '', priority: '', project: '', category: '' },
@@ -111,12 +109,6 @@ function parseScope(value) {
   if (value.startsWith('category:')) return { scope: 'projectCategory', projectId: null, projectCategoryId: value.slice(9) };
   return { scope: 'all', projectId: null, projectCategoryId: null };
 }
-function scopeValue(c) {
-  if (c.scope === 'project') return `project:${c.projectId}`;
-  if (c.scope === 'projectCategory') return `category:${c.projectCategoryId}`;
-  return 'all';
-}
-
 // "buy milk #home" files the item under project "home" (created if missing).
 // Extra lines from a multi-line paste arrive as the description.
 function addItem(store, raw, description = '') {
@@ -255,37 +247,6 @@ function createTodoCategory(store, name, projectId) {
       d.categories.push({ id: uid(), name, ...(projectId ? parseScope(`project:${projectId}`) : parseScope('all')) }));
   }
   return name;
-}
-
-function saveTodoCategory(store, id, name, scope) {
-  if (!name) return;
-  if (todoCategories(store).some((c) => c.id !== id && sameLower(c.name, name))) {
-    view.catError = `"${name}" already exists.`;
-    return store.refresh();
-  }
-  view.catError = '';
-  store.update(COLLECTION, (d) => {
-    const c = d.categories.find((x) => x.id === id);
-    if (c) Object.assign(c, { name }, parseScope(scope));
-  });
-}
-
-function addTodoCategory(store, v) {
-  const name = v.name.trim();
-  if (!name) return;
-  if (todoCategories(store).some((c) => sameLower(c.name, name))) {
-    view.catError = `"${name}" already exists.`;
-    return store.refresh();
-  }
-  view.catError = '';
-  store.update(COLLECTION, (d) => d.categories.push({ id: uid(), name, ...parseScope(v.scope) }));
-}
-
-function deleteTodoCategory(store, c) {
-  if (!confirm(`Delete category "${c.name}"? Todos keep their label.`)) return;
-  store.update(COLLECTION, (d) => {
-    d.categories = d.categories.filter((x) => x.id !== c.id);
-  });
 }
 
 const toggleExpanded = (store, id) => {
@@ -1047,70 +1008,6 @@ function projectDetails(store, p) {
       : null);
 }
 
-// --- Category manager ---
-
-// Manager card: name and scope of every todo category, edited in place.
-function categoriesManager(store) {
-  const projects = projectsOf(store);
-  const projectCategories = store.get('projects').categories ?? [];
-  const scopeOptions = () => [
-    h('option', { value: 'all' }, 'All projects'),
-    h('optgroup', { label: 'One project' },
-      [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => h('option', { value: `project:${p.id}` }, p.name))),
-    h('optgroup', { label: 'Projects in a category' },
-      projectCategories.map((c) => h('option', { value: `category:${c.id}` }, c.name))),
-  ];
-  const scopeLabel = (c) => {
-    if (c.scope === 'project') return projects.find((p) => p.id === c.projectId)?.name ?? 'Missing project';
-    if (c.scope === 'projectCategory') return `Category: ${projectCategories.find((x) => x.id === c.projectCategoryId)?.name ?? 'Missing'}`;
-    return 'All projects';
-  };
-  const cats = todoCategories(store);
-
-  return h('section', { class: 'panel-mini stack' },
-    h('div', { class: 'row between' },
-      h('strong', null, 'Task categories'),
-      h('button', {
-        type: 'button',
-        class: 'btn-small',
-        onclick: () => {
-          view.managingCategories = false;
-          store.refresh();
-        },
-      }, 'Done')),
-    h('p', { class: 'muted small' }, 'General categories apply to every project. Scope one to a single project, or to all projects in a project category. Click a name or scope to change it.'),
-    view.catError ? h('p', { class: 'error', role: 'alert' }, view.catError) : null,
-    cats.length
-      ? h('ul', { class: 'cat-list' },
-          cats.map((c) =>
-            h('li', { class: 'cat-row' },
-              editText({
-                value: c.name,
-                placeholder: 'Name',
-                className: 'cat-name',
-                onSave: (name) => saveTodoCategory(store, c.id, name, scopeValue(c)),
-              }),
-              h('label', { class: 'cat-scope' },
-                h('select', {
-                  value: scopeValue(c),
-                  'aria-label': `Applies to for ${c.name}`,
-                  onchange: (e) => saveTodoCategory(store, c.id, c.name, e.target.value),
-                }, scopeOptions())),
-              h('span', { class: 'muted small' }, scopeLabel(c)),
-              h('button', { type: 'button', class: 'icon-btn', title: 'Delete', 'aria-label': `Delete ${c.name}`, onclick: () => deleteTodoCategory(store, c) }, icon('x')))))
-      : empty('No todo categories yet. Add one below.'),
-    h('form', {
-      class: 'row',
-      onsubmit: (e) => {
-        e.preventDefault();
-        addTodoCategory(store, formValues(e.currentTarget));
-      },
-    },
-      h('input', { name: 'name', placeholder: 'New category, e.g. errands', 'aria-label': 'New category', class: 'grow', autocomplete: 'off' }),
-      h('select', { name: 'scope', 'aria-label': 'Applies to' }, scopeOptions()),
-      h('button', { class: 'primary', type: 'submit' }, 'Add')));
-}
-
 // --- Page ---
 
 // Each keystroke re-renders the list; the shell keeps focus and the caret in the box across the render. It has to run
@@ -1340,15 +1237,7 @@ function draw(root, store) {
               disabled: view.tidy.status === 'loading',
               onclick: () => runTidy(store),
             }, 'Tidy with AI'),
-            h('button', {
-              type: 'button',
-              class: 'btn-small',
-              onclick: () => {
-                view.managingCategories = !view.managingCategories;
-                view.catError = '';
-                store.refresh();
-              },
-            }, 'Labels'),
+            h('a', { href: '#/settings?section=categories', class: 'btn-small', title: 'Statuses and categories, in Settings' }, 'Labels'),
             h('div', { class: 'segmented layout-seg', role: 'group', 'aria-label': 'View' },
               LAYOUTS.map(([key, text, iconName]) =>
                 h('button', {
@@ -1370,7 +1259,6 @@ function draw(root, store) {
           ? projectDetails(store, projects.find((p) => p.id === view.filter))
           : null,
 
-        view.managingCategories ? categoriesManager(store) : null,
         tidyPanel(store),
 
         h('form', {
