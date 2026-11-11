@@ -231,8 +231,10 @@ function updateProject(store, id, patch) {
         if (!repos.includes(repo)) repos.push(repo);
       }
     }
+    // A pasted repo names its owner, so an empty org is filled from the first repo.
+    const owner = patch.repos !== undefined && !org && repos.length ? repos[0].split('/')[0] : org;
     const { org: _org, repos: _repos, ...rest } = patch;
-    patch = { ...rest, github: { org, repos } };
+    patch = { ...rest, github: { org: owner, repos } };
   }
   if (patch.iconUrl !== undefined) {
     const iconUrl = patch.iconUrl.trim();
