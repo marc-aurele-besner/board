@@ -1688,6 +1688,8 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .cron-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: var(--gap); align-items: start; }
 .cron-list { display: flex; flex-direction: column; gap: 10px; }
 .cron-flows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.cron-flow-row { display: flex; align-items: center; gap: 6px; }
+.cron-flow-toggle { flex: none; margin-right: 6px; }
 .cron-flow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: none; border-radius: 8px; background: none; text-align: left; color: var(--text); font-weight: 400; }
 .cron-flow:hover { background: var(--surface-2); }
 .cron-flow.active { background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
@@ -1700,11 +1702,22 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 @keyframes cronPulse { 50% { opacity: 0.3; } }
 .cron-name { flex: 1 1 220px; min-width: 0; font-size: 1.1rem; font-weight: 600; }
 .cron-templates { display: grid; gap: 8px; }
+.cron-template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: var(--gap); }
+.cron-template-card { display: flex; flex-direction: column; }
+.cron-template-card h3 { margin: 0; }
+.cron-template-card .grow { flex: 1; margin: 0; }
+.cron-template-steps { display: flex; flex-wrap: wrap; gap: 6px; }
+.cron-template-steps .flow-node-icon { width: 28px; height: 28px; border-radius: 8px; }
+.cron-template-steps .flow-node-icon .icon { width: 15px; height: 15px; }
+.cron .segmented { margin-bottom: 0; }
 .cron-template { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; text-align: left; font-weight: 400; }
 .cron-template.row { flex-direction: row; align-items: center; gap: 12px; }
 .cron-template .grow { display: flex; flex-direction: column; }
 .cron-fields { align-items: flex-end; }
 .cron-fields label { flex: 1 1 160px; }
+.cron-days { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cron-day { min-width: 44px; padding: 6px 10px; border-radius: 999px; font-weight: 500; }
+.cron-day.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, var(--surface)); color: var(--text); }
 .mono-text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
 .flow-canvas { display: flex; align-items: center; flex-wrap: wrap; row-gap: 14px; padding: 18px; border-radius: var(--radius); overflow: hidden;
   background-color: var(--surface-2); background-image: radial-gradient(color-mix(in srgb, var(--muted) 35%, transparent) 1px, transparent 1px); background-size: 16px 16px; }
@@ -1721,6 +1734,7 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .kind-ai { --c: var(--ai); }
 .kind-task { --c: var(--income); }
 .kind-notify { --c: var(--danger); }
+.kind-stop { --c: var(--muted); }
 .flow-node-text { display: flex; flex-direction: column; min-width: 0; }
 .flow-node-kind { font-weight: 600; font-size: 0.9rem; }
 .flow-node-sub { color: var(--muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
