@@ -51,6 +51,10 @@ const view = {
   status: 'open',
   category: '',
   expanded: new Set(),
+  // Ticked tasks, for the batch actions. Not saved: a reload starts with nothing selected.
+  selected: new Set(),
+  // The task last ticked, so Shift+click can tick everything between it and the next one.
+  lastPicked: null,
   dragId: null,
   managingCategories: false,
   creatingProject: false,
@@ -412,8 +416,44 @@ function issueControl(store, item, repos) {
   }, icon('repo'));
 }
 
+// Marks a task done, or back to "To do" when it already is.
+function doneButton(store, item) {
+  const done = statusOf(item) === 'done';
+  return h('button', {
+    type: 'button',
+    class: done ? 'icon-btn done-btn on' : 'icon-btn done-btn',
+    title: done ? 'Mark as not done' : 'Mark done',
+    'aria-label': done ? `Mark "${item.text}" as not done` : `Mark "${item.text}" done`,
+    'aria-pressed': String(done),
+    onclick: () => updateItem(store, item.id, { status: done ? 'todo' : 'done' }),
+  }, icon('check'));
+}
+
+// The checkbox picks the task for the batch actions. Shift+click picks the whole range from the last one.
+// order: the ids shown, top to bottom.
+function selectBox(store, item, order = []) {
+  return h('input', {
+    type: 'checkbox',
+    class: 'todo-select',
+    checked: view.selected.has(item.id),
+    title: 'Select (Shift+click for a range)',
+    'aria-label': `Select "${item.text}"`,
+    onclick: (e) => {
+      const on = e.currentTarget.checked;
+      const from = order.indexOf(view.lastPicked);
+      const to = order.indexOf(item.id);
+      const ids = e.shiftKey && from >= 0 && to >= 0
+        ? order.slice(Math.min(from, to), Math.max(from, to) + 1)
+        : [item.id];
+      for (const id of ids) on ? view.selected.add(id) : view.selected.delete(id);
+      view.lastPicked = item.id;
+      store.refresh();
+    },
+  });
+}
+
 // One todo row. Title, description, and the pickers all edit in place.
-// ctx: { store, projects, projectLabel }
+// ctx: { store, projects, projectLabel, order }
 function todoRow(store, item, ctx) {
   const expanded = view.expanded.has(item.id);
   const status = statusOf(item);
@@ -426,7 +466,7 @@ function todoRow(store, item, ctx) {
   if (item.category && !categoryNames.includes(item.category)) categoryNames.push(item.category);
 
   return h('li', {
-    class: status === 'done' ? 'todo-item done' : 'todo-item',
+    class: ['todo-item', status === 'done' ? 'done' : '', view.selected.has(item.id) ? 'selected' : ''].filter(Boolean).join(' '),
     'data-id': item.id,
     ondragstart: (e) => {
       if (!reorderEnabled()) return e.preventDefault();
@@ -467,12 +507,7 @@ function todoRow(store, item, ctx) {
           if (reorderEnabled()) e.currentTarget.closest('li').draggable = true;
         },
       }, icon('grip')),
-      h('input', {
-        type: 'checkbox',
-        checked: status === 'done',
-        'aria-label': `Mark "${item.text}" done`,
-        onchange: (e) => updateItem(store, item.id, { status: e.target.checked ? 'done' : 'todo' }),
-      }),
+      selectBox(store, item, ctx.order),
       h('div', { class: 'todo-title-cell' },
         editText({
           value: item.text,
@@ -492,11 +527,13 @@ function todoRow(store, item, ctx) {
             }, 'Organized')
           : null),
       h('div', { class: 'todo-meta' },
-        pickChip({
-          value: status,
-          options: STATUSES.map(([v, l]) => ({ value: v, label: l, tone: STATUS_TONE[v] })),
-          onPick: (v) => updateItem(store, item.id, { status: v }),
-        }),
+        h('div', { class: 'todo-status' },
+          pickChip({
+            value: status,
+            options: STATUSES.map(([v, l]) => ({ value: v, label: l, tone: STATUS_TONE[v] })),
+            onPick: (v) => updateItem(store, item.id, { status: v }),
+          }),
+          doneButton(store, item)),
         pickChip({
           value: priority,
           options: PRIORITIES.map(([v, l]) => ({ value: v, label: l, tone: v === 'none' ? 'plain' : v })),
@@ -1003,7 +1040,10 @@ function draw(root, store) {
   );
   const columnsActive = Object.values(view.colFilter).some(Boolean);
 
-  const rowOf = (item) => todoRow(store, item, { store, projects, projectLabel: view.filter === 'all' ? projectName(item.projectId) : '' });
+  // Ticked tasks that were deleted elsewhere drop out of the selection.
+  for (const id of view.selected) if (!items.some((i) => i.id === id)) view.selected.delete(id);
+  const order = visible.map((i) => i.id);
+  const rowOf = (item) => todoRow(store, item, { store, projects, order, projectLabel: view.filter === 'all' ? projectName(item.projectId) : '' });
   const grouped = (groups) => h('div', { class: 'todo-groups' },
     groups.filter(([, rows]) => rows.length).map(([name, rows]) =>
       h('section', { class: 'todo-group' },
