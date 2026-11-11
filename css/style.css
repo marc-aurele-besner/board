@@ -1185,6 +1185,9 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .label-list .label-name { min-width: 0; flex: 0 1 220px; font-weight: 500; }
 .label-list .pill { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .label-list select { width: auto; max-width: 14rem; }
+/* The task category scope picker reads as a field, so it takes a select's outline. */
+.chip-pick.scope-pick { min-height: 34px; max-width: 14rem; padding: 4px 10px; border-color: var(--border); border-radius: 8px; background: var(--bg); gap: 6px; }
+.chip-pick.scope-pick .opt-plain { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .label-list li.is-hidden .pill { opacity: 0.5; }
 .label-add { margin-bottom: 4px; }
 .label-add input { font-size: 16px; }
