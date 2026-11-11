@@ -257,6 +257,17 @@ export async function usdPrices(chain, addresses) {
   return out;
 }
 
+// The same, at a past time (unix seconds): the value of a collect when it was made.
+export async function usdPricesAt(chain, addresses, time) {
+  const list = [...new Set(addresses.map((a) => a.toLowerCase()))];
+  if (!list.length) return {};
+  const keyOf = (a) => (isNative(a) ? `coingecko:${chain.native.coingecko}` : `${chain.prices}:${a}`);
+  const res = await fetch(`https://coins.llama.fi/prices/historical/${Math.floor(time)}/${list.map(keyOf).join(',')}`);
+  if (!res.ok) throw new Error(`The price service answered ${res.status}.`);
+  const coins = (await res.json()).coins ?? {};
+  return Object.fromEntries(list.filter((a) => coins[keyOf(a)]?.price).map((a) => [a, coins[keyOf(a)].price]));
+}
+
 // Uniswap v4 positions are plain ERC-721 tokens with no way to list an owner's tokens, so they are found from the
 // Transfer events into a wallet. Public nodes only search a limited window, and most refuse old blocks, so the
 // search keeps where it got to: it reads new blocks on every load and walks back toward the deployment while the
@@ -331,6 +342,131 @@ export async function scanV4(chain, node, owner, prev) {
   }
   s.ids = [...found];
   return s;
+}
+
+// A v3 position's own history, read from the position manager's events: IncreaseLiquidity and DecreaseLiquidity
+// (tokenId, liquidity, amount0, amount1) and Collect (tokenId, recipient, amount0, amount1). A collect pays out the
+// fees and any liquidity removed before it, so the removals tell the two apart. v4 has no such events: its pool
+// manager logs liquidity changes without amounts, so v4 collects are only seen from the fee counter.
+const INCREASE_V3 = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f';
+const DECREASE_V3 = '0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4';
+const COLLECT_V3 = '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01';
+const HISTORY_CALLS = 12; // log searches per position and load
+const KIND = { [INCREASE_V3]: 'add', [DECREASE_V3]: 'remove', [COLLECT_V3]: 'collect' };
+
+// One block range of a position's events, narrowing it while the node refuses. Amounts stay text, for JSON.
+async function historyIn(chain, node, tokenId, start, end, span, forward) {
+  for (let width = span; width >= MIN_SPAN; width = Math.floor(width / 2)) {
+    const from = forward ? start : Math.max(start, end - width + 1);
+    const to = forward ? Math.min(end, start + width - 1) : end;
+    try {
+      const logs = await rpc(node, 'eth_getLogs', [{
+        address: chain.positions,
+        fromBlock: `0x${from.toString(16)}`,
+        toBlock: `0x${to.toString(16)}`,
+        topics: [[INCREASE_V3, DECREASE_V3, COLLECT_V3], `0x${pad(BigInt(tokenId).toString(16))}`],
+      }]);
+      const events = (logs ?? []).map((l) => {
+        const w = words(l.data);
+        const kind = KIND[String(l.topics[0]).toLowerCase()];
+        // Collect's first word is the recipient, the others' is the liquidity.
+        return {
+          kind,
+          block: Number(l.blockNumber),
+          index: Number(l.logIndex),
+          tx: l.transactionHash,
+          liq: kind === 'collect' ? '0' : big(w[0]).toString(),
+          a0: big(w[1]).toString(),
+          a1: big(w[2]).toString(),
+        };
+      });
+      return { events, from, to, span: width };
+    } catch (err) {
+      if (!err.refused) return { events: null, refused: false };
+    }
+  }
+  return { events: null, refused: true };
+}
+
+// Whether the oldest event read is the position's opening: undoing every event read from today's liquidity
+// leaves none before it.
+function reachedMint(events, liquidity) {
+  if (!events.length) return false;
+  const sorted = [...events].sort((a, b) => a.block - b.block || a.index - b.index);
+  let l = BigInt(liquidity);
+  for (const e of sorted) l += e.kind === 'add' ? -BigInt(e.liq) : e.kind === 'remove' ? BigInt(e.liq) : 0n;
+  return sorted[0].kind === 'add' && l <= 0n;
+}
+
+// Extends a position's saved history. prev is what the last load saved: { node, from, to, span, done, events }.
+// Like the v4 search: new blocks first, then back toward the opening while the node keeps the blocks. done means
+// the opening was reached, or the node will not search further back. Collects get their block's time.
+export async function positionHistory(chain, node, tokenId, liquidity, prev) {
+  const head = Number(await rpc(node, 'eth_blockNumber', []));
+  const fresh = !prev || prev.node !== node;
+  const s = fresh
+    ? { node, from: head + 1, to: head, span: chain.v4.span, done: false, events: [] }
+    : { ...prev, events: [...prev.events] };
+  const have = new Set(s.events.map((e) => `${e.tx}:${e.index}`));
+  const add = (list) => list.forEach((e) => {
+    if (!have.has(`${e.tx}:${e.index}`)) {
+      have.add(`${e.tx}:${e.index}`);
+      s.events.push(e);
+    }
+  });
+  let calls = HISTORY_CALLS;
+
+  // A gap too long for this load skips its oldest part rather than falling behind for good.
+  let cursor = Math.max(s.to + 1, head - s.span * (HISTORY_CALLS / 2) + 1);
+  while (cursor <= head && calls > 0) {
+    calls--;
+    const r = await historyIn(chain, node, tokenId, cursor, head, s.span, true);
+    if (!r.events) break;
+    add(r.events);
+    s.span = r.span;
+    s.to = r.to;
+    cursor = r.to + 1;
+  }
+  while (!s.done && calls > 0) {
+    if (s.from <= 0 || reachedMint(s.events, liquidity)) {
+      s.done = true;
+      break;
+    }
+    calls--;
+    const r = await historyIn(chain, node, tokenId, 0, s.from - 1, s.span, false);
+    if (!r.events) {
+      s.done = r.refused;
+      break;
+    }
+    add(r.events);
+    s.span = r.span;
+    s.from = r.from;
+  }
+
+  const blocks = [...new Set(s.events.filter((e) => e.kind === 'collect' && !e.time).map((e) => e.block))];
+  const times = new Map(await Promise.all(blocks.map(async (b) => [b, Number((await rpc(node, 'eth_getBlockByNumber', [`0x${b.toString(16)}`, false]))?.timestamp ?? 0)])));
+  s.events = s.events.map((e) => (times.get(e.block) ? { ...e, time: times.get(e.block) } : e));
+  return s;
+}
+
+// The fees in each collect, in raw token units: what it paid out, less the liquidity removed and not yet paid.
+export function collectFees(events) {
+  let owed0 = 0n;
+  let owed1 = 0n;
+  const out = [];
+  for (const e of [...events].sort((a, b) => a.block - b.block || a.index - b.index)) {
+    if (e.kind === 'remove') {
+      owed0 += BigInt(e.a0);
+      owed1 += BigInt(e.a1);
+    } else if (e.kind === 'collect') {
+      const p0 = BigInt(e.a0) < owed0 ? BigInt(e.a0) : owed0;
+      const p1 = BigInt(e.a1) < owed1 ? BigInt(e.a1) : owed1;
+      owed0 -= p0;
+      owed1 -= p1;
+      out.push({ ...e, f0: BigInt(e.a0) - p0, f1: BigInt(e.a1) - p1 });
+    }
+  }
+  return out;
 }
 
 // Fee APR over a past window comes from the pool's swaps in it, read from logs: public nodes refuse to read
