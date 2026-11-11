@@ -898,8 +898,8 @@ function categoriesManager(store) {
 
 // --- Page ---
 
-// The search re-renders after a short pause; the shell keeps focus and the caret in the box across the render.
-let searchTimer = null;
+// Each keystroke re-renders the list; the shell keeps focus and the caret in the box across the render. It has to run
+// inside the input event: a render from a timer counts as a background one and is held while the box has focus.
 function searchBox(store) {
   const input = h('input', {
     type: 'search',
@@ -909,17 +909,12 @@ function searchBox(store) {
     'aria-label': 'Search tasks',
     autocomplete: 'off',
     oninput: (e) => {
-      clearTimeout(searchTimer);
-      const value = e.target.value;
-      searchTimer = setTimeout(() => {
-        view.query = value;
-        store.refresh();
-      }, 180);
+      view.query = e.target.value;
+      store.refresh();
     },
     onkeydown: (e) => {
       if (e.key === 'Escape' && view.query) {
         e.stopPropagation();
-        clearTimeout(searchTimer);
         view.query = '';
         store.refresh();
       }
