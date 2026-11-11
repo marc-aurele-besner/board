@@ -1189,6 +1189,8 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 /* flex: none, or the row shrinks it to a sliver, since its clipped text has no minimum width. */
 .chip-pick.scope-pick { flex: none; min-height: 34px; max-width: 14rem; padding: 4px 10px; border-color: var(--border); border-radius: 8px; background: var(--bg); gap: 6px; }
 .chip-pick.scope-pick .opt-plain { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A label shows as a pill; the row's 40% pill cap would measure against the picker and crop it. */
+.label-list .chip-pick.scope-pick .pill { max-width: 100%; }
 .label-list li.is-hidden .pill { opacity: 0.5; }
 .label-add { margin-bottom: 4px; }
 .label-add input { font-size: 16px; }
