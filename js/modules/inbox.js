@@ -5,6 +5,7 @@ import { projectIcon, projectTree, labelsOf, labelColor, underLabel } from './pr
 import { setupBanner, settingsHref } from '../integrations.js';
 import { syncInbox, readEmail, keyedProjects } from '../resend.js';
 import { syncGmail, readGmail, gmailAccounts, gmailProjects, connectGmail, isGmailConnected } from '../gmail.js';
+import { accountAvatar } from '../google.js';
 import { makeTask } from '../capture.js';
 import { pickChip } from '../inline.js';
 import { openDialog } from '../modal.js';
@@ -43,7 +44,8 @@ const STATUS = {
 };
 
 // View state. open: an email to open once it is on screen (from a link in a task).
-const view = { folder: 'inbox', project: 'all', mailbox: 'all', status: 'all', flagged: false, query: '', limit: STEP, open: '' };
+// collapsed: directories whose mailboxes are folded away. dirsOpen: whether the directory list is open (null: by screen width).
+const view = { folder: 'inbox', project: 'all', mailbox: 'all', status: 'all', flagged: false, query: '', limit: STEP, open: '', collapsed: new Set(), dirsOpen: null };
 // The last read: whether one runs now, what failed, and which Gmail accounts need a sign-in first.
 const read = { busy: false, errors: [], waiting: [], asked: false };
 
@@ -367,6 +369,83 @@ function rowEl(store, e, projects, threadSize) {
     taskControl(store, e));
 }
 
+// view.project is a project id, 'all', or 'none' for mail of a Gmail account that has no project.
+const inProject = (e, project) => project === 'all' || (project === 'none' ? !e.projectId : e.projectId === project);
+
+// A mailbox with its look: Resend gets the mail icon, a Gmail account its Google picture.
+const mailboxIcon = (key) => (key === 'resend' ? icon('send') : accountAvatar(key));
+const mailboxLabel = (key) => (key === 'resend' ? 'Resend' : key);
+
+// The directories beside the list, like a mail client's labels: each project (nested as in Projects) with the
+// mailboxes its mail comes through, then mail with no project. Counts are unread mail in the Inbox.
+function directories(store, emails, accounts, resendKeyed, set) {
+  const all = store.get('projects').projects;
+  const byId = new Map(all.map((p) => [p.id, p]));
+  const boxes = new Map(); // project id or 'none' -> Set of mailbox keys
+  const add = (projectId, key) => {
+    const id = projectId || 'none';
+    if (!boxes.has(id)) boxes.set(id, new Set());
+    boxes.get(id).add(key);
+  };
+  for (const p of resendKeyed) add(p.id, 'resend');
+  for (const a of accounts) add(a.projectId, a.email);
+  for (const e of emails) add(e.projectId, mailboxOf(e));
+  // A project with mail keeps its parents, so the tree reads as on the Projects page.
+  const shown = new Set();
+  for (const id of boxes.keys()) {
+    for (let p = byId.get(id); p && !shown.has(p.id); p = byId.get(p.parentId)) shown.add(p.id);
+  }
+  const unread = (match) => emails.filter((e) => FOLDERS[0][3](e) && e.unread && match(e)).length;
+
+  const entry = ({ active, depth = 0, lead, label, count, onclick, toggle = null, title }) =>
+    h('li', { class: 'inbox-dir', style: { '--depth': depth } },
+      toggle ?? h('span', { class: 'inbox-dir-gap' }),
+      h('button', { type: 'button', class: active ? 'inbox-dir-btn active' : 'inbox-dir-btn', 'aria-current': active ? 'true' : null, title: title ?? label, onclick },
+        lead, h('span', { class: 'inbox-dir-name' }, label), count ? h('span', { class: 'chip-count' }, count) : null));
+
+  const branch = (id, depth, lead, label) => {
+    const keys = [...(boxes.get(id) ?? [])];
+    const open = !view.collapsed.has(id);
+    const toggle = keys.length
+      ? h('button', {
+          type: 'button',
+          class: open ? 'icon-btn inbox-dir-toggle open' : 'icon-btn inbox-dir-toggle',
+          'aria-expanded': String(open),
+          'aria-label': `${open ? 'Hide' : 'Show'} the mailboxes of ${label}`,
+          onclick: () => {
+            if (open) view.collapsed.add(id);
+            else view.collapsed.delete(id);
+            store.refresh();
+          },
+        }, icon('chevron-right'))
+      : null;
+    return [
+      entry({
+        active: view.project === id && view.mailbox === 'all',
+        depth,
+        lead,
+        label,
+        count: unread((e) => inProject(e, id)),
+        toggle,
+        onclick: () => set({ project: id, mailbox: 'all' }),
+      }),
+      ...(open ? keys.map((key) => entry({
+        active: view.project === id && view.mailbox === key,
+        depth: depth + 1,
+        lead: mailboxIcon(key),
+        label: mailboxLabel(key),
+        count: unread((e) => inProject(e, id) && mailboxOf(e) === key),
+        onclick: () => set({ project: id, mailbox: key }),
+      })) : []),
+    ];
+  };
+
+  return h('ul', { class: 'inbox-dirs', 'aria-label': 'Projects and mailboxes' },
+    entry({ active: view.project === 'all' && view.mailbox === 'all', lead: icon('mail'), label: 'Every project', count: unread(() => true), onclick: () => set({ project: 'all', mailbox: 'all' }) }),
+    projectTree(all).filter(({ project }) => shown.has(project.id)).flatMap(({ project, depth }) => branch(project.id, depth, projectIcon(project), project.name)),
+    boxes.has('none') ? branch('none', 0, icon('inbox'), 'No project') : null);
+}
+
 function draw(root, store) {
   const accounts = gmailAccounts(store);
   const resendKeyed = keyedProjects(store);
@@ -379,19 +458,21 @@ function draw(root, store) {
   // A Gmail account needs no project, so it counts on its own.
   const hasMail = keyed.length > 0 || accounts.length > 0;
   if (hasMail && !read.asked) setTimeout(() => refresh(store), 0);
+  const hasNone = accounts.some((a) => !a.projectId) || emails.some((e) => !e.projectId);
 
   const folder = FOLDERS.find(([key]) => key === view.folder) ?? FOLDERS[0];
   const mailboxes = [...(resendKeyed.length || emails.some((e) => !e.source) ? [['resend', 'Resend']] : []), ...accounts.map((a) => [a.email, a.email])];
   if (!mailboxes.some(([key]) => key === view.mailbox)) view.mailbox = 'all';
-  // The project filter is a project id, or "label:<id>" for a project label: Gmail mail can carry its account's label.
+  // The project filter is a project id, 'none', or "label:<id>" for a project label: Gmail mail can carry its account's label.
   const labels = store.get('projects').categories ?? [];
   const allProjects = store.get('projects').projects;
   const labelOfAccount = new Map(accounts.map((a) => [a.email, a.labelId ?? null]));
   const labelFilter = view.project.startsWith('label:') ? view.project.slice(6) : null;
   if (labelFilter && !labels.some((c) => c.id === labelFilter)) view.project = 'all';
-  const inProject = (e) => view.project === 'all' ||
-    (labelFilter ? underLabel(allProjects, e.projectId, e.source === 'gmail' ? labelOfAccount.get(e.account) ?? null : null, labelFilter) : e.projectId === view.project);
-  const byProject = emails.filter((e) => inProject(e) && (view.mailbox === 'all' || mailboxOf(e) === view.mailbox));
+  const matchesProject = (e) => (labelFilter
+    ? underLabel(allProjects, e.projectId, e.source === 'gmail' ? labelOfAccount.get(e.account) ?? null : null, labelFilter)
+    : inProject(e, view.project));
+  const byProject = emails.filter((e) => matchesProject(e) && (view.mailbox === 'all' || mailboxOf(e) === view.mailbox));
   // Labels the filter offers: those of projects with mail, and those set on a Gmail account.
   const labelOptions = labels
     .filter((c) => keyed.some((p) => labelsOf(p).includes(c.id)) || accounts.some((a) => a.labelId === c.id))
@@ -471,13 +552,23 @@ function draw(root, store) {
     })),
 
     hasMail || emails.length
-      ? h('div', { class: 'stack' },
-          h('div', { class: 'row lp-filters inbox-folders', role: 'tablist', 'aria-label': 'Folders' },
-            FOLDERS.map((f) => chip(view.folder === f[0], [icon(f[2]), f[1]], countOf(f), () => set({ folder: f[0], status: 'all' }), {
-              role: 'tab',
-              'aria-selected': String(view.folder === f[0]),
-              title: f[0] === 'inbox' ? `${unread.length} unread` : undefined,
-            }))),
+      ? h('div', { class: 'inbox-layout' },
+          h('aside', { class: 'inbox-side' },
+            h('div', { class: 'inbox-folders', role: 'tablist', 'aria-label': 'Folders' },
+              FOLDERS.map((f) => chip(view.folder === f[0], [icon(f[2]), h('span', { class: 'inbox-folder-name' }, f[1])], countOf(f), () => set({ folder: f[0], status: 'all' }), {
+                role: 'tab',
+                'aria-selected': String(view.folder === f[0]),
+                title: f[0] === 'inbox' ? `${unread.length} unread` : undefined,
+              }))),
+            // Open on wide screens; on a phone it starts folded so the mail comes first.
+            h('details', {
+              class: 'inbox-dirs-wrap',
+              open: (view.dirsOpen ?? !window.matchMedia?.('(max-width: 760px)').matches) || null,
+              ontoggle: (ev) => { view.dirsOpen = ev.currentTarget.open; },
+            },
+              h('summary', { class: 'muted small' }, 'Projects'),
+              directories(store, emails, accounts, resendKeyed, set))),
+          h('div', { class: 'stack inbox-main' },
           h('div', { class: 'row between' },
             h('div', { class: 'row lp-filters' },
               chip(view.flagged, 'With a task', flaggedCount, () => set({ flagged: !view.flagged })),
@@ -485,11 +576,15 @@ function draw(root, store) {
                 ? h('button', { type: 'button', class: 'btn-small', onclick: () => patch(store, unread.map((e) => e.id), { unread: false }) }, icon('check'), 'Mark all read')
                 : null),
             h('div', { class: 'row inbox-pickers' },
-              keyed.length > 1 || labelOptions.length
+              keyed.length + Number(hasNone) > 1 || labelOptions.length
                 // Searchable, with each project's icon, since the list can grow long; project labels follow in their colours.
                 ? pickChip({
                     value: view.project === 'all' ? null : view.project,
-                    options: [...keyed.map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })), ...labelOptions],
+                    options: [
+                      ...keyed.map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
+                      ...(hasNone ? [{ value: 'none', label: 'No project', plainIcon: () => icon('inbox') }] : []),
+                      ...labelOptions,
+                    ],
                     nullable: true,
                     nullLabel: 'All projects',
                     className: 'inbox-project-pick',
@@ -497,9 +592,15 @@ function draw(root, store) {
                   })
                 : null,
               accounts.length && mailboxes.length > 1
-                ? h('select', { 'aria-label': 'Mailbox', onchange: (ev) => set({ mailbox: ev.target.value }) },
-                    h('option', { value: 'all' }, 'All mailboxes'),
-                    mailboxes.map(([key, label]) => h('option', { value: key, selected: view.mailbox === key }, label)))
+                // Searchable, with each Gmail account's Google picture.
+                ? pickChip({
+                    value: view.mailbox === 'all' ? null : view.mailbox,
+                    options: mailboxes.map(([key, label]) => ({ value: key, label, plainIcon: () => mailboxIcon(key) })),
+                    nullable: true,
+                    nullLabel: 'All mailboxes',
+                    className: 'inbox-project-pick',
+                    onPick: (v) => set({ mailbox: v ?? 'all' }),
+                  })
                 : null,
               statuses.length
                 ? h('select', { 'aria-label': 'Status', onchange: (ev) => set({ status: ev.target.value }) },
@@ -520,7 +621,7 @@ function draw(root, store) {
             },
           }),
           h('section', { class: 'card inbox-card' }, list),
-          more)
+          more))
       : null));
 }
 

@@ -1,6 +1,6 @@
 // Gmail, read-only, straight from the browser. Each account signs in on its own and may belong to a project (a
 // project can have several) and carry a project label for the Inbox filter; both are optional. Tokens live in memory only and last about an hour, like the other Google ones.
-import { loadGis } from './google.js';
+import { loadGis, PROFILE_SCOPE, rememberPicture } from './google.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me';
@@ -52,14 +52,15 @@ export async function connectGmail(clientId, address = '') {
   const value = await new Promise((resolve, reject) => {
     const client = window.google.accounts.oauth2.initTokenClient({
       client_id: clientId,
-      scope: SCOPE,
+      // The profile is only read for the account's picture.
+      scope: `${SCOPE} ${PROFILE_SCOPE}`,
       // Other Google services granted earlier are not mixed into a Gmail account's token.
       include_granted_scopes: false,
       ...(address ? { login_hint: address } : {}),
       callback: (resp) => {
         if (resp.error) return reject(new Error(resp.error_description || resp.error));
         if (!String(resp.scope ?? '').split(' ').includes(SCOPE)) return reject(new Error('Google did not grant Gmail access. Tick its box on the consent screen.'));
-        resolve({ value: resp.access_token, expiresAt: Date.now() + (Number(resp.expires_in) - 60) * 1000 });
+        resolve({ value: resp.access_token, expiresAt: Date.now() + (Number(resp.expires_in) - 60) * 1000, scope: resp.scope });
       },
       error_callback: (err) => reject(new Error(err?.message || 'Google sign-in was closed.')),
     });
@@ -69,6 +70,7 @@ export async function connectGmail(clientId, address = '') {
   const signedIn = String(emailAddress ?? '').toLowerCase();
   if (address && signedIn !== address) throw new Error(`You signed in as ${signedIn}, not ${address}.`);
   tokens.set(signedIn, value);
+  await rememberPicture(signedIn, value.value, value.scope);
   return signedIn;
 }
 

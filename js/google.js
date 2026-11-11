@@ -1,6 +1,8 @@
 // Google, read-only, straight from the browser (Google Identity Services): Analytics and Search Console.
 // One access token covers the services you connected. Calendar (js/gcal.js) and Gmail sign in per account instead. It lives in memory only and lasts about an hour,
 // so reconnecting is one click.
+import { h } from './ui.js';
+
 const SCOPES = {
   analytics: 'https://www.googleapis.com/auth/analytics.readonly',
   search: 'https://www.googleapis.com/auth/webmasters.readonly',
@@ -72,4 +74,41 @@ export async function googleFetch(service, name, url, options = {}) {
     throw new Error(`${name} error ${res.status}${detail ? `: ${detail}` : ''}`);
   }
   return res.json();
+}
+
+// --- Account pictures ---
+// Gmail and Calendar also ask for the basic profile, only to show each account's Google picture. The picture's URL is
+// kept in this browser (localStorage), so it shows before the account signs in again this session.
+export const PROFILE_SCOPE = 'https://www.googleapis.com/auth/userinfo.profile';
+const PICTURE_PREFIX = 'board:google-picture:';
+
+// Reads the signed-in account's picture with a fresh token and keeps it. Without the profile scope, nothing happens.
+export async function rememberPicture(address, accessToken, grantedScope) {
+  if (!String(grantedScope ?? '').split(' ').includes(PROFILE_SCOPE)) return;
+  try {
+    const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: `Bearer ${accessToken}` } });
+    const { picture = '' } = res.ok ? await res.json() : {};
+    if (picture) localStorage.setItem(PICTURE_PREFIX + address, picture);
+  } catch {
+    /* the letter stands in */
+  }
+}
+
+export function pictureOf(address) {
+  try {
+    return localStorage.getItem(PICTURE_PREFIX + address) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+// A round avatar for a Google account: its picture, or its first letter when there is none or it fails to load.
+export function accountAvatar(address, className = 'account-avatar') {
+  const letter = () => h('span', { class: `${className} is-letter`, 'aria-hidden': 'true' }, (address[0] ?? '?').toUpperCase());
+  const url = pictureOf(address);
+  if (!url) return letter();
+  // Google's picture host refuses some requests that carry a referrer.
+  const img = h('img', { class: className, src: url, alt: '', referrerpolicy: 'no-referrer', loading: 'lazy' });
+  img.addEventListener('error', () => img.replaceWith(letter()), { once: true });
+  return img;
 }
