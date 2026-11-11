@@ -9,6 +9,7 @@ import { sitesOf, siteData, ruleOf } from '../automations.js';
 import { hostOf, daysUntil } from '../sitecheck.js';
 import { overBudget } from './money.js';
 import { outOfRange } from './positions.js';
+import { unreadCount } from './inbox.js';
 
 const PRIORITY_RANK = { high: 0, medium: 1, low: 2, none: 3 };
 const RECIPE_LABEL = { testing: 'Testing', idea: 'Ideas', final: 'Final' };
@@ -260,6 +261,8 @@ function attentionCard(store, open) {
   const inbox = open.filter((i) => i.inbox).length;
   if (late) add('clock', `${late} task${late === 1 ? '' : 's'} past the deadline`, '#/todos?filter=today', 'Review');
   if (inbox) add('inbox', `${inbox} task${inbox === 1 ? '' : 's'} to organize`, '#/todos?filter=organize', 'Organize');
+  const mail = unreadCount(store);
+  if (mail) add('mail', `${mail} unread email${mail === 1 ? '' : 's'}`, '#/inbox', 'Read');
   const domains = new Set();
   for (const p of sitesOf(store)) {
     const s = siteData(store, p.id);

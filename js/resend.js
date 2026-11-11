@@ -116,7 +116,9 @@ export async function syncInbox(store) {
       const known = new Set(saved.filter((e) => e.dir === dir && ids.has(e.projectId)).map((e) => e.id));
       try {
         const rows = (await listNew(key, dir, relay, known)).map((e) => rowOf(e, dir));
-        fresh.push(...rows.map((r) => ({ ...r, projectId: ownerOf(group, r) })));
+        // A key's first read brings in its history; only mail that arrives after it counts as unread.
+        const unread = dir === 'received' && known.size > 0;
+        fresh.push(...rows.map((r) => ({ ...r, projectId: ownerOf(group, r), unread })));
       } catch (err) {
         errors.push({ projectIds: [...ids], dir, text: err.message });
         // A failed key fails both directions the same way; the second request would only repeat the error.
@@ -131,8 +133,8 @@ export async function syncInbox(store) {
     for (const r of fresh) {
       const old = byId.get(r.id);
       if (!old) added++;
-      // The status of a sent email moves on (delivered, then opened or bounced); flags and tasks stay.
-      byId.set(r.id, { ...old, ...r, taskId: old?.taskId ?? null });
+      // The status of a sent email moves on (delivered, then opened or bounced); read, star, archive and task stay.
+      byId.set(r.id, old ? { ...old, ...r, unread: Boolean(old.unread) } : { ...r, taskId: null });
     }
     const live = new Set(projects.map((p) => p.id));
     const perProject = new Map();
