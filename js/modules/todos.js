@@ -19,8 +19,8 @@ const PRIORITIES = [
   ['medium', 'Medium'],
   ['high', 'High'],
 ];
-// The "Show" filter: open, all, or one status by the name it has in Settings → Labels.
-const statusFilters = (store) => [['open', 'Open'], ['all', 'All'], ...taskStatuses(store).map((s) => [s.key, s.name])];
+// The "Show" filter: "Open" (anything not done) and each status by the name it has in Settings → Labels.
+const statusFilters = (store) => [{ value: 'open', label: 'Open' }, ...taskStatuses(store).map((s) => ({ value: s.key, label: s.name, ...statusLook(s) }))];
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2, none: 3 };
 const NO_CATEGORY = '__none';
 // Lists that are not a project: everything, no project, due today or late, waiting to be organized, made by a rule.
@@ -35,15 +35,15 @@ const DEFAULT_SORT = { key: 'status', dir: 'asc' };
 const isDefaultSort = (s) => s.key === DEFAULT_SORT.key && s.dir === DEFAULT_SORT.dir;
 
 // View state lives here so it survives re-renders.
-// filter: one of SMART_LISTS, or a project id. status: a statusFilters key. category: '' means any.
+// filter: one of SMART_LISTS, or a project id. status, category: lists of picked values; empty means any.
 // sort: { key, dir }. colFilter: the title filter, and a list of picked values per column. Empty means "any".
 // query: the search box, read by taskMatcher (words plus #project, !priority, is:status, cat:, due: tokens).
 const view = {
   layout: 'table',
   query: '',
   filter: 'all',
-  status: 'open',
-  category: '',
+  status: ['open'],
+  category: [],
   expanded: new Set(),
   // Ticked tasks, for the batch actions. Not saved: a reload starts with nothing selected.
   selected: new Set(),
@@ -73,10 +73,10 @@ const matchesFilter = (item) => {
 };
 const matchesStatus = (item) => {
   const s = statusOf(item);
-  if (view.status === 'open') return s !== 'done';
-  return view.status === 'all' || s === view.status;
+  if (!view.status.length) return true;
+  return view.status.includes(s) || (s !== 'done' && view.status.includes('open'));
 };
-const matchesCategory = (item) => !view.category || item.category === view.category;
+const matchesCategory = (item) => !view.category.length || view.category.includes(item.category || NO_CATEGORY);
 const matchesColumns = (item) => {
   const f = view.colFilter;
   if (f.text && !item.text.toLowerCase().includes(f.text.toLowerCase())) return false;
@@ -1048,7 +1048,7 @@ function draw(root, store) {
 
   // Settings → Labels sets the order.
   const categories = taskCategoryNames(store);
-  if (view.category && !categories.includes(view.category)) view.category = '';
+  view.category = view.category.filter((c) => c === NO_CATEGORY || categories.includes(c));
 
   const openCount = (pred) => items.filter((i) => statusOf(i) !== 'done' && pred(i)).length;
   const projectName = (id) => projects.find((p) => p.id === id)?.name ?? '';
@@ -1112,7 +1112,7 @@ function draw(root, store) {
   let listBody;
   if (!visible.length) {
     listBody = h('p', { class: 'empty' }, matchesQuery.active
-      ? `No task matches “${view.query.trim()}”${view.status === 'open' && !matchesQuery.hasStatus ? ' among open tasks. Add is:done to look in completed ones.' : '.'}`
+      ? `No task matches “${view.query.trim()}”${view.status.includes('open') && !view.status.includes('done') && !matchesQuery.hasStatus ? ' among open tasks. Add is:done to look in completed ones.' : '.'}`
       : columnsActive ? 'No todo matches these filters.' : 'Nothing matches these filters.');
   } else if (view.layout === 'board') {
     listBody = boardView(store, visible, projects, order);
@@ -1216,26 +1216,32 @@ function draw(root, store) {
             isProjectFilter(view.filter) ? projectMeta(store, projects.find((p) => p.id === view.filter)) : null),
           h('div', { class: 'row head-actions' },
             searchBox(store),
+            // Searchable, and several values can be picked; a task matching any of them is shown.
             h('label', { class: 'inline' }, 'Show',
-              h('select', {
-                value: view.status,
-                'aria-label': 'Filter by status',
-                onchange: (e) => {
-                  view.status = e.target.value;
+              pickMulti({
+                key: 'todo-show-status',
+                values: view.status,
+                options: statusFilters(store),
+                anyLabel: 'All',
+                ariaLabel: 'Filter by status',
+                onChange: (values) => {
+                  view.status = values;
                   store.refresh();
                 },
-              }, statusFilters(store).map(([k, l]) => h('option', { value: k }, l)))),
+              })),
             categories.length
               ? h('label', { class: 'inline' }, 'Category',
-                  h('select', {
-                    value: view.category,
-                    'aria-label': 'Filter by category',
-                    onchange: (e) => {
-                      view.category = e.target.value;
+                  pickMulti({
+                    key: 'todo-show-category',
+                    values: view.category,
+                    options: [{ value: NO_CATEGORY, label: 'No category' }, ...categories.map((c) => ({ value: c, label: c, color: categoryColor(store, c) }))],
+                    anyLabel: 'All',
+                    ariaLabel: 'Filter by category',
+                    onChange: (values) => {
+                      view.category = values;
                       store.refresh();
                     },
-                  }, h('option', { value: '' }, 'All'),
-                    categories.map((c) => h('option', { value: c }, c))))
+                  }))
               : null,
             h('button', {
               type: 'button',
@@ -1313,8 +1319,9 @@ export default {
     view: view.layout === 'table' ? '' : view.layout,
     filter: view.filter,
     q: view.query,
-    status: view.status,
-    category: view.category,
+    // An empty status list shows everything; it is written as "all" so a reload does not fall back to Open.
+    status: view.status.length ? view.status.join(',') : 'all',
+    category: view.category.join(','),
     more: view.showProject ? '1' : '',
     sort: isDefaultSort(view.sort) ? '' : view.sort.key ? `${view.sort.key}.${view.sort.dir}` : 'manual',
   }),
@@ -1322,8 +1329,8 @@ export default {
     view.layout = LAYOUTS.some(([k]) => k === p.view) ? p.view : 'table';
     view.filter = p.filter || 'all';
     view.query = p.q || '';
-    view.status = p.status || 'open';
-    view.category = p.category || '';
+    view.status = !p.status ? ['open'] : p.status === 'all' ? [] : p.status.split(',');
+    view.category = p.category ? p.category.split(',') : [];
     view.showProject = p.more === '1';
     const [key = '', dir = 'asc'] = (p.sort ?? '').split('.');
     view.sort = p.sort === 'manual'
