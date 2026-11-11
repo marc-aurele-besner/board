@@ -811,6 +811,10 @@ label.inline select { width: auto; min-width: 110px; padding: 4px 8px; }
 .th-btn:hover, .th-btn.sorted { color: var(--text); }
 .todo-filters { padding: 4px 4px 6px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
 .todo-filters input, .todo-filters select { padding: 3px 6px; font-size: 13px; min-width: 0; }
+.pick-multi { justify-content: space-between; gap: 4px; min-width: 0; min-height: 0; padding: 3px 6px; font-size: 13px; background: var(--bg); border-radius: 8px; }
+.pick-multi.active { border-color: var(--accent); }
+.pick-multi-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-multi .icon { width: 12px; height: 12px; flex: none; color: var(--muted); }
 .panel-mini { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; font-size: 0.9rem; }
 .tidy-list { display: flex; flex-direction: column; gap: 4px; }
 .tidy-list li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

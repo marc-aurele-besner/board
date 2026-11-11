@@ -75,6 +75,8 @@ function closePicker() {
 function onOutside(e) {
   if (!openPicker) return;
   if (openPicker.el.contains(e.target) || openPicker.anchor.contains(e.target)) return;
+  // A multi-select re-renders its page on every tick, so its anchor is found again by key.
+  if (openPicker.key && e.target.closest?.(`[data-pick-key="${openPicker.key}"]`)) return;
   closePicker();
 }
 
@@ -93,17 +95,30 @@ function positionPopover(el, anchor) {
 }
 
 // Opens a searchable list anchored to `anchor`. `options` are { value, label, tone? }.
-function showPicker(anchor, { options, value, nullable, nullLabel, allowCreate, onPick, onCreate }) {
+// With `multi`, `value` is an array, a click ticks or unticks an option and the list stays open.
+function showPicker(anchor, { options, value, nullable, nullLabel, allowCreate, multi = false, key = null, onPick, onCreate }) {
   closePicker();
   // Options without a usable label are dropped, so no empty or "null" rows can appear.
   options = options.filter((o) => o && o.label !== null && o.label !== undefined && String(o.label) !== '');
   const search = h('input', { class: 'pop-search', placeholder: allowCreate ? 'Search or create…' : 'Search…', autocomplete: 'off', 'aria-label': 'Search options' });
   const list = h('div', { class: 'pop-list', role: 'listbox' });
 
+  let picked = multi ? new Set(value) : null;
   const choose = (v) => {
-    closePicker();
-    onPick(v);
+    if (!multi) {
+      closePicker();
+      return onPick(v);
+    }
+    if (picked.has(v)) picked.delete(v);
+    else picked.add(v);
+    renderList();
+    onPick([...picked]);
+    // onPick re-renders the page on the next frame, and the shell then focuses its own field; take the focus back.
+    requestAnimationFrame(() => {
+      if (openPicker?.el === el) search.focus();
+    });
   };
+  const isSelected = (v) => (multi ? picked.has(v) : v === value);
   const create = (name) => {
     closePicker();
     onCreate(name);
@@ -128,7 +143,14 @@ function showPicker(anchor, { options, value, nullable, nullLabel, allowCreate, 
     // replaceChildren() turns null into the text "null", so empty slots are filtered out first.
     list.replaceChildren(...[
       nullable && !q ? row(null, nullLabel ?? 'None', {}, !value) : null,
-      ...shown.map((o) => row(o.value, o.label, o, o.value === value)),
+      multi && picked.size && !q
+        ? h('button', { type: 'button', class: 'pop-item create', onclick: () => {
+            picked = new Set();
+            renderList();
+            onPick([]);
+          } }, icon('x'), 'Clear')
+        : null,
+      ...shown.map((o) => row(o.value, o.label, o, isSelected(o.value))),
       allowCreate && q && !exact
         ? h('button', { type: 'button', class: 'pop-item create', onclick: () => create(q) }, icon('plus'), `Create “${q}”`)
         : null,
@@ -145,11 +167,16 @@ function showPicker(anchor, { options, value, nullable, nullLabel, allowCreate, 
     const exact = options.find((o) => o.label.toLowerCase() === lower);
     if (exact) choose(exact.value);
     else if (allowCreate && q) create(q);
+    else if (multi && q) {
+      const first = options.find((o) => o.label.toLowerCase().includes(lower));
+      if (first) choose(first.value);
+    }
   });
 
-  const el = h('div', { class: 'popover', role: 'dialog', 'aria-label': 'Choose an option' }, search, list);
+  if (multi) list.setAttribute('aria-multiselectable', 'true');
+  const el = h('div', { class: 'popover', role: 'dialog', 'aria-label': multi ? 'Choose options' : 'Choose an option' }, search, list);
   document.body.append(el);
-  openPicker = { el, anchor };
+  openPicker = { el, anchor, key };
   renderList();
   positionPopover(el, anchor);
   search.focus();
@@ -213,3 +240,24 @@ export function pill(label, opt = {}) {
 
 // Keeps a row's own click (for example, opening its details) from firing when a control inside it is used.
 export const stop = (e) => e.stopPropagation();
+
+// A filter button that opens the searchable picker with several options ticked at once. An empty list means "any".
+// options: [{ value, label, tone?, color? }]. `key` must be unique on the page: the button is drawn again on each tick.
+export function pickMulti({ key, values = [], options, anyLabel = 'Any', ariaLabel, onChange }) {
+  const chosen = options.filter((o) => values.includes(o.value));
+  const text = !chosen.length ? anyLabel : chosen.length === 1 ? chosen[0].label : `${chosen[0].label} +${chosen.length - 1}`;
+  const button = h('button', {
+    type: 'button',
+    class: `pick-multi${chosen.length ? ' active' : ''}`,
+    title: chosen.map((o) => o.label).join(', ') || anyLabel,
+    'aria-label': ariaLabel,
+    'aria-haspopup': 'listbox',
+    'data-pick-key': key,
+    onclick: (e) => {
+      e.stopPropagation();
+      if (openPicker && openPicker.key === key) return closePicker();
+      showPicker(button, { options, value: values, multi: true, key, onPick: onChange });
+    },
+  }, h('span', { class: 'pick-multi-text' }, text), icon('chevron-down'));
+  return button;
+}
