@@ -1250,6 +1250,8 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .lend-hf.safe strong, .lend-hf-text.safe { color: var(--income); }
 .lend-hf.watch strong, .lend-hf-text.watch { color: var(--warn); }
 .lend-hf.risk strong, .lend-hf-text.risk { color: var(--danger); }
+.lend-table .lend-hf-text { font-size: inherit; }
+.lend-table td { vertical-align: top; }
 .lend-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 10px; }
 .lend-stats > div { display: flex; flex-direction: column; gap: 2px; }
 .lend-stats strong { font-variant-numeric: tabular-nums; }

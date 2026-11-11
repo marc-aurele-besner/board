@@ -2664,6 +2664,7 @@ export default {
     wallet: view.tab === 'wallets' && walletsView.wallet !== 'all' ? walletsView.wallet : '',
     lchain: view.tab === 'lending' && lendingView.chain !== 'all' ? String(lendingView.chain) : '',
     lwallet: view.tab === 'lending' && lendingView.wallet !== 'all' ? lendingView.wallet : '',
+    lview: view.tab === 'lending' && lendingView.layout === 'list' ? 'list' : '',
     range: view.feeAuto ? '' : view.feeRange,
     by: view.feeGroup === defaultFeeGroup(view.feeRange) ? '' : view.feeGroup,
     fsort: view.feeSort === 'date' && view.feeDir === -1 ? '' : sortName(view.feeSort, view.feeDir),
@@ -2687,6 +2688,7 @@ export default {
     walletsView.wallet = isAddress(p.wallet) ? p.wallet.toLowerCase() : 'all';
     lendingView.chain = Number(p.lchain) || 'all';
     lendingView.wallet = isAddress(p.lwallet) ? p.lwallet.toLowerCase() : 'all';
+    lendingView.layout = p.lview === 'list' ? 'list' : 'cards';
     view.feeAuto = !Object.hasOwn(FEE_RANGES, p.range);
     view.feeRange = view.feeAuto ? '7' : p.range;
     view.feeGroup = FEE_GROUPS.some(([k]) => k === p.by) ? p.by : defaultFeeGroup(view.feeRange);
