@@ -1507,3 +1507,17 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .call-block > header { padding: 6px 10px; background: var(--surface-2); gap: 8px; }
 .call-block .btn-small .icon { width: 13px; height: 13px; }
 .call-pre { margin: 0; padding: 10px; max-height: 420px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 0.85rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Bar chart hover: the column under the pointer stays bright and its values show in a tooltip */
+.chart-box { position: relative; }
+.chart svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.chart .hit { fill: transparent; cursor: crosshair; }
+.chart .bar { transition: opacity 0.12s ease; }
+.chart svg.hovering .bar:not(.on) { opacity: 0.35; }
+.chart-tip { position: absolute; z-index: 5; transform: translate(-50%, -100%); pointer-events: none; min-width: 130px; max-width: 260px; padding: 7px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); font-size: 0.8rem; display: flex; flex-direction: column; gap: 3px; }
+.chart-tip[hidden] { display: none; }
+.chart-tip-label { font-weight: 600; margin-bottom: 2px; }
+.chart-tip-row { display: flex; align-items: center; gap: 6px; }
+.chart-tip-row strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chart-tip-row.total { border-top: 1px solid var(--border); padding-top: 3px; margin-top: 1px; }
+@media (prefers-reduced-motion: reduce) { .chart .bar { transition: none; } }

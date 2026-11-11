@@ -1,5 +1,6 @@
 import { h, icon, money, empty, notice } from '../ui.js';
 import { openDialog } from '../modal.js';
+import { barChart, legend } from '../chart.js';
 import { LOG_LIMIT } from '../ai.js';
 import { getCatalog } from '../model-picker.js';
 import { fetchActivity } from '../github.js';
@@ -68,40 +69,6 @@ const hoursLabel = (hours) => {
   if (hours < 48) return `${hours.toFixed(1)} h`;
   return `${(hours / 24).toFixed(1)} days`;
 };
-
-// --- Charts: plain SVG bars, drawn from numbers and our own labels only ---
-
-export function barChart(labels, series) {
-  const W = Math.max(360, labels.length * 24);
-  const H = 160;
-  const PAD = 22;
-  const totals = labels.map((_, i) => series.reduce((s, sr) => s + (sr.values[i] || 0), 0));
-  const max = Math.max(1, ...totals);
-  const slot = W / labels.length;
-  const bw = Math.max(4, slot * 0.6);
-  let body = '';
-  labels.forEach((label, i) => {
-    const x = i * slot + (slot - bw) / 2;
-    let y = H - PAD;
-    for (const sr of series) {
-      const v = sr.values[i] || 0;
-      const height = (v / max) * (H - PAD - 8);
-      y -= height;
-      body += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${height.toFixed(1)}" rx="3" style="fill:${sr.color}"><title>${label} · ${sr.name}: ${v}</title></rect>`;
-    }
-    if (labels.length <= 12 || i % Math.ceil(labels.length / 10) === 0) {
-      body += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="axis">${label}</text>`;
-    }
-  });
-  const wrap = h('div', { class: 'chart' });
-  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Chart">${body}</svg>`;
-  return wrap;
-}
-
-export function legend(series) {
-  return h('div', { class: 'legend' }, series.map((sr) =>
-    h('span', { class: 'legend-item' }, h('span', { class: 'legend-swatch', style: { background: sr.color } }), sr.name)));
-}
 
 export function stat(label, value, hint) {
   return h('div', { class: 'card stat' },
@@ -172,9 +139,19 @@ function groupCalls(entries, keyOf, labelOf) {
     .sort((a, b) => (b.cost ?? 0) - (a.cost ?? 0) || b.calls - a.calls);
 }
 
+// Features send their data as compact JSON; indent it so it can be read.
+function pretty(text) {
+  if (!/^\s*[[{]/.test(text)) return text;
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}
+
 // One message's content as text. Parts that are not text (images, files) show as a short placeholder.
 function contentText(content) {
-  if (typeof content === 'string') return content;
+  if (typeof content === 'string') return pretty(content);
   if (!Array.isArray(content)) return JSON.stringify(content, null, 2);
   return content.map((part) => {
     if (part?.type === 'text') return part.text;
@@ -224,7 +201,7 @@ function showCall(e, task) {
   ].filter(Boolean);
   const messages = Array.isArray(e.input) ? e.input : [];
   openDialog({
-    title: `${task} · ${e.at.slice(0, 16).replace('T', ' ')}`,
+    title: `${task} · ${new Date(e.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`,
     wide: true,
     body: h('div', { class: 'stack call-detail' },
       e.error ? notice({ text: e.error }) : null,
@@ -234,7 +211,7 @@ function showCall(e, task) {
             h('h3', null, `Input · ${messages.length} message${messages.length === 1 ? '' : 's'}`),
             messages.map((msg, i) => block(`${i + 1}. ${msg.role}`, contentText(msg.content))),
             h('h3', null, 'Output'),
-            block('Reply', e.output ?? ''),
+            block('Reply', pretty(e.output ?? '')),
             m.usage ? block('Usage as reported', JSON.stringify(m.usage, null, 2)) : null,
           ]
         : notice({ tone: 'info', text: `The full input and output are not kept for this call. They are kept for the latest ${LOG_LIMIT} calls made since call logging was added.` })),
@@ -277,7 +254,7 @@ function aiTab(store, w) {
       stat('Tokens', fmtTokens(tokens), 'input + output')),
     h('section', { class: 'card stack' },
       h('h3', null, 'Cost over time'),
-      entries.length ? barChart(w.items.map((b) => b.label), series) : empty('No AI calls in this period.'),
+      entries.length ? barChart(w.items.map((b) => b.label), series, { format: usdPrecise }) : empty('No AI calls in this period.'),
       entries.length ? legend(series) : null),
     h('div', { class: 'split-2' },
       groupTable('By model', groupCalls(entries, (e) => e.model, (e) => e.model), 'Model'),
