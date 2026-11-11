@@ -1,6 +1,6 @@
 // Settings → Blockchains: the chains the board reads, the nodes and explorers of each, and chains added by hand.
 import { h, icon, notice } from '../ui.js';
-import { allChains, customChains, isNodeUrl, isExplorerUrl, testNode, testNodes } from '../chains.js';
+import { allChains, customChains, isNodeUrl, isExplorerUrl, testNode, testNodes, etherscanKey } from '../chains.js';
 import { nodeUrls } from '../uniswap.js';
 import { logo } from './positions.js';
 
@@ -187,6 +187,18 @@ export function chainsCard(store) {
         ...(test.failed ?? []).map((line) => h('span', { class: 'chain-test-node' }, line))) : null);
   };
 
+  // Saved under blockchains; the copy kept under uniswap from before is dropped.
+  const saveEtherscan = (e) => {
+    e.preventDefault();
+    const key = String(new FormData(e.currentTarget).get('etherscan') ?? '').trim();
+    store.update(COLLECTION, (d) => {
+      d.blockchains = { ...d.blockchains, etherscan: key };
+      if (d.uniswap) delete d.uniswap.etherscan;
+    });
+    say(true, key ? 'Etherscan key saved.' : 'Etherscan key removed.');
+    store.refresh();
+  };
+
   return h('section', { class: 'card panel' },
     h('h2', null, 'Blockchains'),
     h('p', { class: 'muted small' }, 'The chains the board reads, for Liquidity Pools and smart contracts. A node is a JSON-RPC address a chain is read from. With several, reads go to the one answering fastest, spread across them, and move off a node that fails or stops answering. Built-in chains start with several public nodes and their usual explorer; empty the fields to go back to them. Links open in the first explorer. LP marks the chains the Liquidity Pools tab reads. Test asks each node for its chain ID and latest block.'),
@@ -203,5 +215,10 @@ export function chainsCard(store) {
       urlGroup({ name: 'rpc', values: [], label: 'Nodes', what: 'node', placeholder: 'https://…' }),
       urlGroup({ name: 'explorer', values: [], label: 'Explorers (optional)', what: 'explorer', placeholder: 'https://…', link: true }),
       h('div', { class: 'row' }, h('button', { type: 'submit', class: 'btn-small' }, 'Add chain'))),
+    h('h3', null, 'Etherscan API key'),
+    h('p', { class: 'muted small' }, 'Optional, free at etherscan.io. It covers most chains by their ID. Smart contracts uses it to fetch verified ABIs and to list transactions sent to a contract. Fees collected uses it to read each wallet\'s collect transactions, as Etherscan keeps every block where public nodes keep only recent ones. The addresses read and the key are sent to Etherscan.'),
+    h('form', { class: 'row', onsubmit: saveEtherscan },
+      h('input', { name: 'etherscan', type: 'password', value: etherscanKey(store.get(COLLECTION)), placeholder: 'Etherscan API key', autocomplete: 'off', spellcheck: false, 'aria-label': 'Etherscan API key' }),
+      h('button', { type: 'submit', class: 'btn-small' }, 'Save key')),
     chainsView.message ? notice({ tone: chainsView.ok ? 'info' : 'error', text: chainsView.message }) : null);
 }
