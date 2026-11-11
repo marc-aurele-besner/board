@@ -6,7 +6,7 @@ import { editText, pill, pickChip, pickButton } from '../inline.js';
 import { openDialog } from '../modal.js';
 import { colorPicker, SWATCHES } from '../color-picker.js';
 import { labelsOf, labelColor, projectIcon } from './projects.js';
-import { taskStatuses, statusLook, ALWAYS_SHOWN } from '../task-labels.js';
+import { taskStatuses, statusLook, ALWAYS_SHOWN, categoryLabelIds, withoutLabel } from '../task-labels.js';
 
 const UNCATEGORIZED = 'Uncategorized';
 const sameName = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -155,16 +155,59 @@ function taskStatusesSection(store) {
 const taskCategories = (store) => store.get('todos').categories ?? [];
 const taskCategoryUse = (store, name) => store.get('todos').items.filter((i) => i.category && sameName(i.category, name)).length;
 
-// Select values: "all", "project:<id>", "category:<project label id>".
+// Select values: "all", "project:<id>", "category:<project label id>". A label scope can hold several labels;
+// the picker sets the first one and the others are added beside it.
 function parseScope(value) {
-  if (value.startsWith('project:')) return { scope: 'project', projectId: value.slice(8), projectCategoryId: null };
-  if (value.startsWith('category:')) return { scope: 'projectCategory', projectId: null, projectCategoryId: value.slice(9) };
-  return { scope: 'all', projectId: null, projectCategoryId: null };
+  if (value.startsWith('project:')) return { scope: 'project', projectId: value.slice(8), projectCategoryIds: [] };
+  if (value.startsWith('category:')) return { scope: 'projectCategory', projectId: null, projectCategoryIds: [value.slice(9)] };
+  return { scope: 'all', projectId: null, projectCategoryIds: [] };
 }
 function scopeValue(c) {
   if (c.scope === 'project') return `project:${c.projectId}`;
-  if (c.scope === 'projectCategory') return `category:${c.projectCategoryId}`;
+  if (c.scope === 'projectCategory') return `category:${categoryLabelIds(c)[0]}`;
   return 'all';
+}
+
+// Picking a label for a category already scoped to labels swaps its first label and keeps the others.
+function setScope(store, c, value) {
+  const ids = categoryLabelIds(c);
+  if (value.startsWith('category:') && ids.length > 1) {
+    return editTaskCategory(store, c, { projectCategoryIds: [...new Set([value.slice(9), ...ids.slice(1)])] });
+  }
+  editTaskCategory(store, c, parseScope(value));
+}
+
+// For a category scoped to labels: its other labels, each removable, and a chip to add one more.
+function moreLabels(store, c) {
+  const ids = categoryLabelIds(c);
+  if (!ids.length) return null;
+  const labels = store.get('projects').categories ?? [];
+  const setIds = (next) => editTaskCategory(store, c, { projectCategoryIds: next });
+  const free = labels.filter((l) => !ids.includes(l.id));
+  return [
+    ids.slice(1).map((id) => {
+      const l = labels.find((x) => x.id === id);
+      if (!l) return null;
+      return h('span', { class: 'pill tone-custom pill-x', style: { '--c': labelColor(l) } },
+        l.name,
+        h('button', {
+          type: 'button',
+          class: 'pill-remove',
+          'aria-label': `Remove label ${l.name} from ${c.name}`,
+          onclick: () => setIds(ids.filter((x) => x !== id)),
+        }, icon('x')));
+    }),
+    free.length
+      ? pickChip({
+          value: null,
+          options: free.map((l) => ({ value: l.id, label: l.name, color: labelColor(l) })),
+          placeholder: '+ Label',
+          onPick: (id) => {
+            if (id) setIds([...ids, id]);
+          },
+        })
+      : null,
+  ];
 }
 
 // Options for the searchable scope picker: every project label in its colour, and every project with its icon.
@@ -238,6 +281,9 @@ function editTaskCategory(store, cat, patch) {
     if (!c) return;
     Object.assign(c, patch);
     if (!c.color) delete c.color;
+    // The single-label field of older files gives way to the list.
+    if (patch.projectCategoryIds) delete c.projectCategoryId;
+    if (!c.projectCategoryIds?.length) delete c.projectCategoryIds;
     if (name !== oldName) for (const i of d.items) if (i.category && sameName(i.category, oldName)) i.category = name;
   });
 }
@@ -272,7 +318,7 @@ function taskCategoriesSection(store) {
     sectionHead('Task categories', cats.length > 1
       ? sortButton('Sort A–Z', 'Put the task categories in alphabetical order', () => store.update('todos', (d) => { d.categories = [...d.categories].sort(byName); }))
       : null),
-    h('p', { class: 'muted small' }, 'Categories sort tasks within a project (errands, bugs, ideas…). A general one applies to every project; scope one to a single project, or to every project with a label. Promote one to widen it, from a project to that project’s label or to all projects. Renaming one renames it on its tasks. Drag the grip to reorder them; the category pickers and filters follow this order.'),
+    h('p', { class: 'muted small' }, 'Categories sort tasks within a project (errands, bugs, ideas…). A general one applies to every project; scope one to a single project, or to every project with one of its labels (add more with + Label). Promote one to widen it, from a project to that project’s label or to all projects. Renaming one renames it on its tasks. Drag the grip to reorder them; the category pickers and filters follow this order.'),
     labelsView.tasks ? notice({ tone: 'error', text: labelsView.tasks }) : null,
     cats.length
       ? h('ul', { class: 'label-list' }, cats.map((c) =>
@@ -281,7 +327,8 @@ function taskCategoriesSection(store) {
             colorPicker({ value: c.color ?? '', name: c.name, onPick: (color) => editTaskCategory(store, c, { color }), onClear: () => editTaskCategory(store, c, { color: '' }) }),
             editText({ value: c.name, placeholder: 'Name', className: 'label-name', onSave: (name) => editTaskCategory(store, c, { name: name.trim() }) }),
             pill(c.name, { color: c.color }),
-            scopePicker(store, scopeValue(c), (v) => editTaskCategory(store, c, parseScope(v))),
+            scopePicker(store, scopeValue(c), (v) => setScope(store, c, v)),
+            moreLabels(store, c),
             promoteControl(store, c),
             h('span', { class: 'grow' }),
             h('span', { class: 'muted small' }, plural(taskCategoryUse(store, c.name), 'task')),
@@ -299,7 +346,7 @@ function taskCategoriesSection(store) {
 // What uses a project label: the projects that carry it and the task categories scoped to it.
 function projectLabelUse(store, id) {
   const projects = store.get('projects').projects.filter((p) => labelsOf(p).includes(id)).length;
-  const taskCategories = (store.get('todos').categories ?? []).filter((c) => c.scope === 'projectCategory' && c.projectCategoryId === id).length;
+  const taskCategories = (store.get('todos').categories ?? []).filter((c) => categoryLabelIds(c).includes(id)).length;
   return { projects, taskCategories, total: projects + taskCategories };
 }
 
@@ -327,7 +374,7 @@ function renameProjectLabel(store, label, name) {
 }
 
 // Deletes a label. With a target, its projects get the target label and its scoped task categories follow it;
-// without one, the label is only removed from its projects and the task categories scoped to it go too.
+// without one, the label is removed from its projects and task categories, and a category left with no label goes.
 function deleteProjectLabel(store, label, targetId) {
   store.update('projects', (d) => {
     d.categories = d.categories.filter((c) => c.id !== label.id);
@@ -340,11 +387,7 @@ function deleteProjectLabel(store, label, targetId) {
   });
   if (Array.isArray(store.get('todos').categories)) {
     store.update('todos', (t) => {
-      if (targetId) {
-        for (const c of t.categories) if (c.scope === 'projectCategory' && c.projectCategoryId === label.id) c.projectCategoryId = targetId;
-      } else {
-        t.categories = t.categories.filter((c) => !(c.scope === 'projectCategory' && c.projectCategoryId === label.id));
-      }
+      t.categories = withoutLabel(t.categories, label.id, targetId);
     });
   }
 }

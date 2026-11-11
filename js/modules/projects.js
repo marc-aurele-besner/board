@@ -9,6 +9,7 @@ import { colorPicker } from '../color-picker.js';
 import { siteIcon, clearFaviconCache } from '../favicon.js';
 import { fetchRepoOverview } from '../github.js';
 import { makeTask } from '../capture.js';
+import { withoutLabel } from '../task-labels.js';
 
 const COLLECTION = 'projects';
 const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
@@ -321,7 +322,7 @@ function deleteCategory(store, category) {
   const todos = store.get('todos');
   if (Array.isArray(todos.categories)) {
     store.update('todos', (t) => {
-      t.categories = t.categories.filter((c) => !(c.scope === 'projectCategory' && c.projectCategoryId === category.id));
+      t.categories = withoutLabel(t.categories, category.id);
     });
   }
 }

@@ -10,7 +10,7 @@ import { ask, parseJson } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { taskMatcher, QUERY_HINT } from '../task-query.js';
-import { taskStatuses, statusName, statusOptions, statusLook, categoryColor, taskCategoryNames } from '../task-labels.js';
+import { taskStatuses, statusName, statusOptions, statusLook, categoryColor, taskCategoryNames, categoryLabelIds } from '../task-labels.js';
 
 const COLLECTION = 'todos';
 const PRIORITIES = [
@@ -89,25 +89,19 @@ const sameLower = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
 const label = (list, key) => list.find(([k]) => k === key)?.[1] ?? '';
 
 // Task categories. Each has a scope: 'all' (every project), 'project' (one project),
-// or 'projectCategory' (every project in a project category such as Web).
+// or 'projectCategory' (every project carrying one of its project labels, such as Web).
 const todoCategories = (store) => store.get(COLLECTION).categories ?? [];
 
-// Names a todo in this project can use: general ones, plus those scoped to the project or its category.
+// Names a todo in this project can use: general ones, plus those scoped to the project or one of its labels.
 function categoriesFor(store, projectId) {
   const project = projectsOf(store).find((p) => p.id === projectId);
+  const labels = project ? labelsOf(project) : [];
   return todoCategories(store)
     .filter((c) =>
       c.scope === 'all' ||
       (c.scope === 'project' && c.projectId === projectId) ||
-      (c.scope === 'projectCategory' && Boolean(project) && labelsOf(project).includes(c.projectCategoryId)))
+      categoryLabelIds(c).some((id) => labels.includes(id)))
     .map((c) => c.name);
-}
-
-// Select values: "all", "project:<id>", "category:<project category id>".
-function parseScope(value) {
-  if (value.startsWith('project:')) return { scope: 'project', projectId: value.slice(8), projectCategoryId: null };
-  if (value.startsWith('category:')) return { scope: 'projectCategory', projectId: null, projectCategoryId: value.slice(9) };
-  return { scope: 'all', projectId: null, projectCategoryId: null };
 }
 // "buy milk #home" files the item under project "home" (created if missing).
 // Extra lines from a multi-line paste arrive as the description.
