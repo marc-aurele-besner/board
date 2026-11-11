@@ -4,6 +4,11 @@
 
 /* Tokens: light by default, dark when the OS asks for it or data-theme="dark" is set. */
 :root {
+  /* Google's brand colors for the Gmail and Calendar marks; the same in both themes. */
+  --google-blue: #4285f4;
+  --google-red: #ea4335;
+  --google-yellow: #fbbc04;
+  --google-green: #34a853;
   --bg: #f2f5f6;
   --surface: #ffffff;
   --surface-2: #e5eaec;
@@ -958,6 +963,14 @@ button.danger { color: var(--danger); }
 .project-item.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
 .project-item .grip { cursor: grab; color: var(--muted); display: inline-flex; touch-action: none; }
 .project-item .grip .icon { width: 14px; height: 14px; }
+.service-badges { display: inline-flex; gap: 4px; flex-shrink: 0; }
+.service-badge { display: inline-flex; }
+.service-badge .icon { width: 15px; height: 15px; }
+.brand-mark { stroke: none; }
+.brand-mark .g-blue { fill: var(--google-blue); }
+.brand-mark .g-red { fill: var(--google-red); }
+.brand-mark .g-yellow { fill: var(--google-yellow); }
+.brand-mark .g-green { fill: var(--google-green); }
 .list-scroll { max-height: 60vh; overflow: auto; }
 .links li { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 .links a { color: var(--accent); word-break: break-all; }
