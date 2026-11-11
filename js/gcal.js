@@ -136,6 +136,12 @@ export const setCalendarAccount = (store, address, patch) => saveAccounts(store,
 export const calendarProject = (account, cal) => cal.projectId ?? account.projectId ?? null;
 export const calendarLabel = (account, cal) => cal.labelId ?? account.labelId ?? null;
 
+// The connected Calendar addresses that feed a project: through the account itself or one of its shown calendars.
+export const connectedCalendarsOf = (store, projectId) => calendarAccounts(store)
+  .filter((a) => isCalendarConnected(a.email)
+    && (a.projectId === projectId || (a.calendars ?? []).some((c) => c.on && calendarProject(a, c) === projectId)))
+  .map((a) => a.email);
+
 // Changes one calendar's saved fields: { on }, { projectId } or { labelId }.
 export const setCalendar = (store, address, calendarId, patch) => saveAccounts(store, (accounts) =>
   accounts.map((a) => (a.email !== address ? a : { ...a, calendars: a.calendars.map((c) => (c.id === calendarId ? { ...c, ...patch } : c)) })));
