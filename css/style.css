@@ -1482,3 +1482,13 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
   .lp-coverage-chains li { grid-template-columns: minmax(0, 1fr) auto auto; }
   .lp-coverage-chains .meter { grid-column: 1 / -1; grid-row: 2; }
 }
+
+/* Settings → Prompts */
+.prompt-list { display: flex; flex-direction: column; }
+.prompt-list > li { border-bottom: 1px solid var(--border); }
+.prompt-item summary { display: flex; align-items: center; gap: 10px; padding: 10px 0; cursor: pointer; flex-wrap: wrap; }
+.prompt-item summary .icon { width: 13px; height: 13px; vertical-align: -2px; }
+.prompt-item[open] { padding-bottom: 14px; }
+.prompt-item > p { margin: 0 0 8px; }
+.prompt-text { width: 100%; font-size: 16px; line-height: 1.45; }
+@media (min-width: 700px) { .prompt-text { font-size: 0.88rem; } }
