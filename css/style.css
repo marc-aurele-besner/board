@@ -104,6 +104,10 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
 .head-title h2 { margin: 0; }
 .head-actions { gap: 8px 10px; flex-wrap: wrap; justify-content: flex-end; }
 .head-actions .muted { margin-left: auto; }
+.todo-search { flex-direction: row; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--muted); flex: 1 1 200px; max-width: 320px; }
+.todo-search:focus-within, .todo-search.active { border-color: var(--accent); }
+.todo-search input { border: none; background: none; padding: 6px 0; }
+.todo-search input:focus { outline: none; }
 .meta-inline { gap: 6px; flex-wrap: wrap; }
 .tree-row { display: flex; align-items: center; gap: 2px; border-radius: 8px; }
 .tree-row > .nav-item { flex: 1; min-width: 0; }
@@ -1212,6 +1216,20 @@ label.check { cursor: pointer; }
 .palette-list li { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; cursor: pointer; }
 .palette-list li.active { background: color-mix(in srgb, var(--accent) 13%, var(--surface)); color: var(--accent); }
 .palette-foot { margin: 0; padding: 0 8px 4px; }
+.palette-list li.palette-more { border-top: 1px solid var(--border); border-radius: 0 0 8px 8px; margin-top: 4px; color: var(--accent); font-weight: 600; }
+
+/* Search page */
+.search-page .r-search { flex: none; }
+.search-tabs { flex-wrap: wrap; align-self: flex-start; max-width: 100%; }
+.search-group { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.search-group h3 { width: 100%; margin: 0; }
+.search-list { width: 100%; list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.search-row + .search-row { border-top: 1px solid var(--border); }
+.search-row > a, .search-row > button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; color: var(--text); text-decoration: none; background: none; border: none; text-align: left; cursor: pointer; min-width: 0; }
+.search-row > a:hover, .search-row > button:hover { background: var(--surface-2); }
+.search-row .grow { min-width: 0; overflow-wrap: anywhere; }
+.search-row .muted { flex: none; max-width: 45%; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-row.done .grow { text-decoration: line-through; color: var(--muted); }
 
 /* Segmented controls that sit in a row instead of filling it */
 .r-tabs, .r-layout, .lp-layout { margin: 0; flex: none; }

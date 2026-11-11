@@ -22,6 +22,10 @@ Tasks have a deadline. The lists **Today**, **To Organize** and **Automated** ga
 - a Money entry: `-42.50 groceries weekly shop` is an expense, `+4200 salary` is income, both dated today
 - a recipe: paste a link to import it into Kitchen
 
+The last row, **See all results**, opens the search on its own page: **All** shows the first matches of each kind, and a tab per kind (Tasks, Projects, Recipes, Sections, Settings) shows every match.
+
+The search box in Tasks filters the list as you type. Words match the title, description, category and project; `#atlas` keeps a project (`#personal` for none), `!high` a priority, `is:doing` a status (`is:done` looks in completed tasks too), `cat:design` a category, and `due:today`, `due:late`, `due:week` or `due:none` a deadline. Search page results for tasks open in Tasks with the same filter.
+
 Outside a field, `g` then a letter jumps to a section (`g t` for Tasks, `g m` for Money), `n` starts a new task, and `?` lists every shortcut.
 
 Deleting a task, a Money entry, a bill, a recipe or a recipe iteration shows **Undo** for a few seconds.
