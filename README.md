@@ -4,7 +4,7 @@ A personal command center that runs locally. No backend, no build step, no depen
 
 Sections (v1):
 
-- **Todos**: personal and per-project lists. Type `buy milk #home` to file a todo under a project. Drag the grip to reorder. Paste several lines to create a todo with a description. Click the description icon to read or edit it.
+- **Todos**: personal and per-project lists. Type `buy milk #home` to file a todo under a project. Tasks are sorted by status (in progress first, completed last); click a column title to sort by it, and a third click returns to your own order. Drag the grip to reorder, within a status while sorted by status. Paste several lines to create a todo with a description. Click the description icon to read or edit it.
 - **Projects**: quick-add by name, or a detailed form for color, description, and GitHub links (one org, several repos, or none).
 - **Kitchen**: recipe ideas, recipes you are testing, and final recipes. Log each iteration with notes and a rating.
 - **Money**: rough income and expenses per month, with totals and a per-category breakdown.

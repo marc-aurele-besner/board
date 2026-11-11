@@ -3,7 +3,7 @@ import { makeTask } from '../capture.js';
 import { AUTO_SOURCES } from '../automations.js';
 import { toast } from '../toast.js';
 import { createProject, projectIcon, labelsOf, projectTree, moveProject, labelColor } from './projects.js';
-import { editText, pickChip } from '../inline.js';
+import { editText, pickChip, pickButton } from '../inline.js';
 import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
 import { openDialog } from '../modal.js';
 import { ask, parseJson } from '../ai.js';
@@ -30,7 +30,6 @@ const PRIORITIES = [
   ['high', 'High'],
 ];
 const STATUS_FILTERS = [['open', 'Open'], ['all', 'All'], ...STATUSES];
-const STATUS_ORDER = Object.fromEntries(STATUSES.map(([key], i) => [key, i]));
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2, none: 3 };
 const NO_CATEGORY = '__none';
 // Lists that are not a project: everything, no project, due today or late, waiting to be organized, made by a rule.
@@ -39,6 +38,10 @@ const SMART_LISTS = ['all', 'personal', 'today', 'organize', 'auto'];
 const LAYOUTS = [['table', 'Table', 'list'], ['board', 'Board', 'columns'], ['project', 'By project', 'folder'], ['status', 'By status', 'check-square']];
 // In "By status", what is being worked on comes first and what is done comes last.
 const STATUS_GROUP_ORDER = ['doing', 'review', 'ondeck', 'todo', 'blocked', 'paused', 'done'];
+
+// Tasks open sorted by status, so what is being worked on is on top. An empty key means the manual (dragged) order.
+const DEFAULT_SORT = { key: 'status', dir: 'asc' };
+const isDefaultSort = (s) => s.key === DEFAULT_SORT.key && s.dir === DEFAULT_SORT.dir;
 
 // View state lives here so it survives re-renders.
 // filter: one of SMART_LISTS, or a project id. status: a STATUS_FILTERS key. category: '' means any.
@@ -56,11 +59,12 @@ const view = {
   // The task last ticked, so Shift+click can tick everything between it and the next one.
   lastPicked: null,
   dragId: null,
+  dragStatus: null,
   managingCategories: false,
   creatingProject: false,
   catError: '',
   showProject: false,
-  sort: { key: '', dir: 'asc' },
+  sort: { ...DEFAULT_SORT },
   colFilter: { text: '', status: '', priority: '', project: '', category: '' },
   tidy: { status: 'idle', items: [] },
 };
@@ -322,7 +326,9 @@ function clearDropMarks(el) {
 let dragProjectId = null;
 
 // Sorting by a column replaces the stored order, so drag-to-reorder is off while a sort is active.
-const reorderEnabled = () => !view.sort.key;
+// The status sort is stable and keeps the stored order within a status, so tasks of the same status can still be dragged.
+const reorderEnabled = () => !view.sort.key || view.sort.key === 'status';
+const canDropOn = (item) => !view.sort.key || view.dragStatus === statusOf(item);
 
 // --- GitHub issues for a task ---
 
@@ -447,15 +453,21 @@ function taskMarkdown(item, projects) {
   return desc ? `${head}\n${desc.split(/\r?\n/).map((l) => `  ${l}`).join('\n')}` : head;
 }
 
+// A copied task is being handed on, so it moves to "On Deck" (completed ones stay done) and leaves the selection.
 async function copyTasks(store, items) {
   if (!items.length) return;
   const text = items.map((i) => taskMarkdown(i, projectsOf(store))).join('\n');
   try {
     await navigator.clipboard.writeText(text);
-    toast(items.length === 1 ? 'Task copied' : `${items.length} tasks copied`);
   } catch {
     toast('Could not copy: the browser blocked the clipboard');
+    return;
   }
+  for (const i of items) view.selected.delete(i.id);
+  const moving = items.filter((i) => !['done', 'ondeck'].includes(statusOf(i))).map((i) => i.id);
+  if (moving.length) updateItems(store, moving, { status: 'ondeck' });
+  else store.refresh();
+  toast(`${items.length === 1 ? 'Task' : `${items.length} tasks`} copied${moving.length ? ', moved to On Deck' : ''}`);
 }
 
 function copyButton(store, item) {
@@ -505,19 +517,21 @@ function selectBox(store, item, order = []) {
 }
 
 // Shown while tasks are ticked: change them all at once, copy them, or delete them.
-// A select's first option is its label; picking a value applies it and the select resets on re-render.
+// Each field opens the same searchable, colored picker as a row's chips; picking a value applies it to every ticked task.
 function batchBar(store, visible, projects, categories) {
   const items = store.get(COLLECTION).items.filter((i) => view.selected.has(i.id));
   if (!items.length) return null;
   const ids = items.map((i) => i.id);
   const apply = (patch) => updateItems(store, ids, patch);
   const select = (name, options, onPick) =>
-    h('select', {
-      'aria-label': `Set ${name.toLowerCase()} of the selected tasks`,
-      onchange: (e) => {
-        if (e.target.value) onPick(e.target.value);
-      },
-    }, h('option', { value: '' }, `${name}…`), options.map(([v, l]) => h('option', { value: v }, l)));
+    pickButton({ label: name, title: `Set the ${name.toLowerCase()} of the selected tasks`, options, onPick });
+  const deadline = h('input', {
+    type: 'date',
+    class: 'due-picker',
+    tabindex: '-1',
+    'aria-hidden': 'true',
+    onchange: (e) => apply({ due: e.target.value }),
+  });
   const allShown = visible.length > 0 && visible.every((i) => view.selected.has(i.id));
   return h('div', { class: 'batch-bar', role: 'toolbar', 'aria-label': 'Selected tasks' },
     // The count doubles as the way out, so clearing never wraps onto a line of its own.
@@ -542,19 +556,24 @@ function batchBar(store, visible, projects, categories) {
           },
         }, `Select all ${visible.length} shown`),
     h('button', { type: 'button', class: 'btn-small', title: 'Mark the selected tasks done', onclick: () => apply({ status: 'done' }) }, icon('check'), 'Done'),
-    select('Status', STATUSES, (v) => apply({ status: v })),
-    select('Priority', PRIORITIES, (v) => apply({ priority: v })),
-    select('Project', [['__personal', 'Personal'], ...[...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => [p.id, p.name])],
-      (v) => apply({ projectId: v === '__personal' ? null : v })),
-    select('Category', [[NO_CATEGORY, 'No category'], ...categories.map((c) => [c, c])],
+    select('Status', STATUSES.map(([v, l]) => ({ value: v, label: l, tone: STATUS_TONE[v] })), (v) => apply({ status: v })),
+    select('Priority', PRIORITIES.map(([v, l]) => ({ value: v, label: l, tone: v === 'none' ? 'plain' : v })), (v) => apply({ priority: v })),
+    select('Project', [
+      { value: '__personal', label: 'Personal' },
+      ...[...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, color: p.color })),
+    ], (v) => apply({ projectId: v === '__personal' ? null : v })),
+    select('Category', [{ value: NO_CATEGORY, label: 'No category' }, ...categories.map((c) => ({ value: c, label: c }))],
       (v) => apply({ category: v === NO_CATEGORY ? '' : v })),
-    h('label', { class: 'inline small' }, 'Deadline',
-      h('input', {
-        type: 'date',
-        class: 'due-input',
-        'aria-label': 'Set the deadline of the selected tasks',
-        onchange: (e) => apply({ due: e.target.value }),
-      })),
+    h('span', { class: 'due-control' },
+      h('button', {
+        type: 'button',
+        class: 'btn-small',
+        title: 'Set the deadline of the selected tasks',
+        onclick: () => {
+          try { deadline.showPicker(); } catch { deadline.focus(); }
+        },
+      }, icon('calendar'), 'Deadline'),
+      deadline),
     h('span', { class: 'grow' }),
     h('button', { type: 'button', class: 'btn-small', title: 'Copy the selected tasks as a Markdown list', onclick: () => copyTasks(store, items) }, icon('copy'), 'Copy'),
     h('button', { type: 'button', class: 'btn-small danger', onclick: () => removeItems(store, ids) }, icon('trash'), 'Delete'));
@@ -580,7 +599,7 @@ function selectAllBox(store, visible) {
 }
 
 // One todo row. Title, description, and the pickers all edit in place.
-// ctx: { store, projects, projectLabel, order }
+// ctx: { store, projects, projectLabel, order, showDue }. Without a deadline column, its button sits with the actions.
 function todoRow(store, item, ctx) {
   const expanded = view.expanded.has(item.id);
   const status = statusOf(item);
@@ -598,6 +617,7 @@ function todoRow(store, item, ctx) {
     ondragstart: (e) => {
       if (!reorderEnabled()) return e.preventDefault();
       view.dragId = item.id;
+      view.dragStatus = statusOf(item);
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', item.id); // Firefox needs data to start a drag
       e.currentTarget.classList.add('dragging');
@@ -608,7 +628,7 @@ function todoRow(store, item, ctx) {
       e.currentTarget.classList.remove('dragging');
     },
     ondragover: (e) => {
-      if (!reorderEnabled() || !view.dragId || view.dragId === item.id) return;
+      if (!reorderEnabled() || !view.dragId || view.dragId === item.id || !canDropOn(item)) return;
       e.preventDefault();
       const side = dropSide(e);
       e.currentTarget.classList.toggle('drop-before', side === 'before');
@@ -616,7 +636,7 @@ function todoRow(store, item, ctx) {
     },
     ondragleave: (e) => clearDropMarks(e.currentTarget),
     ondrop: (e) => {
-      if (!reorderEnabled() || !view.dragId) return;
+      if (!reorderEnabled() || !view.dragId || !canDropOn(item)) return;
       e.preventDefault();
       const after = dropSide(e) === 'after';
       clearDropMarks(e.currentTarget);
@@ -682,8 +702,9 @@ function todoRow(store, item, ctx) {
           onPick: (v) => updateItem(store, item.id, { category: v ?? '' }),
           onCreate: (name) => updateItem(store, item.id, { category: createTodoCategory(store, name, item.projectId) }),
         }),
-        dueControl(store, item)),
+        ctx.showDue ? dueControl(store, item) : null),
       h('div', { class: 'todo-actions' },
+        ctx.showDue ? null : dueControl(store, item),
         repos.length || item.issue ? issueControl(store, item, repos) : null,
         item.email
           ? h('a', { href: `#/inbox?email=${encodeURIComponent(item.email.id)}`, class: 'icon-btn', title: 'Open the email', 'aria-label': 'Open the email this task came from' }, icon('mail'))
@@ -819,7 +840,7 @@ function boardView(store, items, projects, order) {
 
 const columnValue = (item, key, projects) => {
   if (key === 'text') return item.text.toLowerCase();
-  if (key === 'status') return STATUS_ORDER[statusOf(item)];
+  if (key === 'status') return STATUS_GROUP_ORDER.indexOf(statusOf(item));
   if (key === 'priority') return PRIORITY_ORDER[item.priority ?? 'none'];
   if (key === 'project') return (projects.find((p) => p.id === item.projectId)?.name ?? 'Personal').toLowerCase();
   if (key === 'due') return item.due || '9999-99-99'; // tasks without a deadline sort last
@@ -838,7 +859,7 @@ function sortItems(items, projects) {
   });
 }
 
-// Click a column title: ascending, then descending, then back to manual order.
+// Click a column title: ascending, then descending, then the manual order.
 function cycleSort(store, key) {
   if (view.sort.key !== key) view.sort = { key, dir: 'asc' };
   else if (view.sort.dir === 'asc') view.sort = { key, dir: 'desc' };
@@ -858,7 +879,7 @@ function columnHeader(store, key, text) {
 }
 
 // Filter row under the headers, one control per column, aligned with the rows.
-function columnFilters(store, projects, categories) {
+function columnFilters(store, projects, categories, showDue) {
   const f = view.colFilter;
   const set = (key) => (e) => {
     view.colFilter = { ...view.colFilter, [key]: e.target.value };
@@ -881,14 +902,14 @@ function columnFilters(store, projects, categories) {
     select('priority', PRIORITIES),
     select('project', [['none', 'Personal'], ...projects.map((p) => [p.id, p.name])]),
     select('category', [[NO_CATEGORY, 'No category'], ...categories.map((c) => [c, c])]),
-    h('span'),
-    h('span', null, Object.values(f).some(Boolean) || view.sort.key
+    showDue ? h('span') : null,
+    h('span', null, Object.values(f).some(Boolean) || !isDefaultSort(view.sort)
       ? h('button', {
           type: 'button',
           class: 'btn-small',
           onclick: () => {
             view.colFilter = { text: '', status: '', priority: '', project: '', category: '' };
-            view.sort = { key: '', dir: 'asc' };
+            view.sort = { ...DEFAULT_SORT };
             store.refresh();
           },
         }, 'Reset')
@@ -1176,7 +1197,9 @@ function draw(root, store) {
   // The selection only holds tasks on screen, so a batch never touches one hidden by a filter or deleted elsewhere.
   const order = visible.map((i) => i.id);
   for (const id of view.selected) if (!order.includes(id)) view.selected.delete(id);
-  const rowOf = (item) => todoRow(store, item, { store, projects, order, projectLabel: view.filter === 'all' ? projectName(item.projectId) : '' });
+  // A deadline column with nothing in it only takes room, so it shows once a task on screen has one.
+  const showDue = visible.some((i) => i.due);
+  const rowOf = (item) => todoRow(store, item, { store, projects, order, showDue, projectLabel: view.filter === 'all' ? projectName(item.projectId) : '' });
   const grouped = (groups) => h('div', { class: 'todo-groups' },
     groups.filter(([, rows]) => rows.length).map(([name, rows]) =>
       h('section', { class: 'todo-group' },
@@ -1186,7 +1209,7 @@ function draw(root, store) {
   if (!visible.length) {
     listBody = h('p', { class: 'empty' }, matchesQuery.active
       ? `No task matches “${view.query.trim()}”${view.status === 'open' && !matchesQuery.hasStatus ? ' among open tasks. Add is:done to look in completed ones.' : '.'}`
-      : columnsActive || view.sort.key ? 'No todo matches these filters.' : 'Nothing matches these filters.');
+      : columnsActive ? 'No todo matches these filters.' : 'Nothing matches these filters.');
   } else if (view.layout === 'board') {
     listBody = boardView(store, visible, projects, order);
   } else if (view.layout === 'project') {
@@ -1369,7 +1392,7 @@ function draw(root, store) {
 
         batchBar(store, visible, projects, categories),
 
-        h('div', { class: view.layout === 'table' ? 'todo-table' : 'todo-table no-columns' },
+        h('div', { class: ['todo-table', view.layout === 'table' ? '' : 'no-columns', showDue ? '' : 'no-due'].filter(Boolean).join(' ') },
           h('div', { class: 'todo-row todo-head' },
             h('span'), selectAllBox(store, visible),
             columnHeader(store, 'text', 'Task'),
@@ -1377,9 +1400,9 @@ function draw(root, store) {
             columnHeader(store, 'priority', 'Priority'),
             columnHeader(store, 'project', 'Project'),
             columnHeader(store, 'category', 'Category'),
-            columnHeader(store, 'due', 'Deadline'),
+            showDue ? columnHeader(store, 'due', 'Deadline') : null,
             h('span')),
-          columnFilters(store, projects, categories),
+          columnFilters(store, projects, categories, showDue),
           listBody))));
 }
 
@@ -1398,7 +1421,7 @@ export default {
     status: view.status,
     category: view.category,
     more: view.showProject ? '1' : '',
-    sort: view.sort.key ? `${view.sort.key}.${view.sort.dir}` : '',
+    sort: isDefaultSort(view.sort) ? '' : view.sort.key ? `${view.sort.key}.${view.sort.dir}` : 'manual',
   }),
   restore: (p = {}) => {
     view.layout = LAYOUTS.some(([k]) => k === p.view) ? p.view : 'table';
@@ -1408,6 +1431,10 @@ export default {
     view.category = p.category || '';
     view.showProject = p.more === '1';
     const [key = '', dir = 'asc'] = (p.sort ?? '').split('.');
-    view.sort = { key: ['text', 'status', 'priority', 'project', 'category', 'due'].includes(key) ? key : '', dir: dir === 'desc' ? 'desc' : 'asc' };
+    view.sort = p.sort === 'manual'
+      ? { key: '', dir: 'asc' }
+      : ['text', 'status', 'priority', 'project', 'category', 'due'].includes(key)
+        ? { key, dir: dir === 'desc' ? 'desc' : 'asc' }
+        : { ...DEFAULT_SORT };
   },
 };

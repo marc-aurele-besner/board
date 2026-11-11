@@ -184,6 +184,23 @@ export function pickChip({ value = null, options, placeholder = 'Set', nullable 
   return chip;
 }
 
+// A button that names an action and opens the same searchable picker, for setting a value on many things at once.
+// options: [{ value, label, tone?, color? }].
+export function pickButton({ label, options, title, className = 'btn-small', onPick }) {
+  const button = h('button', {
+    type: 'button',
+    class: `${className} pick-btn`.trim(),
+    title: title ?? label,
+    'aria-haspopup': 'listbox',
+    onclick: (e) => {
+      e.stopPropagation();
+      if (openPicker && openPicker.anchor === button) return closePicker();
+      showPicker(button, { options, value: undefined, onPick });
+    },
+  }, label, icon('chevron-down'));
+  return button;
+}
+
 // A colored pill. An option with `color` (a project's color) gets that color; otherwise `tone` picks one from the CSS palette.
 export function pill(label, opt = {}) {
   const text = label === null || label === undefined ? '' : String(label);
