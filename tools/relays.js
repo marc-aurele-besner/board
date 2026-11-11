@@ -1,8 +1,9 @@
 // Local relays for the APIs that send no CORS header, so a web page cannot read their answers: Bing Webmaster
-// (search data) and Resend (Inbox). Both run in this one process: `bun tools/relays.js` (or `node tools/relays.js`),
-// or with the board through `bun tools/start.js`. BING_PORT and RESEND_PORT change their ports.
+// (search data) and Resend (Inbox). Both run in this one process: `bun run relays` (or `node tools/relays.js`),
+// or with the board through `bun start`. BING_PORT and RESEND_PORT change their ports.
 // Each forwards read-only GET requests to its API only, and answers only pages served from this machine.
 import { createServer } from 'node:http';
+import { logger } from './log.js';
 
 const LOCAL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
@@ -28,7 +29,11 @@ const RELAYS = [
 ];
 
 function start(relay) {
+  const log = logger(relay.name.toLowerCase());
   createServer(async (req, res) => {
+    const started = performance.now();
+    // Preflights would double every line, so they are left out.
+    res.on('finish', () => req.method !== 'OPTIONS' && log.request(req.method, new URL(req.url, 'http://relay').pathname, res.statusCode, performance.now() - started));
     const origin = req.headers.origin ?? '';
     // Without this check any website open in the browser could use the relay, and the keys it is sent.
     if (origin && !LOCAL.test(origin)) {
@@ -56,10 +61,10 @@ function start(relay) {
   })
     .on('error', (err) => {
       const env = `${relay.name.toUpperCase()}_PORT`;
-      console.error(err.code === 'EADDRINUSE' ? `Port ${relay.port} (${relay.name} relay) is in use. Pick another with ${env}=<port> and set the same address in Settings.` : err.message);
+      log.error(err.code === 'EADDRINUSE' ? `Port ${relay.port} (${relay.name} relay) is in use. Pick another with ${env}=<port> and set the same address in Settings.` : err.message);
       process.exit(1);
     })
-    .listen(relay.port, '127.0.0.1', () => console.log(`${relay.name} relay on http://127.0.0.1:${relay.port}`));
+    .listen(relay.port, '127.0.0.1', () => log.info(`${relay.name} relay on http://127.0.0.1:${relay.port}`));
 }
 
 RELAYS.forEach(start);
