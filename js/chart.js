@@ -50,7 +50,7 @@ function hoverable(wrap, count, totals, tip) {
     wrap.classList.add('hovering');
     for (const el of svg.querySelectorAll('rect.bar')) el.classList.toggle('hot', Number(el.dataset.i) === i);
     const content = tip(i);
-    box.replaceChildren(...(Array.isArray(content) ? content : [content]).filter((x) => x != null));
+    box.replaceChildren(...[content].flat(Infinity).filter((x) => x != null));
     box.hidden = false;
     const hit = svg.querySelector(`rect.hit[data-i="${i}"]`).getBoundingClientRect();
     const bars = [...svg.querySelectorAll(`rect.bar[data-i="${i}"]`)].map((el) => el.getBoundingClientRect().top);
