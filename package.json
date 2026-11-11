@@ -1,6 +1,7 @@
 {
   "name": "board",
   "private": true,
+  "type": "module",
   "description": "Scripts only: the board has no dependencies and no build step.",
   "scripts": {
     "start": "bun tools/start.js",
