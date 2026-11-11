@@ -6,16 +6,18 @@ import { getCatalog } from '../model-picker.js';
 import { fetchActivity } from '../github.js';
 import { setupBanner } from '../integrations.js';
 import { analyticsTab, searchTab, sortTable } from './monitoring-web.js';
+import { contractsActivityTab, contractsActivitySerialize, contractsActivityRestore } from './monitoring-contracts.js';
 
 const COLLECTION = 'usage';
 const DAY = 86400000;
 const HOUR = 3600000;
-const TABS = [['ai', 'AI usage'], ['github', 'GitHub activity'], ['analytics', 'Web analytics'], ['search', 'Search']];
+const TABS = [['ai', 'AI usage'], ['github', 'GitHub activity'], ['analytics', 'Web analytics'], ['search', 'Search'], ['contracts', 'Contracts']];
 const SUBTITLES = {
   ai: 'AI calls made by the board, with their cost and tokens.',
   github: 'Commits, pull requests and issues across the repos linked to your projects.',
   analytics: 'Visitors and page views for each project website, from Google Analytics.',
   search: 'How each project website shows up in Google and Bing search.',
+  contracts: 'Transactions and events on the smart contracts saved in Settings.',
 };
 const PERIODS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['7', '7 days'], ['30', '30 days'], ['90', '90 days']];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -490,6 +492,7 @@ function draw(root, store) {
   const body = view.tab === 'github' ? githubTab(store, w)
     : view.tab === 'analytics' ? analyticsTab(store, view, w)
       : view.tab === 'search' ? searchTab(store, view, w)
+      : view.tab === 'contracts' ? contractsActivityTab(store, w, view.period)
         : aiTab(store, w);
   const periodName = PERIODS.find(([k]) => k === view.period)?.[1] ?? '';
 
@@ -540,6 +543,7 @@ export default {
       period: view.period === '7' ? '' : view.period,
       site: web ? view.site : '',
       engine: view.tab === 'search' && view.engine === 'bing' ? 'bing' : '',
+      contract: view.tab === 'contracts' ? contractsActivitySerialize() : '',
     };
   },
   restore: (p = {}) => {
@@ -547,5 +551,6 @@ export default {
     view.site = p.site || '';
     view.engine = p.engine === 'bing' ? 'bing' : 'google';
     view.period = PERIODS.some(([k]) => k === p.period) ? p.period : '7';
+    contractsActivityRestore(p.contract);
   },
 };
