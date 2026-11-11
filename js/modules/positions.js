@@ -1547,10 +1547,10 @@ function coverageCard(store) {
             class: 'btn-small lp-search-more',
             disabled: searching.has(c.chainId) || loading,
             'aria-busy': searching.has(c.chainId) ? 'true' : null,
-            title: `Search ${c.name} further back for collects now, without waiting for the next load`,
+            title: searching.has(c.chainId) ? `Searching ${c.name}…` : `Search ${c.name} further back for collects now, without waiting for the next load`,
             'aria-label': `Search ${c.name} further`,
             onclick: () => loadHistory(store, c.chainId),
-          }, refreshIcon(searching.has(c.chainId)), searching.has(c.chainId) ? 'Searching…' : 'Search further'))))
+          }, refreshIcon(searching.has(c.chainId))))))
       : null);
 }
 
