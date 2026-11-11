@@ -678,6 +678,31 @@ select { width: auto; min-width: 0; }
 .row select { width: auto; }
 .chain-row { flex-wrap: nowrap; }
 .chain-row .chain-name { flex: 0 0 9.5rem; }
+
+/* Positions added by hand, in Settings → Uniswap: striped rows, with the status as a coloured edge. */
+.added-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.added-row { --edge: var(--border); display: grid; grid-template-columns: 10rem minmax(0, 1fr) 7rem 7rem auto; align-items: center; gap: 6px 14px; padding: 8px 12px; border-left: 3px solid var(--edge); }
+.added-row:nth-child(even) { background: var(--surface-2); }
+.added-head { border-left-color: transparent; font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.added-row.tone-in { --edge: var(--income); }
+.added-row.tone-out { --edge: var(--warn); }
+.added-row.tone-closed, .added-row.tone-unread { --edge: var(--muted); }
+.added-chain, .added-pair { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.added-pair strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.added-id { font-variant-numeric: tabular-nums; }
+.added-status { font-weight: 600; color: var(--edge); }
+.tone-closed .added-status, .tone-unread .added-status { color: var(--muted); }
+.logo.sm { width: 22px; height: 22px; }
+.added-pair .pair .logo.second { margin-left: -7px; }
+@media (max-width: 720px) {
+  .added-head { display: none; }
+  .added-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "pair actions" "chain status" "id id"; }
+  .added-pair { grid-area: pair; }
+  .added-chain { grid-area: chain; }
+  .added-id { grid-area: id; }
+  .added-status { grid-area: status; justify-self: end; }
+  .added-row > button { grid-area: actions; }
+}
 .chain-row input:not([type]) { flex: 1; min-width: 0; }
 
 button {

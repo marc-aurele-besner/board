@@ -4,11 +4,12 @@ import { configure, checkGithubToken } from '../github.js';
 import { connect, disconnect, isConnected } from '../google.js';
 import { editText, pill } from '../inline.js';
 import { modelChip } from '../model-picker.js';
-import { isAddress, CHAINS, chainSettings, savedNode, parsePosition, addPosition, addedPositions, addedListOf } from '../uniswap.js';
+import { isAddress, CHAINS, chainSettings, savedNode, parsePosition, addPosition, addedPositions, addedListOf, tokenLogos } from '../uniswap.js';
 import { positionFields, positionError } from '../position-input.js';
 import { telegramCard, analyticsCard, searchCard, resendCard, notificationsCard, automationsCard, dataCard } from './settings-more.js';
 import { promptsCard } from './settings-prompts.js';
 import { projectIcon } from './projects.js';
+import { logo } from './positions.js';
 
 const COLLECTION = 'settings';
 const byName = (a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), undefined, { sensitivity: 'base' });
@@ -527,6 +528,47 @@ function categoriesCard(store) {
 
 const uniswapView = { message: '', ok: null };
 
+// Token logos, read once from the token list; the page redraws when they arrive.
+let tokenLogoMap = new Map();
+let tokenLogosAsked = false;
+
+// The positions added by hand, with the pair and range from the last Liquidity Pools read when there is one.
+function addedList(store, added, remove) {
+  if (!tokenLogosAsked) {
+    tokenLogosAsked = true;
+    tokenLogos().then((map) => {
+      tokenLogoMap = map;
+      store.refresh();
+    });
+  }
+  // The same key as a pools row's ref: v3 rows have no version in it.
+  const refOf = (x) => (x.version === 'v3' ? `${x.chainId}:${x.tokenId}` : `${x.chainId}:${x.version}:${x.tokenId}`);
+  const read = new Map();
+  for (const part of Object.values(store.get('pools')?.cache ?? {})) for (const r of part.rows ?? []) read.set(r.ref, r);
+  const tokenLogo = (chainId, address) => (address ? tokenLogoMap.get(`${chainId}:${address.toLowerCase()}`) ?? null : null);
+  const rows = added
+    .map((x) => ({ x, r: read.get(refOf(x)) ?? null, chain: CHAINS.find((c) => c.id === x.chainId) }))
+    .sort((a, b) => (a.chain?.name ?? '').localeCompare(b.chain?.name ?? '') || Number(a.x.tokenId) - Number(b.x.tokenId));
+  const status = (r) => (!r ? ['unread', 'Not read yet'] : r.closed ? ['closed', 'Closed'] : r.inRange ? ['in', 'In range'] : ['out', 'Out of range']);
+
+  return h('ul', { class: 'added-list' },
+    h('li', { class: 'added-row added-head', 'aria-hidden': 'true' },
+      h('span', null, 'Chain'), h('span', null, 'Pair'), h('span', null, 'Position'), h('span', null, 'Status'), h('span')),
+    rows.map(({ x, r, chain }) => {
+      const [tone, label] = status(r);
+      return h('li', { class: `added-row tone-${tone}` },
+        h('span', { class: 'added-chain' }, logo(chain?.logo, chain?.name ?? `Chain ${x.chainId}`, 'xs'), chain?.name ?? `Chain ${x.chainId}`),
+        r
+          ? h('span', { class: 'added-pair' },
+              h('span', { class: 'pair' }, logo(tokenLogo(x.chainId, r.addr0), r.sym0, 'sm'), logo(tokenLogo(x.chainId, r.addr1), r.sym1, 'sm second')),
+              h('strong', null, `${r.sym0} / ${r.sym1}`))
+          : h('span', { class: 'added-pair muted' }, 'Open Liquidity Pools to read it'),
+        h('span', { class: 'added-id' }, r?.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener' }, `${x.version} #${x.tokenId}`) : `${x.version} #${x.tokenId}`),
+        h('span', { class: 'added-status small' }, label),
+        h('button', { type: 'button', class: 'btn-small', onclick: () => remove(x) }, 'Remove'));
+    }));
+}
+
 // Public wallet addresses whose Uniswap positions the LP tab reads, positions added by hand, and the chains and
 // nodes to read them from.
 function uniswapCard(store) {
@@ -572,8 +614,6 @@ function uniswapCard(store) {
     const list = addedListOf(x.version);
     save({ [list]: (cfg[list] ?? []).filter((y) => !(y.chainId === x.chainId && String(y.tokenId) === String(x.tokenId))) });
   };
-  const chainName = (id) => CHAINS.find((c) => c.id === id)?.name ?? `Chain ${id}`;
-
   const saveChains = (e) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -618,11 +658,7 @@ function uniswapCard(store) {
       h('input', { name: 'address', placeholder: '0x…', spellcheck: false, 'aria-label': 'Wallet address' }),
       h('button', { type: 'submit', class: 'btn-small' }, 'Add wallet')),
     h('p', { class: 'muted small' }, 'Positions added by hand: a v3 position held by an address that is not in the list, or a v4 position the board does not find. v4 positions are found by searching each wallet\'s history on the chain, and most public nodes only search recent blocks. The Liquidity Pools tab has the same Add position button.'),
-    added.length
-      ? h('ul', { class: 'stack' }, added.map((x) => h('li', { class: 'row between' },
-        h('span', null, `${chainName(x.chainId)} · ${x.version} #${x.tokenId}`),
-        h('button', { type: 'button', class: 'btn-small', onclick: () => removeAdded(x) }, 'Remove'))))
-      : null,
+    added.length ? addedList(store, added, removeAdded) : null,
     (() => {
       const f = positionFields();
       return h('form', { class: 'stack', onsubmit: addAdded, onreset: f.reset },
