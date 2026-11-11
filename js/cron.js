@@ -79,10 +79,11 @@ export function makeFlow(fields = {}) {
   };
 }
 
-// Starting points for the "New flow" menu.
+// Starting points for the Templates tab.
 export const TEMPLATES = [
   {
     name: 'Morning plan',
+    about: 'Picks the five open tasks that matter most today.',
     schedule: { every: 'daily', time: '08:00', weekday: 1, minutes: 60 },
     steps: [
       { type: 'gather', source: 'open' },
@@ -92,6 +93,7 @@ export const TEMPLATES = [
   },
   {
     name: 'Weekly spending review',
+    about: 'Explains where this month’s money went and flags anything unusual.',
     schedule: { every: 'weekly', time: '09:00', weekday: 1, minutes: 60 },
     steps: [
       { type: 'gather', source: 'spending' },
@@ -101,10 +103,62 @@ export const TEMPLATES = [
   },
   {
     name: 'Daily writing prompt',
+    about: 'Adds a task with a fresh writing prompt, due the same day.',
     schedule: { every: 'daily', time: '07:30', weekday: 1, minutes: 60 },
     steps: [
       { type: 'ai', prompt: 'Write one short, specific writing prompt for today ({{date}}). Reply with the prompt only.' },
       { type: 'task', title: 'Write: {{input}}', priority: 'none', due: 'today' },
+    ],
+  },
+  {
+    name: 'Day ahead',
+    about: 'Reads today’s calendar on workdays and suggests how to fit the day around it.',
+    schedule: { every: 'days', time: '07:45', days: [1, 2, 3, 4, 5] },
+    steps: [
+      { type: 'gather', source: 'calendar' },
+      { type: 'ai', prompt: 'These are my events today:\n\n{{input}}\n\nSay in three short lines where the free time is and what kind of work fits it.' },
+      { type: 'notify', text: 'Today, {{date}}:\n{{input}}' },
+    ],
+  },
+  {
+    name: 'Inbox digest',
+    about: 'Summarizes unread mail at the end of the workday, and stays quiet when there is none.',
+    schedule: { every: 'days', time: '17:00', days: [1, 2, 3, 4, 5] },
+    steps: [
+      { type: 'gather', source: 'inbox' },
+      { type: 'stop', when: 'nothing' },
+      { type: 'ai', prompt: 'These emails are unread:\n\n{{input}}\n\nGroup them by what they need from me (reply, read, ignore). Keep it short.' },
+      { type: 'notify', text: 'Inbox digest:\n{{input}}' },
+    ],
+  },
+  {
+    name: 'Site watch',
+    about: 'Turns site check problems into a task during work hours.',
+    schedule: { every: 'interval', minutes: 120, from: '08:00', to: '20:00' },
+    steps: [
+      { type: 'gather', source: 'sites' },
+      { type: 'stop', when: 'nothing' },
+      { type: 'task', title: 'Look at the site problems ({{date}})', priority: 'high', due: 'today' },
+    ],
+  },
+  {
+    name: 'Pools out of range',
+    about: 'Lets you know when a liquidity position leaves its range.',
+    schedule: { every: 'interval', minutes: 180, from: '08:00', to: '22:00' },
+    steps: [
+      { type: 'gather', source: 'pools-out' },
+      { type: 'stop', when: 'nothing' },
+      { type: 'notify', text: 'Out of range:\n{{input}}' },
+    ],
+  },
+  {
+    name: 'Monthly money check',
+    about: 'Near the end of each month, reviews its spending and adds a task to act on it.',
+    schedule: { every: 'monthly', time: '09:00', day: 28 },
+    steps: [
+      { type: 'gather', source: 'spending' },
+      { type: 'ai', prompt: 'Spending so far this month:\n\n{{input}}\n\nGive three concrete ways to spend less next month.' },
+      { type: 'task', title: 'Monthly money check ({{date}})', priority: 'medium' },
     ],
   },
 ];

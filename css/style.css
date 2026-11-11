@@ -1702,6 +1702,14 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 @keyframes cronPulse { 50% { opacity: 0.3; } }
 .cron-name { flex: 1 1 220px; min-width: 0; font-size: 1.1rem; font-weight: 600; }
 .cron-templates { display: grid; gap: 8px; }
+.cron-template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: var(--gap); }
+.cron-template-card { display: flex; flex-direction: column; }
+.cron-template-card h3 { margin: 0; }
+.cron-template-card .grow { flex: 1; margin: 0; }
+.cron-template-steps { display: flex; flex-wrap: wrap; gap: 6px; }
+.cron-template-steps .flow-node-icon { width: 28px; height: 28px; border-radius: 8px; }
+.cron-template-steps .flow-node-icon .icon { width: 15px; height: 15px; }
+.cron .segmented { margin-bottom: 0; }
 .cron-template { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; text-align: left; font-weight: 400; }
 .cron-template.row { flex-direction: row; align-items: center; gap: 12px; }
 .cron-template .grow { display: flex; flex-direction: column; }

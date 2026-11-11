@@ -11,8 +11,14 @@ import {
 } from '../cron.js';
 import { modelForTask } from './settings.js';
 
-// View state: the open flow and the selected node ('trigger' or a step id).
-const view = { flow: '', node: 'trigger' };
+// View state: the tab, the open flow, the selected node ('trigger' or a step id) and the Runs tab's filter.
+const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all' };
+const TABS = [['flows', 'Flows'], ['runs', 'Runs'], ['templates', 'Templates']];
+const SUBTITLES = {
+  flows: 'Recurring flows that gather data from the board, ask an AI model, and turn the answer into a task or a notification.',
+  runs: 'What every flow did, step by step.',
+  templates: 'Starting points. A template becomes a paused flow you can adjust before switching it on.',
+};
 
 const typeOf = (type) => STEP_TYPES.find(([t]) => t === type) ?? [type, type, 'info', ''];
 const timeOf = (at) => (at ? new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never');
@@ -120,30 +126,73 @@ function flowList(store, flows) {
 }
 
 function openNewFlow(store) {
-  const dialog = openDialog({
-    title: 'New flow',
-    body: h('div', { class: 'stack' },
-      h('p', { class: 'muted small' }, 'Start from a template and adjust it, or from a blank flow.'),
-      h('div', { class: 'cron-templates' },
-        TEMPLATES.map((t) => h('button', {
+  view.tab = 'templates';
+  store.refresh();
+}
+
+// --- Templates tab ---
+
+function templateCard(store, { name, about, schedule, steps, blank = false }) {
+  return h('article', { class: 'card stack cron-template-card' },
+    h('h3', null, name),
+    h('p', { class: 'muted small grow' }, about),
+    h('div', { class: 'cron-template-steps', 'aria-label': 'Steps' },
+      h('span', { class: 'flow-node-icon kind-trigger', title: scheduleLabel(schedule) }, icon('clock')),
+      steps.map((s) => {
+        const [, label, iconName] = typeOf(s.type);
+        return h('span', { class: `flow-node-icon kind-${s.type}`, title: label }, icon(iconName));
+      })),
+    h('p', { class: 'muted small' }, scheduleLabel(schedule)),
+    h('div', null, h('button', {
+      type: 'button',
+      class: 'btn-small primary',
+      onclick: () => {
+        view.tab = 'flows';
+        addFlow(store, blank ? makeFlow({ steps: [makeStep('ai')] }) : flowFromTemplate({ name, schedule, steps }));
+      },
+    }, icon('plus'), blank ? 'Start blank' : 'Use template')));
+}
+
+function templatesTab(store) {
+  const blank = { name: 'Blank flow', about: 'One AI step to start with. Add data, conditions and outputs around it.', schedule: makeFlow().schedule, steps: [{ type: 'ai' }], blank: true };
+  return h('div', { class: 'cron-template-grid' }, [...TEMPLATES, blank].map((t) => templateCard(store, t)));
+}
+
+// --- Runs tab ---
+
+const RUN_FILTERS = [['all', 'All'], ['error', 'Failed'], ['stopped', 'Stopped'], ['dry', 'Tests']];
+
+function runsTab(store) {
+  const { flows, runs } = store.get(COLLECTION);
+  const shown = runs.filter((r) => (view.runs === 'all' ? true : view.runs === 'dry' ? r.dry : r.status === view.runs));
+  const failed = runs.filter((r) => r.status === 'error').length;
+  return h('section', { class: 'card stack' },
+    h('div', { class: 'row between' },
+      h('p', { class: 'muted small' }, `The last ${runs.length} runs of every flow${failed ? `, ${failed} failed` : ''}. Older runs are dropped.`),
+      h('div', { class: 'segmented', role: 'group', 'aria-label': 'Show' },
+        RUN_FILTERS.map(([key, label]) => h('button', {
           type: 'button',
-          class: 'cron-template',
+          class: view.runs === key ? 'seg active' : 'seg',
+          'aria-pressed': String(view.runs === key),
           onclick: () => {
-            dialog.close();
-            addFlow(store, flowFromTemplate(t));
+            view.runs = key;
+            store.refresh();
           },
-        },
-          h('strong', null, t.name),
-          h('span', { class: 'muted small' }, `${scheduleLabel(t.schedule)} · ${t.steps.map((s) => typeOf(s.type)[1]).join(' → ')}`))),
-        h('button', {
-          type: 'button',
-          class: 'cron-template',
-          onclick: () => {
-            dialog.close();
-            addFlow(store, makeFlow({ steps: [makeStep('ai')] }));
-          },
-        }, h('strong', null, 'Blank flow'), h('span', { class: 'muted small' }, 'One AI step to start with')))),
-  });
+        }, label)))),
+    shown.length
+      ? h('ul', { class: 'cron-runs' }, shown.map((r) => {
+          const flow = flows.find((f) => f.id === r.flowId) ?? null;
+          return runItem(flow, r, {
+            flowName: flow?.name ?? 'Deleted flow',
+            open: flow ? () => {
+              view.tab = 'flows';
+              view.flow = flow.id;
+              view.node = 'trigger';
+              store.refresh();
+            } : null,
+          });
+        }))
+      : empty(runs.length ? 'No run matches this filter.' : 'No run yet. Runs of every flow show here.'));
 }
 
 // --- Canvas ---
@@ -361,8 +410,9 @@ function inspector(store, flow) {
 
 const RUN_STATUS = { ok: ['Done', 'done'], stopped: ['Stopped', 'plain'], error: ['Failed', 'high'] };
 
-// One run, folded: its status and time, and when opened each step's output. flowName: shown on the Runs tab.
-function runItem(flow, r, flowName = '') {
+// One run, folded: its status and time, and when opened each step's output. On the Runs tab it also names its flow
+// and links to it.
+function runItem(flow, r, { flowName = '', open = null } = {}) {
   const nameOf = (id) => {
     const i = flow ? flow.steps.findIndex((s) => s.id === id) : -1;
     return i < 0 ? 'Removed step' : `${i + 1}. ${typeOf(flow.steps[i].type)[1]}`;
@@ -376,6 +426,7 @@ function runItem(flow, r, flowName = '') {
       h('span', null, timeOf(r.at)),
       h('span', { class: 'muted small' }, r.dry ? 'test run' : r.manual ? 'run by hand' : 'on schedule'),
       r.error ? h('span', { class: `${r.status === 'error' ? 'error' : 'muted'} small grow` }, r.error) : null),
+    open ? h('button', { type: 'button', class: 'btn-link small', onclick: open }, 'Open the flow') : null,
     h('ol', { class: 'cron-run-steps' }, r.steps.map((s) =>
       h('li', null,
         h('div', { class: 'row' }, h('strong', null, nameOf(s.stepId)), h('span', { class: 'muted small' }, `${s.ms} ms`)),
@@ -428,19 +479,36 @@ function editor(store, flow) {
     runList(store, flow));
 }
 
-function draw(root, store) {
+function flowsTab(store) {
   const flows = store.get(COLLECTION).flows;
   const flow = flows.find((f) => f.id === view.flow) ?? flows[0] ?? null;
   if (flow) view.flow = flow.id;
+  return h('div', { class: 'cron-layout' },
+    flowList(store, flows),
+    flow ? editor(store, flow) : h('div', { class: 'card stack' }, empty('Create a flow to schedule AI work, such as a morning plan from your open tasks.'),
+      h('div', null, h('button', { type: 'button', class: 'primary', onclick: () => openNewFlow(store) }, icon('plus'), 'New flow'))));
+}
+
+function draw(root, store) {
+  if (!TABS.some(([k]) => k === view.tab)) view.tab = 'flows';
+  const body = view.tab === 'runs' ? runsTab(store) : view.tab === 'templates' ? templatesTab(store) : flowsTab(store);
   root.replaceChildren(
     h('div', { class: 'stack-lg cron' },
       h('header', null,
         h('h2', null, 'Cron'),
-        h('p', { class: 'muted small' }, 'Recurring flows that gather data from the board, ask an AI model, and turn the answer into a task or a notification.')),
-      h('div', { class: 'cron-layout' },
-        flowList(store, flows),
-        flow ? editor(store, flow) : h('div', { class: 'card stack' }, empty('Create a flow to schedule AI work, such as a morning plan from your open tasks.'),
-          h('div', null, h('button', { type: 'button', class: 'primary', onclick: () => openNewFlow(store) }, icon('plus'), 'New flow'))))));
+        h('p', { class: 'muted small' }, SUBTITLES[view.tab])),
+      h('nav', { class: 'sub-tabs', role: 'tablist', 'aria-label': 'Cron sections' },
+        TABS.map(([key, label]) => h('button', {
+          type: 'button',
+          role: 'tab',
+          class: view.tab === key ? 'sub-tab active' : 'sub-tab',
+          'aria-selected': String(view.tab === key),
+          onclick: () => {
+            view.tab = key;
+            store.refresh();
+          },
+        }, label))),
+      body));
 }
 
 export default {
@@ -450,9 +518,11 @@ export default {
   collection: COLLECTION,
   defaults: DEFAULTS,
   render: draw,
-  serialize: () => ({ flow: view.flow }),
+  serialize: () => ({ tab: view.tab === 'flows' ? '' : view.tab, flow: view.flow }),
   restore: (p = {}) => {
     if (p.flow && p.flow !== view.flow) view.node = 'trigger';
     view.flow = p.flow || '';
+    // A notification links to #/cron?flow=…, with no tab, so it opens the Flows tab.
+    view.tab = p.tab || 'flows';
   },
 };
