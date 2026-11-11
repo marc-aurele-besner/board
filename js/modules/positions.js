@@ -4,7 +4,7 @@ import { toast } from '../toast.js';
 import { setupBanner } from '../integrations.js';
 import { positionFields, positionError } from '../position-input.js';
 import { poolsChanged } from '../automations.js';
-import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt } from '../uniswap.js';
+import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs } from '../uniswap.js';
 
 const STALE_MS = 10 * 60 * 1000;
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
@@ -386,7 +386,7 @@ async function load(store) {
           store.update(COLLECTION, (d) => {
             // A collect already read from the chain is not logged again from the fee counter.
             const found = collectsOf(d.cache?.[key], done.rows, Date.now())
-              .filter((f) => !(d.collected ?? []).some((c) => c.source === 'chain' && c.ref === f.ref && coversCollect(f, Date.parse(c.at))));
+              .filter((f) => !(d.collected ?? []).some((c) => c.tx && c.ref === f.ref && coversCollect(f, Date.parse(c.at))));
             if (found.length) d.collected = [...(d.collected ?? []), ...found];
             d.cache = { ...d.cache, [key]: { at: Date.now(), rows: done.rows } };
             d.fees = nextBaselines(d.fees, done.rows, Date.now());
@@ -525,53 +525,156 @@ async function loadAprs(store) {
   }
 }
 
-// v3 collects read from the position manager's events: exact amounts and times, with fees told apart from the
-// liquidity removed. One position at a time per chain, as public nodes limit bursts. A collect read from the chain
-// replaces the fee counter's entry for it; one the user removed is remembered in `hidden`, so it stays removed.
+// Collects read from the chain, three ways, each a check on the others:
+// - v3, from the node: the position manager's events give the exact fees, even when liquidity was removed in an
+//   earlier transaction (level 4);
+// - v4, from the node: the pool manager's events find each collect, and its transaction says what it paid;
+// - with an Etherscan key: each wallet's transactions to the position managers, read the same way, back to the
+//   wallet's first one, however little history the node keeps.
+// A collect is one transaction for one position. When two ways read it, the surer one (higher level) stays. Each
+// replaces the fee counter's entry for the same collect; one the user removed is remembered in `hidden`.
+// One position or transaction at a time per chain, as public nodes and Etherscan limit bursts.
+const ETHERSCAN_TXS = 40; // transactions read from Etherscan per chain and load
+const collectKey = (c) => (c.tx && c.ref ? `${c.ref}|${String(c.tx).toLowerCase()}` : c.id);
+// Entries from the v3 events came before levels, and are the surest.
+const levelOf = (c) => c.level ?? (c.source === 'chain' ? 4 : 0);
+const etherscanErrors = new Map(); // chain name -> the last Etherscan error, shown on Fees collected
+
+// Whether a reading of a collect would add to the log: new, or surer than the one kept, and not removed.
+function wanted(store, ref, tx, level) {
+  const d = store.get(COLLECTION) ?? {};
+  const key = `${ref}|${String(tx).toLowerCase()}`;
+  if ((d.hidden ?? []).includes(key)) return false;
+  const have = (d.collected ?? []).find((c) => collectKey(c) === key);
+  return !have || level > levelOf(have);
+}
+
+// A log entry for a reading: fees in tokens, valued at the token prices when they were collected.
+async function collectEntry(chain, r, tx, time, f0, f1, level, source) {
+  const a0 = f0 / 10 ** r.dec0;
+  const a1 = f1 / 10 ** r.dec1;
+  let usd = null;
+  try {
+    const p = await usdPricesAt(chain, [r.addr0, r.addr1], time);
+    const p0 = p[r.addr0.toLowerCase()];
+    const p1 = p[r.addr1.toLowerCase()];
+    if (p0 != null && p1 != null) usd = a0 * p0 + a1 * p1;
+  } catch {
+    // Logged without a value; the totals leave it out and say so.
+  }
+  return { id: `chain:${r.ref}:${tx}`, at: new Date(time * 1000).toISOString(), source, level, tx, ref: r.ref, pair: r.pair, chain: r.chain, tokenId: r.tokenId, a0, a1, sym0: r.sym0, sym1: r.sym1, usd };
+}
+
+function mergeCollects(d, found) {
+  const hidden = new Set(d.hidden ?? []);
+  const list = [...(d.collected ?? [])];
+  for (const f of found) {
+    const key = collectKey(f);
+    if (hidden.has(key)) continue;
+    const i = list.findIndex((c) => collectKey(c) === key);
+    if (i < 0) list.push(f);
+    else if (levelOf(f) > levelOf(list[i])) list[i] = f;
+  }
+  d.collected = list.filter((c) => !(c.source === 'auto' && list.some((x) => x.tx && x.ref === c.ref && coversCollect(c, Date.parse(x.at)))));
+}
+
+// What a row needs for reading its collect transactions.
+const posOf = (r) => ({ version: r.version, tokenId: r.tokenId, owner: r.wallet, token0: r.addr0, token1: r.addr1 });
+
+// One position's collects from the node.
+async function nodeCollects(store, chain, node, r) {
+  const prev = store.get(COLLECTION)?.history?.[r.ref];
+  const s = await positionHistory(chain, node, { version: r.version, tokenId: r.tokenId, liquidity: r.liq, pool: r.pool }, prev);
+  const found = [];
+  if (r.version === 'v3') {
+    for (const e of collectFees(s.events)) {
+      if (!e.time || (e.f0 === 0n && e.f1 === 0n) || !wanted(store, r.ref, e.tx, 4)) continue;
+      found.push(await collectEntry(chain, r, e.tx, e.time, Number(e.f0), Number(e.f1), 4, 'chain'));
+    }
+  } else {
+    // Transactions read before and found to collect nothing are not read again.
+    const checked = new Set(prev?.node === node ? prev.checked ?? [] : []);
+    const txs = new Map(s.events.filter((e) => e.kind !== 'add' && e.time).map((e) => [e.tx, e.time]));
+    for (const [tx, time] of txs) {
+      if (checked.has(tx) || !wanted(store, r.ref, tx, 3)) continue;
+      const res = await collectTx(chain, nodeSource(node), node, tx, posOf(r));
+      if (!res || res.level > 1) checked.add(tx);
+      if (res && (res.f0 > 0 || res.f1 > 0) && wanted(store, r.ref, tx, res.level)) found.push(await collectEntry(chain, r, tx, time, res.f0, res.f1, res.level, 'chain'));
+    }
+    s.checked = [...checked];
+  }
+  store.update(COLLECTION, (d) => {
+    d.history = { ...d.history, [r.ref]: s };
+    if (found.length) mergeCollects(d, found);
+  });
+}
+
+// One chain's collects from each wallet's transactions on Etherscan, from where the last load got to. Only
+// positions the board shows are logged: a burned position no longer says what its tokens are.
+async function etherscanCollects(store, chain, node, key, wallets, rows) {
+  const src = etherscanSource(key, chain.id);
+  const byRef = new Map(rows.map((r) => [r.ref, r]));
+  let budget = ETHERSCAN_TXS;
+  for (const wallet of wallets) {
+    const saved = store.get(COLLECTION)?.etherscan?.[chain.id]?.[wallet] ?? { block: 0, checked: [] };
+    const checked = new Set(saved.checked);
+    let block = saved.block;
+    const found = [];
+    let more = true;
+    while (more && budget > 0) {
+      const start = block;
+      const page = await walletPositionTxs(key, chain, wallet, start);
+      const todo = page.txs.filter((t) => !checked.has(t.tx));
+      for (const t of todo) {
+        if (budget <= 0) break;
+        budget--;
+        const receipt = await src.call('eth_getTransactionReceipt', [t.tx]);
+        for (const p of await positionsInReceipt(chain, node, receipt)) {
+          const r = byRef.get(refOf(p.version, chain.id, p.tokenId));
+          if (!r || !wanted(store, r.ref, t.tx, 3)) continue;
+          const res = await collectTx(chain, src, node, t.tx, posOf(r), receipt);
+          if (res && (res.f0 > 0 || res.f1 > 0) && wanted(store, r.ref, t.tx, res.level)) found.push(await collectEntry(chain, r, t.tx, t.time, res.f0, res.f1, res.level, 'etherscan'));
+        }
+        checked.add(t.tx);
+        block = t.block;
+      }
+      // The next call starts at the newest block read in full; its transactions already read are skipped.
+      if (budget > 0) block = Math.max(block, page.last ?? block);
+      more = page.more && budget > 0 && page.last != null && page.last > start;
+    }
+    store.update(COLLECTION, (d) => {
+      // Only the transactions of the block the next call starts at need remembering.
+      d.etherscan = { ...d.etherscan, [chain.id]: { ...d.etherscan?.[chain.id], [wallet]: { block, checked: [...checked].slice(-200) } } };
+      if (found.length) mergeCollects(d, found);
+    });
+  }
+}
+
 let historyBusy = false;
 async function loadHistory(store) {
   if (historyBusy) return;
   historyBusy = true;
   const cfg = store.get('settings').uniswap ?? {};
+  const key = String(cfg.etherscan ?? '').trim();
+  const wallets = (cfg.wallets ?? []).filter((w) => isAddress(w.address)).map((w) => w.address.toLowerCase());
   const byChain = new Map();
-  for (const r of state.rows.filter((x) => x.version === 'v3' && !x.staleAt && x.liq != null)) byChain.set(r.chainId, [...(byChain.get(r.chainId) ?? []), r]);
+  for (const r of state.rows.filter((x) => !x.staleAt && x.liq != null && (x.version === 'v3' || x.pool))) byChain.set(r.chainId, [...(byChain.get(r.chainId) ?? []), r]);
   await Promise.all([...byChain].map(async ([chainId, rows]) => {
     const chain = chainOf(chainId);
     const { node } = chainSettings(cfg, chain);
     for (const r of rows) {
       try {
-        const s = await positionHistory(chain, node, r.tokenId, r.liq, store.get(COLLECTION)?.history?.[r.ref]);
-        const saved = store.get(COLLECTION) ?? {};
-        const known = new Set([...(saved.collected ?? []).map((c) => c.id), ...(saved.hidden ?? [])]);
-        const found = [];
-        for (const e of collectFees(s.events)) {
-          const id = `chain:${r.chainId}:${e.tx}:${e.index}`;
-          if (known.has(id) || !e.time || (e.f0 === 0n && e.f1 === 0n)) continue;
-          const a0 = Number(e.f0) / 10 ** r.dec0;
-          const a1 = Number(e.f1) / 10 ** r.dec1;
-          let usd = null;
-          try {
-            const p = await usdPricesAt(chain, [r.addr0, r.addr1], e.time);
-            const p0 = p[r.addr0.toLowerCase()];
-            const p1 = p[r.addr1.toLowerCase()];
-            if (p0 != null && p1 != null) usd = a0 * p0 + a1 * p1;
-          } catch {
-            // Logged without a value; the totals leave it out and say so.
-          }
-          found.push({ id, at: new Date(e.time * 1000).toISOString(), source: 'chain', tx: e.tx, ref: r.ref, pair: r.pair, chain: r.chain, tokenId: r.tokenId, a0, a1, sym0: r.sym0, sym1: r.sym1, usd });
-        }
-        store.update(COLLECTION, (d) => {
-          d.history = { ...d.history, [r.ref]: s };
-          if (!found.length) return;
-          const times = found.map((f) => Date.parse(f.at));
-          d.collected = [
-            ...(d.collected ?? []).filter((c) => !(c.source === 'auto' && c.ref === r.ref && times.some((t) => coversCollect(c, t)))),
-            ...found,
-          ];
-        });
+        await nodeCollects(store, chain, node, r);
       } catch {
-        // This position keeps the fee counter's entries until its history can be read.
+        // This position keeps the other readings until its history can be read.
       }
+    }
+    if (!key) return;
+    try {
+      await etherscanCollects(store, chain, node, key, wallets, rows);
+      etherscanErrors.delete(chain.name);
+    } catch (err) {
+      etherscanErrors.set(chain.name, err.message);
     }
   }));
   historyBusy = false;
@@ -856,16 +959,16 @@ function collectedByRef(store) {
   return out;
 }
 
-// A collect read from the chain would be read again, so its id is kept in `hidden`.
+// A collect read from the chain or Etherscan would be read again, so its key is kept in `hidden`.
 function removeCollect(store, entry) {
   store.update(COLLECTION, (d) => {
     d.collected = (d.collected ?? []).filter((c) => c.id !== entry.id);
-    if (entry.source === 'chain') d.hidden = [...(d.hidden ?? []), entry.id];
+    if (entry.tx) d.hidden = [...(d.hidden ?? []), collectKey(entry)];
   });
   toast('Collection removed.', {
     undo: () => store.update(COLLECTION, (d) => {
       d.collected = [...(d.collected ?? []), entry];
-      d.hidden = (d.hidden ?? []).filter((id) => id !== entry.id);
+      d.hidden = (d.hidden ?? []).filter((key) => key !== collectKey(entry));
     }),
   });
 }
@@ -911,6 +1014,7 @@ function logForm(store) {
     view.logMessage ? notice({ text: view.logMessage }) : null);
 }
 
+const COLLECT_TITLE = 'The fees in this collect, without the liquidity it paid out, at the token prices of that day.';
 const tokenAmounts = (c) => (c.a0 != null ? `${amount(c.a0)} ${c.sym0} · ${amount(c.a1)} ${c.sym1}` : '');
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -957,12 +1061,13 @@ function feesView(store) {
       h('tbody', null, list.map((c) => h('tr', null,
         h('td', { title: c.since ? `Collected between ${new Date(c.since).toLocaleString()} and ${new Date(c.at).toLocaleString()}` : null },
           new Date(c.at).toLocaleDateString(),
-          h('div', { class: 'muted small', title: c.tx ?? null }, { manual: 'Logged by hand', chain: 'From the chain' }[c.source] ?? 'Seen by the board')),
+          h('div', { class: 'muted small', title: c.tx ?? null }, { manual: 'Logged by hand', chain: 'From the chain', etherscan: 'From Etherscan' }[c.source] ?? 'Seen by the board'),
+          c.level === 1 ? h('div', { class: 'muted small' }, `The ${c.sym0} part could not be read`) : null),
         h('td', null,
           c.pair ? h('strong', null, c.pair) : h('span', { class: 'muted' }, '—'),
           h('div', { class: 'muted small' }, [c.chain, c.tokenId ? `#${c.tokenId}` : '', c.note].filter(Boolean).join(' · '))),
         h('td', { class: 'small' }, tokenAmounts(c)),
-        h('td', { class: 'num', title: { auto: 'The unclaimed fees at the read before the collect. Fees earned after that read are not counted.', chain: 'The fees in this collect, without the liquidity it paid out, at the token prices of that day.' }[c.source] ?? null }, usdOrDash(c.usd ?? null)),
+        h('td', { class: 'num', title: { auto: 'The unclaimed fees at the read before the collect. Fees earned after that read are not counted.', chain: COLLECT_TITLE, etherscan: COLLECT_TITLE }[c.source] ?? null }, usdOrDash(c.usd ?? null)),
         h('td', null, h('button', {
           type: 'button',
           class: 'icon-btn',
@@ -990,6 +1095,9 @@ function feesView(store) {
       stat('Per week', money(perDay * 7, 'USD')),
       stat('Per month', money(perDay * 30.44, 'USD')),
       stat('Per year', money(perDay * 365, 'USD'))),
+    etherscanErrors.size
+      ? notice({ tone: 'info', text: `Etherscan could not be read for ${[...etherscanErrors].map(([name, text]) => `${name} (${text})`).join(', ')}. Collects there come from the node only.` })
+      : null,
     unpriced ? h('p', { class: 'muted small' }, `${plural(unpriced, 'collection')} without a USD value (prices were unavailable) ${unpriced === 1 ? 'is' : 'are'} left out of the totals.`) : null,
     list.length
       ? h('section', { class: 'card stack' },
@@ -1000,7 +1108,7 @@ function feesView(store) {
       ? table
       : h('div', { class: 'lp-empty' },
           h('span', { class: 'float' }, icon('coins')),
-          h('p', null, all.length ? 'No collections in this range.' : 'No collections yet. v3 collects are read from the chain; v4 ones are logged when a position\'s unclaimed fees drop between two reads. You can also log one by hand.')));
+          h('p', null, all.length ? 'No collections in this range.' : 'No collections yet. Collects are read from the chain, and from Etherscan when its key is set in Settings. Between two reads, a drop in unclaimed fees is logged too. You can also log one by hand.')));
 }
 
 // The tab's two views: the positions, and the fees collected from them.
@@ -1207,7 +1315,7 @@ export default {
   short: 'Pools',
   icon: 'droplet',
   collection: COLLECTION,
-  defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [], history: {}, hidden: [] },
+  defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [], history: {}, hidden: [], etherscan: {} },
   render: draw,
   serialize: () => ({
     filter: view.filter === 'all' ? '' : view.filter,

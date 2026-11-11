@@ -344,42 +344,54 @@ export async function scanV4(chain, node, owner, prev) {
   return s;
 }
 
-// A v3 position's own history, read from the position manager's events: IncreaseLiquidity and DecreaseLiquidity
+// A position's own history, read from events. v3's position manager logs IncreaseLiquidity and DecreaseLiquidity
 // (tokenId, liquidity, amount0, amount1) and Collect (tokenId, recipient, amount0, amount1). A collect pays out the
-// fees and any liquidity removed before it, so the removals tell the two apart. v4 has no such events: its pool
-// manager logs liquidity changes without amounts, so v4 collects are only seen from the fee counter.
+// fees and any liquidity removed before it, so the removals tell the two apart. v4's pool manager logs
+// ModifyLiquidity (pool, sender, tickLower, tickUpper, liquidityDelta, salt = the position number) with no amounts:
+// a change of zero is a fee collect, and the amounts are read from the transaction (collectTx).
 const INCREASE_V3 = '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f';
 const DECREASE_V3 = '0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4';
 const COLLECT_V3 = '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01';
+const MODIFY_V4 = '0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec';
 const HISTORY_CALLS = 12; // log searches per position and load
 const KIND = { [INCREASE_V3]: 'add', [DECREASE_V3]: 'remove', [COLLECT_V3]: 'collect' };
+const idWord = (tokenId) => pad(BigInt(tokenId).toString(16));
 
-// One block range of a position's events, narrowing it while the node refuses. Amounts stay text, for JSON.
-async function historyIn(chain, node, tokenId, start, end, span, forward) {
+// What a log search for a position asks for, and how each log reads. Amounts stay text, for JSON.
+async function historyQuery(chain, node, pos) {
+  if (pos.version === 'v3') {
+    return {
+      filter: { address: chain.positions, topics: [[INCREASE_V3, DECREASE_V3, COLLECT_V3], `0x${idWord(pos.tokenId)}`] },
+      read: (l) => {
+        const w = words(l.data);
+        const kind = KIND[String(l.topics[0]).toLowerCase()];
+        // Collect's first word is the recipient, the others' is the liquidity.
+        return { kind, liq: kind === 'collect' ? '0' : big(w[0]).toString(), a0: big(w[1]).toString(), a1: big(w[2]).toString() };
+      },
+    };
+  }
+  return {
+    filter: { address: await managerOf(chain, node), topics: [MODIFY_V4, `0x${pad(pos.pool)}`, `0x${pad(chain.v4.positions)}`] },
+    read: (l) => {
+      const w = words(l.data);
+      if (w[3] !== idWord(pos.tokenId)) return null; // another position in the same pool
+      const delta = signed(w[2]);
+      return { kind: delta > 0n ? 'add' : delta < 0n ? 'remove' : 'collect', liq: (delta < 0n ? -delta : delta).toString() };
+    },
+  };
+}
+
+// One block range of a position's events, narrowing it while the node refuses.
+async function historyIn(node, query, start, end, span, forward) {
   for (let width = span; width >= MIN_SPAN; width = Math.floor(width / 2)) {
     const from = forward ? start : Math.max(start, end - width + 1);
     const to = forward ? Math.min(end, start + width - 1) : end;
     try {
-      const logs = await rpc(node, 'eth_getLogs', [{
-        address: chain.positions,
-        fromBlock: `0x${from.toString(16)}`,
-        toBlock: `0x${to.toString(16)}`,
-        topics: [[INCREASE_V3, DECREASE_V3, COLLECT_V3], `0x${pad(BigInt(tokenId).toString(16))}`],
-      }]);
+      const logs = await rpc(node, 'eth_getLogs', [{ ...query.filter, fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}` }]);
       const events = (logs ?? []).map((l) => {
-        const w = words(l.data);
-        const kind = KIND[String(l.topics[0]).toLowerCase()];
-        // Collect's first word is the recipient, the others' is the liquidity.
-        return {
-          kind,
-          block: Number(l.blockNumber),
-          index: Number(l.logIndex),
-          tx: l.transactionHash,
-          liq: kind === 'collect' ? '0' : big(w[0]).toString(),
-          a0: big(w[1]).toString(),
-          a1: big(w[2]).toString(),
-        };
-      });
+        const e = query.read(l);
+        return e && { ...e, block: Number(l.blockNumber), index: Number(l.logIndex), tx: l.transactionHash };
+      }).filter(Boolean);
       return { events, from, to, span: width };
     } catch (err) {
       if (!err.refused) return { events: null, refused: false };
@@ -398,11 +410,14 @@ function reachedMint(events, liquidity) {
   return sorted[0].kind === 'add' && l <= 0n;
 }
 
-// Extends a position's saved history. prev is what the last load saved: { node, from, to, span, done, events }.
-// Like the v4 search: new blocks first, then back toward the opening while the node keeps the blocks. done means
-// the opening was reached, or the node will not search further back. Collects get their block's time.
-export async function positionHistory(chain, node, tokenId, liquidity, prev) {
+// Extends a position's saved history. pos: { version, tokenId, liquidity, pool (v4: the pool id) }. prev is what
+// the last load saved: { node, from, to, span, done, events }. Like the v4 search: new blocks first, then back
+// toward the opening while the node keeps the blocks. done means the opening was reached, or the node will not
+// search further back. Collects get their block's time.
+export async function positionHistory(chain, node, pos, prev) {
   const head = Number(await rpc(node, 'eth_blockNumber', []));
+  const query = await historyQuery(chain, node, pos);
+  const floor = pos.version === 'v4' ? chain.v4.start : 0;
   const fresh = !prev || prev.node !== node;
   const s = fresh
     ? { node, from: head + 1, to: head, span: chain.v4.span, done: false, events: [] }
@@ -420,7 +435,7 @@ export async function positionHistory(chain, node, tokenId, liquidity, prev) {
   let cursor = Math.max(s.to + 1, head - s.span * (HISTORY_CALLS / 2) + 1);
   while (cursor <= head && calls > 0) {
     calls--;
-    const r = await historyIn(chain, node, tokenId, cursor, head, s.span, true);
+    const r = await historyIn(node, query, cursor, head, s.span, true);
     if (!r.events) break;
     add(r.events);
     s.span = r.span;
@@ -428,12 +443,12 @@ export async function positionHistory(chain, node, tokenId, liquidity, prev) {
     cursor = r.to + 1;
   }
   while (!s.done && calls > 0) {
-    if (s.from <= 0 || reachedMint(s.events, liquidity)) {
+    if (s.from <= floor || reachedMint(s.events, pos.liquidity)) {
       s.done = true;
       break;
     }
     calls--;
-    const r = await historyIn(chain, node, tokenId, 0, s.from - 1, s.span, false);
+    const r = await historyIn(node, query, floor, s.from - 1, s.span, false);
     if (!r.events) {
       s.done = r.refused;
       break;
@@ -443,8 +458,8 @@ export async function positionHistory(chain, node, tokenId, liquidity, prev) {
     s.from = r.from;
   }
 
-  const blocks = [...new Set(s.events.filter((e) => e.kind === 'collect' && !e.time).map((e) => e.block))];
-  const times = new Map(await Promise.all(blocks.map(async (b) => [b, Number((await rpc(node, 'eth_getBlockByNumber', [`0x${b.toString(16)}`, false]))?.timestamp ?? 0)])));
+  const blocks = [...new Set(s.events.filter((e) => e.kind !== 'add' && !e.time).map((e) => e.block))];
+  const times = new Map(await Promise.all(blocks.map(async (b) => [b, await blockTime(nodeSource(node), b)])));
   s.events = s.events.map((e) => (times.get(e.block) ? { ...e, time: times.get(e.block) } : e));
   return s;
 }
@@ -467,6 +482,188 @@ export function collectFees(events) {
     }
   }
   return out;
+}
+
+// ---- Collect transactions: what each one paid, read from the node or from Etherscan ----
+
+const hexBlock = (n) => `0x${n.toString(16)}`;
+const lower = (a) => String(a ?? '').toLowerCase();
+const topicOf = (l, i) => lower(l.topics?.[i]).replace(/^0x/, '');
+
+// Where a transaction is read from. Both answer the same JSON-RPC calls; Etherscan keeps every block, where most
+// public nodes keep only recent ones, and it also knows the native coin paid inside a transaction.
+export const nodeSource = (node) => ({ kind: 'node', call: (method, params) => rpc(node, method, params) });
+
+const ETHERSCAN = 'https://api.etherscan.io/v2/api';
+let etherscanQueue = Promise.resolve();
+// Etherscan's free plan takes about 5 calls a second, so calls go one at a time with a short pause.
+function etherscan(key, chainId, params) {
+  const run = async () => {
+    const res = await fetch(`${ETHERSCAN}?${new URLSearchParams({ chainid: String(chainId), ...params, apikey: key })}`);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    if (!res.ok) throw new Error(`Etherscan answered ${res.status}.`);
+    const json = await res.json();
+    const fail = (text) => Object.assign(new Error(`Etherscan: ${text}`), { refused: true });
+    if (json.error) throw fail(json.error.message ?? 'error');
+    if (params.module === 'proxy') {
+      if (typeof json.result === 'string' && json.status === '0') throw fail(json.result);
+      return json.result;
+    }
+    if (json.status === '0' && !/no (transactions|records) found/i.test(`${json.message} ${json.result}`)) {
+      throw fail(typeof json.result === 'string' ? json.result : json.message);
+    }
+    return Array.isArray(json.result) ? json.result : [];
+  };
+  const p = etherscanQueue.then(run, run);
+  etherscanQueue = p.catch(() => {});
+  return p;
+}
+
+export function etherscanSource(key, chainId) {
+  const proxy = (action, params) => etherscan(key, chainId, { module: 'proxy', action, ...params });
+  return {
+    kind: 'etherscan',
+    call: (method, params) => {
+      if (method === 'eth_getTransactionReceipt') return proxy(method, { txhash: params[0] });
+      if (method === 'eth_getBlockByNumber') return proxy(method, { tag: params[0], boolean: 'false' });
+      if (method === 'eth_call') return proxy(method, { to: params[0].to, data: params[0].data, tag: params[1] });
+      throw new Error(`Etherscan is not asked for ${method}.`);
+    },
+    // A v4 pool's swaps in a block range, for its price when no node will read past state.
+    swaps: (manager, poolId, from, to) => etherscan(key, chainId, { module: 'logs', action: 'getLogs', address: manager, fromBlock: String(from), toBlock: String(to), topic0: SWAP_V4, topic1: `0x${pad(poolId)}`, topic0_1_opr: 'and', page: '1', offset: '1000' }),
+    // The native coin paid to `to` inside a transaction, in wei. It leaves no log, but Etherscan traces it.
+    native: async (tx, to) => (await etherscan(key, chainId, { module: 'account', action: 'txlistinternal', txhash: tx }))
+      .filter((t) => lower(t.to) === lower(to) && t.isError !== '1')
+      .reduce((s, t) => s + BigInt(t.value), 0n),
+  };
+}
+
+export async function blockTime(src, block) {
+  return Number((await src.call('eth_getBlockByNumber', [hexBlock(block), false]))?.timestamp ?? 0);
+}
+
+// A wallet's transactions to a chain's Uniswap position managers, oldest first, from a block on. Etherscan sends
+// up to 1000 transactions a call; last is the newest block it sent, and more says whether there are more after it.
+export async function walletPositionTxs(key, chain, wallet, startblock) {
+  const list = await etherscan(key, chain.id, { module: 'account', action: 'txlist', address: wallet, startblock: String(startblock), endblock: '999999999', sort: 'asc', page: '1', offset: '1000' });
+  const managers = new Set([chain.positions, chain.v4?.positions].filter(Boolean).map(lower));
+  return {
+    txs: list.filter((t) => managers.has(lower(t.to)) && t.isError === '0').map((t) => ({ tx: t.hash, block: Number(t.blockNumber), time: Number(t.timeStamp) })),
+    last: list.length ? Number(list[list.length - 1].blockNumber) : null,
+    more: list.length >= 1000,
+  };
+}
+
+// The positions a transaction collected from: v3 Collect events and v4 liquidity changes made through the
+// position manager that did not add liquidity.
+export async function positionsInReceipt(chain, node, receipt) {
+  const out = [];
+  const logs = receipt?.logs ?? [];
+  for (const l of logs) {
+    if (lower(l.address) === lower(chain.positions) && lower(l.topics?.[0]) === COLLECT_V3) out.push({ version: 'v3', tokenId: big(topicOf(l, 1)).toString() });
+  }
+  if (chain.v4 && logs.some((l) => lower(l.topics?.[0]) === MODIFY_V4)) {
+    const manager = lower(await managerOf(chain, node));
+    for (const l of logs) {
+      if (lower(l.address) !== manager || lower(l.topics?.[0]) !== MODIFY_V4 || topicOf(l, 2) !== pad(chain.v4.positions)) continue;
+      if (signed(words(l.data)[2]) <= 0n) out.push({ version: 'v4', tokenId: big(words(l.data)[3]).toString() });
+    }
+  }
+  return [...new Map(out.map((p) => [`${p.version}:${p.tokenId}`, p])).values()];
+}
+
+// A v4 pool's price (sqrt, as a float) just before a transaction: its state one block back, from the source or
+// the node, else the last swap before it, from Etherscan's log search. null when none of them answers.
+async function priceBefore(chain, src, node, manager, poolId, block, txIndex) {
+  const call = { to: chain.v4.stateView, data: SEL.getSlot0 + pad(poolId) };
+  for (const s of [src, nodeSource(node)]) {
+    try {
+      const w = words(await s.call('eth_call', [call, hexBlock(block - 1)]));
+      if (w.length && big(w[0]) > 0n) return Number(big(w[0])) / Q96;
+    } catch {
+      // Most public nodes refuse past state: try the next way.
+    }
+  }
+  if (!src.swaps) return null;
+  for (const back of [200, 5000, 50000]) {
+    try {
+      const before = (await src.swaps(manager, poolId, Math.max(0, block - back), block))
+        .filter((l) => Number(l.blockNumber) < block || (Number(l.blockNumber) === block && Number(l.transactionIndex) < txIndex));
+      if (before.length) return Number(big(words(before[before.length - 1].data)[2])) / Q96;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+// What one transaction paid a position in fees, in raw token units (as numbers), or null when it collected
+// nothing for it. pos: { version, tokenId, owner, token0, token1 }. node is used for the v4 pool manager's
+// address and, without Etherscan, for the native coin.
+// level ranks how sure the reading is: 3 every amount comes from the transaction; 2 liquidity was removed in it,
+// worked out from the pool's price just before; 1 the native coin part could not be read (left at 0).
+// A collect sends value only as fees and liquidity removed, so what the wallet gained in the native coin, plus the
+// gas it paid, is that part.
+export async function collectTx(chain, src, node, tx, pos, given = null) {
+  const receipt = given ?? await src.call('eth_getTransactionReceipt', [tx]);
+  if (!receipt || receipt.status !== '0x1') return null;
+  const block = Number(receipt.blockNumber);
+  const id = idWord(pos.tokenId);
+  const logs = receipt.logs ?? [];
+
+  if (pos.version === 'v3') {
+    const mine = (sig) => logs.filter((l) => lower(l.address) === lower(chain.positions) && lower(l.topics?.[0]) === sig && topicOf(l, 1) === id);
+    const sum = (list) => list.reduce(([x, y], l) => [x + big(words(l.data)[1]), y + big(words(l.data)[2])], [0n, 0n]);
+    const collects = mine(COLLECT_V3);
+    if (!collects.length) return null;
+    const [c0, c1] = sum(collects);
+    const [d0, d1] = sum(mine(DECREASE_V3));
+    return { block, f0: Number(c0 > d0 ? c0 - d0 : 0n), f1: Number(c1 > d1 ? c1 - d1 : 0n), level: 3 };
+  }
+
+  const manager = lower(await managerOf(chain, node));
+  const mods = logs.filter((l) => lower(l.address) === manager && lower(l.topics?.[0]) === MODIFY_V4
+    && topicOf(l, 2) === pad(chain.v4.positions) && words(l.data)[3] === id);
+  if (!mods.length) return null;
+  const delta = mods.reduce((s, l) => s + signed(words(l.data)[2]), 0n);
+  if (delta > 0n) return null; // liquidity added: the fees went back into the position
+
+  let level = 3;
+  // Liquidity removed in the same transaction is paid out with the fees: take it off at the price just before.
+  let p0 = 0;
+  let p1 = 0;
+  if (delta < 0n) {
+    const w = words(mods[0].data);
+    const sqrt = await priceBefore(chain, src, node, manager, topicOf(mods[0], 1), block, Number(receipt.transactionIndex));
+    if (sqrt == null) return null; // without the price, fees cannot be told from the liquidity removed
+    const amt = positionAmounts({ liquidity: -delta, tickLower: Number(signed(w[0])), tickUpper: Number(signed(w[1])) }, sqrt);
+    p0 = amt.a0;
+    p1 = amt.a1;
+    level = 2;
+  }
+
+  const owner = pad(pos.owner);
+  const amountOf = async (token) => {
+    if (!isNative(token)) {
+      return Number(logs.filter((l) => lower(l.address) === lower(token) && lower(l.topics?.[0]) === TRANSFER && topicOf(l, 1) === pad(manager) && topicOf(l, 2) === owner)
+        .reduce((s, l) => s + big(words(l.data)[0]), 0n));
+    }
+    try {
+      if (src.native) return Number(await src.native(tx, pos.owner));
+      const n = nodeSource(node);
+      const [after, before] = await Promise.all([block, block - 1].map((b) => n.call('eth_getBalance', [pos.owner, hexBlock(b)])));
+      // Rollups such as Base also charge a fee for posting the transaction to Ethereum (l1Fee).
+      const gas = lower(receipt.from) === lower(pos.owner) ? BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice ?? 0) + BigInt(receipt.l1Fee ?? 0) : 0n;
+      const gained = BigInt(after) - BigInt(before) + gas;
+      return Number(gained > 0n ? gained : 0n);
+    } catch {
+      level = 1;
+      return 0;
+    }
+  };
+  const a0 = await amountOf(pos.token0);
+  const a1 = await amountOf(pos.token1);
+  return { block, f0: Math.max(0, a0 - p0), f1: Math.max(0, a1 - p1), level };
 }
 
 // Fee APR over a past window comes from the pool's swaps in it, read from logs: public nodes refuse to read

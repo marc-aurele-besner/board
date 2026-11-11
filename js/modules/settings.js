@@ -591,6 +591,15 @@ function uniswapCard(store) {
     store.refresh();
   };
 
+  const saveEtherscan = (e) => {
+    e.preventDefault();
+    const key = String(new FormData(e.currentTarget).get('etherscan') ?? '').trim();
+    save({ etherscan: key });
+    uniswapView.ok = true;
+    uniswapView.message = key ? 'Etherscan key saved. Fees collected reads it on the next refresh.' : 'Etherscan key removed.';
+    store.refresh();
+  };
+
   return h('section', { class: 'card panel' },
     h('h2', null, 'Uniswap'),
     h('p', { class: 'muted small' }, 'Add the public address of each wallet that holds Uniswap v3 or v4 positions. The board only reads them. It never asks for a key and never signs anything.'),
@@ -626,6 +635,11 @@ function uniswapCard(store) {
           h('input', { name: `node-${chain.id}`, value: savedNode(cfg, chain), placeholder: chain.rpc, spellcheck: false, 'aria-label': `${chain.name} node URL` }));
       }),
       h('button', { type: 'submit', class: 'btn-small' }, 'Save chains')),
+    h('form', { class: 'stack', onsubmit: saveEtherscan },
+      h('p', { class: 'muted small' }, 'Etherscan API key (optional, free at etherscan.io). With it, Fees collected also reads each wallet\'s collect transactions from Etherscan, which keeps every block, where public nodes keep only recent ones. Your wallet addresses and the key are sent to Etherscan.'),
+      h('div', { class: 'row' },
+        h('input', { name: 'etherscan', type: 'password', value: cfg.etherscan ?? '', placeholder: 'Etherscan API key', autocomplete: 'off', spellcheck: false, 'aria-label': 'Etherscan API key' }),
+        h('button', { type: 'submit', class: 'btn-small' }, 'Save key'))),
     uniswapView.message ? notice({ tone: uniswapView.ok ? 'info' : 'error', text: uniswapView.message }) : null);
 }
 
