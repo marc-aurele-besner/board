@@ -5,6 +5,7 @@ import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { richText } from '../rich.js';
 import { editText, pickChip } from '../inline.js';
+import { colorPicker } from '../color-picker.js';
 import { siteIcon, clearFaviconCache } from '../favicon.js';
 import { fetchRepoOverview } from '../github.js';
 import { makeTask } from '../capture.js';
@@ -809,15 +810,12 @@ function categoriesPanel(store, categories, projects) {
       categories.map((c) => {
         const count = projects.filter((p) => labelsOf(p).includes(c.id)).length;
         return h('li', { class: 'row category-row' },
-          h('input', {
-            type: 'color',
-            class: 'swatch-input',
+          colorPicker({
             value: labelColor(c),
-            title: 'Label colour',
-            'aria-label': `Colour of ${c.name}`,
-            onchange: (e) => store.update(COLLECTION, (d) => {
+            name: c.name,
+            onPick: (color) => store.update(COLLECTION, (d) => {
               const label = d.categories.find((x) => x.id === c.id);
-              if (label) label.color = e.target.value;
+              if (label) label.color = color;
             }),
           }),
           editText({

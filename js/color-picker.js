@@ -53,7 +53,7 @@ function place(el, anchor) {
   el.style.top = below + el.offsetHeight + 8 < window.innerHeight ? `${below}px` : `${Math.max(8, rect.top - 4 - el.offsetHeight)}px`;
 }
 
-function show(anchor, { value, name, onPick }) {
+function show(anchor, { value, name, onPick, onClear }) {
   close();
   let current = normalizeHex(value) ?? SWATCHES[0];
   const pick = (color) => {
@@ -120,7 +120,10 @@ function show(anchor, { value, name, onPick }) {
     h('div', { class: 'cp-custom' },
       h('label', { class: 'cp-more', title: 'More colours' }, icon('palette'), native),
       hex,
-      h('button', { type: 'button', class: 'btn-small primary', onclick: () => pick(hex.value) }, 'Apply')));
+      h('button', { type: 'button', class: 'btn-small primary', onclick: () => pick(hex.value) }, 'Apply')),
+    onClear && value
+      ? h('button', { type: 'button', class: 'btn-small', onclick: () => { close(); onClear(); } }, 'No colour')
+      : null);
 
   document.body.append(el);
   open = { el, anchor };
@@ -131,19 +134,20 @@ function show(anchor, { value, name, onPick }) {
   document.addEventListener('keydown', onKey, true);
 }
 
-// The swatch button. `name` labels the preview pill and the button.
-export function colorPicker({ value, name = '', onPick, className = '' }) {
+// The swatch button. `name` labels the preview pill and the button. With `onClear`, the colour can be removed,
+// and an empty value shows as an empty swatch.
+export function colorPicker({ value, name = '', onPick, onClear = null, className = '' }) {
   const btn = h('button', {
     type: 'button',
-    class: `cp-button ${className}`.trim(),
-    style: { '--c': value || SWATCHES[0] },
+    class: `cp-button${value ? '' : ' is-empty'} ${className}`.trim(),
+    style: { '--c': value || 'var(--muted)' },
     title: 'Change the colour',
     'aria-label': name ? `Colour of ${name}` : 'Colour',
     'aria-haspopup': 'dialog',
     onclick: (e) => {
       e.stopPropagation();
       if (open?.anchor === btn) return close();
-      show(btn, { value, name, onPick });
+      show(btn, { value, name, onPick, onClear });
     },
   });
   return btn;

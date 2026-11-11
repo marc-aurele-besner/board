@@ -626,6 +626,7 @@ textarea.editable-field { resize: vertical; }
   background: var(--c); border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--border); cursor: pointer;
 }
 .cp-button:hover { box-shadow: 0 0 0 2px var(--c); }
+.cp-button.is-empty { background: transparent; border: 2px dashed var(--border); box-shadow: none; }
 .cp-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .color-pop { gap: 10px; }
 .cp-preview { display: flex; justify-content: center; padding: 6px; border-radius: 6px; background: var(--surface-2); }
@@ -971,9 +972,6 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 }
 
 /* Appearance: label colours */
-.label-colours { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.label-colours li { display: flex; align-items: center; gap: 10px; }
-.label-colours input[type='color'] { width: 40px; height: 30px; padding: 2px; }
 .app-seg .seg { min-width: 96px; }
 
 /* Money entries: one line each; bills open to their charges */
@@ -1173,9 +1171,12 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 }
 
 /* Settings: category colours */
-.category-colors { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.category-colors li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-.category-colors input[type="color"] { width: 36px; height: 28px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); cursor: pointer; }
+.label-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; }
+.label-list li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.label-list .label-name { min-width: 0; flex: 0 1 220px; font-weight: 500; }
+.label-list .pill { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.label-add { margin-bottom: 4px; }
+.label-add input { font-size: 16px; }
 
 /* Money: recurring expenses */
 .recurring-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
@@ -1535,7 +1536,6 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .kanban-details .editable { display: block; min-height: 1.5em; }
 
 /* Projects: a label's colour beside its name */
-.category-row .swatch-input { width: 30px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); flex: none; }
 
 /* Cron: flow list beside an editor; the flow is a chain of nodes joined by links */
 .cron-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: var(--gap); align-items: start; }

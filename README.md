@@ -32,6 +32,8 @@ Outside a field, `g` then a letter jumps to a section (`g t` for Tasks, `g m` fo
 
 Deleting a task, a Money entry, a bill, a recipe or a recipe iteration shows **Undo** for a few seconds.
 
+Settings → Labels lists the project labels and the Money categories, each in its own section. Rename one, change its colour, or delete it; deleting one that is in use first moves its projects, or its entries, recurring items and budget, to another label or category.
+
 ## Run it
 
 Browsers only allow the folder picker on a secure origin, so serve the folder locally:

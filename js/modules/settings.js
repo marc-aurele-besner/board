@@ -3,12 +3,13 @@ import { toast } from '../toast.js';
 import { manualRate, setManualRate, clearCachedRates, PROVIDERS, providerId, setProvider, fallbackOn, setFallback, testProvider, lastSource } from '../fx.js';
 import { configure, checkGithubToken, orgAvatar } from '../github.js';
 import { connect, disconnect, isConnected } from '../google.js';
-import { editText, pill } from '../inline.js';
+import { editText } from '../inline.js';
 import { modelChip } from '../model-picker.js';
 import { isAddress, CHAINS, chainSettings, savedNode, parsePosition, addPosition, addedPositions, addedListOf, tokenLogos } from '../uniswap.js';
 import { positionFields, positionError } from '../position-input.js';
 import { telegramCard, analyticsCard, searchCard, resendCard, gmailCard, notificationsCard, automationsCard, dataCard } from './settings-more.js';
 import { promptsCard } from './settings-prompts.js';
+import { labelsCard } from './settings-labels.js';
 import { logo } from './positions.js';
 
 const COLLECTION = 'settings';
@@ -61,7 +62,7 @@ const SECTION_GROUPS = [
       ['appearance', 'Appearance', 'palette'],
       ['models', 'Models & tasks', 'cpu'],
       ['prompts', 'Prompts', 'sparkle'],
-      ['categories', 'Categories', 'tag'],
+      ['categories', 'Labels', 'tag'],
       ['notifications', 'Notifications', 'bell'],
       ['automations', 'Automations', 'zap'],
       ['data', 'Data folder', 'folder'],
@@ -353,7 +354,7 @@ function exchangeCard(store) {
     h('div', { class: 'cred-body' },
       h('div', { class: 'svc-section' },
         h('h3', null, 'Providers'),
-        h('p', { class: 'muted small' }, 'The board asks the provider you pick first. When it does not answer, the next one in the list is asked, so Money keeps converting if one service is down. Each provider is asked only for the USD to CAD rate of the days shown.'),
+        h('p', { class: 'muted small' }, 'The board asks the provider you pick first. When it does not answer, the next one in the list is asked, so Money keeps converting if one service is down. Only the days whose rate Money needs are sent.'),
         h('ul', { class: 'fx-providers' },
           PROVIDERS.map((p) => {
             const r = exchange.results[p.id];
@@ -519,41 +520,6 @@ export function applyAppearance() {
   if (theme) document.documentElement.dataset.theme = theme;
   else delete document.documentElement.dataset.theme;
   document.body.classList.toggle('compact', density === 'compact');
-}
-
-// Colours for Money categories. The colour is saved on the Money data, so it shows wherever the category does.
-function categoriesCard(store) {
-  const fin = store.get('finance');
-  const colors = fin.categoryColors ?? {};
-  const names = [...new Set([...fin.categories, ...fin.entries.map((e) => e.category).filter(Boolean)])].sort((a, b) => a.localeCompare(b));
-  const setColor = (name, color) => store.update('finance', (d) => {
-    d.categoryColors = { ...(d.categoryColors ?? {}), [name]: color };
-  });
-  const clearColor = (name) => store.update('finance', (d) => {
-    const next = { ...(d.categoryColors ?? {}) };
-    delete next[name];
-    d.categoryColors = next;
-  });
-
-  return h('section', { class: 'card panel' },
-    h('header', { class: 'panel-head' },
-      h('div', null,
-        h('h2', null, 'Categories'),
-        h('p', { class: 'muted' }, 'Pick a colour for each category. Money shows it on the category wherever it appears, and in the category breakdown.'))),
-    names.length
-      ? h('ul', { class: 'category-colors' }, names.map((name) =>
-          h('li', null,
-            h('input', {
-              type: 'color',
-              value: colors[name] ?? '#8a8a85',
-              'aria-label': `Colour for ${name}`,
-              onchange: (e) => setColor(name, e.currentTarget.value),
-            }),
-            pill(name, { color: colors[name] }),
-            h('span', { class: 'grow' }),
-            h('span', { class: 'muted small' }, `${fin.entries.filter((e) => e.category === name).length} entries`),
-            colors[name] ? h('button', { type: 'button', class: 'btn-small', onclick: () => clearColor(name) }, 'Reset') : null)))
-      : empty('No categories yet. They appear here once an entry uses one.'));
 }
 
 const uniswapView = { message: '', ok: null };
@@ -749,14 +715,6 @@ function appearanceCard(store) {
     applyAppearance();
     store.refresh();
   };
-  const labels = store.get('projects').categories ?? [];
-  const setLabelColor = (id, color) => {
-    store.update('projects', (d) => {
-      const label = d.categories.find((x) => x.id === id);
-      if (label) label.color = color;
-    });
-  };
-
   return h('section', { class: 'card panel' },
     h('header', { class: 'panel-head' },
       h('div', null,
@@ -775,23 +733,7 @@ function appearanceCard(store) {
       h('p', { class: 'muted small' }, 'Compact tightens the rows in tasks, projects and the board.'),
       h('div', { class: 'segmented app-seg' },
         choice('Comfortable', 'comfortable', density, pickDensity),
-        choice('Compact', 'compact', density, pickDensity))),
-
-    h('div', { class: 'svc-section' },
-      h('h3', null, 'Label colours'),
-      h('p', { class: 'muted small' }, 'Each project label has a colour. It shows on projects, tasks, the project tiles and in the label picker.'),
-      labels.length
-        ? h('ul', { class: 'label-colours' },
-            labels.map((l) =>
-              h('li', null,
-                h('input', {
-                  type: 'color',
-                  value: l.color || '#2f6f4e',
-                  'aria-label': `Colour for ${l.name}`,
-                  onchange: (e) => setLabelColor(l.id, e.target.value),
-                }),
-                h('span', { class: 'pill tone-custom', style: { '--c': l.color || '#2f6f4e' } }, l.name))))
-        : empty('No labels yet. Create them from Projects.')));
+        choice('Compact', 'compact', density, pickDensity))));
 }
 
 // --- Keys per organization ---
@@ -993,7 +935,7 @@ function draw(root, store) {
         : view.section === 'exchange' ? exchangeCard(store)
         : view.section === 'appearance' ? appearanceCard(store)
         : view.section === 'uniswap' ? uniswapCard(store)
-        : view.section === 'categories' ? categoriesCard(store)
+        : view.section === 'categories' ? labelsCard(store)
         : view.section === 'telegram' ? telegramCard(store)
         : view.section === 'analytics' ? analyticsCard(store)
         : view.section === 'search' ? searchCard(store)
