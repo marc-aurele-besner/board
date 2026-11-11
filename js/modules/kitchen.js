@@ -218,7 +218,7 @@ export async function importFromUrl(store, url) {
   }
 }
 
-// The import box at the top of the recipe list: a link, or pasted text when the page cannot be read.
+// The link import, in the side column: a link, or pasted text when the page cannot be read.
 function importBlock(store) {
   const s = importState;
   return h('div', { class: 'k-import stack' },
@@ -235,9 +235,8 @@ function importBlock(store) {
         importFromUrl(store, url);
       },
     },
-      h('input', { name: 'url', type: 'url', placeholder: 'Import a recipe from a link', 'aria-label': 'Recipe link', inputmode: 'url', autocomplete: 'off' }),
+      h('input', { name: 'url', type: 'url', placeholder: 'https://…', 'aria-label': 'Recipe link', inputmode: 'url', autocomplete: 'off' }),
       h('button', { class: 'btn-small primary', type: 'submit', disabled: s.status === 'loading' }, s.status === 'loading' ? 'Reading…' : 'Import')),
-    hasOpenRouter(store) ? null : setupBanner('openrouter', 'Importing a recipe needs an OpenRouter key.'),
     s.status === 'error' ? notice({ text: s.error }) : null,
     s.pasting
       ? h('form', {
@@ -540,8 +539,17 @@ function gallery(store, recipes) {
             STATUSES.map(([k, l]) => h('option', { value: k }, l))),
           h('button', { class: 'primary', type: 'submit' }, 'Add'))
       : null,
-    h('div', { class: 'r-import stack' }, importBlock(store), photoBlock(store)),
-    box);
+    // Laid out like Money: the recipes, and a side column of cards to add one from a photo or a link.
+    h('div', { class: 'k-grid' },
+      h('div', { class: 'k-main' }, box),
+      h('aside', { class: 'k-side stack-lg' },
+        hasOpenRouter(store) ? null : setupBanner('openrouter', 'Reading a photo or a link needs an OpenRouter key.'),
+        h('section', { class: 'card stack' },
+          h('h3', null, 'Add a recipe from a photo'),
+          photoBlock(store)),
+        h('section', { class: 'card stack' },
+          h('h3', null, 'Import from a link'),
+          importBlock(store)))));
 }
 
 // --- Detail ---
