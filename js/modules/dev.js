@@ -9,6 +9,8 @@ import { TERMINAL_RUNNER, runnerInfo, runCommand, sendInput } from '../terminal.
 import { createTerminal, styleOf, colorOf } from '../vt.js';
 import { readTheme, themedColors } from '../term-colors.js';
 import { explorer, editor, setRoot, hasOpenFiles, baseName } from './dev-files.js';
+import { pickChip } from '../inline.js';
+import { projectIcon } from './projects.js';
 
 const COLLECTION = 'dev';
 const DEFAULTS = { history: [], runner: '' };
@@ -363,20 +365,29 @@ async function run(store, s, command, { remember: keep = true } = {}) {
   }
 }
 
+// A searchable list, since a board with many projects makes a plain dropdown long; projects show their icon.
 function workspacePicker(store) {
-  const roots = [['board', 'This board'], ['home', 'Home folder'], ...projectsWithFolder(store).map((p) => [`p:${p.id}`, p.name])];
-  if (!roots.some(([v]) => v === view.workspace)) roots.push([view.workspace, rootLabel(store, view.workspace)]);
-  return h('select', {
-    class: 'ide-workspace',
+  const projects = [...projectsWithFolder(store)].sort((a, b) => a.name.localeCompare(b.name));
+  const options = [
+    { value: 'board', label: 'This board', plainIcon: () => icon('folder') },
+    { value: 'home', label: 'Home folder', plainIcon: () => icon('home') },
+    ...projects.map((p) => ({ value: `p:${p.id}`, label: p.name, plainIcon: () => projectIcon(p) })),
+  ];
+  if (!options.some((o) => o.value === view.workspace)) options.push({ value: view.workspace, label: rootLabel(store, view.workspace), plainIcon: () => icon('folder') });
+  const chip = pickChip({
     value: view.workspace,
-    'aria-label': 'Workspace folder',
-    title: 'The folder the files and new terminals open in. Projects show here once they have a local folder.',
-    onchange: (e) => {
-      view.workspace = e.target.value;
+    options,
+    className: 'field-pick ide-workspace',
+    onPick: (v) => {
+      if (!v || v === view.workspace) return;
+      view.workspace = v;
       setRoot(filesCtx(store), rootPath(store, view.workspace));
       store.refresh();
     },
-  }, roots.map(([v, label]) => h('option', { value: v }, label)));
+  });
+  chip.setAttribute('aria-label', 'Workspace folder');
+  chip.title = 'The folder the files and new terminals open in. Projects show here once they have a local folder.';
+  return chip;
 }
 
 function sessionTabs(store) {
