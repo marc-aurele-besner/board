@@ -1053,7 +1053,8 @@ async function runDev(store, flow, step, input, vars, ctx) {
   if (claude ? !prompt : !command) throw new Error(claude ? 'Write the Dev prompt.' : 'Enter the command to run.');
   const devCommand = claude ? stepDevCommand(store, step) : '';
   const where = project ? `${project.name}’s folder` : 'the board’s folder';
-  if (ctx.dry) {
+  // A step tested "in a terminal" starts it for real, so its output can be watched; it has no task to go with.
+  if (ctx.dry && !ctx.live) {
     const how = devCommand ? `start “${devCommand.trim()}” with this prompt` : claude ? 'hand this prompt to the project’s Dev command' : 'run this command';
     ctx.note = `Test run: would ${how} in a new Dev terminal, in ${where}.`;
     ctx.data = claude ? { devCommand: devCommand || null, prompt, folder: where } : { command, folder: where };
@@ -1069,9 +1070,10 @@ async function runDev(store, flow, step, input, vars, ctx) {
       if (worktree && statusOf(t) !== 'done') t.worktrees = [...(t.worktrees ?? []), { ...worktree, session: id }];
     });
   }
-  ctx.note = `Started in Dev terminal ${n}, in ${where}${task ? `, on the task “${task.text}”` : ''}.`;
-  ctx.data = { terminal: n, folder: where, ...(claude ? { prompt } : { command }) };
-  return input;
+  ctx.note = `${ctx.dry ? 'Test: started' : 'Started'} in Dev terminal ${n}, in ${where}${task ? `, on the task “${task.text}”` : ''}.`;
+  // session and cwd let the editor show the terminal's output, which the runner keeps, and open it in Dev.
+  ctx.data = { terminal: n, session: id, cwd: project?.localPath || '', folder: where, ...(claude ? { prompt } : { command }) };
+  return ctx.dry ? (claude ? prompt : command) : input;
 }
 
 // ctx carries what passes between steps besides the text: whether the last data step found nothing, whether this is
@@ -1214,7 +1216,8 @@ export function clearTests(store, flowId) {
 
 // Tests one step: earlier steps with no result yet run first, then this one runs again. A "Stop if" that would stop
 // does not keep the next step from being tested, since testing it is the point.
-export async function testStep(store, flowId, stepId) {
+// With `live`, a Run in Dev step starts its terminal (the steps before it stay tests).
+export async function testStep(store, flowId, stepId, { live = false } = {}) {
   const flow = store.get(COLLECTION).flows.find((f) => f.id === flowId);
   if (!flow || running.has(flowId) || testing.has(flowId)) return null;
   const end = flow.steps.findIndex((s) => s.id === stepId);
@@ -1232,6 +1235,7 @@ export async function testStep(store, flowId, stepId) {
         ctx.nothing = kept.nothing;
         continue;
       }
+      ctx.live = live && step.id === stepId;
       last = await stepOnce(store, flow, step, ctx);
       saveTest(store, flowId, step.id, last);
       if (!last.ok) break;
@@ -1264,7 +1268,8 @@ export async function runFlow(store, flowId, { manual = false, dry = false } = {
     for (const step of flow.steps) {
       const result = await stepOnce(store, flow, step, ctx);
       if (dry) saveTest(store, flowId, step.id, result);
-      run.steps.push({ stepId: step.id, ok: result.ok, output: result.output.slice(0, 4000), note: result.note, ms: result.ms });
+      const term = step.type === 'dev' && result.data?.session ? { session: result.data.session, cwd: result.data.cwd } : {};
+      run.steps.push({ stepId: step.id, ok: result.ok, output: result.output.slice(0, 4000), note: result.note, ms: result.ms, ...term });
       if (!result.ok) throw new Error(result.output);
       if (ctx.stop) {
         run.status = 'stopped';
