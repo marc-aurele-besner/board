@@ -11,6 +11,7 @@ import { openPositions } from './modules/positions.js';
 import { startDevSession, devPresets, devCommandOf, runnerOf } from './modules/dev.js';
 import { sessionStatus, sessionOutcome } from './terminal.js';
 import { findGithubLinks, plainOutput, addTaskLinks, prsOf } from './task-links.js';
+import { buildProfile, profileOf, hasProfileSources } from './profile.js';
 
 export const COLLECTION = 'cron';
 // templates: flows saved as templates. tests: each flow's step test results, by flow id then step id.
@@ -26,6 +27,7 @@ export const STEP_TYPES = [
   ['stop', 'Stop if', 'filter', 'Ends the run early, for example when there is nothing to report.'],
   ['task', 'Create task', 'check-square', 'Adds a task with the output as its description.'],
   ['notify', 'Notify', 'bell', 'Posts the output under the bell (and Telegram if enabled).'],
+  ['profile', 'Refresh project profile', 'refresh', 'Rebuilds a project’s profile from its folder, repos and website, as Projects does.'],
   ['dev', 'Run in Dev', 'terminal', 'Hands a prompt to the project’s Dev command, a preset or your own, in a new Dev terminal.'],
 ];
 
@@ -208,6 +210,7 @@ export function makeStep(type) {
   if (type === 'ai') return { ...base, prompt: 'Summarize this in five bullet points:\n\n{{input}}', system: '', model: '' };
   if (type === 'task') return { ...base, title: '{{flow}} · {{date}}', projectId: '', priority: 'none', due: '' };
   if (type === 'stop') return { ...base, when: 'nothing', text: '' };
+  if (type === 'profile') return { ...base, projectId: '', keepEdited: true };
   if (type === 'dev') return { ...base, mode: 'claude', preset: '', devCommand: '', projectId: '', prompt: '{{input}}', command: '', waitMinutes: DEV_WAIT_MINUTES };
   return { ...base, text: '{{flow}}: {{input}}' };
 }
@@ -369,6 +372,15 @@ export const TEMPLATES = [
           + '(same folder, file format, front matter, and any list or index that names them). Leave [placeholders] as they are. '
           + 'Check that the site still builds, then commit on a new branch, push it and open a pull request.\n\n{{task}}',
       },
+    ],
+  },
+  {
+    name: 'Refresh project profile',
+    about: 'Rebuilds a project’s profile every week from its folder, commits, repos and website, so AI features read it up to date. A profile you edited by hand is kept. Choose the flow’s project first.',
+    schedule: { every: 'weekly', time: '07:00', weekday: 1 },
+    steps: [
+      { type: 'profile' },
+      { type: 'notify', text: 'The profile of {{project}} was refreshed.' },
     ],
   },
   {
@@ -1202,6 +1214,32 @@ async function runDev(store, flow, step, input, vars, ctx) {
   return outcomeText(data, { terminal: n, where, state: status.state });
 }
 
+// Rebuilds the project's profile through the same call as Projects → Profile. A profile edited by hand is kept unless
+// the step says otherwise; the run then stops quietly, so a notification after it does not claim a refresh.
+async function runProfile(store, flow, step, ctx) {
+  const projectId = withFlowProject(flow, step).projectId;
+  if (!projectId) throw new Error('Choose the project whose profile to refresh.');
+  const project = store.get('projects').projects.find((p) => p.id === projectId);
+  if (!project) throw new Error('The project of this step was removed. Choose another.');
+  if (!hasProfileSources(project)) throw new Error(`${project.name} has no local folder, repository or website to read. Add one in Projects.`);
+  const current = profileOf(project);
+  if (step.keepEdited !== false && current.edited) {
+    ctx.stop = true;
+    ctx.note = `Stopped: the profile of ${project.name} was edited by hand, so it was kept.`;
+    ctx.data = { project: project.name, text: current.text, updated: current.updated, edited: true };
+    return current.text;
+  }
+  if (ctx.dry && !ctx.live) {
+    ctx.note = `Test run: would rebuild the profile of ${project.name}.`;
+    ctx.data = { project: project.name, text: current.text, updated: current.updated, edited: current.edited };
+    return current.text;
+  }
+  const profile = await buildProfile(store, project);
+  ctx.data = { project: project.name, text: profile.text, updated: profile.updated, edited: false };
+  ctx.note = `${ctx.dry ? 'Test: rebuilt' : 'Rebuilt'} the profile of ${project.name}.`;
+  return profile.text;
+}
+
 // ctx carries what passes between steps besides the text: whether the last data step found nothing, whether this is
 // a test run, and a note a step leaves for the run log (what it would have done, or why the run stopped).
 // A step may set ctx.data to what it made, for paths such as {{step3.title}}; by default its output is read as JSON.
@@ -1264,6 +1302,7 @@ async function runStep(store, flow, step, input, ctx) {
     return input;
   }
   if (step.type === 'dev') return runDev(store, flow, step, input, vars, ctx);
+  if (step.type === 'profile') return runProfile(store, flow, step, ctx);
   if (step.type === 'notify') {
     const text = fill(step.text, vars).slice(0, 1200);
     if (ctx.dry) {

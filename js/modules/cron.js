@@ -17,6 +17,7 @@ import { modelForTask } from './settings.js';
 import { openSession, runnerOf, liveSession, onSessionPaint, exitText, terminalView, terminalBackground } from './dev.js';
 import { attachSession, sessionStatus } from '../terminal.js';
 import { createTerminal } from '../vt.js';
+import { hasProfileSources } from '../profile.js';
 
 // View state: the tab, the open flow, the selected node ('trigger' or a step id), the Runs tab's filter and the
 // flow list's project filter ('' for all, NO_PROJECT for flows without one).
@@ -311,6 +312,10 @@ function stepSummary(store, flow, step) {
   if (step.type === 'ai') return step.model || modelForTask(store, AI_TASK) || 'No model set';
   if (step.type === 'task') return step.title || '{{input}}';
   if (step.type === 'stop') return stopLabel(step);
+  if (step.type === 'profile') {
+    const id = withFlowProject(flow, step).projectId;
+    return id ? `${projectName(store, id)}${step.keepEdited === false ? '' : ' · keeps an edited profile'}` : 'Choose a project';
+  }
   if (step.type === 'dev') {
     const id = withFlowProject(flow, step).projectId;
     const where = id ? projectName(store, id) : 'Task’s project or board';
@@ -760,6 +765,23 @@ function stepForm(store, flow, step) {
         field('Stop when', select(step.when, STOP_WHEN, (when) => set({ when }))),
         needsText ? field('Words', h('input', { value: step.text ?? '', autocomplete: 'off', onchange: (e) => set({ text: e.target.value }) }), 'Not case-sensitive.') : null),
       h('p', { class: 'muted small' }, 'The run ends here without counting as a failure, and the steps after this one are skipped. Put it after a data step to stay quiet when there is nothing to report.'));
+  }
+  if (step.type === 'profile') {
+    const own = withFlowProject(flow, step).projectId;
+    const readable = projectsOf(store).filter((p) => hasProfileSources(p) || p.id === own);
+    return h('div', { class: 'stack' },
+      h('div', { class: 'row cron-fields' },
+        field('Project', stepProjectPick(store, flow, step.projectId, (projectId) => set({ projectId }), {
+          none: 'Choose…',
+          list: readable, name: (p) => (hasProfileSources(p) ? p.name : `${p.name} (nothing to read)`),
+        }), 'Projects show here once they have a local folder, a repository or a website.')),
+      h('label', { class: 'check' },
+        h('input', { type: 'checkbox', checked: step.keepEdited !== false, onchange: (e) => set({ keepEdited: e.target.checked }) }),
+        ' Keep a profile I edited by hand'),
+      h('p', { class: 'muted small' },
+        'Reads the project’s README, docs and recent commits through the runner, its GitHub repos and its website, then asks the model once and saves the profile on the project, as Refresh does in Projects. ',
+        'Its output is the new profile. When the profile was edited by hand and is kept, the run stops here quietly. A test only says what it would do; “Test run” of the flow rebuilds it.'),
+      store.get('settings').openrouter?.key ? null : notice({ tone: 'info', text: 'Profiles need an OpenRouter key.', actions: [h('a', { href: '#/settings?section=openrouter', class: 'btn-link' }, 'Add a key')] }));
   }
   if (step.type === 'dev') {
     const claude = step.mode !== 'command';

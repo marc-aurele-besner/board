@@ -1,6 +1,6 @@
 // A project's profile: a short Markdown text saying what the project is, built once from its folder, repos and
-// website and saved on the project, so AI features read it as context instead of guessing. A Cron step can call
-// buildProfile() later; nothing here touches the page.
+// website and saved on the project, so AI features read it as context instead of guessing. The Cron "Refresh project
+// profile" step calls buildProfile() too; nothing here touches the page.
 import { ask } from './ai.js';
 import { systemPrompt } from './prompts.js';
 import { uid, now } from './ui.js';
