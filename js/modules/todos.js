@@ -6,6 +6,7 @@ import { createProject, projectIcon, labelsOf, projectTree, moveProject, labelCo
 import { editText, pickChip, pickButton, pickMulti, pill } from '../inline.js';
 import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
 import { openDialog } from '../modal.js';
+import { issuesOf, prsOf } from '../task-links.js';
 import { startClaudeSession } from './dev.js';
 import { ask, parseJson } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
@@ -287,29 +288,56 @@ let dragProjectId = null;
 const reorderEnabled = () => !view.sort.key || view.sort.key === 'status';
 const canDropOn = (item) => !view.sort.key || view.dragStatus === statusOf(item);
 
-// --- GitHub issues for a task ---
+// --- GitHub issues and pull requests for a task ---
 
-// "#12", "12" or a github.com issue link, as { repo, number }. null when the text is not an issue reference.
+// "#12", "12" or a github.com issue or PR link, as { repo, number }. null when the text is not a reference.
 function parseIssueRef(text, defaultRepo) {
   const t = String(text ?? '').trim();
-  const link = t.match(/github\.com\/([^/\s]+\/[^/\s]+)\/issues\/(\d+)/);
+  const link = t.match(/github\.com\/([^/\s]+\/[^/\s]+)\/(?:issues|pull)\/(\d+)/);
   if (link) return { repo: link[1], number: Number(link[2]) };
   const number = t.match(/^#?(\d+)$/);
   if (number) return { repo: defaultRepo, number: Number(number[1]) };
   return null;
 }
 
-// Creates a new issue for a task, or links an existing one. The task keeps the issue's repo, number, link and title.
+// GitHub answers issues and PRs on the same API; the link says which one it is.
+const isPr = (link) => /\/pull\/\d+/.test(link.url);
+const sameLink = (a, b) => a.repo.toLowerCase() === b.repo.toLowerCase() && a.number === b.number;
+const linkTitle = (l) => `${l.repo} #${l.number}${l.title ? `: ${l.title}` : ''}`;
+
+// Adds an issue or a PR to the task's list of its kind, or takes one out.
+function saveLink(store, id, link) {
+  store.update(COLLECTION, (d) => {
+    const item = d.items.find((i) => i.id === id);
+    if (!item) return;
+    if (isPr(link)) item.prs = [...prsOf(item).filter((l) => !sameLink(l, link)), link];
+    else item.issues = [...issuesOf(item).filter((l) => !sameLink(l, link)), link];
+    delete item.issue;
+  });
+}
+function unlinkLink(store, id, link) {
+  store.update(COLLECTION, (d) => {
+    const item = d.items.find((i) => i.id === id);
+    if (!item) return;
+    if (isPr(link)) item.prs = prsOf(item).filter((l) => !sameLink(l, link));
+    else item.issues = issuesOf(item).filter((l) => !sameLink(l, link));
+    delete item.issue;
+  });
+}
+
+// Lists a task's issues and PRs, creates a new issue, or links an existing issue or PR.
+// The task keeps each one's repo, number, link and title.
 function openIssueDialog(store, item, repos) {
-  let repo = repos[0];
-  let mode = 'create';
+  let repo = repos[0] ?? '';
+  let mode = repos.length ? 'create' : 'link';
   const body = h('div', { class: 'stack' });
   const message = h('div', null);
-  const dialog = openDialog({ title: 'GitHub issue', body: h('div', { class: 'stack' }, body, message) });
+  const dialog = openDialog({ title: 'GitHub issues and PRs', body: h('div', { class: 'stack' }, body, message) });
+  const current = () => store.get(COLLECTION).items.find((i) => i.id === item.id) ?? item;
 
   const fail = (text) => message.replaceChildren(notice({ text }));
-  const saved = (issue) => {
-    updateItem(store, item.id, { issue });
+  const saved = (link) => {
+    saveLink(store, item.id, link);
     dialog.close();
   };
   const create = (title, text) => {
@@ -320,27 +348,46 @@ function openIssueDialog(store, item, repos) {
   };
 
   const paint = () => {
+    const task = current();
+    const linked = [...issuesOf(task), ...prsOf(task)];
+    const list = linked.length
+      ? h('ul', { class: 'task-links' }, linked.map((l) =>
+          h('li', null,
+            h('a', { href: l.url, target: '_blank', rel: 'noopener', class: 'issue-link', title: linkTitle(l) },
+              icon(isPr(l) ? 'pull-request' : 'repo'), `${l.repo} #${l.number}`),
+            h('span', { class: 'muted small task-link-title' }, l.title),
+            h('button', {
+              type: 'button',
+              class: 'btn-small danger',
+              'aria-label': `Unlink ${l.repo} #${l.number}`,
+              onclick: () => {
+                unlinkLink(store, item.id, l);
+                paint();
+              },
+            }, 'Unlink'))))
+      : null;
     const repoPick = repos.length > 1
       ? h('label', { class: 'bill-field' },
           h('span', { class: 'muted small' }, 'Repository'),
           h('select', {
-            value: repo,
             onchange: (e) => {
               repo = e.target.value;
               paint();
             },
-          }, repos.map((r) => h('option', { value: r }, r))))
-      : h('p', { class: 'muted small' }, `Repository: ${repo}`);
-    const modes = h('div', { class: 'segmented' },
-      [['create', 'Create new'], ['link', 'Link existing']].map(([key, label]) =>
-        h('button', {
-          type: 'button',
-          class: mode === key ? 'seg active' : 'seg',
-          onclick: () => {
-            mode = key;
-            paint();
-          },
-        }, label)));
+          }, repos.map((r) => h('option', { value: r, selected: r === repo }, r))))
+      : repo ? h('p', { class: 'muted small' }, `Repository: ${repo}`) : null;
+    const modes = repos.length
+      ? h('div', { class: 'segmented' },
+          [['create', 'Create issue'], ['link', 'Link existing']].map(([key, label]) =>
+            h('button', {
+              type: 'button',
+              class: mode === key ? 'seg active' : 'seg',
+              onclick: () => {
+                mode = key;
+                paint();
+              },
+            }, label)))
+      : null;
     const form = mode === 'create'
       ? h('form', {
           class: 'stack',
@@ -350,54 +397,49 @@ function openIssueDialog(store, item, repos) {
             create(String(f.get('title') ?? '').trim(), String(f.get('body') ?? '').trim());
           },
         },
-          h('input', { name: 'title', value: item.text, required: true, 'aria-label': 'Issue title' }),
-          h('textarea', { name: 'body', rows: 4, placeholder: 'Issue description', 'aria-label': 'Issue description' }, item.description ?? ''),
+          h('input', { name: 'title', value: task.text, required: true, 'aria-label': 'Issue title' }),
+          h('textarea', { name: 'body', rows: 4, placeholder: 'Issue description', 'aria-label': 'Issue description' }, task.description ?? ''),
           h('div', { class: 'row end' }, h('button', { class: 'primary', type: 'submit' }, 'Create issue')))
       : h('form', {
           class: 'stack',
           onsubmit: (e) => {
             e.preventDefault();
             const ref = parseIssueRef(new FormData(e.currentTarget).get('ref'), repo);
-            if (!ref) return fail('Enter an issue number like 12, or a github.com issue link.');
+            if (!ref?.repo) return fail(repo ? 'Enter a number like 12, or a github.com issue or pull request link.' : 'Enter a github.com issue or pull request link.');
             link(ref.repo, ref.number);
           },
         },
-          h('input', { name: 'ref', placeholder: '#12 or a github.com issue link', 'aria-label': 'Issue number or link' }),
-          h('div', { class: 'row end' }, h('button', { class: 'primary', type: 'submit' }, 'Link issue')));
-    const unlink = item.issue
-      ? h('button', {
-          type: 'button',
-          class: 'btn-small danger',
-          onclick: () => {
-            updateItem(store, item.id, { issue: null });
-            dialog.close();
-          },
-        }, `Unlink #${item.issue.number}`)
-      : null;
-    body.replaceChildren(repoPick, modes, form, unlink);
+          h('input', { name: 'ref', placeholder: repo ? '#12, or a github.com issue or PR link' : 'A github.com issue or PR link', 'aria-label': 'Issue or PR number or link' }),
+          h('div', { class: 'row end' }, h('button', { class: 'primary', type: 'submit' }, 'Link')));
+    body.replaceChildren(...[list, repoPick, modes, form].filter(Boolean));
   };
   paint();
 }
 
-// The issue of a task as a link (#12, opens in a new tab), or a button to create or link one.
+// A task's issues and PRs as links (#12, opens in a new tab), then a button to see them all or add one.
+// A Dev session started on the task adds the ones it opens.
 function issueControl(store, item, repos) {
-  if (item.issue) {
-    return h('a', {
-      href: item.issue.url,
-      target: '_blank',
-      rel: 'noopener',
-      class: 'issue-link',
-      title: `${item.issue.repo} #${item.issue.number}: ${item.issue.title}`,
-      'aria-label': `Open issue #${item.issue.number}`,
-    }, icon('repo'), `#${item.issue.number}`);
-  }
-  return h('button', {
-    type: 'button',
-    class: 'icon-btn',
-    title: 'Create or link a GitHub issue',
-    'aria-label': 'Create or link a GitHub issue',
-    onclick: () => openIssueDialog(store, item, repos),
-  }, icon('repo'));
+  const issues = issuesOf(item);
+  const prs = prsOf(item);
+  const chip = (l, pr) => h('a', {
+    href: l.url,
+    target: '_blank',
+    rel: 'noopener',
+    class: 'issue-link',
+    title: `${pr ? 'Pull request' : 'Issue'} ${linkTitle(l)}`,
+    'aria-label': `Open ${pr ? 'pull request' : 'issue'} ${l.repo} #${l.number}`,
+  }, icon(pr ? 'pull-request' : 'repo'), `#${l.number}`);
+  const any = issues.length + prs.length > 0;
+  return h('span', { class: 'task-link-chips' },
+    issues.map((l) => chip(l, false)),
+    prs.map((l) => chip(l, true)),
+    h('button', {
+      type: 'button',
+      class: 'icon-btn',
+      title: any ? 'Issues and PRs: link more, or unlink' : 'Create or link a GitHub issue or PR',
+      'aria-label': any ? 'Manage GitHub issues and PRs' : 'Create or link a GitHub issue or PR',
+      onclick: () => openIssueDialog(store, item, repos),
+    }, icon(any ? 'plus' : 'repo')));
 }
 
 // A task as Markdown: a checklist line with its status, project and deadline, then its description indented.
@@ -438,7 +480,8 @@ function copyButton(store, item) {
 }
 
 // Hands tasks to claude in a new Dev terminal, in the folder of the first task's project that has one.
-// The issues and PRs it opens come back to the tasks (task-links.js). They are being worked on now, so open ones move to "In progress" (completed ones stay done).
+// The issues and PRs it opens come back to the tasks (task-links.js).
+// They are being worked on now, so open ones move to "In progress" (completed ones stay done).
 function devTasks(store, items) {
   if (!items.length) return;
   const projects = projectsOf(store);
@@ -686,7 +729,7 @@ function todoRow(store, item, ctx) {
         ctx.showDue ? dueControl(store, item) : null),
       h('div', { class: 'todo-actions' },
         ctx.showDue ? null : dueControl(store, item),
-        repos.length || item.issue ? issueControl(store, item, repos) : null,
+        repos.length || issuesOf(item).length || prsOf(item).length ? issueControl(store, item, repos) : null,
         devButton(store, item),
         item.email
           ? h('a', { href: `#/inbox?email=${encodeURIComponent(item.email.id)}`, class: 'icon-btn', title: 'Open the email', 'aria-label': 'Open the email this task came from' }, icon('mail'))
