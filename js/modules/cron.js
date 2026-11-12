@@ -973,6 +973,21 @@ function previewOf(text, vars) {
 /** @type {Map<string, boolean>} */
 const folds = new Map();
 
+// Each tree's scroll, by tree, put back once a re-render's new tree is on the page, so it does not jump to the top.
+/** @type {Map<string, number>} */
+const scrolls = new Map();
+
+/** @param {string} fold @param {...import("../../types/ui").Child} children */
+function treeBox(fold, ...children) {
+  const el = h('div', {
+    class: 'json-tree',
+    onscroll: (/** @type {Event} */ e) => scrolls.set(fold, /** @type {HTMLElement} */ (e.currentTarget).scrollTop),
+  }, ...children);
+  const top = scrolls.get(fold);
+  if (top) requestAnimationFrame(() => { if (el.isConnected) el.scrollTop = top; });
+  return el;
+}
+
 /** @param {unknown} value */
 const copyable = (value) => (typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? String(value));
 /** @param {string} text @param {string} what */
@@ -1025,7 +1040,7 @@ function inputTree(vars, fold) {
   const pick = (path) => {
     if (!view.field || !insertVar(view.field, path)) toast('Click in a field first, then on the key to add.');
   };
-  return h('div', { class: 'json-tree' }, Object.entries(tree).map(([k, v]) => jsonTree(v, k, pick, 0, fold)(k)));
+  return treeBox(fold, Object.entries(tree).map(([k, v]) => jsonTree(v, k, pick, 0, fold)(k)));
 }
 
 /**
@@ -1698,7 +1713,7 @@ function testPanel(store, flow, step, index) {
   const copy = (path) => navigator.clipboard.writeText(`{{${path}}}`).then(() => toast(`Copied {{${path}}}`), () => toast('Could not copy'));
   const next = flow.steps[index + 1];
   const outTree = result
-    ? h('div', { class: 'json-tree' }, result.ok
+    ? treeBox(`${flow.id}/${step.id}/out`, result.ok
       ? jsonTree(result.data, `step${index + 1}`, copy, 0, `${flow.id}/${step.id}/out`)(`step${index + 1}`)
       : h('pre', { class: 'error' }, result.output))
     : h('p', { class: 'muted small' }, 'Test the step to see what it gives.');
