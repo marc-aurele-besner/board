@@ -3,9 +3,9 @@
 // and a rule never makes a second task while its first one is still open.
 import { statusOf, now, todayISO, money } from './ui.js';
 import { makeTask } from './capture.js';
-import { notify } from './notifications.js';
+import { notify } from './notify-core.js';
 import { checkHealth, checkDomain, checkCertificate, checkDns, readMeta, readCrawlFiles, checkProvider, hostOf, daysUntil } from './sitecheck.js';
-import { nextRecurringDue, overBudget } from './modules/money.js';
+import { nextRecurringDue, overBudget } from './money-core.js';
 
 // [key, title, description, has a "days before" setting]
 export const RULES = [
@@ -200,6 +200,27 @@ export async function checkSite(store, project, parts = ['health', 'ssl', 'domai
 
 export async function checkAllSites(store, parts) {
   for (const p of sitesOf(store)) await checkSite(store, p, parts);
+  return runRules(store);
+}
+
+const DAY_MS = 86400000;
+const olderThan = (at, ms) => !at || Date.now() - Date.parse(at) > ms;
+
+// The runners' round of site checks: health on the interval chosen in Tools; certificates, domains, DNS and crawl
+// files, which change slowly, once a day. Returns the number of tasks the rules made.
+export async function checkDueSites(store) {
+  const every = (store.get('tools').every || 60) * 60000;
+  for (const p of sitesOf(store)) {
+    const s = siteData(store, p.id);
+    const parts = [
+      olderThan(s.health?.at, every) ? 'health' : null,
+      olderThan(s.ssl?.at, DAY_MS) ? 'ssl' : null,
+      olderThan(s.domain?.at, DAY_MS) ? 'domain' : null,
+      olderThan(s.dns?.at, DAY_MS) ? 'dns' : null,
+      olderThan(s.crawl?.at, DAY_MS) ? 'crawl' : null,
+    ].filter(Boolean);
+    if (parts.length) await checkSite(store, p, parts);
+  }
   return runRules(store);
 }
 

@@ -3,6 +3,7 @@ import { editText, pickChip } from '../inline.js';
 import { ask, parseJson } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
 import { readPdf } from '../pdf-reader.js';
+import { overBudget, nextRecurringDue, dueDates } from '../money-core.js';
 import { knownRate, fetchDayRate, fetchRateRange, manualRate, setManualRate, convert } from '../fx.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { projectIcon } from './projects.js';
@@ -190,20 +191,6 @@ function removeEntry(store, id) {
   toast('Entry deleted', { undo: () => store.update(COLLECTION, (d) => d.entries.push(removed)) });
 }
 
-// Categories that went over their monthly budget this month, each in its budget's currency.
-// An entry in another currency whose rate is not loaded yet is left out, so nothing is flagged on a guess.
-export function overBudget(store) {
-  const { entries, budgets = {} } = store.get(COLLECTION);
-  const month = monthKeyOf(new Date());
-  return Object.entries(budgets)
-    .map(([category, b]) => {
-      const spent = entries
-        .filter((e) => e.type === 'expense' && e.category === category && e.date.startsWith(month))
-        .reduce((s, e) => s + (convert(e.amount, entryCurrency(e), b.currency, knownRate(e.date)) ?? 0), 0);
-      return { category, spent: round2(spent), budget: b.amount, currency: b.currency };
-    })
-    .filter((r) => r.spent > r.budget);
-}
 
 // --- Exchange rates, one per day ---
 
@@ -968,30 +955,10 @@ function billLabelRow(store, projectOptions) {
 
 // --- Recurring expenses ---
 
-// Due dates of a recurring expense, from its start date up to a day (inclusive), as YYYY-MM-DD.
-// A day past the month's end (the 31st in April) falls on the last day of that month.
-function dueDates(item, untilKey) {
-  const start = parseYmd(item.startDate);
-  const step = item.cadence === 'yearly' ? 12 : 1;
-  const dates = [];
-  for (let i = 0; i < 5000; i += 1) {
-    const first = new Date(start.getFullYear(), start.getMonth() + i * step, 1);
-    const lastDay = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
-    const key = ymd(new Date(first.getFullYear(), first.getMonth(), Math.min(start.getDate(), lastDay)));
-    if (key > untilKey) break;
-    dates.push(key);
-  }
-  return dates;
-}
+export { overBudget, nextRecurringDue };
 
 // Adds an entry for every due date up to today that has none yet. Each date is recorded on its expense,
 // so an entry the user deletes is not added again.
-// The next date a recurring expense is due, or '' when none falls within about a year. The automation rules read it too.
-export function nextRecurringDue(item) {
-  const today = ymd(startOfDay(new Date()));
-  return dueDates(item, ymd(addDays(startOfDay(new Date()), 400))).find((k) => k > today) ?? '';
-}
-
 function syncRecurring(store) {
   const today = ymd(startOfDay(new Date()));
   const missing = [];

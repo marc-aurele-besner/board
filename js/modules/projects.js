@@ -18,9 +18,11 @@ import { pickFolder } from '../folder-picker.js';
 import { openDialog } from '../modal.js';
 import { buildProfile, profileOf, hasProfileSources, profilesFor } from '../profile.js';
 import { fmtCost } from '../dev-usage.js';
+import { PALETTE, makeProject, createProject } from '../projects-core.js';
+
+export { makeProject, createProject };
 
 const COLLECTION = 'projects';
-const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
 const SLUG = /^[\w.-]+$/;
 const DEFAULT_CATEGORIES = [
   { id: 'cat-personal', name: 'Personal', color: '#2f6f4e' },
@@ -134,42 +136,6 @@ export function normalizeWebsite(text) {
   } catch {
     return null;
   }
-}
-
-// Shared by the todos module, so a #tag can create a project on the fly.
-// Every project has the same shape; fields are optional and default to empty.
-export function makeProject(existingCount, fields = {}) {
-  return {
-    id: uid(),
-    name: '',
-    color: PALETTE[existingCount % PALETTE.length],
-    description: '',
-    website: '',
-    // The project's folder on this machine, where the Dev section opens its terminals.
-    localPath: '',
-    // What Dev runs when a task is handed to it; empty uses DEFAULT_DEV_COMMAND.
-    devCommand: '',
-    // A command preset from Settings → Dev environment; when set, it runs instead of devCommand.
-    devPreset: '',
-    labels: [],
-    parentId: null,
-    github: { org: '', repos: [] },
-    // What the project is, saved for the board's AI features (js/profile.js). A missing profile reads as empty.
-    profile: { text: '', sources: [], updated: '', edited: false, usageId: '' },
-    created: now(),
-    ...fields,
-  };
-}
-
-// Creates a project unless one with the same name exists. Returns { project, created }.
-// The caller sets any view state it needs, then calls store.refresh().
-export function createProject(store, name, fields = {}) {
-  const { projects } = store.get(COLLECTION);
-  const existing = projects.find((p) => sameName(p.name, name));
-  if (existing) return { project: existing, created: false };
-  const project = makeProject(projects.length, { name, ...fields });
-  store.update(COLLECTION, (d) => d.projects.push(project));
-  return { project, created: true };
 }
 
 // The site's own /favicon.ico. Browsers show cross-origin images without CORS, so this

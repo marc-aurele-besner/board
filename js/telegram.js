@@ -1,8 +1,8 @@
 // Telegram: messages sent to your own bot become tasks, and notifications can be sent back to the same chat.
 // There is no server, so new messages are read while the board is open. The token goes only to api.telegram.org.
 import { parseTask, makeTask } from './capture.js';
-import { notify } from './notifications.js';
-import { createProject } from './modules/projects.js';
+import { notify } from './notify-core.js';
+import { createProject } from './projects-core.js';
 
 const API = 'https://api.telegram.org';
 
