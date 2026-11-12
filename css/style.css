@@ -2464,9 +2464,10 @@ button.sum-line:hover { background: var(--surface-2); }
 .term-chip { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; min-height: 26px; padding: 2px 10px; }
 .term-runner input { flex: 1; min-width: 0; font-size: 16px; }
 /* Dev side panel switch (Files / Source control), and the tree's git colours */
-.ide-side-tabs { display: flex; gap: 2px; flex: none; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
-.ide-side-tab { flex: 1; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: none; border: none; min-height: 0; padding: 5px 6px; border-radius: 6px; color: var(--muted); font-size: 0.8rem; font-weight: 500; white-space: nowrap; }
-.ide-side-tab .icon { width: 14px; height: 14px; flex: none; }
+.ide-side-tabs { display: flex; gap: 4px; flex: none; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.ide-side-tab { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 30px; background: none; border: none; min-height: 0; padding: 0; border-radius: 6px; color: var(--muted); }
+.ide-side-tab .icon { width: 18px; height: 18px; flex: none; }
+.ide-side-badge { position: absolute; top: 0; right: -2px; min-width: 15px; padding: 0 3px; border-radius: 8px; background: var(--accent); color: var(--accent-text); font-size: 0.6rem; font-weight: 700; line-height: 15px; text-align: center; pointer-events: none; }
 .ide-side-tab:hover { background: var(--surface-2); color: var(--text); }
 .ide-side-tab.active { background: var(--surface-2); color: var(--text); }
 .scm-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); font-size: 0.7rem; font-weight: 600; line-height: 18px; text-align: center; }
