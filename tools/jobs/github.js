@@ -1,10 +1,13 @@
+// @ts-check
 // Reads every project's GitHub repos into github.json: open issue and PR counts and the newest open items. The board
 // asks it for one repo it does not hold yet (POST /run/github { repos }).
+/** @import { Job, NodeStore } from '../../types/runner' */
 import { configure, readRepos } from '../../js/github.js';
 
+/** @param {NodeStore} store */
 const reposOf = (store) => [...new Set(store.get('projects').projects.flatMap((p) => p.github?.repos ?? []).filter(Boolean))];
 
-export default {
+export default /** @satisfies {Job} */ ({
   id: 'github',
   delay: 6000,
   timeout: 3 * 60000,
@@ -16,4 +19,4 @@ export default {
     if (errors.length === repos.length) throw new Error(errors.slice(0, 3).join('; '));
     return { repos: repos.length - errors.length, errors: errors.map((text) => ({ text })) };
   },
-};
+});
