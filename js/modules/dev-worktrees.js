@@ -12,7 +12,10 @@ import { baseName, panelHead, panelAction } from './dev-files.js';
 const STALE_MS = 5000;
 
 // View state: the folder, what the runner said about it, the worktrees being removed, and the last refusals.
-const state = { path: '', data: null, loadError: '', loading: false, at: 0, busy: new Set(), errors: new Map() };
+const state = { path: '', data: null, loadError: '', loading: false, at: 0, busy: new Set(), errors: new Map(), folded: new Set() };
+
+// The panel's groups, in the order they show.
+const GROUPS = [['running', 'In use'], ['held', 'Held'], ['idle', 'Not in use']];
 
 const inside = (path, dir) => !!path && (path === dir || path.startsWith(`${dir}/`));
 
@@ -34,22 +37,25 @@ export async function refreshWorktrees(ctx, path, { force = false } = {}) {
 }
 
 // In use (a claude or a command runs in it), held (an open task or an open terminal points at it, but nothing
-// runs), or unused. `session` is the board's running terminal in it, stopped before it is removed.
+// runs), or unused. `session` is the board's running terminal in it, stopped before it is removed. `why` says what
+// uses or holds it when no task says so, `task` is the task it was made for, if any.
 function usageOf(ctx, w) {
   const { worktree, tasks } = w.claude ? tasksOfWorktree(ctx.store, w.name) : { worktree: null, tasks: [] };
   const sessions = ctx.sessions();
   const session = worktree?.session ? sessions.find((s) => s.id === worktree.session && s.running) : null;
   const open = tasks.filter((t) => statusOf(t) !== 'done');
+  const task = open[0] ?? tasks[0] ?? null;
+  const more = (open.length || tasks.length) - 1;
   if (w.running || w.commands || session) {
     const why = w.running ? `claude runs in it (pid ${w.pid})` : session ? `terminal ${session.n} runs in it` : 'a command runs in it';
-    return { tone: 'running', label: `In use: ${why}`, session: session?.id ?? worktree?.session ?? '' };
+    return { tone: 'running', label: `In use: ${why}`, why, task, more, session: session?.id ?? worktree?.session ?? '' };
   }
   const terminals = sessions.filter((s) => inside(s.cwd, w.path));
   if (open.length || terminals.length) {
     const why = open.length ? `held by “${open[0].text}”${open.length > 1 ? ` and ${open.length - 1} more` : ''}` : `terminal ${terminals[0].n} is open in it`;
-    return { tone: 'held', label: `Idle, ${why}`, session: worktree?.session ?? '' };
+    return { tone: 'held', label: `Idle, ${why}`, why: open.length ? '' : why, task, more, session: worktree?.session ?? '' };
   }
-  return { tone: 'idle', label: 'Not in use', session: worktree?.session ?? '' };
+  return { tone: 'idle', label: 'Not in use', why: task ? 'its task is done' : '', task, more, session: worktree?.session ?? '' };
 }
 
 async function removeOne(ctx, w, use) {
@@ -103,17 +109,20 @@ function confirmRemove(ctx, list, title) {
   });
 }
 
+// A line under a worktree's name: an icon and a text cut to the panel's width, in full on hover.
+const meta = (name, text, cls = '') => h('div', { class: `wt-meta muted ${cls}`, title: text }, icon(name), h('span', { class: 'wt-meta-text' }, text));
+
 function row(ctx, w, use) {
   const busy = state.busy.has(w.path);
   const error = state.errors.get(w.path);
   const button = (name, title, onclick) => h('button', { type: 'button', class: 'tree-action', title, 'aria-label': `${title}: ${w.name}`, disabled: busy, onclick }, icon(name));
   const branch = w.branch && w.branch !== `worktree-${w.name}` ? w.branch : '';
-  return h('div', { class: 'wt-item' },
+  const task = use.task ? `${use.task.text}${use.more > 0 ? ` (+${use.more})` : ''}` : '';
+  return h('div', { class: 'wt-item', role: 'listitem' },
     h('div', { class: 'tree-row scm-row wt-row' },
-      h('div', { class: 'tree-item', title: `${w.path}${w.branch ? ` · ${w.branch}` : ''}` },
+      h('div', { class: 'tree-item', title: w.path },
         h('span', { class: `wt-dot ${use.tone}`, role: 'img', 'aria-label': use.label, title: use.label }),
-        h('span', { class: 'tree-name' }, w.name),
-        branch ? h('span', { class: 'scm-dir muted' }, branch) : null),
+        h('span', { class: 'tree-name' }, w.name)),
       w.prunable ? null : button('terminal', 'Open a terminal in it', () => ctx.openTerminal(w.path)),
       busy ? h('span', { class: 'tree-action spin-icon wt-busy' }, icon('refresh')) : button('trash', 'Remove this worktree', () => {
         if (use.tone === 'running') confirmRemove(ctx, [[w, use]], 'Remove a worktree in use');
@@ -123,7 +132,29 @@ function row(ctx, w, use) {
         });
       }),
       w.changes ? h('span', { class: 'scm-letter git-mod', title: `${w.changes} changed ${w.changes === 1 ? 'file' : 'files'}: git keeps it until they are committed or discarded` }, w.changes) : null),
+    task ? meta('check-square', task) : null,
+    branch ? meta('git-branch', branch) : w.branch ? null : meta('git-commit', w.head ? `detached at ${w.head.slice(0, 7)}` : 'no branch'),
+    w.prunable ? meta('alert', 'its folder is gone: removing it cleans git up', 'wt-warn') : use.why ? meta(use.tone === 'running' ? 'activity' : 'info', use.why) : null,
     error ? h('p', { class: 'small tree-error wt-error' }, error) : null);
+}
+
+// One group of worktrees, folded or open, with its count.
+function group(ctx, tone, title, rows) {
+  const open = !state.folded.has(tone);
+  return h('div', { class: 'scm-section' },
+    h('div', { class: 'tree-row scm-section-head' },
+      h('button', {
+        type: 'button',
+        class: 'tree-item',
+        'aria-expanded': String(open),
+        onclick: () => {
+          if (open) state.folded.add(tone);
+          else state.folded.delete(tone);
+          ctx.refresh();
+        },
+      }, h('span', { class: open ? 'tree-chevron open' : 'tree-chevron' }, icon('chevron-right')), h('span', { class: `wt-dot ${tone}` }), h('span', { class: 'tree-name' }, title)),
+      h('span', { class: 'scm-count' }, rows.length)),
+    open ? h('div', { role: 'list' }, rows.map(([w, use]) => row(ctx, w, use))) : null);
 }
 
 export function worktreesPanel(ctx, picker, switcher, path) {
@@ -142,7 +173,10 @@ export function worktreesPanel(ctx, picker, switcher, path) {
       h('div', { class: 'row wt-actions' },
         h('button', { type: 'button', class: 'btn-small', disabled: busy || !unused.length, title: 'Remove the worktrees nothing uses: no claude or command runs in them, and no open task or terminal points at them', onclick: () => confirmRemove(ctx, unused, 'Remove unused worktrees') }, icon('trash'), `Remove unused${unused.length ? ` (${unused.length})` : ''}`),
         h('button', { type: 'button', class: 'btn-small danger', disabled: busy, title: 'Remove every worktree but the main checkout', onclick: () => confirmRemove(ctx, list, 'Remove all worktrees') }, icon('trash'), 'Remove all')),
-      h('div', { class: 'tree scm-list', role: 'list' }, list.map(([w, use]) => row(ctx, w, use))));
+      h('div', { class: 'tree scm-list' }, GROUPS.map(([tone, title]) => {
+        const rows = list.filter(([, use]) => use.tone === tone).sort(([a], [b]) => a.name.localeCompare(b.name));
+        return rows.length ? group(ctx, tone, title, rows) : null;
+      })));
   }
   return h('aside', { class: 'card ide-explorer scm', 'aria-label': 'Worktrees' },
     switcher,
