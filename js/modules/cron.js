@@ -1982,6 +1982,8 @@ function flowsTab(store) {
   const flows = all.filter(inFilter);
   const flow = flows.find((f) => f.id === view.flow) ?? flows[0] ?? null;
   if (flow) view.flow = flow.id;
+  // A step the address names that this flow no longer has falls back to the schedule.
+  if (flow && view.node !== 'trigger' && !flow.steps.some((s) => s.id === view.node)) view.node = 'trigger';
   return h('div', { class: 'cron-layout' },
     flowList(store, all, flows),
     flow ? editor(store, flow) : h('div', { class: 'card stack' }, empty('Create a flow to schedule AI work, such as a morning plan from your open tasks.'),
@@ -2029,9 +2031,15 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
   collection: COLLECTION,
   defaults: DEFAULTS,
   render: draw,
-  serialize: () => ({ tab: view.tab === 'flows' ? '' : view.tab, flow: view.flow }),
+  // The selected step goes in the address too, so a refresh reopens it.
+  serialize: () => ({
+    tab: view.tab === 'flows' ? '' : view.tab,
+    flow: view.flow,
+    step: view.tab === 'flows' && view.node !== 'trigger' ? view.node : '',
+  }),
   restore: (/** @type {Record<string, string>} */ p = {}) => {
-    if (p.flow && p.flow !== view.flow) view.node = 'trigger';
+    if (p.step) view.node = p.step;
+    else if (p.flow && p.flow !== view.flow) view.node = 'trigger';
     view.flow = p.flow || '';
     // A notification links to #/cron?flow=…, with no tab, so it opens the Flows tab.
     view.tab = p.tab || 'flows';
