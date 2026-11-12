@@ -1,5 +1,5 @@
 # Personal data: keep it outside the repo, or ignore it if you pick a folder inside it
-data/
+/data/
 *.json.bak
 
 # OS and editor noise
