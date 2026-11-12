@@ -1,5 +1,7 @@
+// @ts-check
 import { h } from './ui.js';
 import { CHAINS, readLink, hasVersion } from './uniswap.js';
+/** @import { Chain } from '../types/uniswap' */
 
 // The fields to add a position by hand: the link or number, the chain and version pickers, and a line that says
 // what a pasted link was read as. A link names its chain and version, so the pickers hide while one is typed and
@@ -10,7 +12,7 @@ export function positionFields({ placeholder = 'Position link or number', autofo
   const version = h('select', { name: 'version', 'aria-label': 'Uniswap version' }, v4, h('option', { value: 'v3' }, 'v3'));
   // A chain without v4 offers v3 alone.
   const syncVersion = () => {
-    v4.hidden = v4.disabled = !hasVersion(CHAINS.find((c) => String(c.id) === chain.value), 'v4');
+    v4.hidden = v4.disabled = !hasVersion(/** @type {Chain} */ (CHAINS.find((c) => String(c.id) === chain.value)), 'v4'); // the picker lists CHAINS
     if (v4.disabled) version.value = 'v3';
   };
   chain.addEventListener('change', syncVersion);
@@ -26,7 +28,7 @@ export function positionFields({ placeholder = 'Position link or number', autofo
       chain.value = String(link.chainId);
       syncVersion();
       version.value = link.version;
-      hint.textContent = `Read from the link: ${CHAINS.find((c) => c.id === link.chainId).name}, Uniswap ${link.version}, position #${link.tokenId}.`;
+      hint.textContent = `Read from the link: ${/** @type {Chain} */ (CHAINS.find((c) => c.id === link.chainId)).name}, Uniswap ${link.version}, position #${link.tokenId}.`;
     } else {
       hint.textContent = unreadLink(link);
     }
@@ -38,6 +40,7 @@ export function positionFields({ placeholder = 'Position link or number', autofo
 }
 
 // Why typed text could not be added, for the form's message.
+/** @param {unknown} text */
 export function positionError(text) {
   const link = readLink(text);
   if (link && !link.chainId) return `${unreadLink(link)} The chains it reads are listed in Settings.`;
@@ -45,6 +48,7 @@ export function positionError(text) {
 }
 
 // Why a link was not read: its chain is not one the board reads, or Uniswap has no such version there.
+/** @param {{ slug: string, version: string }} link */
 function unreadLink(link) {
   const known = CHAINS.find((c) => c.app === link.slug);
   return known
