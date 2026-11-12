@@ -15,6 +15,7 @@ import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
 import { openDialog } from '../modal.js';
 import { issuesOf, prsOf, moveToReview } from '../task-links.js';
 import { previewChips } from '../previews.js';
+import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startClaudeSession, openSession, runnerOf } from './dev.js';
 import { sessionStatus } from '../terminal.js';
@@ -548,22 +549,29 @@ function openIssueDialog(store, item, repos) {
 
 // A task's issues and PRs as links (#12, opens in a new tab), shown beside its title where they have room.
 // A Dev session started on the task adds the ones it opens. A PR's Vercel or Netlify preview follows it.
+// Each is coloured like GitHub: green while open, purple once merged or completed, red once closed unmerged.
 /** @param {Store} store @param {Task} item */
 function linkChips(store, item) {
   const issues = issuesOf(item);
   const prs = prsOf(item);
   if (!issues.length && !prs.length) return null;
   /** @param {TaskLink} l @param {boolean} pr */
-  const chip = (l, pr) => h('a', {
+  const chip = (l, pr) => {
+    const state = linkState(store, l);
+    return h('a', {
     href: l.url,
     target: '_blank',
     rel: 'noopener',
-    class: 'issue-link',
-    title: `${pr ? 'Pull request' : 'Issue'} ${linkTitle(l)}`,
+    class: `issue-link${state ? ` gh-${state}` : ''}`,
+    title: `${pr ? 'Pull request' : 'Issue'} ${linkTitle(l)}${state ? ` · ${STATE_NAMES[state] ?? state}` : ''}`,
     'aria-label': `Open ${pr ? 'pull request' : 'issue'} ${l.repo} #${l.number}`,
   }, icon(pr ? 'pull-request' : 'repo'), `#${l.number}`);
+  };
   return h('span', { class: 'task-link-chips' }, issues.map((l) => chip(l, false)), prs.map((l) => chip(l, true)), previewChips(store, prs, 'issue-link'));
 }
+
+/** @type {Record<string, string>} */
+const STATE_NAMES = { open: 'open', merged: 'merged', closed: 'closed', completed: 'closed as completed', not_planned: 'closed as not planned' };
 
 // One button in the actions to see a task's issues and PRs, link more, or create one.
 /** @param {Store} store @param {Task} item @param {string[]} repos */
