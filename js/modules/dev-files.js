@@ -1,3 +1,4 @@
+// @ts-check
 // Dev's file explorer and file reader, Cursor style: a folder tree on the left, open files as tabs, each shown
 // with line numbers and syntax colours. Read only; files come through the runner on this machine.
 // A tab can also show a diff (a changed file, or a commit) from Source Control.
@@ -5,23 +6,37 @@ import { h, icon } from '../ui.js';
 import { toast } from '../toast.js';
 import { listFolder, readFile } from '../terminal.js';
 import { highlight, languageOf, languageLabel } from '../highlight.js';
+/** @import { DevContext } from '../../types/dev' */
+/** @import { RunnerFolder, GitDiff } from '../../types/terminal' */
+/** @import { Child } from '../../types/ui' */
+/** @import { IconName } from '../../types/data' */
+
+/**
+ * @typedef {{ loading?: boolean, full?: string, entries?: RunnerFolder['entries'], error?: string }} Folder
+ * @typedef {{ path: string, name: string, title?: string, file?: string, load?: () => Promise<GitDiff> }} TabInfo
+ * @typedef {TabInfo & { loading: boolean, scroll: number, goto: number, error?: string, el?: HTMLElement | null, size?: number, text?: string, binary?: boolean,
+ *   tooLarge?: boolean, diff?: string, commit?: GitDiff['commit'], lines?: number, files?: number }} FileTab
+ */
 
 // Folders nobody reads in an explorer, and that can hold many thousands of files.
 const HIDDEN = new Set(['.git', 'node_modules', '.DS_Store', '.next', '.turbo', '.cache', '__pycache__', '.venv']);
 
 // View state: listed folders by path, the expanded ones, and the open files.
+/** @type {{ root: string, folders: Map<string, Folder>, expanded: Set<string>, tabs: FileTab[], active: string }} */
 const state = { root: '', folders: new Map(), expanded: new Set(), tabs: [], active: '' };
 
-const sepOf = (path) => (path.includes('\\') && !path.includes('/') ? '\\' : '/');
-export const joinPath = (dir, name) => (/[\\/]$/.test(dir) ? dir + name : dir + sepOf(dir) + name);
-export const baseName = (path) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+const sepOf = (/** @type {string} */ path) => (path.includes('\\') && !path.includes('/') ? '\\' : '/');
+export const joinPath = (/** @type {string} */ dir, /** @type {string} */ name) => (/[\\/]$/.test(dir) ? dir + name : dir + sepOf(dir) + name);
+export const baseName = (/** @type {string} */ path) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 
+/** @param {number} bytes */
 function sizeText(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** @param {DevContext} ctx @param {string} path */
 async function load(ctx, path) {
   const folder = state.folders.get(path) ?? {};
   if (folder.loading) return;
@@ -32,12 +47,13 @@ async function load(ctx, path) {
     const worktrees = baseName(full) === '.claude';
     state.folders.set(path, { full, entries: entries.filter((e) => !HIDDEN.has(e.name) && !(worktrees && e.dir && e.name === 'worktrees')) });
   } catch (err) {
-    state.folders.set(path, { error: err.message });
+    state.folders.set(path, { error: /** @type {Error} */ (err).message });
   }
   ctx.refresh();
 }
 
 // The folder the explorer shows. A new root starts with the tree folded.
+/** @param {DevContext} ctx @param {string} path */
 export function setRoot(ctx, path) {
   if (path === state.root && state.folders.has(path)) return;
   state.root = path;
@@ -45,6 +61,7 @@ export function setRoot(ctx, path) {
   if (path || ctx.ready()) load(ctx, path);
 }
 
+/** @param {DevContext} ctx @param {string} path */
 function toggle(ctx, path) {
   if (state.expanded.has(path)) state.expanded.delete(path);
   else {
@@ -54,18 +71,22 @@ function toggle(ctx, path) {
   ctx.refresh();
 }
 
+/** @param {DevContext} ctx */
 function reloadAll(ctx) {
   for (const path of [state.root, ...state.expanded]) load(ctx, path);
   for (const file of state.tabs) openFile(ctx, file.path, { reload: true });
 }
 
 // `line` scrolls to that line and marks it (a search match).
+/** @type {(ctx: DevContext, path: string, options?: { reload?: boolean, line?: number }) => Promise<void>} */
 export const openFile = (ctx, path, { reload = false, line = 0 } = {}) => openTab(ctx, { path, name: baseName(path) }, { reload, line });
 
 // A diff in a tab. `key` names the tab (opening it again reads it again); `load` answers { diff, commit? }; `file`
 // is the changed file's full path, for the button that opens it.
+/** @type {(ctx: DevContext, tab: { key: string, name: string, title: string, file?: string, load: () => Promise<GitDiff> }) => Promise<void>} */
 export const openDiff = (ctx, { key, name, title, file = '', load }) => openTab(ctx, { path: key, name, title, file, load }, { reload: true });
 
+/** @param {DevContext} ctx @param {TabInfo} tab @param {{ reload: boolean, line?: number }} options */
 async function openTab(ctx, tab, { reload, line = 0 }) {
   let file = state.tabs.find((f) => f.path === tab.path);
   if (file && line) file.goto = line;
@@ -87,12 +108,13 @@ async function openTab(ctx, tab, { reload, line = 0 }) {
       Object.assign(file, { size: read.size, text: read.text, binary: read.binary, tooLarge: read.tooLarge, error: '', el: null });
     }
   } catch (err) {
-    file.error = err.message;
+    file.error = /** @type {Error} */ (err).message;
   }
   file.loading = false;
   ctx.refresh();
 }
 
+/** @param {DevContext} ctx @param {FileTab} file */
 function closeFile(ctx, file) {
   const i = state.tabs.indexOf(file);
   state.tabs.splice(i, 1);
@@ -100,13 +122,15 @@ function closeFile(ctx, file) {
   ctx.refresh();
 }
 
+/** @param {DevContext} ctx @param {string} path @param {number} depth @returns {HTMLElement[]} */
 function treeRows(ctx, path, depth) {
   const folder = state.folders.get(path);
   if (!folder || folder.loading && !folder.entries) return [h('div', { class: 'tree-note muted small', style: { '--depth': depth } }, 'Loading…')];
   if (folder.error) return [h('div', { class: 'tree-note small tree-error', style: { '--depth': depth } }, folder.error)];
-  if (!folder.entries.length) return [h('div', { class: 'tree-note muted small', style: { '--depth': depth } }, 'Empty folder')];
-  return folder.entries.flatMap((entry) => {
-    const full = joinPath(folder.full, entry.name);
+  // Neither loading nor failed: the folder was read.
+  if (!/** @type {RunnerFolder['entries']} */ (folder.entries).length) return [h('div', { class: 'tree-note muted small', style: { '--depth': depth } }, 'Empty folder')];
+  return /** @type {RunnerFolder['entries']} */ (folder.entries).flatMap((entry) => {
+    const full = joinPath(/** @type {string} */ (folder.full), entry.name);
     if (entry.dir) {
       const open = state.expanded.has(full);
       return [
@@ -133,10 +157,11 @@ function treeRows(ctx, path, depth) {
 }
 
 // A side panel's title, Cursor style (small capitals), with its actions as icons on the right.
-export const panelHead = (title, ...actions) => h('div', { class: 'ide-panel-head' }, h('h2', { class: 'ide-panel-title' }, title), h('div', { class: 'ide-panel-actions' }, actions));
-export const panelAction = (name, label, onclick, disabled = false) => h('button', { type: 'button', class: 'ide-panel-action', title: label, 'aria-label': label, disabled, onclick }, icon(name));
+export const panelHead = (/** @type {string} */ title, /** @type {Child[]} */ ...actions) => h('div', { class: 'ide-panel-head' }, h('h2', { class: 'ide-panel-title' }, title), h('div', { class: 'ide-panel-actions' }, actions));
+export const panelAction = (/** @type {IconName} */ name, /** @type {string} */ label, /** @type {() => void} */ onclick, disabled = false) => h('button', { type: 'button', class: 'ide-panel-action', title: label, 'aria-label': label, disabled, onclick }, icon(name));
 
 // `switcher` picks the side panel; `picker` chooses the workspace and sits under the panel's title.
+/** @param {DevContext} ctx @param {Child} picker @param {Child} switcher */
 export function explorer(ctx, picker, switcher) {
   const root = state.folders.get(state.root);
   return h('aside', { class: 'card ide-explorer', 'aria-label': 'Files' },
@@ -153,24 +178,28 @@ export function explorer(ctx, picker, switcher) {
 }
 
 // The code is drawn once per read and kept, so switching tabs or a page refresh does not draw it again.
+/** @param {FileTab} file */
 function codeView(file) {
   if (file.el) return file.el;
-  const lines = highlight(file.text, languageOf(file.name));
+  // Only a text file gets here (fileBody).
+  const lines = highlight(/** @type {string} */ (file.text), languageOf(file.name));
   const code = h('div', { class: 'code', style: { '--gutter': `${String(lines.length).length + 1}ch` } },
     lines.map((runs, i) =>
       h('div', { class: 'code-line' },
         h('span', { class: 'ln', 'aria-hidden': 'true' }, i + 1),
         h('span', { class: 'lc' }, runs.map(([cls, text]) => (cls ? h('span', { class: `tok-${cls}` }, text) : text))))));
   file.lines = lines.length;
-  file.el = h('div', { class: 'code-view', tabindex: '0', onscroll: (e) => (file.scroll = e.currentTarget.scrollTop) }, code);
+  file.el = h('div', { class: 'code-view', tabindex: '0', onscroll: (/** @type {Event} */ e) => (file.scroll = /** @type {HTMLElement} */ (e.currentTarget).scrollTop) }, code);
   return file.el;
 }
 
 // A unified diff as rows: each file's name (in a commit), its hunks, and lines with their old and new numbers.
 const DIFF_MAX_LINES = 20000;
 const DIFF_HEADER = /^(index |--- |\+\+\+ |old mode|new mode|similarity index|dissimilarity index|copy from|copy to)/;
+/** @param {FileTab & { diff: string }} file */
 function diffView(file) {
   if (file.el) return file.el;
+  /** @type {HTMLElement[]} */
   const rows = [];
   const lines = file.diff.split('\n');
   if (lines.at(-1) === '') lines.pop();
@@ -178,12 +207,13 @@ function diffView(file) {
   let newN = 0;
   let lang = languageOf(file.name);
   let files = 0;
+  /** @type {(cls: string, a: number | string, b: number | string, sign: string, content: Child) => HTMLElement} */
   const row = (cls, a, b, sign, content) => h('div', { class: `code-line ${cls}` },
     h('span', { class: 'ln', 'aria-hidden': 'true' }, a),
     h('span', { class: 'ln', 'aria-hidden': 'true' }, b),
     h('span', { class: 'lc' }, h('span', { class: 'diff-sign', 'aria-hidden': 'true' }, sign), content));
   // Each line is coloured on its own: a hunk starts anywhere, so a comment opened above it is not seen.
-  const coloured = (text) => (highlight(text, lang)[0] ?? []).map(([cls, t]) => (cls ? h('span', { class: `tok-${cls}` }, t) : t));
+  const coloured = (/** @type {string} */ text) => (highlight(text, lang)[0] ?? []).map(([cls, t]) => (cls ? h('span', { class: `tok-${cls}` }, t) : t));
   for (const line of lines.slice(0, DIFF_MAX_LINES)) {
     if (line.startsWith('diff --')) {
       files++;
@@ -212,20 +242,21 @@ function diffView(file) {
   const body = rows.length
     ? h('div', { class: 'code diff', style: { '--gutter': `${String(Math.max(oldN, newN)).length + 1}ch` } }, rows)
     : h('p', { class: 'muted small ide-msg' }, 'No changes to show.');
-  file.el = h('div', { class: 'code-view', tabindex: '0', onscroll: (e) => (file.scroll = e.currentTarget.scrollTop) }, head, body);
+  file.el = h('div', { class: 'code-view', tabindex: '0', onscroll: (/** @type {Event} */ e) => (file.scroll = /** @type {HTMLElement} */ (e.currentTarget).scrollTop) }, head, body);
   return file.el;
 }
 
+/** @param {FileTab} file */
 function fileBody(file) {
   if (file.loading && !file.el) return h('p', { class: 'muted small ide-msg' }, 'Reading…');
   if (file.error) return h('p', { class: 'small ide-msg tree-error' }, file.error);
   if (file.diff !== undefined) {
-    const el = diffView(file);
+    const el = diffView(/** @type {FileTab & { diff: string }} */ (file));
     requestAnimationFrame(() => (el.scrollTop = file.scroll));
     return el;
   }
-  if (file.binary) return h('p', { class: 'muted small ide-msg' }, `A binary file (${sizeText(file.size)}). The reader shows text files.`);
-  if (file.tooLarge) return h('p', { class: 'muted small ide-msg' }, `${sizeText(file.size)} is over the 1 MB the reader shows.`);
+  if (file.binary) return h('p', { class: 'muted small ide-msg' }, `A binary file (${sizeText(/** @type {number} */ (file.size))}). The reader shows text files.`);
+  if (file.tooLarge) return h('p', { class: 'muted small ide-msg' }, `${sizeText(/** @type {number} */ (file.size))} is over the 1 MB the reader shows.`);
   const el = codeView(file);
   requestAnimationFrame(() => {
     const row = file.goto && el.querySelector('.code')?.children[file.goto - 1];
@@ -243,6 +274,7 @@ function fileBody(file) {
 
 export const hasOpenFiles = () => state.tabs.length > 0;
 
+/** @param {DevContext} ctx */
 export function editor(ctx) {
   if (!state.tabs.length) return null;
   const file = state.tabs.find((f) => f.path === state.active) ?? state.tabs[0];
@@ -253,7 +285,7 @@ export function editor(ctx) {
     ? h('div', { class: 'file-bar' },
         h('code', { class: 'file-path', title: file.title }, file.title),
         h('span', { class: 'muted small file-meta' }, file.commit ? `${file.files ?? 0} ${file.files === 1 ? 'file' : 'files'}` : ''),
-        file.file ? h('button', { type: 'button', class: 'icon-btn', title: 'Open the file', 'aria-label': 'Open the file', onclick: () => openFile(ctx, file.file) }, icon('file')) : null,
+        file.file ? h('button', { type: 'button', class: 'icon-btn', title: 'Open the file', 'aria-label': 'Open the file', onclick: () => openFile(ctx, /** @type {string} */ (file.file)) }, icon('file')) : null,
         h('button', { type: 'button', class: 'icon-btn', title: 'Read the changes again', 'aria-label': 'Reload the changes', onclick: () => openTab(ctx, file, { reload: true }) }, icon('refresh')))
     : null;
   return h('section', { class: 'card ide-editor' },
