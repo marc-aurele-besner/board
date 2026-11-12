@@ -1823,6 +1823,9 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .cron-flow.active { background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
 .cron-flow .grow { display: flex; flex-direction: column; min-width: 0; }
 .cron-flow strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cron-flow-meta { display: flex; align-items: center; gap: 5px; min-width: 0; white-space: nowrap; }
+.cron-flow-meta .project-icon { width: 14px; height: 14px; }
+.cron-flow-project { overflow: hidden; text-overflow: ellipsis; }
 .cron-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
 .cron-dot.on { background: var(--income); }
 .cron-dot.bad { background: var(--danger); }
