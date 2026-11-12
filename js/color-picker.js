@@ -1,3 +1,4 @@
+// @ts-check
 // A colour picker for labels and projects: a swatch button that opens a popover with a curated palette, a hex
 // field and the system picker for anything else. The popover previews the colour on the item's own pill, so
 // the choice is seen as it will appear.
@@ -14,6 +15,7 @@ export const SWATCHES = [
 const HEX = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i;
 
 // "#abc" or "abc" to "#aabbcc"; null when the text is not a colour.
+/** @param {unknown} text */
 export function normalizeHex(text) {
   const m = HEX.exec(String(text ?? '').trim());
   if (!m) return null;
@@ -21,7 +23,16 @@ export function normalizeHex(text) {
   return `#${v.toLowerCase()}`;
 }
 
+/** @type {{ el: HTMLElement, anchor: HTMLElement } | null} */
 let open = null; // { el, anchor }
+
+/**
+ * @typedef {object} PickerOptions
+ * @property {string | null} [value]
+ * @property {string} [name]
+ * @property {(color: string) => void} onPick
+ * @property {(() => void) | null} [onClear]
+ */
 
 function close() {
   if (!open) return;
@@ -33,10 +44,12 @@ function close() {
   if (anchor.isConnected) anchor.focus();
 }
 
+/** @param {PointerEvent} e */
 function onOutside(e) {
-  if (open && !open.el.contains(e.target) && !open.anchor.contains(e.target)) close();
+  if (open && !open.el.contains(/** @type {Node} */ (e.target)) && !open.anchor.contains(/** @type {Node} */ (e.target))) close();
 }
 
+/** @param {KeyboardEvent} e */
 function onKey(e) {
   if (e.key === 'Escape') {
     e.stopPropagation();
@@ -44,6 +57,7 @@ function onKey(e) {
   }
 }
 
+/** @param {HTMLElement} el @param {HTMLElement} anchor */
 function place(el, anchor) {
   const rect = anchor.getBoundingClientRect();
   const width = Math.min(248, window.innerWidth - 16);
@@ -53,9 +67,11 @@ function place(el, anchor) {
   el.style.top = below + el.offsetHeight + 8 < window.innerHeight ? `${below}px` : `${Math.max(8, rect.top - 4 - el.offsetHeight)}px`;
 }
 
+/** @param {HTMLElement} anchor @param {PickerOptions} options */
 function show(anchor, { value, name, onPick, onClear }) {
   close();
   let current = normalizeHex(value) ?? SWATCHES[0];
+  /** @param {string} color */
   const pick = (color) => {
     const v = normalizeHex(color);
     if (!v) return;
@@ -86,10 +102,12 @@ function show(anchor, { value, name, onPick, onClear }) {
       onpointerleave: () => setPreview(current),
     }));
 
+  /** @param {string} color */
   function setPreview(color) {
     preview.style.setProperty('--c', color);
     for (const b of swatches) b.setAttribute('aria-pressed', String(b.title === current));
   }
+  /** @param {string} color */
   const setCurrent = (color) => {
     current = color;
     setPreview(color);
@@ -136,6 +154,7 @@ function show(anchor, { value, name, onPick, onClear }) {
 
 // The swatch button. `name` labels the preview pill and the button. With `onClear`, the colour can be removed,
 // and an empty value shows as an empty swatch.
+/** @param {PickerOptions & { className?: string }} options */
 export function colorPicker({ value, name = '', onPick, onClear = null, className = '' }) {
   const btn = h('button', {
     type: 'button',
@@ -144,6 +163,7 @@ export function colorPicker({ value, name = '', onPick, onClear = null, classNam
     title: 'Change the colour',
     'aria-label': name ? `Colour of ${name}` : 'Colour',
     'aria-haspopup': 'dialog',
+    /** @param {MouseEvent} e */
     onclick: (e) => {
       e.stopPropagation();
       if (open?.anchor === btn) return close();
