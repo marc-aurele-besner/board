@@ -54,6 +54,17 @@ function collections() {
     ({ id, text, description: '', status, priority, category: '', projectId, due: '', created: at, ...more });
   const entry = (id, offset, type, amount, category, note, projectId = null) =>
     ({ id, date: day(offset), type, amount, tax: 0, billId: '', currency: 'USD', category, note, projectId, source: '', created: at });
+  // models: { id: [input, output, cache read, cache write, cost] }; the session ended `offset` days from today.
+  const devRecord = (name, taskIds, offset, models, effort) => {
+    const end = Date.now() + offset * 86400000 - 3600000;
+    const list = Object.entries(models);
+    return {
+      name, cwd: '', added: at, taskIds, sessions: 1, start: end - 40 * 60000, end, duration: 38 * 60000, apiDuration: 21 * 60000,
+      linesAdded: 214, linesRemoved: 37, replies: 60, efforts: { [effort]: 60 },
+      cost: list.reduce((sum, [, m]) => sum + m[4], 0),
+      models: Object.fromEntries(list.map(([id, [input, output, cacheRead, cacheWrite, cost]]) => [id, { provider: 'Anthropic', input, output, thinking: 0, cacheRead, cacheWrite, cost }])),
+    };
+  };
   const mail = (id, dir, hoursAgo, from, subject, more = {}) => ({
     id, dir, from, to: ['Atlas <hello@example.com>'], cc: [], subject, status: '', projectId: 'p-atlas', taskId: null,
     at: new Date(Date.now() - hoursAgo * 3600000).toISOString(), ...more,
@@ -115,6 +126,15 @@ function collections() {
           ? { ref: '42161:200002', pair: 'WBTC / ETH', chain: 'Arbitrum One', tokenId: '200002' }
           : { ref: '8453:v4:100001', pair: 'ETH / USDC', chain: 'Base', tokenId: '100001' }),
       })),
+    },
+    // Two claude sessions Dev ran for tasks, so Monitoring, the tasks and Dev show what they used. No folder, so
+    // the runner is never asked about them.
+    usage: {
+      entries: [],
+      dev: {
+        'ship-the-pricing-page-a1b2c3': devRecord('ship-the-pricing-page-a1b2c3', ['t1'], -1, { 'claude-opus-5-5': [820, 31200, 4100000, 160000, 2.84], 'claude-haiku-5-5': [1300, 210, 0, 0, 0.0003] }, 'high'),
+        'write-the-install-guide-d4e5f6': devRecord('write-the-install-guide-d4e5f6', ['t6'], 0, { 'claude-sonnet-5-5': [410, 18400, 1900000, 90000, 0.97] }, 'medium'),
+      },
     },
     tools: { every: 60, sites: { 'p-atlas': site(true, 64), 'p-docs': site(false, 9) } },
     inbox: {
