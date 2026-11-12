@@ -814,6 +814,22 @@ const fill = (template, vars, quote = (x) => x) =>
     return v === undefined ? m : quote(v);
   });
 
+// The template cut into plain text and filled variables, for the editor's preview: a part with `name` was a
+// placeholder, and `missing` says nothing filled it yet.
+export function fillParts(template, vars) {
+  const parts = [];
+  let at = 0;
+  const text = String(template ?? '');
+  for (const m of text.matchAll(VAR)) {
+    if (m.index > at) parts.push({ text: text.slice(at, m.index) });
+    const v = lookup(vars, m[1], m[2]);
+    parts.push(v === undefined ? { text: m[0], name: m[0], missing: true } : { text: v, name: m[0] });
+    at = m.index + m[0].length;
+  }
+  if (at < text.length) parts.push({ text: text.slice(at) });
+  return parts;
+}
+
 // A project as {{project}} reads it: its name as text, and with a path its parts ({{project.website}},
 // {{project.repo}}, {{project.directory}}). Empty fields stay as '' so a template reads the same for every project.
 export function projectVars(project) {
