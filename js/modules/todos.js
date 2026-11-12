@@ -63,6 +63,8 @@ const view = {
   sort: { ...DEFAULT_SORT },
   colFilter: emptyColFilter(),
   tidy: { status: 'idle', items: [] },
+  // The task a link opened (#/todos?task=…, from a Cron run), scrolled to and marked once.
+  focusTask: '',
 };
 
 function emptyColFilter() {
@@ -646,6 +648,21 @@ function devButton(store, item) {
   }, icon('terminal'));
 }
 
+// On a task a Cron flow made: opens the run that made it, or the flow when the run is gone (or the task predates
+// runs keeping it).
+function cronButton(store, item) {
+  if (item.auto !== 'cron' || !item.autoRef) return null;
+  const flow = store.get('cron')?.flows?.find((f) => f.id === item.autoRef);
+  const run = item.cronRun ? store.get('cron')?.runs?.find((r) => r.id === item.cronRun) : null;
+  const name = flow ? `“${flow.name}”` : 'a Cron flow';
+  return h('a', {
+    class: 'icon-btn cron-btn',
+    href: run ? `#/cron?run=${encodeURIComponent(run.id)}` : `#/cron?flow=${encodeURIComponent(item.autoRef)}`,
+    title: run ? `Made by ${name}. Open the run.` : `Made by ${name}. Open the flow.`,
+    'aria-label': run ? `Open the Cron run that made "${item.text}"` : `Open the Cron flow that made "${item.text}"`,
+  }, icon('repeat'));
+}
+
 // Marks a task done, or back to "To do" when it already is.
 function doneButton(store, item) {
   const done = statusOf(item) === 'done';
@@ -881,6 +898,7 @@ function todoRow(store, item, ctx) {
       h('div', { class: 'todo-actions' },
         ctx.showDue ? null : dueControl(store, item),
         repos.length || issuesOf(item).length || prsOf(item).length ? issueControl(store, item, repos) : null,
+        cronButton(store, item),
         devButton(store, item),
         item.email
           ? h('a', { href: `#/inbox?email=${encodeURIComponent(item.email.id)}`, class: 'icon-btn', title: 'Open the email', 'aria-label': 'Open the email this task came from' }, icon('mail'))
@@ -945,6 +963,7 @@ function boardCard(store, item, projects, order) {
   const { onpaste, ...dropProps } = imageDrop(store, item);
   return h('article', {
     class: view.selected.has(item.id) ? 'kanban-card selected' : 'kanban-card',
+    'data-id': item.id,
     draggable: 'true',
     ondragstart: (e) => {
       view.dragId = item.id;
@@ -978,6 +997,7 @@ function boardCard(store, item, projects, order) {
       h('div', { class: 'row kanban-actions' },
         item.description ? h('span', { class: 'desc-indicator', title: 'Has a description', 'aria-label': 'Has a description' }, icon('align-left')) : null,
         imageCount(item),
+        cronButton(store, item),
         devButton(store, item),
         copyButton(store, item),
         h('button', {
@@ -1293,6 +1313,16 @@ function searchBox(store) {
 
 function draw(root, store) {
   watchDevSessions(store);
+  if (view.focusTask) {
+    const id = view.focusTask;
+    view.focusTask = '';
+    requestAnimationFrame(() => {
+      const el = root.querySelector(`[data-id="${CSS.escape(id)}"]`);
+      if (!el) return;
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el.classList.add('flash');
+    });
+  }
   const projects = projectsOf(store);
   const { items } = store.get(COLLECTION);
   if (isProjectFilter(view.filter) && !projects.some((p) => p.id === view.filter)) view.filter = 'all';
@@ -1591,6 +1621,10 @@ export default {
     view.status = !p.status ? ['open'] : p.status === 'all' ? [] : p.status.split(',');
     view.category = p.category ? p.category.split(',') : [];
     view.showProject = p.more === '1';
+    if (p.task) {
+      view.focusTask = p.task;
+      view.expanded.add(p.task);
+    }
     const [key = '', dir = 'asc'] = (p.sort ?? '').split('.');
     view.sort = p.sort === 'manual'
       ? { key: '', dir: 'asc' }

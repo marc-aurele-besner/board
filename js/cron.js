@@ -8,7 +8,9 @@ import { calendarEvents, calendarAccounts, eventDate } from './gcal.js';
 import { sitesOf, siteData } from './automations.js';
 import { readPageText } from './sitecheck.js';
 import { openPositions } from './modules/positions.js';
-import { startDevSession, devPresets, devCommandOf } from './modules/dev.js';
+import { startDevSession, devPresets, devCommandOf, runnerOf } from './modules/dev.js';
+import { sessionStatus, sessionOutcome } from './terminal.js';
+import { findGithubLinks, plainOutput, addTaskLinks, prsOf } from './task-links.js';
 
 export const COLLECTION = 'cron';
 // templates: flows saved as templates. tests: each flow's step test results, by flow id then step id.
@@ -206,7 +208,7 @@ export function makeStep(type) {
   if (type === 'ai') return { ...base, prompt: 'Summarize this in five bullet points:\n\n{{input}}', system: '', model: '' };
   if (type === 'task') return { ...base, title: '{{flow}} · {{date}}', projectId: '', priority: 'none', due: '' };
   if (type === 'stop') return { ...base, when: 'nothing', text: '' };
-  if (type === 'dev') return { ...base, mode: 'claude', preset: '', devCommand: '', projectId: '', prompt: '{{input}}', command: '' };
+  if (type === 'dev') return { ...base, mode: 'claude', preset: '', devCommand: '', projectId: '', prompt: '{{input}}', command: '', waitMinutes: DEV_WAIT_MINUTES };
   return { ...base, text: '{{flow}}: {{input}}' };
 }
 
@@ -1036,9 +1038,116 @@ function taskText(task, fallback) {
   return `- [ ] ${task.text}${desc ? `\n${desc.split(/\r?\n/).map((l) => `  ${l}`).join('\n')}` : ''}`;
 }
 
-// Starts claude (or a command) in a new Dev terminal and moves on: the run does not wait for it to finish.
-// The task made earlier in the run goes with it, as when it is handed over from Tasks: it moves to In progress,
-// keeps the terminal and its worktree, and gets the issues and PRs claude prints.
+// --- Run in Dev: waiting for the terminal, and what it left behind ---
+// A Dev step with steps after it waits for its terminal, so they can build on its work: the branch, the last commit,
+// the files changed and the PR it opened. claude stays open once it is done, waiting for its user; a terminal quiet
+// for SETTLE_MS more than the runner's own quiet time counts as finished.
+export const DEV_WAIT_MINUTES = 60;
+const WAIT_POLL_MS = 5000;
+const SETTLE_MS = 30000;
+const ENDED = ['done', 'failed', 'stopped', 'idle'];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Whether a Dev step waits for its terminal: as the step says, else when a step follows it.
+export const devWaits = (flow, step) => step.wait ?? flow.steps.findIndex((s) => s.id === step.id) < flow.steps.length - 1;
+
+async function waitForSession(store, session, minutes, beat) {
+  const deadline = Date.now() + Math.max(1, Number(minutes) || DEV_WAIT_MINUTES) * MINUTE;
+  let quietSince = 0;
+  let misses = 0;
+  for (;;) {
+    let status = null;
+    try {
+      status = (await sessionStatus(runnerOf(store), [session]))[session] ?? null;
+      misses = 0;
+      if (!status) throw Object.assign(new Error('The terminal was closed in Dev before it finished.'), { final: true });
+    } catch (err) {
+      // A runner restarting is not the end of the work; a few misses in a row are.
+      if (err.final || ++misses >= 6) throw err.final ? err : new Error(`Lost the terminal runner: ${err.message}`);
+    }
+    if (status && ENDED.includes(status.state)) return status;
+    if (status?.state === 'waiting') {
+      quietSince ||= Date.now();
+      if (Date.now() - quietSince >= SETTLE_MS) return status;
+    } else if (status) quietSince = 0;
+    if (Date.now() > deadline) throw new Error(`The terminal was still working after ${minutes} minutes. It keeps running in Dev.`);
+    beat?.();
+    await sleep(WAIT_POLL_MS);
+  }
+}
+
+const STATE_TEXT = { waiting: 'finished, waiting for input', done: 'finished', failed: 'ended with an error', stopped: 'was stopped', idle: 'ended' };
+const FILE_STATUS = { A: 'added', M: 'modified', D: 'deleted', R: 'renamed', C: 'copied', T: 'type changed', '?': 'untracked' };
+const OUTPUT_KEPT = 4000;
+
+// What the terminal left: the runner's git view of the folder it worked in, and the links in its output. A PR the
+// prompt already named is not counted as one it opened.
+async function devOutcome(store, { session, path, prompt, task }) {
+  let raw = { output: '', repo: false };
+  try {
+    raw = await sessionOutcome(runnerOf(store), { session, path });
+  } catch (err) {
+    raw.error = err.message;
+  }
+  const text = plainOutput(raw.output ?? '').replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  const known = new Set(findGithubLinks(prompt).map((l) => l.url.toLowerCase()));
+  const links = findGithubLinks(text).filter((l) => !known.has(l.url.toLowerCase()));
+  // A PR Dev already added to the task (its link watcher reads the terminal while Dev shows it) counts too.
+  const saved = task ? prsOf(store.get('todos').items.find((t) => t.id === task.id) ?? {}) : [];
+  const fresh = links.filter((l) => l.kind === 'pr');
+  const prs = [...saved.filter((p) => !fresh.some((l) => l.url.toLowerCase() === p.url.toLowerCase())), ...fresh];
+  const pick = ({ repo, number, url }) => ({ repo, number, url });
+  return {
+    links,
+    data: {
+      repo: Boolean(raw.repo),
+      branch: raw.branch ?? '',
+      base: raw.base ?? '',
+      commit: raw.commit ?? '',
+      commitShort: raw.short ?? '',
+      commitSubject: raw.subject ?? '',
+      commits: raw.commits ?? [],
+      files: (raw.files ?? []).map((f) => ({ ...f, change: FILE_STATUS[f.status] ?? f.status })),
+      moreFiles: raw.more ?? 0,
+      uncommitted: raw.uncommitted ?? 0,
+      pushed: Boolean(raw.upstream) && !raw.ahead,
+      // The PR opened last is the one the work ended on.
+      pr: prs.length ? pick(prs.at(-1)) : null,
+      prs: prs.map(pick),
+      issues: links.filter((l) => l.kind === 'issue').map(pick),
+      output: text.slice(-OUTPUT_KEPT),
+      ...(raw.error ? { error: raw.error } : {}),
+    },
+  };
+}
+
+// The outcome as text, for {{input}}: what a model or the next Dev prompt reads first.
+function outcomeText(o, { terminal, where, state }) {
+  const lines = [`Dev terminal ${terminal} ${STATE_TEXT[state] ?? 'ended'}, in ${where}.`];
+  if (o.branch) lines.push(`Branch: ${o.branch}${o.base ? ` (from ${o.base}, ${o.commits.length} commit${o.commits.length === 1 ? '' : 's'})` : ''}${o.pushed ? ', pushed' : ''}`);
+  if (o.commit) lines.push(`Last commit: ${o.commitShort} ${o.commitSubject}`);
+  if (o.pr) lines.push(`Pull request: ${o.pr.url}`);
+  for (const p of o.prs.slice(0, -1)) lines.push(`Also a pull request: ${p.url}`);
+  for (const i of o.issues) lines.push(`Issue: ${i.url}`);
+  if (o.files.length) {
+    const shown = o.files.slice(0, 60);
+    lines.push('', `Files changed (${o.files.length + o.moreFiles}):`);
+    for (const f of shown) lines.push(`- ${f.change}: ${f.from ? `${f.from} → ` : ''}${f.path}`);
+    const rest = o.files.length - shown.length + o.moreFiles;
+    if (rest) lines.push(`- and ${rest} more`);
+  } else if (o.repo) lines.push('', 'No file changed.');
+  if (o.uncommitted) lines.push(`${o.uncommitted} change${o.uncommitted === 1 ? ' is' : 's are'} not committed.`);
+  if (o.error) lines.push(`Could not read the outcome: ${o.error}`);
+  if (o.output) lines.push('', 'End of the terminal output:', o.output.split('\n').slice(-40).join('\n'));
+  return lines.join('\n');
+}
+
+// What a Dev step gives in a test that starts no terminal, so later steps can pick its keys already.
+const OUTCOME_SHAPE = { terminal: 0, session: '', branch: '', base: '', commit: '', commitShort: '', commitSubject: '', commits: [], files: [], pr: null, prs: [], issues: [], output: '' };
+
+// Starts claude (or a command) in a new Dev terminal. With steps after it, the run waits for the terminal and passes
+// on what it did; otherwise it moves on at once. The task made earlier in the run goes with it, as when it is handed
+// over from Tasks: it moves to In progress, keeps the terminal and its worktree, and gets the issues and PRs claude prints.
 async function runDev(store, flow, step, input, vars, ctx) {
   const claude = step.mode !== 'command';
   const task = ctx.task ?? null;
@@ -1053,11 +1162,12 @@ async function runDev(store, flow, step, input, vars, ctx) {
   if (claude ? !prompt : !command) throw new Error(claude ? 'Write the Dev prompt.' : 'Enter the command to run.');
   const devCommand = claude ? stepDevCommand(store, step) : '';
   const where = project ? `${project.name}’s folder` : 'the board’s folder';
-  // A step tested "in a terminal" starts it for real, so its output can be watched; it has no task to go with.
+  const waits = devWaits(flow, step);
+  // A step tested "in a terminal", and a test of the whole flow, start it for real so its work can be watched.
   if (ctx.dry && !ctx.live) {
     const how = devCommand ? `start “${devCommand.trim()}” with this prompt` : claude ? 'hand this prompt to the project’s Dev command' : 'run this command';
-    ctx.note = `Test run: would ${how} in a new Dev terminal, in ${where}.`;
-    ctx.data = claude ? { devCommand: devCommand || null, prompt, folder: where } : { command, folder: where };
+    ctx.note = `Test run: would ${how} in a new Dev terminal, in ${where}${waits ? ', then wait for it and pass on its branch, commit, files and PR' : ''}.`;
+    ctx.data = { ...(claude ? { devCommand: devCommand || null, prompt } : { command }), folder: where, ...(waits ? OUTCOME_SHAPE : {}) };
     return claude ? prompt : command;
   }
   const { id, n, worktree } = await startDevSession({ store, claude, prompt, command, devCommand, projectId, taskIds: task ? [task.id] : [], title: task?.text || flow.name });
@@ -1070,10 +1180,26 @@ async function runDev(store, flow, step, input, vars, ctx) {
       if (worktree && statusOf(t) !== 'done') t.worktrees = [...(t.worktrees ?? []), { ...worktree, session: id }];
     });
   }
-  ctx.note = `${ctx.dry ? 'Test: started' : 'Started'} in Dev terminal ${n}, in ${where}${task ? `, on the task “${task.text}”` : ''}.`;
+  const cwd = project?.localPath || '';
+  // claude --worktree works in .claude/worktrees/<name> of the project's repository.
+  const workPath = worktree ? `${String(worktree.cwd).replace(/\/+$/, '')}/.claude/worktrees/${worktree.name}` : cwd;
+  const on = `Dev terminal ${n}, in ${where}${task ? `, on the task “${task.text}”` : ''}`;
   // session and cwd let the editor show the terminal's output, which the runner keeps, and open it in Dev.
-  ctx.data = { terminal: n, session: id, cwd: project?.localPath || '', folder: where, ...(claude ? { prompt } : { command }) };
-  return ctx.dry ? (claude ? prompt : command) : input;
+  ctx.data = { terminal: n, session: id, cwd, folder: where, worktree: worktree ? workPath : '', ...(claude ? { prompt } : { command }) };
+  ctx.started?.({ session: id, cwd, terminal: n, ...(task ? { taskId: task.id } : {}) });
+  if (!waits) {
+    ctx.note = `${ctx.dry ? 'Test: started' : 'Started'} in ${on}.`;
+    return input;
+  }
+  const status = await waitForSession(store, id, step.waitMinutes ?? DEV_WAIT_MINUTES, ctx.beat);
+  if (status.state === 'failed') throw new Error(`${on} ended with exit ${status.code ?? 'an error'}.`);
+  if (status.state === 'stopped') throw new Error(`${on} was stopped.`);
+  const { links, data } = await devOutcome(store, { session: id, path: workPath || cwd, prompt: claude ? prompt : command, task });
+  // The PR and issues go to the task even when Dev was not open to see them printed.
+  if (task && links.length) addTaskLinks(store, [task.id], links);
+  ctx.data = { ...ctx.data, ...data };
+  ctx.note = `${ctx.dry ? 'Test: ran' : 'Ran'} in ${on}; it ${STATE_TEXT[status.state] ?? 'ended'}${data.pr ? `, PR #${data.pr.number}` : ''}.`;
+  return outcomeText(data, { terminal: n, where, state: status.state });
 }
 
 // ctx carries what passes between steps besides the text: whether the last data step found nothing, whether this is
@@ -1114,7 +1240,8 @@ async function runStep(store, flow, step, input, ctx) {
     const due = step.due === 'today' ? todayISO() : step.due === 'tomorrow' ? new Date(Date.now() + 24 * 60 * MINUTE).toISOString().slice(0, 10) : '';
     const projectId = withFlowProject(flow, step).projectId || null;
     ctx.data = { title, description: input, projectId, priority: step.priority || 'none', due };
-    if (ctx.dry) {
+    // A test of the whole flow makes the task for real, so the Dev step after it can work on it.
+    if (ctx.dry && !ctx.live) {
       ctx.note = `Test run: would create the task “${title}”${due ? ` due ${due}` : ''}.`;
       return input;
     }
@@ -1127,8 +1254,11 @@ async function runStep(store, flow, step, input, ctx) {
       auto: 'cron',
       autoRef: flow.id,
     });
+    // The run that made it, so the task can open it (Tasks shows a Cron button).
+    if (ctx.runId) task.cronRun = ctx.runId;
     store.update('todos', (d) => d.items.push(task));
     ctx.data.id = task.id;
+    if (ctx.dry) ctx.note = `Test run: created the task “${title}”${due ? ` due ${due}` : ''}.`;
     // A "Run in Dev" step later in the run works on this task.
     ctx.task = task;
     return input;
@@ -1216,7 +1346,8 @@ export function clearTests(store, flowId) {
 
 // Tests one step: earlier steps with no result yet run first, then this one runs again. A "Stop if" that would stop
 // does not keep the next step from being tested, since testing it is the point.
-// With `live`, a Run in Dev step starts its terminal (the steps before it stay tests).
+// With `live`, a Run in Dev step starts its terminal (the steps before it stay tests). While it waits for the
+// terminal, its test shows the terminal already.
 export async function testStep(store, flowId, stepId, { live = false } = {}) {
   const flow = store.get(COLLECTION).flows.find((f) => f.id === flowId);
   if (!flow || running.has(flowId) || testing.has(flowId)) return null;
@@ -1236,6 +1367,9 @@ export async function testStep(store, flowId, stepId, { live = false } = {}) {
         continue;
       }
       ctx.live = live && step.id === stepId;
+      ctx.started = (info) => saveTest(store, flowId, step.id, {
+        ok: true, pending: true, output: '', data: info, note: `Started in Dev terminal ${info.terminal}; waiting for it to finish.`, ms: 0, at: now(),
+      });
       last = await stepOnce(store, flow, step, ctx);
       saveTest(store, flowId, step.id, last);
       if (!last.ok) break;
@@ -1247,49 +1381,98 @@ export async function testStep(store, flowId, stepId, { live = false } = {}) {
   return last;
 }
 
+// What a run keeps of a step besides its output, so the Runs tab can link to what it made: the task, the terminal,
+// and a Dev step's branch, commit and PR.
+function stepRecord(step, result) {
+  const d = result.ok && result.data && typeof result.data === 'object' ? result.data : null;
+  const out = { stepId: step.id, type: step.type, ok: result.ok, output: result.output.slice(0, 4000), note: result.note, ms: result.ms };
+  if (step.type === 'task' && d?.id) out.taskId = d.id;
+  if (step.type === 'dev' && d?.session) {
+    Object.assign(out, { session: d.session, cwd: d.cwd, terminal: d.terminal });
+    if (d.branch) out.branch = d.branch;
+    if (d.commit) out.commit = d.commitShort || d.commit.slice(0, 7);
+    if (d.pr) out.pr = d.pr;
+    if (d.files) out.files = d.files.length + (d.moreFiles ?? 0);
+  }
+  return out;
+}
+
 // Runs the steps in order and keeps each step's output, so the editor can show what passed between them.
-// A test run (dry) creates no task and sends no notification, and leaves the schedule alone. AI steps still call the model.
+// The run is saved as it goes, so the Runs tab shows it while it runs, with the terminal it is waiting on.
+// A test run (dry) leaves the schedule alone, sends no notification and is not read back as the flow's history; it
+// does make its tasks and start its terminals, so the whole flow is tried as it will run. AI steps call the model.
 export async function runFlow(store, flowId, { manual = false, dry = false } = {}) {
   const flow = store.get(COLLECTION).flows.find((f) => f.id === flowId);
   if (!flow || isRunning(flowId)) return null;
   running.add(flowId);
-  const run = { id: uid(), flowId, at: now(), manual: manual || dry, dry, status: 'ok', steps: [], error: '' };
-  // Mark the run at its start, so a slow model call is not started twice by the next tick.
-  if (!dry) {
-    store.update(COLLECTION, (d) => {
-      const f = d.flows.find((x) => x.id === flowId);
-      if (f) f.lastRun = run.at;
-    });
-  }
-  const ctx = { dry, nothing: false, stop: false, note: '', results: [] };
+  const run = { id: uid(), flowId, at: now(), manual: manual || dry, dry, status: 'running', steps: [], error: '', beat: now() };
+  const save = () => store.update(COLLECTION, (d) => {
+    const copy = structuredClone(run);
+    const i = d.runs.findIndex((r) => r.id === run.id);
+    if (i >= 0) d.runs[i] = copy;
+    else {
+      d.runs.unshift(copy);
+      d.runs.length = Math.min(d.runs.length, MAX_RUNS);
+    }
+    // Marked at its start, so a slow model call is not started twice by the next tick.
+    const f = d.flows.find((x) => x.id === flowId);
+    if (f && !dry && i < 0) f.lastRun = run.at;
+  });
+  save();
+  const ctx = {
+    dry,
+    live: dry,
+    runId: run.id,
+    nothing: false,
+    stop: false,
+    note: '',
+    results: [],
+    // A run waiting on a terminal says now and then that it is still alive, so one cut short by a reload shows as such.
+    beat: () => {
+      if (Date.now() - Date.parse(run.beat) < MINUTE) return;
+      run.beat = now();
+      save();
+    },
+  };
   // A test run of the whole flow also fills the step tests, so its data can be looked at and picked from.
   if (dry) clearTests(store, flowId);
   try {
     for (const step of flow.steps) {
+      ctx.started = (info) => {
+        run.current = { stepId: step.id, ...info };
+        run.beat = now();
+        save();
+      };
       const result = await stepOnce(store, flow, step, ctx);
       if (dry) saveTest(store, flowId, step.id, result);
-      const term = step.type === 'dev' && result.data?.session ? { session: result.data.session, cwd: result.data.cwd } : {};
-      run.steps.push({ stepId: step.id, ok: result.ok, output: result.output.slice(0, 4000), note: result.note, ms: result.ms, ...term });
+      delete run.current;
+      run.steps.push(stepRecord(step, result));
+      run.beat = now();
       if (!result.ok) throw new Error(result.output);
+      save();
       if (ctx.stop) {
         run.status = 'stopped';
         run.error = ctx.note;
         break;
       }
     }
+    if (run.status === 'running') run.status = 'ok';
   } catch (err) {
     run.status = 'error';
     run.error = err.message;
-    if (!dry) notify(store, { kind: 'cron', text: `Flow “${flow.name}” failed: ${err.message}`, href: `#/cron?flow=${flow.id}` });
+    if (!dry) notify(store, { kind: 'cron', text: `Flow “${flow.name}” failed: ${err.message}`, href: `#/cron?tab=runs&run=${run.id}` });
   } finally {
     running.delete(flowId);
-    store.update(COLLECTION, (d) => {
-      d.runs.unshift(run);
-      d.runs.length = Math.min(d.runs.length, MAX_RUNS);
-    });
+    delete run.current;
+    run.ended = now();
+    save();
   }
   return run;
 }
+
+// A run marked running that no page has touched for a while was cut short: the board was closed or reloaded.
+const STALE_MS = 3 * MINUTE;
+export const runState = (r) => (r.status === 'running' && !running.has(r.flowId) && Date.now() - Date.parse(r.beat || r.at) > STALE_MS ? 'lost' : r.status);
 
 export async function runDueFlows(store) {
   const at = new Date();

@@ -288,8 +288,8 @@ function lineLinks(line) {
   return hrefs;
 }
 
-function lineNode(line, cursorX = -1) {
-  const was = drawn.get(line);
+function lineNode(line, cursorX = -1, cache = drawn) {
+  const was = cache.get(line);
   if (was && was.v === line.v && was.cx === cursorX && was.theme === currentTheme().key) return was.el;
   const el = was?.el ?? h('div', { class: 'term-line' });
   const spans = [];
@@ -314,30 +314,59 @@ function lineNode(line, cursorX = -1) {
     spans.push(href ? h('a', { class: 'term-link', href, target: '_blank', rel: 'noopener noreferrer', title: href }, node) : node);
   }
   el.replaceChildren(...spans);
-  drawn.set(line, { v: line.v, cx: cursorX, theme: currentTheme().key, el });
+  cache.set(line, { v: line.v, cx: cursorX, theme: currentTheme().key, el });
   return el;
+}
+
+// Draws a terminal into a view's elements ({ history, screen, from, theme }). `cache` keeps each line's element for
+// that view: one line can be shown by Dev and by another view at once.
+function drawLines(el, term, cursorY, cache = drawn) {
+  const { history, screen } = el;
+  // The theme changed: every line is drawn again in the new colours.
+  if (el.theme !== currentTheme().key) {
+    el.theme = currentTheme().key;
+    history.replaceChildren(...term.history.map((l) => lineNode(l, -1, cache)));
+    el.from = term.trimmed;
+  }
+  // History lines never change once scrolled off; only new ones are added, and old ones dropped.
+  const drop = Math.min(history.childElementCount, term.trimmed - el.from);
+  for (let i = 0; i < drop; i++) history.firstChild.remove();
+  if (term.trimmed > el.from) el.from = term.trimmed;
+  for (let i = el.from + history.childElementCount - term.trimmed; i < term.history.length; i++) history.append(lineNode(term.history[i], -1, cache));
+  screen.replaceChildren(...term.screen.slice(0, term.used()).map((l, y) => lineNode(l, y === cursorY ? Math.min(term.x, term.cols - 1) : -1, cache)));
 }
 
 function paint(s) {
   if (!s.el) return;
   const { term } = s;
-  const { history, screen, out } = s.el;
-  // The theme changed: every line is drawn again in the new colours.
-  if (s.el.theme !== currentTheme().key) {
-    s.el.theme = currentTheme().key;
-    history.replaceChildren(...term.history.map((l) => lineNode(l)));
-    s.el.from = term.trimmed;
-  }
-  // History lines never change once scrolled off; only new ones are added, and old ones dropped.
-  const drop = Math.min(history.childElementCount, term.trimmed - s.el.from);
-  for (let i = 0; i < drop; i++) history.firstChild.remove();
-  if (term.trimmed > s.el.from) s.el.from = term.trimmed;
-  for (let i = s.el.from + history.childElementCount - term.trimmed; i < term.history.length; i++) history.append(lineNode(term.history[i]));
-  const cursorY = s.running && term.cursor ? term.y : -1;
-  screen.replaceChildren(...term.screen.slice(0, term.used()).map((l, y) => lineNode(l, y === cursorY ? Math.min(term.x, term.cols - 1) : -1)));
+  drawLines(s.el, term, s.running && term.cursor ? term.y : -1);
+  const { out } = s.el;
   if (s.stick) out.scrollTop = out.scrollHeight;
   s.el.top = out.scrollTop;
 }
+
+// A read-only terminal for other sections (Cron), drawn as Dev draws its own: colours, styles and links. paint(term)
+// draws it again and keeps it at the end when it was there.
+export function terminalView(label = 'Terminal output') {
+  const history = h('div', { class: 'term-history' });
+  const screen = h('div', { class: 'term-screen' });
+  const out = h('div', { class: 'term-out term-view', tabindex: '0', role: 'log', 'aria-label': label }, history, screen);
+  const el = { history, screen, from: 0, theme: '' };
+  const cache = new WeakMap();
+  return {
+    el: out,
+    paint(term) {
+      const atEnd = out.scrollHeight - out.scrollTop - out.clientHeight < 24;
+      // The theme may have been switched since Dev last drew.
+      theme = null;
+      drawLines(el, term, -1, cache);
+      if (atEnd) out.scrollTop = out.scrollHeight;
+    },
+  };
+}
+
+// The colours programs are told the page uses, for terminals drawn outside Dev.
+export const terminalBackground = (which) => themeColor(which);
 
 let frame = 0;
 const schedulePaint = () => (frame ||= requestAnimationFrame(() => {
