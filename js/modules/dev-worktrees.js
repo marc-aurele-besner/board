@@ -1,3 +1,4 @@
+// @ts-check
 // Dev's Worktrees panel: every git worktree of the workspace's repository, the ones `claude --worktree` makes and
 // any other, each with a dot saying whether it is in use. One can be removed, or all the unused ones, or all of them.
 // git keeps a worktree with changes or untracked files, so removing never loses work; its branch stays.
@@ -7,19 +8,30 @@ import { openDialog } from '../modal.js';
 import { listWorktrees, removeWorktree } from '../terminal.js';
 import { tasksOfWorktree, forgetWorktree } from '../task-worktrees.js';
 import { baseName, panelHead, panelAction } from './dev-files.js';
+/** @import { DevContext } from '../../types/dev' */
+/** @import { RunnerWorktrees, RunnerWorktree } from '../../types/terminal' */
+/** @import { Child } from '../../types/ui' */
+/** @import { IconName, Task } from '../../types/data' */
+/** @typedef {ReturnType<typeof usageOf>} Use */
+/** @typedef {[RunnerWorktree, Use]} Entry */
 
 // The list is read again when the panel is drawn after this long, and after every removal.
 const STALE_MS = 5000;
 
 // View state: the folder, what the runner said about it, the worktrees being removed, and the last refusals.
+/**
+ * @type {{ path: string, data: RunnerWorktrees | null, loadError: string, loading: boolean, at: number, busy: Set<string>,
+ *   errors: Map<string, string>, folded: Set<string> }}
+ */
 const state = { path: '', data: null, loadError: '', loading: false, at: 0, busy: new Set(), errors: new Map(), folded: new Set() };
 
 // The panel's groups, in the order they show.
 const GROUPS = [['running', 'In use'], ['held', 'Held'], ['idle', 'Not in use']];
 
-const inside = (path, dir) => !!path && (path === dir || path.startsWith(`${dir}/`));
+const inside = (/** @type {string} */ path, /** @type {string} */ dir) => !!path && (path === dir || path.startsWith(`${dir}/`));
 
 // Reads the worktrees of the repository holding `path`, unless they were read a moment ago. `force` reads them now.
+/** @param {DevContext} ctx @param {string} path @param {{ force?: boolean }} [options] */
 export async function refreshWorktrees(ctx, path, { force = false } = {}) {
   if (path !== state.path) Object.assign(state, { path, data: null, loadError: '', at: 0, errors: new Map() });
   if (!ctx.ready() || state.loading || (!force && Date.now() - state.at < STALE_MS)) return;
@@ -28,7 +40,7 @@ export async function refreshWorktrees(ctx, path, { force = false } = {}) {
     const data = await listWorktrees(ctx.base(), path);
     if (path === state.path) Object.assign(state, { data, loadError: '' });
   } catch (err) {
-    if (path === state.path) state.loadError = err.message;
+    if (path === state.path) state.loadError = /** @type {Error} */ (err).message;
   } finally {
     state.loading = false;
     state.at = Date.now();
@@ -41,10 +53,12 @@ export async function refreshWorktrees(ctx, path, { force = false } = {}) {
 // uses or holds it when no task says so, `task` is the task it was made for, if any. `terminal` is the terminal
 // linked to it, shown by its row: one the runner says runs in it, else its task's session, else one opened in its
 // folder, running first. One Dev's list lost is { id, cwd, n: 0 }, listed again when shown.
+/** @param {DevContext} ctx @param {RunnerWorktree} w */
 function usageOf(ctx, w) {
   return { ...usageTone(ctx, w), terminal: terminalOf(ctx, w) };
 }
 
+/** @param {DevContext} ctx @param {RunnerWorktree} w */
 function terminalOf(ctx, w) {
   const { worktree } = w.claude ? tasksOfWorktree(ctx.store, w.name) : { worktree: null };
   const sessions = ctx.sessions();
@@ -54,12 +68,13 @@ function terminalOf(ctx, w) {
   return live.find((s) => s.id === worktree?.session) ?? live[0] ?? (linked?.running ? linked : null) ?? inIt.find((s) => s.running) ?? linked ?? inIt[0] ?? null;
 }
 
+/** @param {DevContext} ctx @param {RunnerWorktree} w */
 function usageTone(ctx, w) {
   const { worktree, tasks } = w.claude ? tasksOfWorktree(ctx.store, w.name) : { worktree: null, tasks: [] };
   const sessions = ctx.sessions();
   const session = (worktree?.session ? sessions.find((s) => s.id === worktree.session && s.running) : null)
     ?? (w.sessions?.length ? sessions.find((s) => s.id === w.sessions[0].id) ?? { id: w.sessions[0].id, n: 0 } : null);
-  const open = tasks.filter((t) => statusOf(t) !== 'done');
+  const open = tasks.filter((/** @type {Task} */ t) => statusOf(t) !== 'done');
   const task = open[0] ?? tasks[0] ?? null;
   const more = (open.length || tasks.length) - 1;
   if (w.running || w.commands || session) {
@@ -74,16 +89,18 @@ function usageTone(ctx, w) {
   return { tone: 'idle', label: 'Not in use', why: task ? 'its task is done' : '', task, more, session: worktree?.session ?? '' };
 }
 
+/** @param {DevContext} ctx @param {RunnerWorktree} w @param {Use} use */
 async function removeOne(ctx, w, use) {
   state.busy.add(w.path);
   state.errors.delete(w.path);
   ctx.refresh();
   try {
-    await removeWorktree(ctx.base(), { cwd: state.data.root, path: w.path, session: use.session });
+    // The panel lists worktrees only from a repository's answer.
+    await removeWorktree(ctx.base(), { cwd: /** @type {RunnerWorktrees} */ (state.data).root, path: w.path, session: use.session });
     if (w.claude) forgetWorktree(ctx.store, w.name);
     return true;
   } catch (err) {
-    state.errors.set(w.path, err.message);
+    state.errors.set(w.path, /** @type {Error} */ (err).message);
     return false;
   } finally {
     state.busy.delete(w.path);
@@ -91,6 +108,7 @@ async function removeOne(ctx, w, use) {
 }
 
 // One after another: git takes a lock on the repository for each removal.
+/** @param {DevContext} ctx @param {Entry[]} list */
 async function removeMany(ctx, list) {
   let removed = 0;
   for (const [w, use] of list) if (await removeOne(ctx, w, use)) removed++;
@@ -99,6 +117,7 @@ async function removeMany(ctx, list) {
   refreshWorktrees(ctx, state.path, { force: true });
 }
 
+/** @param {DevContext} ctx @param {Entry[]} list @param {string} title */
 function confirmRemove(ctx, list, title) {
   const running = list.filter(([, use]) => use.tone === 'running').length;
   const held = list.filter(([, use]) => use.tone === 'held').length;
@@ -126,11 +145,13 @@ function confirmRemove(ctx, list, title) {
 }
 
 // A line under a worktree's name: an icon and a text cut to the panel's width, in full on hover.
-const meta = (name, text, cls = '') => h('div', { class: `wt-meta muted ${cls}`, title: text }, icon(name), h('span', { class: 'wt-meta-text' }, text));
+const meta = (/** @type {IconName} */ name, /** @type {string} */ text, cls = '') => h('div', { class: `wt-meta muted ${cls}`, title: text }, icon(name), h('span', { class: 'wt-meta-text' }, text));
 
+/** @param {DevContext} ctx @param {RunnerWorktree} w @param {Use} use */
 function row(ctx, w, use) {
   const busy = state.busy.has(w.path);
   const error = state.errors.get(w.path);
+  /** @type {(name: IconName, title: string, onclick: () => void) => HTMLButtonElement} */
   const button = (name, title, onclick) => h('button', { type: 'button', class: 'tree-action', title, 'aria-label': `${title}: ${w.name}`, disabled: busy, onclick }, icon(name));
   const branch = w.branch && w.branch !== `worktree-${w.name}` ? w.branch : '';
   const task = use.task ? `${use.task.text}${use.more > 0 ? ` (+${use.more})` : ''}` : '';
@@ -165,6 +186,7 @@ function row(ctx, w, use) {
 }
 
 // One group of worktrees, folded or open, with its count.
+/** @param {DevContext} ctx @param {string} tone @param {string} title @param {Entry[]} rows */
 function group(ctx, tone, title, rows) {
   const open = !state.folded.has(tone);
   return h('div', { class: 'scm-section' },
@@ -183,8 +205,10 @@ function group(ctx, tone, title, rows) {
     open ? h('div', { role: 'list' }, rows.map(([w, use]) => row(ctx, w, use))) : null);
 }
 
+/** @param {DevContext} ctx @param {Child} picker @param {Child} switcher @param {string} path */
 export function worktreesPanel(ctx, picker, switcher, path) {
   const data = state.data;
+  /** @type {Entry[]} */
   const list = data?.worktrees?.map((w) => [w, usageOf(ctx, w)]) ?? [];
   const unused = list.filter(([, use]) => use.tone === 'idle');
   const busy = state.busy.size > 0;
