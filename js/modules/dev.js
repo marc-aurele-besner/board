@@ -443,15 +443,34 @@ const shellQuote = (text) => `'${text.replace(/'/g, `'\\''`)}'`;
 // The command a task is handed to; a project can set its own in its Dev command field.
 export const DEFAULT_DEV_COMMAND = 'claude --dangerously-skip-permissions --worktree';
 
+// A worktree flag with no name: claude would pick a random one, which the tasks could not find again.
+const BARE_WORKTREE = /(^|\s)(--worktree|-w)(?=\s+-|\s*$)/;
+
+// A name claude accepts for a worktree (and its branch, worktree-<name>): the task's words, then the session's id,
+// so two sessions on one task get two worktrees.
+function worktreeName(title, id) {
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40).replace(/^-+|-+$/g, '');
+  return `${slug || 'task'}-${id.replace(/-/g, '').slice(0, 6)}`;
+}
+
 // Opens Dev with a new terminal that runs claude on a prompt, in the project's folder when it has one.
 // The command waits for the runner to answer, so it also works when Dev was not open yet.
 // Issue and PR links the session prints are added to the tasks in `taskIds`.
-// Returns the terminal's session id, so the tasks can find it again (openSession).
-export function startClaudeSession({ prompt, projectId = '', taskIds = [] }) {
+// Returns the terminal's session id, so the tasks can find it again (openSession), and the worktree claude makes
+// ({ name, cwd }: its name and the folder of its repo), so the tasks can remove it once done; null when the command
+// makes none, or names its own.
+export function startClaudeSession({ store, prompt, projectId = '', taskIds = [], title = '' }) {
   const id = uid();
-  view.queued = { id, prompt, projectId, taskIds };
+  const project = store.get('projects').projects.find((p) => p.id === projectId);
+  let command = project?.devCommand?.trim() || DEFAULT_DEV_COMMAND;
+  let worktree = null;
+  if (BARE_WORKTREE.test(command)) {
+    worktree = { name: worktreeName(title, id), cwd: project?.localPath || rootPath(store, view.workspace) };
+    command = command.replace(BARE_WORKTREE, `$1$2 ${worktree.name}`);
+  }
+  view.queued = { id, prompt, projectId, taskIds, command };
   showDev();
-  return id;
+  return { id, worktree };
 }
 
 // Opens Dev on a terminal session a task started. One this page does not list (closed here, or started in another
@@ -479,7 +498,7 @@ function showOpening(store) {
 }
 
 function startQueued(store) {
-  const { id, prompt, projectId, taskIds } = view.queued;
+  const { id, prompt, projectId, taskIds, command } = view.queued;
   const project = store.get('projects').projects.find((p) => p.id === projectId);
   if (project?.localPath) {
     view.workspace = `p:${project.id}`;
@@ -490,7 +509,6 @@ function startQueued(store) {
   if (!s) return;
   // Runs once the terminal is on the page, so it starts at the size it is shown.
   // `--` ends the options, so a flag with an optional value (--worktree [name]) cannot take the prompt.
-  const command = project?.devCommand?.trim() || DEFAULT_DEV_COMMAND;
   requestAnimationFrame(() => run(store, s, `${command} -- ${shellQuote(prompt)}`, { remember: false }));
 }
 

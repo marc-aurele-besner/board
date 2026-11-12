@@ -1,11 +1,12 @@
 // Work that runs by itself while the board is open: reading Telegram, checking sites, Cron flows, announcing deadlines,
-// and renewing Google sign-ins before they expire.
+// renewing Google sign-ins before they expire, and removing the worktrees of completed tasks.
 // Nothing here runs when the board is closed; there is no server.
 import { checkDeadlines } from './notifications.js';
 import { pollTelegram } from './telegram.js';
 import { runDueFlows } from './cron.js';
 import { refreshTokens } from './google.js';
 import { sitesOf, siteData, checkSite, runRules, checkProviders, providersDue, checkBudgets } from './automations.js';
+import { removeDoneWorktrees } from './task-worktrees.js';
 
 const MINUTE = 60000;
 const DAY = 24 * 60 * MINUTE;
@@ -54,4 +55,7 @@ export function startBackground(store) {
   setInterval(cron, MINUTE);
   setInterval(google, MINUTE);
   setInterval(slow, 5 * MINUTE);
+  // A task completed anywhere (Tasks, the palette, another tab's save) gives back the worktree its Dev session made.
+  store.subscribe(() => removeDoneWorktrees(store));
+  setTimeout(() => removeDoneWorktrees(store), 2000);
 }

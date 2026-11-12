@@ -492,9 +492,18 @@ function devTasks(store, items) {
   const moving = items.filter((i) => !['done', 'doing'].includes(statusOf(i))).map((i) => i.id);
   if (moving.length) updateItems(store, moving, { status: 'doing' });
   const ids = items.map((i) => i.id);
-  const session = startClaudeSession({ prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}`, projectId: folder?.id, taskIds: ids });
+  const { id: session, worktree } = startClaudeSession({ store, prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}`, projectId: folder?.id, taskIds: ids, title: items[0].text });
   // The task keeps its terminal: its Dev button shows what the terminal is doing and opens it.
-  updateItems(store, ids, { devSession: session });
+  // It keeps the worktree claude makes too, removed once the task is completed (task-worktrees.js).
+  const pick = new Set(ids);
+  store.update(COLLECTION, (d) => {
+    for (const item of d.items) {
+      if (!pick.has(item.id)) continue;
+      item.devSession = session;
+      // Not on a completed task, or the worktree would be removed as soon as it is made.
+      if (worktree && statusOf(item) !== 'done') item.worktrees = [...(item.worktrees ?? []), { ...worktree, session }];
+    }
+  });
 }
 
 // What each task's terminal is doing, asked of the runner every few seconds once Tasks has been shown.
