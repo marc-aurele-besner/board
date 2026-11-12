@@ -1,5 +1,8 @@
 // Telegram: messages sent to your own bot become tasks, and notifications can be sent back to the same chat.
-// There is no server, so new messages are read while the board is open. The token goes only to api.telegram.org.
+// The runners (tools/jobs/telegram.js) listen for new messages all the time; the board only reads them during setup.
+// The token goes only to api.telegram.org.
+// Only one reader may ask Telegram for a bot's messages at a time. findChat() runs only while no chat is saved, and
+// the runners read only once one is (hasTelegram), so the two never overlap. Keep it that way.
 import { parseTask, makeTask } from './capture.js';
 import { notify } from './notify-core.js';
 import { createProject } from './projects-core.js';
@@ -9,15 +12,17 @@ const API = 'https://api.telegram.org';
 const config = (store) => store.get('settings').telegram ?? {};
 export const hasTelegram = (store) => Boolean(config(store).token && config(store).chatId);
 
-async function call(token, method, body) {
+async function call(token, method, body, signal) {
   let res;
   try {
     res = await fetch(`${API}/bot${token}/${method}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body ?? {}),
+      signal,
     });
-  } catch {
+  } catch (err) {
+    if (signal?.aborted) throw err;
     throw new Error('Telegram could not be reached. Check your connection.');
   }
   const data = await res.json().catch(() => ({}));
@@ -64,13 +69,15 @@ export async function sendTelegram(store, text) {
 }
 
 // Turns one message into a task. Without a project or a deadline it waits in "To Organize".
-export function taskFromMessage(store, text) {
+// `ref` (the update's id) is kept as the task's autoRef, so a message read twice never makes two tasks.
+export function taskFromMessage(store, text, ref = '') {
+  if (ref && store.get('todos').items.some((t) => t.auto === 'telegram' && t.autoRef === ref)) return null;
   const projects = store.get('projects').projects;
   const parsed = parseTask(text, projects);
   if (!parsed.text) return null;
   const projectId = parsed.projectId ?? (parsed.tag ? createProject(store, parsed.tag).project.id : null);
   const inbox = !projectId || !parsed.due;
-  const task = makeTask({ text: parsed.text, priority: parsed.priority, due: parsed.due, projectId, auto: 'telegram', inbox });
+  const task = makeTask({ text: parsed.text, priority: parsed.priority, due: parsed.due, projectId, auto: 'telegram', inbox, ...(ref ? { autoRef: ref } : {}) });
   store.update('todos', (d) => d.items.push(task));
   const where = projectId ? store.get('projects').projects.find((p) => p.id === projectId)?.name : null;
   notify(store, {
@@ -81,19 +88,20 @@ export function taskFromMessage(store, text) {
   return { task, inbox, where };
 }
 
-// Reads the messages that arrived since the last read. Only the saved chat can create tasks.
-export async function pollTelegram(store) {
+// Reads the messages that arrived since the last read. Only the saved chat can create tasks. `wait` is how long
+// Telegram may hold the request open for a new message (long polling), in seconds. Runs in the runners.
+export async function pollTelegram(store, { wait = 0, signal } = {}) {
   const cfg = config(store);
   if (polling || !cfg.token || !cfg.chatId) return 0;
   polling = true;
   try {
-    const updates = await call(cfg.token, 'getUpdates', { offset: cfg.offset || 0, timeout: 0, allowed_updates: ['message'] });
+    const updates = await call(cfg.token, 'getUpdates', { offset: cfg.offset || 0, timeout: wait, allowed_updates: ['message'] }, signal);
     if (!updates.length) return 0;
     let made = 0;
     for (const u of updates) {
       const m = u.message;
       if (!m?.text || String(m.chat?.id) !== String(cfg.chatId) || m.text.startsWith('/')) continue;
-      const result = taskFromMessage(store, m.text);
+      const result = taskFromMessage(store, m.text, `update:${u.update_id}`);
       if (!result) continue;
       made += 1;
       if (cfg.confirm !== false) {

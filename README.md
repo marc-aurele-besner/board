@@ -109,7 +109,7 @@ Nothing runs on a server. Automatic work runs either in an open board tab or in 
 | Cron AI steps | `openrouter.ai`, with your key | the step's prompt, which includes whatever the earlier steps gathered from the board (task titles, a project's description, spending totals, calendar event titles, unread email senders and subjects, site check problems, pool positions, web page text, notification texts, the flow's and other flows' past outputs) |
 | Kitchen recipe photos | `openrouter.ai`, with your key | the dropped photos, shrunk to 1600 px |
 | Liquidity Pools AI insights | `openrouter.ai`, with your key | for each open position shown: its pair, chain, fee tier, price range, current price, value, unclaimed fees, fee APR and token split |
-| Telegram | `api.telegram.org` | your bot token, and the messages you exchange with your bot |
+| Telegram | `api.telegram.org`, from the runners (listening for messages, notifications) and the browser (setup, notifications) | your bot token, and the messages you exchange with your bot |
 | Calendar | Google Calendar API (`www.googleapis.com/calendar`), with your own OAuth Client ID | a read-only sign-in per account, renewed by the runners, to list its calendars (from the browser) and read their events (the runners, every 10 minutes) |
 | Account pictures (Gmail, Calendar) | Google's profile endpoint (`www.googleapis.com/oauth2/v3/userinfo`) at sign-in, then the picture from `googleusercontent.com` | the account's sign-in token; the picture's address is kept in `google.json` |
 | Analytics, Search Console | Google, with your own OAuth Client ID | a read-only sign-in |

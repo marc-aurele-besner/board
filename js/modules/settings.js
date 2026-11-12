@@ -950,7 +950,10 @@ export default {
   icon: 'settings',
   hidden: true, // opened from the gear in the top bar
   collection: COLLECTION,
-  readsRunners: true,
+  // Settings → Runners shows each job's last and next run, so it redraws on every heartbeat change.
+  get readsRunners() {
+    return view.section === 'runners' ? 'all' : false;
+  },
   defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '', clientSecret: '' }, uniswap: { wallets: [], chains: {} }, blockchains: { custom: [] }, contracts: [], telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '', relay: '' }, resend: { relay: '', keys: {} }, gmail: { accounts: [] }, gcal: { accounts: [] }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) }, prompts: {} },
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),

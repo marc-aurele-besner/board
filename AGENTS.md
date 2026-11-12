@@ -39,7 +39,7 @@ js/folder-picker.js   the dialog that finds a folder on this machine through the
 js/vt.js              the terminal emulator Dev draws command output with (cursor moves, colours, alternate screen)
 js/highlight.js       syntax colours for the Dev file reader, per language, with no dependency
 js/sitecheck.js       the lookups behind Tools (health, domain, certificate, share tags)
-js/telegram.js        tasks from Telegram messages, read while the board is open
+js/telegram.js        tasks from Telegram messages, read by the runners; setup's Find my chat
 js/ai.js              the one OpenRouter call; logs each call's input, output and details to usage.json
 js/prompts.js         the system prompt of every AI feature; Settings → Prompts overrides them
 js/profile.js         a project's saved profile: reads its folder, commits, repos and pages, asks the model once, saves it on the project
@@ -87,6 +87,7 @@ tools/jobs/*.js       one file per job: { id, timeout, delay, setup(store), run(
 tools/jobs/gmail.js, resend.js  read new mail into inbox.json; resend.js also answers GET /resend/email/<id> and POST /resend/check
 tools/jobs/calendar.js  reads every shown calendar's window into calendar.json, or a range Calendar asks for
 tools/jobs/monitoring.js  deadlines, budgets, site checks, status pages and the rules that make tasks, every 5 minutes
+tools/jobs/telegram.js  long-polls the bot and turns messages into tasks (a `loop` job: it starts again at once)
 tools/jobs/google.js  renews Google access tokens; a tab that finds one expired asks it through POST /run/google
 tools/check-imports.js  loads every worker module under plain Node, to catch a missing import or a DOM call at load time
 tools/check-merge.js  the worker and a tab change two fields of one file; both must survive

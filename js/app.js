@@ -168,10 +168,12 @@ function settle() {
 // With sample data there are no runners to miss.
 const runnersBadgeHidden = () => sample || !runnersKnown() || runnersOnline();
 
-function onRunners() {
+// A section with readsRunners redraws when a job's outcome changes; 'all' also when only run times did.
+function onRunners({ outcome }) {
   const badge = document.getElementById('runners-offline');
   if (badge) badge.hidden = runnersBadgeHidden();
-  if (currentModule().readsRunners) store.refresh();
+  const reads = currentModule().readsRunners;
+  if (reads === 'all' || (reads && outcome)) store.refresh();
 }
 
 function updateStatus(status) {
