@@ -3,7 +3,8 @@
 import { h, icon, refreshIcon, notice, copyable } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { CHAINS, chainSettings, isAddress, tokenMeta } from '../uniswap.js';
-import { chainTokens, readBalances, tokenRef } from '../balances.js';
+import { tokenRef } from '../balances.js';
+import { readWallets, savedChainRows, walletsOf, enabledChains } from '../defi/wallets-read.js';
 
 const COLLECTION = 'pools';
 const STALE_MS = 10 * 60 * 1000;
@@ -12,55 +13,45 @@ const DUST_USD = 1; // balances worth less are hidden while "Hide small balances
 // View state. chain: a chain id or 'all'. wallet: a lowercase address or 'all'. adding: the add token form is open.
 export const walletsView = { chain: 'all', wallet: 'all', small: false, adding: false, sort: 'value', dir: -1, message: '', ok: true };
 // The last read: rows from every chain, which chains are being read, and which failed (with their last good read).
-const state = { status: 'idle', rows: [], at: 0, pending: [], failed: [] };
+// The reads run in js/defi/wallets-read.js and save in pools.json; the page draws that. loading: a read this tab started.
 let loading = false;
+let askedAt = 0; // when this tab last started a read, so a stale page asks once, not on every redraw
+let bound = null;
+const readOf = () => bound?.get(COLLECTION)?.balancesRead ?? {};
+const state = {
+  get status() {
+    return loading ? 'loading' : readOf().at ? 'ok' : 'idle';
+  },
+  get at() {
+    return readOf().at ?? 0;
+  },
+  get pending() {
+    return loading ? readOf().pending ?? [] : [];
+  },
+  get failed() {
+    return readOf().failed ?? [];
+  },
+};
 
-const enabledChains = (cfg) => CHAINS.filter((c) => chainSettings(cfg, c).enabled);
-const walletsOf = (store) => (store.get('settings').uniswap?.wallets ?? []).filter((w) => isAddress(w.address));
 const addedOf = (store) => store.get(COLLECTION)?.tokens ?? [];
 const hiddenOf = (store) => new Set(store.get(COLLECTION)?.hiddenTokens ?? []);
 const shortAddress = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const amountText = (n) => (n >= 1e6 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toLocaleString(undefined, { maximumFractionDigits: 4 }) : n.toPrecision(4));
 
-// Rows saved by the last read, for the wallets and chains still chosen.
-function savedRows(store, chains, wallets) {
-  const cache = store.get(COLLECTION)?.balances ?? {};
-  const keep = new Set(wallets.map((w) => w.address.toLowerCase()));
-  return chains.flatMap((c) => (cache[c.id]?.rows ?? []).filter((r) => keep.has(r.wallet)));
-}
-
-// Reads every chosen chain at once. Each chain lands on screen as soon as it is read, and is saved as its last
-// good read; a chain that fails keeps showing that read, marked.
+// Reads every chain; each lands on screen as soon as it is saved.
 export async function load(store) {
   if (loading) return;
   loading = true;
-  const cfg = store.get('settings').uniswap ?? {};
-  const chains = enabledChains(cfg);
-  const wallets = walletsOf(store);
-  const added = addedOf(store);
-  Object.assign(state, { status: 'loading', pending: chains.map((c) => c.name), failed: [] });
+  askedAt = Date.now();
   store.refresh();
-  await Promise.all(chains.map(async (chain) => {
-    try {
-      const rows = await readBalances(chain, chainSettings(cfg, chain).node, wallets, await chainTokens(chain, added));
-      state.rows = [...state.rows.filter((r) => r.chainId !== chain.id), ...rows];
-      store.update(COLLECTION, (d) => {
-        d.balances = { ...d.balances, [chain.id]: { at: Date.now(), rows } };
-      });
-    } catch (err) {
-      const at = store.get(COLLECTION)?.balances?.[chain.id]?.at ?? 0;
-      state.failed.push({ name: chain.name, error: err.message, at });
-    } finally {
-      state.pending = state.pending.filter((n) => n !== chain.name);
-      store.refresh();
-    }
-  }));
-  Object.assign(state, { status: 'ok', at: Date.now() });
-  loading = false;
-  store.refresh();
+  try {
+    await readWallets(store);
+  } finally {
+    loading = false;
+    store.refresh();
+  }
 }
 
-// Adds a token by address: its symbol and decimals are read from the chain, then it is checked on the next read.
 async function addToken(store, form) {
   const chain = CHAINS.find((c) => c.id === Number(form.get('chain')));
   const address = String(form.get('address') ?? '').trim();
@@ -93,15 +84,15 @@ function showToken(store, ref) {
 function removeToken(store, ref) {
   store.update(COLLECTION, (d) => {
     d.tokens = (d.tokens ?? []).filter((t) => tokenRef(t.chainId, t.address) !== ref);
+    for (const part of Object.values(d.balances ?? {})) part.rows = (part.rows ?? []).filter((r) => r.ref !== ref);
   });
-  state.rows = state.rows.filter((r) => r.ref !== ref);
 }
 
 // The form to add a token the list does not carry, and the tokens added or hidden so far.
 function addPanel(store, ui) {
   const added = addedOf(store);
   const hidden = [...hiddenOf(store)];
-  const known = new Map(state.rows.map((r) => [r.ref, r]));
+  const known = new Map(Object.values(store.get(COLLECTION)?.balances ?? {}).flatMap((part) => part.rows ?? []).map((r) => [r.ref, r]));
   const nameOf = (ref) => {
     const [chainId, address] = ref.split(':');
     const t = known.get(ref) ?? added.find((x) => tokenRef(x.chainId, x.address) === ref);
@@ -202,14 +193,18 @@ function balanceTable(store, rows, ui, multiWallet) {
         h('td', null, h('button', { type: 'button', class: 'icon-btn', title: 'Hide this token', 'aria-label': `Hide ${r.symbol} on ${r.chainName}`, onclick: () => hideToken(store, r.ref) }, icon('x'))))))));
 }
 
-// The balances to show, read again when stale; until the first read lands, what the last one saved.
+// The rows to show, from the last read saved; read again when stale.
 function currentRows(store, chains, wallets) {
-  if (state.status === 'idle' && !state.rows.length) state.rows = savedRows(store, chains, wallets);
-  if (state.status === 'idle' || (state.status === 'ok' && Date.now() - state.at > STALE_MS)) setTimeout(() => load(store), 0);
+  bound = store;
+  if (!loading && Date.now() - Math.max(state.at, askedAt) > STALE_MS) {
+    askedAt = Date.now();
+    setTimeout(() => load(store), 0);
+  }
+  const rows = savedChainRows(store, 'balances', chains, wallets);
   const names = new Map(wallets.map((w) => [w.address.toLowerCase(), w.label || shortAddress(w.address)]));
   const chainIds = new Set(chains.map((c) => c.id));
   const hidden = hiddenOf(store);
-  return state.rows
+  return rows
     .filter((r) => chainIds.has(r.chainId) && names.has(r.wallet) && !hidden.has(r.ref))
     .map((r) => {
       const chain = CHAINS.find((c) => c.id === r.chainId);

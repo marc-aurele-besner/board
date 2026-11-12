@@ -67,7 +67,9 @@ js/modules/dev-worktrees.js  Dev's Worktrees panel: the repo's worktrees, whethe
 js/dev-usage.js       what a task's claude session used (model, effort, tokens, cost), kept in usage.json `dev`
 js/dev-core.js        Dev without the DOM: runner address, presets, a project's Dev command, starting a terminal on the runner
 js/models.js          the model an AI task uses (Settings → Models & tasks)
-js/defi/positions-read.js  open Liquidity Pools positions as of the last saved read, for Cron
+js/defi/positions-read.js  Liquidity Pools reads without the DOM: positions, fee APR, collects; all saved in pools.json; openPositions() for Cron and Home
+js/defi/wallets-read.js  DeFi → Wallets balances read per chain into pools.json balances
+js/defi/lending-read.js  DeFi → Lending Aave accounts read per chain into pools.json lending
 js/capture.js         parseTask(), parseMoney() and makeTask(): one place for a task's shape
 js/palette.js         the Cmd/Ctrl+K search palette: jump, or capture a task, a Money entry or a recipe link
 js/search.js          what the full search page (modules/search.js, hidden) looks through, grouped by kind

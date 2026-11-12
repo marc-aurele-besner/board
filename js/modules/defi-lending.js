@@ -3,7 +3,8 @@
 import { h, icon, refreshIcon, notice } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { CHAINS, chainSettings, isAddress } from '../uniswap.js';
-import { readLending, hasAave } from '../aave.js';
+import { readAllLending, aaveChains } from '../defi/lending-read.js';
+import { savedChainRows, walletsOf } from '../defi/wallets-read.js';
 
 const COLLECTION = 'pools';
 const STALE_MS = 5 * 60 * 1000;
@@ -13,50 +14,44 @@ const WATCH = 1.5;
 
 // View state. chain: a chain id or 'all'. wallet: a lowercase address or 'all'. layout: 'cards' or 'list'.
 export const lendingView = { chain: 'all', wallet: 'all', layout: 'cards' };
-const state = { status: 'idle', rows: [], at: 0, pending: [], failed: [] };
+// The reads run in js/defi/lending-read.js and save in pools.json; the page draws that. loading: a read this tab started.
 let loading = false;
+let askedAt = 0; // when this tab last started a read, so a stale page asks once, not on every redraw
+let bound = null;
+const readOf = () => bound?.get(COLLECTION)?.lendingRead ?? {};
+const state = {
+  get status() {
+    return loading ? 'loading' : readOf().at ? 'ok' : 'idle';
+  },
+  get at() {
+    return readOf().at ?? 0;
+  },
+  get pending() {
+    return loading ? readOf().pending ?? [] : [];
+  },
+  get failed() {
+    return readOf().failed ?? [];
+  },
+};
 
-const aaveChains = (cfg) => CHAINS.filter((c) => chainSettings(cfg, c).enabled && hasAave(c));
-const walletsOf = (store) => (store.get('settings').uniswap?.wallets ?? []).filter((w) => isAddress(w.address));
 const shortAddress = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const pct = (n) => (n == null ? '—' : `${(n * 100).toFixed(2)}%`);
 const amountText = (n) => (n >= 1e6 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toLocaleString(undefined, { maximumFractionDigits: 4 }) : n.toPrecision(4));
 const healthTone = (hf) => (hf == null ? 'safe' : hf < RISK ? 'risk' : hf < WATCH ? 'watch' : 'safe');
 const healthText = (hf) => (hf == null ? '∞' : hf >= 100 ? '>100' : hf.toFixed(2));
 
-function savedRows(store, chains, wallets) {
-  const cache = store.get(COLLECTION)?.lending ?? {};
-  const keep = new Set(wallets.map((w) => w.address.toLowerCase()));
-  return chains.flatMap((c) => (cache[c.id]?.rows ?? []).filter((r) => keep.has(r.wallet)));
-}
-
-// Reads every chain with Aave at once; each lands as soon as it is read and is saved as its last good read.
+// Reads every chain; each lands on screen as soon as it is saved.
 export async function load(store) {
   if (loading) return;
   loading = true;
-  const cfg = store.get('settings').uniswap ?? {};
-  const chains = aaveChains(cfg);
-  const wallets = walletsOf(store);
-  Object.assign(state, { status: 'loading', pending: chains.map((c) => c.name), failed: [] });
+  askedAt = Date.now();
   store.refresh();
-  await Promise.all(chains.map(async (chain) => {
-    try {
-      const rows = await readLending(chain, chainSettings(cfg, chain).node, wallets);
-      state.rows = [...state.rows.filter((r) => r.chainId !== chain.id), ...rows];
-      store.update(COLLECTION, (d) => {
-        d.lending = { ...d.lending, [chain.id]: { at: Date.now(), rows } };
-      });
-    } catch (err) {
-      const at = store.get(COLLECTION)?.lending?.[chain.id]?.at ?? 0;
-      state.failed.push({ name: chain.name, error: err.message, at });
-    } finally {
-      state.pending = state.pending.filter((n) => n !== chain.name);
-      store.refresh();
-    }
-  }));
-  Object.assign(state, { status: 'ok', at: Date.now() });
-  loading = false;
-  store.refresh();
+  try {
+    await readAllLending(store);
+  } finally {
+    loading = false;
+    store.refresh();
+  }
 }
 
 // The yearly rate the account earns on its equity: supply interest less borrow interest, over supplied less borrowed.
@@ -117,13 +112,17 @@ function accountCard(r, ui, i) {
       assetList('Borrowed', borrowed, ui, (a) => a.borrowed, (a) => a.borrowedUsd, (a) => a.borrowApy)));
 }
 
-// The accounts to show, read again when stale; until the first read lands, what the last one saved.
+// The rows to show, from the last read saved; read again when stale.
 function currentRows(store, chains, wallets) {
-  if (state.status === 'idle' && !state.rows.length) state.rows = savedRows(store, chains, wallets);
-  if (state.status === 'idle' || (state.status === 'ok' && Date.now() - state.at > STALE_MS)) setTimeout(() => load(store), 0);
+  bound = store;
+  if (!loading && Date.now() - Math.max(state.at, askedAt) > STALE_MS) {
+    askedAt = Date.now();
+    setTimeout(() => load(store), 0);
+  }
+  const rows = savedChainRows(store, 'lending', chains, wallets);
   const names = new Map(wallets.map((w) => [w.address.toLowerCase(), w.label || shortAddress(w.address)]));
   const chainIds = new Set(chains.map((c) => c.id));
-  return state.rows
+  return rows
     .filter((r) => chainIds.has(r.chainId) && names.has(r.wallet))
     .map((r) => {
       const chain = CHAINS.find((c) => c.id === r.chainId);
