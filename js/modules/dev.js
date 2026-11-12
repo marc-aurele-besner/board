@@ -9,6 +9,7 @@
 // depend on this browser: another browser, or one whose site data was cleared, opens the same terminals.
 import { h, icon, notice, uid } from '../ui.js';
 import { toast } from '../toast.js';
+import { openDialog } from '../modal.js';
 import { TERMINAL_RUNNER, runnerInfo, listSessions, saveSessionList, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput, saveImage } from '../terminal.js';
 import { imageFiles, dragsFiles } from '../images.js';
 import { createTerminal, styleOf, colorOf } from '../vt.js';
@@ -928,6 +929,29 @@ function cronLink(store, which, label) {
   }, icon('repeat'));
 }
 
+// Asks before closing several terminals at once: a running one has its command stopped.
+/** @param {Store} store @param {Session[]} list @param {string} title */
+function confirmClose(store, list, title) {
+  const running = list.filter((s) => s.running).length;
+  const dialog = openDialog({
+    title,
+    body: h('div', { class: 'stack' },
+      h('p', null, `Close ${list.length} ${list.length === 1 ? 'terminal' : 'terminals'}?`),
+      running ? h('p', { class: 'muted small' }, `${running} running: ${running === 1 ? 'its command is' : 'their commands are'} stopped.`) : null,
+      h('div', { class: 'row end' },
+        h('button', { type: 'button', class: 'btn-small', onclick: () => dialog.close() }, 'Cancel'),
+        h('button', {
+          type: 'button',
+          class: 'btn-small danger',
+          onclick: () => {
+            dialog.close();
+            for (const s of list) if (view.sessions.includes(s)) closeSession(s);
+            store.refresh();
+          },
+        }, 'Close'))),
+  });
+}
+
 /** @param {Store} store @param {Child} picker @param {Child} switcher */
 function terminalsPanel(store, picker, switcher) {
   const tasks = store.get('todos').items;
@@ -935,6 +959,7 @@ function terminalsPanel(store, picker, switcher) {
   // @ts-expect-error booleans subtract as 1 and 0: running terminals first.
   const list = [...view.sessions].sort((a, b) => (b.running - a.running) || a.n - b.n);
   const running = list.filter((s) => s.running).length;
+  const idle = list.filter((s) => !s.running);
   const row = (/** @type {Session} */ s) => {
     const titles = s.tasks.map((id) => tasks.find((t) => t.id === id)?.text).filter(Boolean);
     const what = s.running ? oneLine(s.command) : exitText(s.exit) || 'Ready';
@@ -971,7 +996,11 @@ function terminalsPanel(store, picker, switcher) {
     h('div', { class: 'ide-explorer-head' }, picker),
     list.length ? h('div', { class: 'tree-root muted small' }, `${list.length} OPEN · ${running} RUNNING`) : null,
     list.length
-      ? h('div', { class: 'tree scm-list', role: 'list' }, list.map(row))
+      ? h('div', { class: 'stack wt' },
+        h('div', { class: 'row wt-actions' },
+          h('button', { type: 'button', class: 'btn-small', disabled: !idle.length, title: 'Close the terminals where nothing runs', onclick: () => confirmClose(store, idle, 'Close idle terminals') }, icon('trash'), `Close idle${idle.length ? ` (${idle.length})` : ''}`),
+          h('button', { type: 'button', class: 'btn-small danger', title: 'Stop every running command and close every terminal', onclick: () => confirmClose(store, list, 'Close all terminals') }, icon('trash'), 'Close all')),
+        h('div', { class: 'tree scm-list', role: 'list' }, list.map(row)))
       : h('p', { class: 'muted small' }, 'No terminals open.'));
 }
 
