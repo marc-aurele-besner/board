@@ -21,10 +21,10 @@ function stripData(value) {
 
 // Every call is logged for the Monitoring tab: task, model, tokens, cost if OpenRouter reports it,
 // and the full exchange (messages sent, reply, response details), failed calls included.
-function recordCall(store, { task, model, usage, input, output, meta, error }) {
+function recordCall(store, { id, task, model, usage, input, output, meta, error }) {
   store.update('usage', (d) => {
     d.entries.push({
-      id: uid(),
+      id: id || uid(),
       at: now(),
       task,
       model,
@@ -60,8 +60,9 @@ function withGlobal(store, messages) {
 }
 
 // messages: [{ role, content }]. content can be text or an array with text and image_url parts.
-// `model` overrides the task's model for one call (a Cron step can pick its own).
-export async function ask(store, taskId, messages, { model: override = '' } = {}) {
+// `model` overrides the task's model for one call (a Cron step can pick its own). `usageId` names the usage.json
+// entry, so a feature can point back to the call that made its result.
+export async function ask(store, taskId, messages, { model: override = '', usageId = '' } = {}) {
   const key = store.get('settings').openrouter?.key ?? '';
   if (!key) throw new Error('Add an OpenRouter key in Settings first.');
   const model = override || modelForTask(store, taskId);
@@ -72,7 +73,7 @@ export async function ask(store, taskId, messages, { model: override = '' } = {}
   const meta = { overridden: Boolean(override) };
   const fail = (error, usage) => {
     meta.ms = Math.round(performance.now() - started);
-    recordCall(store, { task: taskId, model, usage, input, output: '', meta, error });
+    recordCall(store, { id: usageId, task: taskId, model, usage, input, output: '', meta, error });
     throw new Error(error);
   };
 
@@ -101,7 +102,7 @@ export async function ask(store, taskId, messages, { model: override = '' } = {}
   });
   const text = choice?.message?.content;
   if (!text) fail('The model returned no text.', data.usage);
-  recordCall(store, { task: taskId, model, usage: data.usage, input, output: text, meta });
+  recordCall(store, { id: usageId, task: taskId, model, usage: data.usage, input, output: text, meta });
   return text;
 }
 
