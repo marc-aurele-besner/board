@@ -66,6 +66,16 @@ export function devCommandPreview(store, flow, step) {
   }
 }
 
+// What a "Refresh project profile" step does with a profile edited by hand. None of them stops the run.
+export const PROFILE_EDITED = [
+  ['merge', 'Update it and keep my edits'],
+  ['replace', 'Replace it with a new one'],
+  ['keep', 'Leave it as it is'],
+];
+
+// Steps saved before the choice had keepEdited, which stopped the run; they now update the profile and keep the edits.
+export const profileEditedMode = (step) => (PROFILE_EDITED.some(([k]) => k === step.onEdited) ? step.onEdited : step.keepEdited === false ? 'replace' : 'merge');
+
 export const STOP_WHEN = [
   ['nothing', 'The data step found nothing'],
   ['empty', 'The input is empty'],
@@ -210,7 +220,7 @@ export function makeStep(type) {
   if (type === 'ai') return { ...base, prompt: 'Summarize this in five bullet points:\n\n{{input}}', system: '', model: '' };
   if (type === 'task') return { ...base, title: '{{flow}} · {{date}}', projectId: '', priority: 'none', due: '' };
   if (type === 'stop') return { ...base, when: 'nothing', text: '' };
-  if (type === 'profile') return { ...base, projectId: '', keepEdited: true };
+  if (type === 'profile') return { ...base, projectId: '', onEdited: 'merge' };
   if (type === 'dev') return { ...base, mode: 'claude', preset: '', devCommand: '', projectId: '', prompt: '{{input}}', command: '', waitMinutes: DEV_WAIT_MINUTES };
   return { ...base, text: '{{flow}}: {{input}}' };
 }
@@ -376,7 +386,7 @@ export const TEMPLATES = [
   },
   {
     name: 'Refresh project profile',
-    about: 'Rebuilds a project’s profile every week from its folder, commits, repos and website, so AI features read it up to date. A profile you edited by hand is kept. Choose the flow’s project first.',
+    about: 'Rebuilds a project’s profile every week from its folder, commits, repos and website, so AI features read it up to date. A profile you edited by hand is updated with your edits kept. Choose the flow’s project first.',
     schedule: { every: 'weekly', time: '07:00', weekday: 1 },
     steps: [
       { type: 'profile' },
@@ -1215,8 +1225,8 @@ async function runDev(store, flow, step, input, vars, ctx) {
   return outcomeText(data, { terminal: n, where, state: status.state });
 }
 
-// Rebuilds the project's profile through the same call as Projects → Profile. A profile edited by hand is kept unless
-// the step says otherwise; the run then stops quietly, so a notification after it does not claim a refresh.
+// Rebuilds the project's profile through the same call as Projects → Profile. A profile edited by hand never blocks
+// the run: by default it is updated with the edits kept; the step can also replace it or leave it as it is.
 async function runProfile(store, flow, step, ctx) {
   const projectId = withFlowProject(flow, step).projectId;
   if (!projectId) throw new Error('Choose the project whose profile to refresh.');
@@ -1224,20 +1234,21 @@ async function runProfile(store, flow, step, ctx) {
   if (!project) throw new Error('The project of this step was removed. Choose another.');
   if (!hasProfileSources(project)) throw new Error(`${project.name} has no local folder, repository or website to read. Add one in Projects.`);
   const current = profileOf(project);
-  if (step.keepEdited !== false && current.edited) {
-    ctx.stop = true;
-    ctx.note = `Stopped: the profile of ${project.name} was edited by hand, so it was kept.`;
-    ctx.data = { project: project.name, text: current.text, updated: current.updated, edited: true };
+  const mode = current.edited ? profileEditedMode(step) : 'replace';
+  if (mode === 'keep') {
+    ctx.note = `Kept the profile of ${project.name}, edited by hand.`;
+    ctx.data = { project: project.name, text: current.text, updated: current.updated, edited: true, kept: true };
     return current.text;
   }
+  const how = mode === 'merge' ? 'update' : 'rebuild';
   if (ctx.dry && !ctx.live) {
-    ctx.note = `Test run: would rebuild the profile of ${project.name}.`;
+    ctx.note = `Test run: would ${how} the profile of ${project.name}${mode === 'merge' ? ', keeping its hand edits' : ''}.`;
     ctx.data = { project: project.name, text: current.text, updated: current.updated, edited: current.edited };
     return current.text;
   }
-  const profile = await buildProfile(store, project);
-  ctx.data = { project: project.name, text: profile.text, updated: profile.updated, edited: false };
-  ctx.note = `${ctx.dry ? 'Test: rebuilt' : 'Rebuilt'} the profile of ${project.name}.`;
+  const profile = await buildProfile(store, project, { keepEdits: mode === 'merge' });
+  ctx.data = { project: project.name, text: profile.text, updated: profile.updated, edited: profile.edited };
+  ctx.note = `${ctx.dry ? 'Test: ' : ''}${mode === 'merge' ? 'Updated' : 'Rebuilt'} the profile of ${project.name}${mode === 'merge' ? ', keeping its hand edits' : ''}.`;
   return profile.text;
 }
 
