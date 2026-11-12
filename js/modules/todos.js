@@ -1389,6 +1389,12 @@ const labelsFor = (store, p) => /** @type {ProjectLabel[]} */ (labelsOf(p)
   .map((id) => (store.get('projects').categories ?? []).find((c) => c.id === id))
   .filter(Boolean));
 
+// Beside the pencil: opens the project's website in a new tab, when it has one.
+/** @param {Project | undefined} p */
+const projectWebsiteButton = (p) => p?.website
+  ? h('a', { href: p.website, target: '_blank', rel: 'noopener', class: 'icon-btn', title: `Open ${p.website}`, 'aria-label': 'Open project website' }, icon('globe'))
+  : null;
+
 // Inline after the title: labels, open count, and a toggle for the details panel.
 /** @param {Store} store @param {Project | undefined} p */
 function projectMeta(store, p) {
@@ -1655,6 +1661,7 @@ function draw(root, store) {
             isProjectFilter(view.filter)
               ? h('a', { href: `#/projects?project=${view.filter}`, class: 'icon-btn', title: 'Open project', 'aria-label': 'Open project' }, icon('pencil'))
               : null,
+            projectWebsiteButton(projects.find((p) => p.id === view.filter)),
             isProjectFilter(view.filter) ? projectMeta(store, projects.find((p) => p.id === view.filter)) : null),
           h('div', { class: 'row head-actions' },
             searchBox(store),
