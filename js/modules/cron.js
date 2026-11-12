@@ -12,6 +12,7 @@ import {
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, templateFromFlow, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
   testStep, testsOf, isTesting, clearTests, useDevStarter, varsTree, fillParts, pathTo, parseData, INPUT_NONE, reorderSteps, projectVars, runState, devWaits, DEV_WAIT_MINUTES, devJsonOffered, devJson, DEV_JSON_PROMPT,
+  FORMAT_MODES, SEPARATOR_OPTIONS, LOOP_LIMIT, makeField, loopSpan, loopOf, loopMax, valueOf, listOf, withItem,
 } from '../cron.js';
 import { modelForTask } from '../models.js';
 import { openSession, runnerOf, liveSession, onSessionPaint, exitText, terminalView, terminalBackground, startDevSession } from './dev.js';
@@ -20,7 +21,7 @@ import { previewChips } from '../previews.js';
 import { attachSession, sessionStatus } from '../terminal.js';
 import { createTerminal } from '../vt.js';
 import { hasProfileSources } from '../profile.js';
-/** @import { Store, CronFlow, CronStep, CronSource, CronSchedule, CronTemplate, CronRun, CronRunStep, CronPr, Project, Task, IconName } from '../../types/data' */
+/** @import { Store, CronFlow, CronStep, CronSource, CronFormatField, CronSchedule, CronTemplate, CronRun, CronRunStep, CronPr, Project, Task, IconName } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @import { Vars } from '../cron.js' */
 /** @import { Exit } from './dev.js' */
@@ -446,6 +447,15 @@ function stepSummary(store, flow, step) {
   if (step.type === 'ai') return step.model || modelForTask(store, AI_TASK) || 'No model set';
   if (step.type === 'task') return step.title || '{{input}}';
   if (step.type === 'stop') return stopLabel(step);
+  if (step.type === 'format') {
+    if (step.mode === 'fields') return (step.fields ?? []).map((f) => f.name.trim()).filter(Boolean).join(', ') || 'Name a field';
+    if (step.mode === 'list') return `${step.itemText || '{{item}}'} · each of ${step.items || '{{input}}'}`;
+    return String(step.text ?? '').split('\n').find((l) => l.trim()) ?? 'Empty';
+  }
+  if (step.type === 'loop') {
+    const n = loopSpan(flow, flow.steps.indexOf(step));
+    return n ? `Each of ${step.items || '{{input}}'} · next ${n === 1 ? 'step' : `${n} steps`}` : 'Add the steps to repeat after it';
+  }
   if (step.type === 'profile') {
     const id = withFlowProject(flow, step).projectId;
     const edited = /** @type {Record<string, string>} */ ({ merge: ' · keeps hand edits', replace: ' · replaces hand edits', keep: ' · skips an edited profile' })[profileEditedMode(step)];
@@ -464,13 +474,13 @@ function stepSummary(store, flow, step) {
 /**
  * @param {Store} store
  * @param {CronFlow} flow
- * @param {{ id: string, iconName: IconName, kind: string, title: string, sub: string, status?: string, pipe?: string }} node
+ * @param {{ id: string, iconName: IconName, kind: string, title: string, sub: string, status?: string, pipe?: string, loop?: string }} node
  */
-function node(store, flow, { id, iconName, kind, title, sub, status, pipe = '' }) {
+function node(store, flow, { id, iconName, kind, title, sub, status, pipe = '', loop = '' }) {
   const step = id !== 'trigger';
   return h('button', {
     type: 'button',
-    class: `flow-node${view.node === id ? ' selected' : ''}${status ? ` ${status}` : ''}`,
+    class: `flow-node${view.node === id ? ' selected' : ''}${status ? ` ${status}` : ''}${loop ? ' in-loop' : ''}`,
     draggable: step ? 'true' : null,
     ondragstart: step ? (/** @type {NodeDrag} */ e) => startDrag(e, `move:${id}`) : null,
     ondragend: step ? endDrag : null,
@@ -483,7 +493,8 @@ function node(store, flow, { id, iconName, kind, title, sub, status, pipe = '' }
     h('span', { class: 'flow-node-text' },
       h('span', { class: 'flow-node-kind' }, title),
       h('span', { class: 'flow-node-sub' }, sub),
-      pipe ? h('span', { class: 'flow-node-pipe' }, icon('arrow-right'), pipe) : null));
+      pipe ? h('span', { class: 'flow-node-pipe' }, icon('arrow-right'), pipe) : null,
+      loop ? h('span', { class: 'flow-node-pipe loop' }, icon('repeat'), loop) : null));
 }
 
 // --- Building a flow: adding, moving and piping nodes ---
@@ -669,7 +680,11 @@ function canvas(store, flow) {
   flow.steps.forEach((s, i) => {
     const [, label, iconName] = typeOf(s.type);
     parts.push(link(store, flow, i));
-    parts.push(node(store, flow, { id: s.id, iconName, kind: s.type, title: `${i + 1}. ${label}`, sub: stepSummary(store, flow, s), status: statusOfStep(s.id), pipe: pipeLabel(flow, s) }));
+    const at = loopOf(flow, i);
+    parts.push(node(store, flow, {
+      id: s.id, iconName, kind: s.type, title: `${i + 1}. ${label}`, sub: stepSummary(store, flow, s), status: statusOfStep(s.id), pipe: pipeLabel(flow, s),
+      loop: at >= 0 ? `Each item of loop ${at + 1}` : '',
+    }));
   });
   parts.push(link(store, flow, flow.steps.length));
   const wires = document.createElementNS(SVG_NS, 'svg');
@@ -775,6 +790,13 @@ const DEV_PARTS = [
   ['files', 'The files it changed'],
 ];
 
+// What a step a loop repeats can read of the item it is on.
+const LOOP_NAMES = [
+  ['item', 'The item the loop is on; add a path for a part of it, such as {{item.title}}'],
+  ['index', 'The item’s number, from 1'],
+  ['count', 'How many items the loop runs'],
+];
+
 // The variables a step can use: the usual ones, the project's when it has one, then every earlier step by number.
 /**
  * @param {CronFlow} flow
@@ -789,6 +811,7 @@ function varNames(flow, index, extra = [], projectId = withFlowProject(flow, flo
     ['date', 'The day of the run'],
     ['flow', 'The flow’s name'],
     ...(projectId ? PROJECT_NAMES : []),
+    ...(loopOf(flow, index) >= 0 ? LOOP_NAMES : []),
     ...extra,
     ...flow.steps.slice(0, index).flatMap((s, i) => [
       [`step${i + 1}`, `Output of step ${i + 1}, ${typeOf(s.type)[1]}`],
@@ -1247,6 +1270,8 @@ function stepForm(store, flow, step) {
         needsText ? field('Words', h('input', { value: step.text ?? '', autocomplete: 'off', onchange: (/** @type {FieldEvent} */ e) => set({ text: e.target.value }) }), 'Not case-sensitive.') : null),
       h('p', { class: 'muted small' }, 'The run ends here without counting as a failure, and the steps after this one are skipped. Put it after a data step to stay quiet when there is nothing to report.'));
   }
+  if (step.type === 'format') return formatForm(store, flow, step, set);
+  if (step.type === 'loop') return loopForm(flow, step, set);
   if (step.type === 'profile') {
     const own = withFlowProject(flow, step).projectId;
     const readable = projectsOf(store).filter((p) => hasProfileSources(p) || p.id === own);
@@ -1343,6 +1368,117 @@ function stepForm(store, flow, step) {
     h('p', { class: 'muted small' }, 'Sent to the bell, and to Telegram when Settings › Notifications says so for Cron flows.'));
 }
 
+// The variables a list's item text sees: those of the step, with {{item}} as the list's first item.
+/**
+ * @param {Vars} vars
+ * @param {string | undefined} items
+ */
+function firstItemVars(vars, items) {
+  const value = valueOf(items || '{{input}}', vars);
+  const list = value === undefined ? [] : listOf(value);
+  return list.length ? withItem(vars, { item: list[0], index: 0, count: list.length }) : vars;
+}
+
+const ITEMS_HINT = 'A variable holding a list, such as {{input}} or {{step2.items}}. A JSON list is read as it is; text gives one item per line, without its bullet.';
+
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {(patch: Partial<CronStep>) => void} set
+ */
+function formatForm(store, flow, step, set) {
+  const index = flow.steps.indexOf(step);
+  const names = varNames(flow, index);
+  /** @param {string} name */
+  const key = (name) => `${step.id}:${name}`;
+  const vars = () => previewVars(store, flow, step);
+  const mode = step.mode || 'text';
+  const n = String(index + 1);
+  /** @param {(list: CronFormatField[]) => CronFormatField[]} mutate */
+  const editFields = (mutate) => updateFlow(store, flow.id, (f) => {
+    const s = f.steps.find((x) => x.id === step.id);
+    if (s) s.fields = mutate((s.fields ?? []).map((x) => ({ ...x })));
+  });
+  /**
+   * @param {string} id
+   * @param {Partial<CronFormatField>} patch
+   */
+  const setField = (id, patch) => editFields((list) => list.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  const fields = step.fields ?? [];
+  return h('div', { class: 'stack' },
+    h('div', { class: 'row cron-fields' }, field('Make', select(mode, FORMAT_MODES, (m) => set({ mode: m })))),
+    mode === 'text'
+      ? varField('Text', h('textarea', { rows: 6, class: 'mono-text', onchange: (/** @type {FieldEvent} */ e) => set({ text: e.target.value }) }, step.text ?? '{{input}}'), key('text'), names,
+          `The output as it should read: plain text, Markdown, or JSON whose keys later steps can pick, such as {{step${n}.title}}.`, vars)
+      : null,
+    mode === 'list'
+      ? [
+          varField('List', h('input', { value: step.items ?? '{{input}}', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (/** @type {FieldEvent} */ e) => set({ items: e.target.value.trim() }) }), key('items'), names, ITEMS_HINT),
+          varField('Each item as', h('textarea', { rows: 2, class: 'mono-text', onchange: (/** @type {FieldEvent} */ e) => set({ itemText: e.target.value }) }, step.itemText ?? '{{item}}'), key('itemText'),
+            [...LOOP_NAMES, ...names.filter(([name]) => !LOOP_NAMES.some(([l]) => l === name))],
+            '{{item}} is the item, and {{item.title}} a part of it when it is JSON; {{index}} counts from 1. Preview shows the first item.',
+            () => firstItemVars(vars(), step.items)),
+          h('div', { class: 'row cron-fields' }, field('Between items', select(step.separator ?? 'line', SEPARATOR_OPTIONS, (separator) => set({ separator })))),
+        ]
+      : null,
+    mode === 'fields'
+      ? [
+          fields.map((f) => h('div', { class: 'cron-source stack' },
+            h('div', { class: 'row cron-fields' },
+              field('Name', h('input', { value: f.name, autocomplete: 'off', spellcheck: false, placeholder: 'title', onchange: (/** @type {FieldEvent} */ e) => setField(f.id, { name: e.target.value.trim() }) })),
+              fields.length > 1
+                ? h('button', { type: 'button', class: 'icon-btn', title: 'Remove field', 'aria-label': 'Remove field', onclick: () => editFields((list) => list.filter((x) => x.id !== f.id)) }, icon('trash'))
+                : null),
+            varField('Value', h('input', { value: f.value, autocomplete: 'off', onchange: (/** @type {FieldEvent} */ e) => setField(f.id, { value: e.target.value }) }), key(`field:${f.id}`), names))),
+          h('div', null, h('button', { type: 'button', class: 'btn-small', onclick: () => editFields((list) => [...list, makeField()]) }, icon('plus'), ' Add a field')),
+          h('p', { class: 'muted small' },
+            `The output is one JSON object with these names as keys, so later steps read {{step${n}.title}}. `,
+            'A value that is a single variable keeps it whole: {{step2.items}} stays a list. Other values are text.'),
+        ]
+      : null);
+}
+
+/**
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {(patch: Partial<CronStep>) => void} set
+ */
+function loopForm(flow, step, set) {
+  const index = flow.steps.indexOf(step);
+  const span = loopSpan(flow, index);
+  const after = flow.steps.length - index - 1;
+  const want = Math.max(1, Math.round(Number(step.span) || 1));
+  const range = span > 1 ? `Steps ${index + 2} to ${index + 1 + span} run` : `Step ${index + 2} runs`;
+  return h('div', { class: 'stack' },
+    varField('Items', h('input', { value: step.items ?? '{{input}}', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (/** @type {FieldEvent} */ e) => set({ items: e.target.value.trim() }) }),
+      `${step.id}:items`, varNames(flow, index), ITEMS_HINT),
+    h('div', { class: 'row cron-fields' },
+      field('Steps to repeat', h('input', {
+        type: 'number', min: 1, max: Math.max(1, after), value: String(want),
+        onchange: (/** @type {FieldEvent} */ e) => set({ span: Math.max(1, Math.round(Number(e.target.value) || 1)) }),
+      }), 'The steps right after this one.'),
+      field('Items at most', h('input', {
+        type: 'number', min: 1, max: LOOP_LIMIT, value: String(loopMax(step)),
+        onchange: (/** @type {FieldEvent} */ e) => set({ max: Math.min(LOOP_LIMIT, Math.max(1, Math.round(Number(e.target.value) || 1))) }),
+      }), 'The rest of a longer list is left out.')),
+    !span
+      ? notice({ tone: 'info', text: 'Add the steps to repeat after this one.' })
+      : want > span
+        ? h('p', { class: 'muted small' }, `Only ${span} step${span === 1 ? '' : 's'} can repeat here: a loop ends at the end of the flow or before another loop.`)
+        : null,
+    span
+      ? h('p', { class: 'muted small' },
+          `${range} once for each item. In them, {{item}} is the item ({{item.title}} reads a part of a JSON item), {{index}} its number from 1 and {{count}} how many there are; `,
+          `step ${index + 2} reads the item as {{input}}. A “Stop if” among them skips the rest for that item only, and a failure on any item fails the run.`)
+      : null,
+    span
+      ? h('p', { class: 'muted small' },
+          'After the loop, each repeated step reads as the list of what it gave for every item: a JSON list when they gave JSON, else their texts one after the other. ',
+          'A Format step making “One line per item” turns that list into clean text.')
+      : null);
+}
+
 /**
  * @param {Store} store
  * @param {CronFlow} flow
@@ -1391,11 +1527,20 @@ function knownVars(store, flow, index) {
   }
   /** @type {Map<string, { output: string, data: unknown }>} */
   const outs = new Map();
+  // In a loop, the loop and the steps before this one in it read as on the first item.
+  const at = loopOf(flow, index);
+  /** @type {unknown[] | null} */
+  let items = null;
   flow.steps.slice(0, index).forEach((s, i) => {
     const t = tested.get(s.id);
     const r = t?.ok ? t : last?.steps.find((x) => x.stepId === s.id && x.ok);
-    const output = r?.output ?? '';
-    const data = t?.ok ? t.data : parseData(output) ?? output;
+    let output = r?.output ?? '';
+    let data = t?.ok ? t.data : parseData(output) ?? output;
+    if (i === at && Array.isArray(data) && data.length) items = data;
+    if (items && i >= at && Array.isArray(data) && data.length) {
+      data = data[0];
+      output = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+    }
     vars[`step${i + 1}`] = output;
     vars.$data[`step${i + 1}`] = data;
     outs.set(s.id, { output, data });
@@ -1406,7 +1551,7 @@ function knownVars(store, flow, index) {
     vars.input = piped.output;
     vars.$data.input = piped.data;
   }
-  return vars;
+  return items ? withItem(vars, { item: items[0], index: 0, count: /** @type {unknown[]} */ (items).length }) : vars;
 }
 
 // What a field's Preview fills its variables with: the step's own test, else what it could read before it.
