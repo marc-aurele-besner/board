@@ -15,6 +15,9 @@ import { connectedCalendarsOf } from '../gcal.js';
 import { resendSettings } from '../resend.js';
 import { DEFAULT_DEV_COMMAND, devPresets, runnerOf } from './dev.js';
 import { pickFolder } from '../folder-picker.js';
+import { openDialog } from '../modal.js';
+import { buildProfile, profileOf, hasProfileSources, profilesFor } from '../profile.js';
+import { fmtCost } from '../dev-usage.js';
 
 const COLLECTION = 'projects';
 const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
@@ -151,6 +154,8 @@ export function makeProject(existingCount, fields = {}) {
     labels: [],
     parentId: null,
     github: { org: '', repos: [] },
+    // What the project is, saved for the board's AI features (js/profile.js). A missing profile reads as empty.
+    profile: { text: '', sources: [], updated: '', edited: false, usageId: '' },
     created: now(),
     ...fields,
   };
@@ -551,7 +556,7 @@ async function runTriage(store, p) {
           role: 'system',
           content: systemPrompt(store, 'triage'),
         },
-        { role: 'user', content: JSON.stringify(all) },
+        { role: 'user', content: JSON.stringify({ items: all, profiles: profilesFor([p], [p.id]) }) },
       ])).trim();
       triage.status = 'ok';
     }
@@ -576,6 +581,187 @@ function triageBlock(store, p) {
   if (mine.status === 'loading') return h('div', { class: 'stack' }, button, h('p', { class: 'muted small' }, 'Reading issues and PRs…'));
   if (mine.status === 'error') return h('div', { class: 'stack' }, button, notice({ text: mine.text }));
   return h('div', { class: 'stack' }, button, h('div', { class: 'card-inset' }, h('pre', { class: 'ai-text' }, mine.text)));
+}
+
+// --- Profile: the saved text that says what the project is (js/profile.js) ---
+
+// Per project id: { status: 'loading' | 'error', step?, error? }. Editing holds the id being edited.
+const profileState = new Map();
+const profileView = { editing: null };
+
+async function runProfile(store, p) {
+  const state = { status: 'loading', step: 'Reading README, commits and website…' };
+  profileState.set(p.id, state);
+  store.refresh();
+  try {
+    await buildProfile(store, p, {
+      onStep: (step) => {
+        state.step = step;
+        store.refresh();
+      },
+    });
+    profileState.delete(p.id);
+  } catch (err) {
+    profileState.set(p.id, { status: 'error', error: err.message });
+  }
+  store.refresh();
+}
+
+// A refresh replaces the text; text changed by hand is only replaced once the user says so.
+function refreshProfile(store, p) {
+  if (!profileOf(p).edited) return runProfile(store, p);
+  const dialog = openDialog({
+    title: 'Replace your edits?',
+    body: h('div', { class: 'stack' },
+      h('p', null, 'This profile was changed by hand. Building it again replaces the text with a new one from the sources.'),
+      h('div', { class: 'row' },
+        h('button', {
+          type: 'button',
+          class: 'primary',
+          onclick: () => {
+            dialog.close();
+            runProfile(store, p);
+          },
+        }, 'Replace'),
+        h('button', { type: 'button', onclick: () => dialog.close() }, 'Keep my edits'))),
+  });
+}
+
+function saveProfile(store, id, patch) {
+  store.update(COLLECTION, (d) => {
+    const x = d.projects.find((q) => q.id === id);
+    if (x) x.profile = { ...profileOf(x), ...patch };
+  });
+}
+
+// Extra URLs, one per line. Lines that are not http(s) addresses are dropped.
+function cleanSources(text) {
+  const out = [];
+  for (const line of text.split('\n').map((l) => l.trim()).filter(Boolean)) {
+    try {
+      const url = new URL(/^https?:\/\//i.test(line) ? line : `https://${line}`);
+      if ((url.protocol === 'https:' || url.protocol === 'http:') && !out.includes(url.href)) out.push(url.href);
+    } catch {
+      /* not an address */
+    }
+  }
+  return out;
+}
+
+// The profile's Markdown: "## " lines as headings, the rest as rich text (bullets and link chips).
+function profileMarkdown(text) {
+  return h('div', { class: 'profile-text' }, text.split('\n').map((line) => {
+    const heading = line.match(/^#{1,4}\s+(.*)$/);
+    const plain = line.replace(/\*\*(.+?)\*\*/g, '$1');
+    return heading ? h('h4', null, heading[1].replace(/\*\*/g, '')) : richText(plain);
+  }));
+}
+
+function relativeTime(iso) {
+  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  if (!Number.isFinite(s)) return '';
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  if (s < 86400 * 30) return `${Math.floor(s / 86400)} d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function profileMeta(store, profile) {
+  const call = profile.usageId ? store.get('usage').entries.find((e) => e.id === profile.usageId) : null;
+  return [
+    profile.updated ? `Updated ${relativeTime(profile.updated)}` : '',
+    profile.edited ? 'edited' : '',
+    call?.model ?? '',
+    call && call.cost !== null && call.cost !== undefined ? fmtCost(call.cost) : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function profileBlock(store, p) {
+  const profile = profileOf(p);
+  const state = profileState.get(p.id);
+  const busy = state?.status === 'loading';
+  const canBuild = hasProfileSources(p);
+  const editing = profileView.editing === p.id;
+  const sources = h('div', { class: 'stack' },
+    h('span', { class: 'muted small' }, 'Extra pages to read, such as the blog or docs'),
+    editText({
+      value: profile.sources.join('\n'),
+      placeholder: 'One URL per line',
+      multiline: true,
+      allowEmpty: true,
+      className: 'pp-lines',
+      onSave: (text) => saveProfile(store, p.id, { sources: cleanSources(text) }),
+    }));
+  const status = [
+    busy ? h('p', { class: 'muted small' }, state.step) : null,
+    state?.status === 'error' ? notice({ text: state.error }) : null,
+  ];
+  const buildButton = (label, onclick) => h('button', {
+    type: 'button',
+    class: 'btn-small',
+    disabled: busy || !canBuild,
+    'aria-busy': busy ? 'true' : null,
+    onclick,
+  }, refreshIcon(busy), busy ? 'Building…' : label);
+
+  if (editing) {
+    const field = h('textarea', { name: 'profile-text', 'aria-label': 'Profile', class: 'profile-edit', rows: 16, value: profile.text });
+    return h('section', { class: 'pp-block' },
+      h('h3', null, 'Profile'),
+      field,
+      h('div', { class: 'row' },
+        h('button', {
+          type: 'button',
+          class: 'btn-small primary',
+          onclick: () => {
+            profileView.editing = null;
+            const text = field.value.trim();
+            if (text === profile.text.trim()) return store.refresh();
+            saveProfile(store, p.id, { text, edited: true, updated: now() });
+          },
+        }, 'Save'),
+        h('button', {
+          type: 'button',
+          class: 'btn-small',
+          onclick: () => {
+            profileView.editing = null;
+            store.refresh();
+          },
+        }, 'Cancel')),
+      sources);
+  }
+
+  if (!profile.text) {
+    return h('section', { class: 'pp-block' },
+      h('h3', null, 'Profile'),
+      h('p', { class: 'muted small' }, 'A short saved text on what this project is, its stack, how to work on it, and what its website says. The board’s AI features read it as context.'),
+      hasOpenRouter(store)
+        ? h('div', { class: 'row' }, buildButton('Build profile', () => runProfile(store, p)))
+        : setupBanner('openrouter', 'Building a profile needs an OpenRouter key.'),
+      canBuild ? null : h('p', { class: 'muted small' }, 'Add a local folder, a repository or a website first, so there is something to read.'),
+      ...status,
+      sources);
+  }
+
+  return h('section', { class: 'pp-block' },
+    h('h3', null, 'Profile'),
+    h('div', { class: 'card-inset' }, profileMarkdown(profile.text)),
+    h('div', { class: 'muted small' }, profileMeta(store, profile)),
+    h('div', { class: 'row' },
+      h('button', {
+        type: 'button',
+        class: 'btn-small',
+        disabled: busy,
+        onclick: () => {
+          profileView.editing = p.id;
+          store.refresh();
+        },
+      }, 'Edit'),
+      hasOpenRouter(store) ? buildButton('Refresh', () => refreshProfile(store, p)) : null),
+    hasOpenRouter(store) ? null : setupBanner('openrouter', 'Refreshing the profile needs an OpenRouter key.'),
+    ...status,
+    sources);
 }
 
 // The project page. Every field is edited where it is shown; a change is saved when the field is left.
@@ -865,6 +1051,7 @@ function projectView(store, p, items, categories) {
     projectTasks(store, p, items),
 
     p.github.repos.length ? repoTable(store, p) : null,
+    profileBlock(store, p),
     overviewBlock(store, p),
     triageBlock(store, p));
 }

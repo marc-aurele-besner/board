@@ -497,6 +497,10 @@ body.project-dragging .project-list .root-drop { display: block; }
 /* AI output */
 .plan-text { white-space: pre-wrap; font-family: inherit; font-size: 0.9rem; margin: 0; background: var(--surface-2); padding: 10px; border-radius: 8px; }
 .ai-text { white-space: pre-wrap; font-family: inherit; font-size: 0.9rem; margin: 0; }
+.profile-text { font-size: 0.9rem; min-width: 0; overflow-wrap: anywhere; }
+.profile-text h4 { margin: 10px 0 2px; font-size: 0.9rem; }
+.profile-text h4:first-child { margin-top: 0; }
+.profile-edit { width: 100%; min-height: 240px; font-family: var(--mono, ui-monospace, monospace); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .dropzone { border: 1.5px dashed var(--border); border-radius: var(--radius); padding: 18px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; cursor: pointer; background: var(--surface); }
 .dropzone:hover, .dropzone:focus-visible, .dropzone.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); outline: none; }

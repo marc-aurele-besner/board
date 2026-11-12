@@ -39,7 +39,7 @@ export function searchAll(store, modules, query) {
     });
   }
   for (const p of projects) {
-    if (wordsIn(q, `${p.name} ${p.description ?? ''}`)) out.projects.push({ label: p.name, hint: p.description ?? '', iconName: 'folder', href: `#/projects?project=${p.id}` });
+    if (wordsIn(q, `${p.name} ${p.description ?? ''} ${p.profile?.text ?? ''}`)) out.projects.push({ label: p.name, hint: p.description ?? '', iconName: 'folder', href: `#/projects?project=${p.id}` });
   }
   for (const r of store.get('recipes').recipes) {
     if (wordsIn(q, `${r.title} ${(r.tags ?? []).join(' ')} ${(r.ingredients ?? []).join(' ')}`)) {

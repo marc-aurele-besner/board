@@ -9,7 +9,7 @@ export const PROMPTS = [
     task: 'task-plan',
     name: 'Next steps',
     where: 'Home → Plan my day',
-    text: 'You plan a personal day. Given open tasks as JSON, reply in plain text with three short sections titled Now, Next and Later, each with up to four bullet points. Name the project in brackets when it helps. Be concise.',
+    text: 'You plan a personal day. Given open tasks as JSON (`tasks`), with short profiles of their projects keyed by project id (`profiles`) for context, reply in plain text with three short sections titled Now, Next and Later, each with up to four bullet points. Name the project in brackets when it helps. Be concise.',
   },
   {
     id: 'tidy',
@@ -18,6 +18,7 @@ export const PROMPTS = [
     where: 'Tasks → Tidy with AI',
     text: [
       'You clean up a personal todo list.',
+      'The input holds the items (`items`) and short profiles of their projects keyed by project id (`profiles`); use the profiles to make titles and categories specific to the project.',
       'Reply with JSON only: an array of objects {"id","title","category","priority"}.',
       'title: a short, clear action sentence in the same language as the original.',
       'category: one short word, or an empty string if none fits.',
@@ -30,7 +31,7 @@ export const PROMPTS = [
     task: 'task-review',
     name: 'Issue & PR triage',
     where: 'Projects → Triage with AI',
-    text: 'You triage GitHub issues and pull requests. Given the open items as JSON, reply in plain text: first what needs attention now, then what looks stale (no update in 30 days or more), then one suggested next action per item in a single line. Be concise.',
+    text: 'You triage GitHub issues and pull requests. Given the open items as JSON (`items`), with a short profile of the project keyed by project id (`profiles`) for context, reply in plain text: first what needs attention now, then what looks stale (no update in 30 days or more), then one suggested next action per item in a single line. Be concise.',
   },
   {
     id: 'repo-summary',
@@ -38,6 +39,24 @@ export const PROMPTS = [
     name: 'Repository summary',
     where: 'Projects → Explain with AI',
     text: 'You help a developer understand a code repository. From the description, topics, languages, file list and README, reply in plain text: what the project does in two sentences, its main parts (from the files), how to work on it, and anything unclear. Do not invent features.',
+  },
+  {
+    id: 'project-profile',
+    task: 'task-summary',
+    name: 'Project profile',
+    where: 'Projects → Build profile',
+    text: [
+      'You write a short profile of a project, which other AI features will read as context.',
+      'The input holds the project\'s name and description, then the sources that could be read: local files (README, AGENTS.md, CLAUDE.md, package.json, the top-level folder), recent commit subjects, GitHub details, and web pages. It ends with the sources that could not be read.',
+      'Reply in Markdown only, at most 400 words, with these six headings, written exactly as quoted and in this order:',
+      '"## What it is": two sentences, then who it is for.',
+      '"## Stack and layout": languages, frameworks and the main folders.',
+      '"## How to work on it": the commands to run, test and verify it, and the conventions the AGENTS.md or CLAUDE.md files set.',
+      '"## Recent focus": the themes of the recent commits.',
+      '"## Website and blog": what the site offers and what the blog writes about.',
+      '"## Unknowns": what the sources did not say, including every source that could not be read.',
+      'Use short bullet points under each heading. Use only facts from the sources. Never invent commands, features, audiences or URLs; anything the sources do not cover goes under Unknowns.',
+    ].join('\n'),
   },
   {
     id: 'recipe-ideas',
