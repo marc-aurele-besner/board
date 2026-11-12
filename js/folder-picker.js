@@ -1,13 +1,15 @@
+// @ts-check
 // A dialog to find a folder on this machine and pick it. The browser cannot read local paths, so it asks the
 // command runner (tools/terminal.js) for each folder's entries.
 import { h, icon } from './ui.js';
 import { openDialog } from './modal.js';
 import { listFolder, runnerInfo } from './terminal.js';
+/** @import { RunnerFolder } from '../types/terminal' */
 
 // Shows paths under the home folder as ~/…, the way they are typed in the Local folder field.
-const tilde = (path, home) => (home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path);
+const tilde = (/** @type {string} */ path, /** @type {string} */ home) => (home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path);
 
-const parentOf = (path) => {
+const parentOf = (/** @type {string} */ path) => {
   const trimmed = path.replace(/[\\/]+$/, '');
   const cut = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
   if (cut < 0) return null;
@@ -16,8 +18,11 @@ const parentOf = (path) => {
 };
 
 // Opens at `start` (a saved path), else ~/Documents, else the home folder. Calls onPick with the chosen path.
+/**
+ * @param {{ base: string, start?: string, onPick: (path: string) => void, title?: string }} options
+ */
 export function pickFolder({ base, start, onPick, title = 'Choose the local folder' }) {
-  const state = { path: '', home: '', entries: [], q: '', hidden: false, loading: true, error: '' };
+  const state = { path: '', home: '', entries: /** @type {RunnerFolder['entries']} */ ([]), q: '', hidden: false, loading: true, error: '' };
   const crumbs = h('div', { class: 'fp-crumbs' });
   const search = h('input', { type: 'search', placeholder: 'Filter folders', 'aria-label': 'Filter folders', autocomplete: 'off', spellcheck: false });
   const hiddenBox = h('input', { type: 'checkbox' });
@@ -36,6 +41,7 @@ export function pickFolder({ base, start, onPick, title = 'Choose the local fold
       h('div', { class: 'fp-foot' }, chosen, useBtn)),
   });
 
+  /** @param {string} path */
   function choose(path) {
     dialog.close();
     onPick(tilde(path, state.home));
@@ -48,10 +54,10 @@ export function pickFolder({ base, start, onPick, title = 'Choose the local fold
     const rootPath = inHome ? home : '/';
     const rest = path.slice(rootPath.length).split('/').filter(Boolean);
     const up = parentOf(path);
-    const crumb = (label, target, last) => h('button', { type: 'button', class: 'fp-crumb', 'aria-current': last ? 'true' : null, onclick: () => go(target) }, label);
+    const crumb = (/** @type {string} */ label, /** @type {string} */ target, /** @type {boolean} */ last) => h('button', { type: 'button', class: 'fp-crumb', 'aria-current': last ? 'true' : null, onclick: () => go(target) }, label);
     let acc = rootPath;
     crumbs.replaceChildren(
-      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Parent folder', title: 'Parent folder', disabled: !up, onclick: () => go(up) }, icon('arrow-up')),
+      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Parent folder', title: 'Parent folder', disabled: !up, onclick: () => go(/** @type {string} */ (up)) }, icon('arrow-up')),
       crumb(inHome ? '~' : '/', rootPath, !rest.length),
       ...rest.flatMap((part, i) => {
         acc = acc.endsWith('/') ? `${acc}${part}` : `${acc}/${part}`;
@@ -81,6 +87,7 @@ export function pickFolder({ base, start, onPick, title = 'Choose the local fold
   }
 
   let ticket = 0;
+  /** @param {string} path */
   async function go(path) {
     const mine = ++ticket;
     state.loading = true;
@@ -94,7 +101,7 @@ export function pickFolder({ base, start, onPick, title = 'Choose the local fold
       search.value = '';
     } catch (err) {
       if (mine !== ticket) return;
-      Object.assign(state, { path, entries: [], loading: false, error: err.message });
+      Object.assign(state, { path, entries: [], loading: false, error: /** @type {Error} */ (err).message });
     }
     paintCrumbs();
     paintList();
@@ -109,7 +116,7 @@ export function pickFolder({ base, start, onPick, title = 'Choose the local fold
     // Enter opens the only match, so a folder can be reached by typing alone.
     if (e.key !== 'Enter') return;
     e.preventDefault();
-    list.querySelector('.fp-row')?.click();
+    /** @type {HTMLButtonElement | null} */ (list.querySelector('.fp-row'))?.click();
   });
   hiddenBox.addEventListener('change', () => {
     state.hidden = hiddenBox.checked;
@@ -121,7 +128,7 @@ export function pickFolder({ base, start, onPick, title = 'Choose the local fold
     try {
       state.home = (await runnerInfo(base)).home ?? '';
     } catch (err) {
-      Object.assign(state, { loading: false, error: err.message });
+      Object.assign(state, { loading: false, error: /** @type {Error} */ (err).message });
       paintCrumbs();
       return paintList();
     }
