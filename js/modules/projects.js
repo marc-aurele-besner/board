@@ -1,4 +1,3 @@
-// @ts-check
 /** @import { Store, Project, ProjectLabel, ProjectProfile, Task, IconName } from '../../types/data' */
 /** @typedef {Partial<Project> & { org?: string, repos?: string, npmOrg?: string, npmPackages?: string }} ProjectPatch */
 // What projects.js reads of repoStats() and packageStats(): the counts are there when status is 'ok'.
@@ -1406,8 +1405,7 @@ function draw(root, store) {
       h('section', { class: 'card main-pane' }, detail)));
 }
 
-/** @satisfies {import('../../types/data').Module} */
-export default {
+export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'projects',
   title: 'Projects',
   icon: 'folder',
@@ -1428,4 +1426,4 @@ export default {
     view.error = '';
     view.draft = null;
   },
-};
+});

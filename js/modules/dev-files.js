@@ -1,4 +1,3 @@
-// @ts-check
 // Dev's file explorer and file reader, Cursor style: a folder tree on the left, open files as tabs, each shown
 // with line numbers and syntax colours. Read only; files come through the runner on this machine.
 // A tab can also show a diff (a changed file, or a commit) from Source Control.

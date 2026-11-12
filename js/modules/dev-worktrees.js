@@ -1,4 +1,3 @@
-// @ts-check
 // Dev's Worktrees panel: every git worktree of the workspace's repository, the ones `claude --worktree` makes and
 // any other, each with a dot saying whether it is in use. One can be removed, or all the unused ones, or all of them.
 // git keeps a worktree with changes or untracked files, so removing never loses work; its branch stays.

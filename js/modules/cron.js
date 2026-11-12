@@ -1,4 +1,3 @@
-// @ts-check
 // Cron: recurring flows that gather board data, ask an AI model, and turn the answer into a task, a notification or work for claude in Dev.
 // The editor draws a flow as a chain of nodes, like a workflow canvas; the inspector below edits the selected node.
 import { h, icon, empty, notice, now, uid, todayISO, statusOf } from '../ui.js';
@@ -2023,8 +2022,7 @@ function draw(root, store) {
   }
 }
 
-/** @satisfies {import('../../types/data').Module} */
-export default {
+export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'cron',
   title: 'Cron',
   icon: 'repeat',
@@ -2046,4 +2044,4 @@ export default {
       view.scrollTo = p.run;
     }
   },
-};
+});

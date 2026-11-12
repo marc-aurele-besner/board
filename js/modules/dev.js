@@ -1,4 +1,3 @@
-// @ts-check
 // Dev: a small IDE for this machine, Cursor style. A workspace folder (the board, the home folder, or a project's
 // local folder) is shown as a file tree; files open read-only with syntax colours; terminals sit below. The side
 // panel switches to Search, which finds text in the folder's files, and to Source Control, which shows and commits
@@ -1191,8 +1190,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
   schedulePaint();
 });
 
-/** @satisfies {import('../../types/data').Module} */
-export default {
+export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'dev',
   title: 'Dev',
   icon: 'terminal',
@@ -1211,4 +1209,4 @@ export default {
       if (view.restored) showWanted();
     }
   },
-};
+});

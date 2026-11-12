@@ -1,4 +1,3 @@
-// @ts-check
 // Settings → Prompts: read and replace the system prompt of every AI feature, plus one prompt added to every call.
 import { h, icon } from '../ui.js';
 import { PROMPTS, GLOBAL_PROMPT, overrides } from '../prompts.js';

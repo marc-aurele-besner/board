@@ -1,4 +1,3 @@
-// @ts-check
 // Calendar: the events of every connected Google account, by day, week or month, with task deadlines on the same days.
 // Events of the range on screen show from the browser's cache at once, then are read again when the cache is stale. Settings → Google Calendar lists the accounts.
 import { h, icon, refreshIcon, notice, statusOf } from '../ui.js';
@@ -659,8 +658,7 @@ function draw(root, store) {
   if (view.mode !== 'month') scrollGrid(root, from, days);
 }
 
-/** @satisfies {import('../../types/data').Module} */
-export default {
+export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'calendar',
   title: 'Calendar',
   icon: 'calendar',
@@ -673,4 +671,4 @@ export default {
     view.project = p.project || 'all';
     view.tasks = p.tasks !== '0';
   },
-};
+});

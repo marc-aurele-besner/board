@@ -1,4 +1,3 @@
-// @ts-check
 import { h, icon, refreshIcon, empty, notice, copyable } from '../ui.js';
 import { toast } from '../toast.js';
 import { redirectUri } from '../google.js';
@@ -1017,8 +1016,7 @@ function draw(root, store) {
       h('div', { class: 'settings-main' }, content)));
 }
 
-/** @satisfies {import('../../types/data').Module} */
-export default {
+export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'settings',
   title: 'Settings',
   icon: 'settings',
@@ -1035,4 +1033,4 @@ export default {
   restore: (p = {}) => {
     view.section = PAGES.includes(p.section) ? p.section : 'github';
   },
-};
+});

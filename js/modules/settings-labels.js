@@ -1,4 +1,3 @@
-// @ts-check
 // Settings → Labels: task statuses and categories, project labels and Money categories in one place. Each can be
 // recoloured, renamed and reordered (the order is the one every picker shows); deleting one that is in use moves
 // what uses it to another label or category first.

@@ -1,4 +1,3 @@
-// @ts-check
 // Tools: checks that run against the website of each project, and the status of the services they rely on.
 import { h, icon, refreshIcon, empty, notice, uid } from '../ui.js';
 import { projectIcon, projectTree } from './projects.js';
@@ -998,8 +997,7 @@ function draw(root, store) {
         : null));
 }
 
-/** @satisfies {import('../../types/data').Module} */
-export default {
+export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'tools',
   title: 'Tools',
   icon: 'wrench',
@@ -1012,4 +1010,4 @@ export default {
     view.project = p.project || '';
     contractsRestore(p.contract);
   },
-};
+});

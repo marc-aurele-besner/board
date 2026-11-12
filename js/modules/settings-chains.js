@@ -1,4 +1,3 @@
-// @ts-check
 // Settings → Blockchains: the chains the board reads, the nodes and explorers of each, and chains added by hand.
 import { h, icon, notice } from '../ui.js';
 import { allChains, customChains, isNodeUrl, isExplorerUrl, testNode, testNodes, etherscanKey } from '../chains.js';

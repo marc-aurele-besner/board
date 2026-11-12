@@ -1,4 +1,3 @@
-// @ts-check
 import { h, uid, now, todayISO, money, empty, icon, notice, progress, CURRENCIES } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { ask, parseJson } from '../ai.js';
@@ -1434,8 +1433,7 @@ function draw(root, store) {
             spendingBlock(store, view.range, inPeriod))))));
 }
 
-/** @satisfies {import('../../types/data').Module} */
-export default {
+export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'money',
   title: 'Money',
   icon: 'wallet',
@@ -1449,4 +1447,4 @@ export default {
     view.group = GROUPS.some(([k]) => k === p.group) ? p.group : 'day';
     view.kind = KINDS.some(([k]) => k === p.kind) ? p.kind : 'all';
   },
-};
+});

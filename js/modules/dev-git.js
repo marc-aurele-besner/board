@@ -1,4 +1,3 @@
-// @ts-check
 // Dev's Source Control, as in VS Code or Cursor: the workspace's branch, its changes (staged, not staged, in
 // conflict), a commit box, sync with the remote, and recent commits. A changed file or a commit opens as a diff in
 // the editor. git runs through the runner on this machine, in the repository that holds the workspace folder.

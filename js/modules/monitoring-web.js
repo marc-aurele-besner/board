@@ -1,4 +1,3 @@
-// @ts-check
 // Monitoring tabs for the project websites: visitors (Google Analytics) and search (Google Search Console, Bing).
 import { h, empty, notice, progress, icon, refreshIcon } from '../ui.js';
 import { setupBanner } from '../integrations.js';

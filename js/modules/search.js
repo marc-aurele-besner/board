@@ -1,4 +1,3 @@
-// @ts-check
 // Full-page search, opened from the last row of the palette. "All" shows a few matches of each kind; a tab per kind
 // shows every match of that kind.
 /** @import { Store, IconName } from '../../types/data' */
@@ -102,8 +101,7 @@ function draw(root, store) {
 
 const serialize = () => ({ q: view.query, tab: view.tab === 'all' ? '' : view.tab });
 
-/** @satisfies {import('../../types/data').Module} */
-export default {
+export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'search',
   title: 'Search',
   icon: 'search',
@@ -114,4 +112,4 @@ export default {
     view.query = p.q || '';
     view.tab = TABS.some(([k]) => k === p.tab) ? p.tab : 'all';
   },
-};
+});
