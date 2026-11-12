@@ -2,7 +2,8 @@
 // through `bun start`. It runs a command in the user's shell and streams its output back as it comes, and lists
 // folders, reads and searches files for the Dev file explorer and Search (read only), and runs git for Dev's Source Control. It also
 // removes the git worktree a task's session made once the task is completed, and only a clean one, saves the
-// images the page hands to claude as files, and reads what a task's claude session used from its transcripts.
+// images the page hands to claude as files, and reads what a task's claude session used from its transcripts and
+// whether it is still working.
 // The runner owns each terminal session: a command keeps running when the page reloads or closes, and the session's
 // output is kept (in memory and in TERMINAL_STATE, a folder in the system's temp folder by default) so the page
 // shows it again when it comes back, even after the runner restarted. The list of open terminals is kept there too,
@@ -19,7 +20,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logger } from './log.js';
-import { worktreeUsage } from './usage.js';
+import { worktreeActivity, worktreeUsage } from './usage.js';
 
 const PORT = Number(process.env.TERMINAL_PORT) || 8419;
 const MAX = Number(process.env.TERMINAL_MAX) || 12;
@@ -201,14 +202,26 @@ async function sessionOf(id) {
   return s;
 }
 
+// The worktree a claude command names (`claude --worktree <name>`, or -w), before the prompt after `--`.
+const WORKTREE_FLAG = /(?:^|\s)(?:--worktree|-w)(?:=|\s+)([\w.-]{1,64})(?=\s|$)/;
+const worktreeOf = (command = '') => WORKTREE_FLAG.exec(String(command).split(/\s--\s/)[0])?.[1] ?? '';
+
 // What a session is doing, for a task's Dev button: running (and how long it has been quiet, as a program waiting
 // for its user prints nothing), ended (with its exit code), or idle. A session that is gone is left out.
+// Quiet is not enough for claude in a worktree: a long tool call or a background subagent prints nothing either, so
+// it waits only once its transcript says the turn ended and no subagent is still working.
 const QUIET_MS = 8000;
 async function statusOf(id) {
   if (!sessions.has(id) && !(await stat(logFile(id)).catch(() => null))) return null;
   const s = await sessionOf(id);
   if (s.closed) return null;
-  if (s.run) return { state: Date.now() - (s.lastOut ?? 0) < QUIET_MS ? 'working' : 'waiting', cwd: s.open?.cwd ?? '' };
+  if (s.run) {
+    const cwd = s.open?.cwd ?? '';
+    if (Date.now() - (s.lastOut ?? 0) < QUIET_MS) return { state: 'working', cwd };
+    const name = worktreeOf(s.open?.command);
+    const activity = name && cwd ? (await worktreeActivity([{ name, cwd }]).catch(() => ({})))[name] : null;
+    return { state: activity?.busy ? 'working' : 'waiting', cwd, ...(activity ? { agents: activity.agents } : {}) };
+  }
   const exit = s.events.findLast((e) => e.t === 'exit');
   const where = s.events.findLast((e) => e.t === 'cwd' || e.t === 'start');
   const cwd = (where?.t === 'cwd' ? where.d : where?.cwd) ?? '';
