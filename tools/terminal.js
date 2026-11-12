@@ -447,15 +447,58 @@ const alive = (pid) => {
   }
 };
 
+// `git worktree list --porcelain` as objects ({ worktree, HEAD, branch?, locked?, prunable? }); the main checkout first.
+const worktreeEntries = (list) => list.trim().split(/\n\n+/).filter(Boolean)
+  .map((block) => Object.fromEntries(block.split('\n').map((line) => [line.split(' ')[0], line.slice(line.indexOf(' ') + 1)])));
+
+const lockPid = (entry) => Number(/\bpid (\d+)/.exec(entry.locked ?? '')?.[1]) || 0;
+const inside = (path, dir) => path === dir || path.startsWith(dir.endsWith('/') ? dir : `${dir}/`);
+
+// Every worktree of the repository holding `path`, but the main checkout, for Dev's Worktrees panel: { repo: false }
+// outside one, else { root, worktrees: [{ path, name, branch, head, claude, locked, prunable, pid, running, commands,
+// changes }] }. `running`: the claude that locked it still runs; `commands`: the runner's running commands started
+// inside it; `changes`: files git would refuse to remove it over (null when it could not tell).
+async function listWorktrees(path) {
+  const dir = await folderOf(path);
+  let entries;
+  try {
+    entries = worktreeEntries(await git(dir, ['worktree', 'list', '--porcelain']));
+  } catch {
+    return { repo: false };
+  }
+  const [main, ...rest] = entries;
+  const started = [...sessions.values()].filter((s) => s.run).map((s) => s.events.findLast((e) => e.t === 'start')?.cwd ?? '');
+  const worktrees = await Promise.all(rest.filter((e) => e.worktree).map(async (e) => {
+    const pid = lockPid(e);
+    const changes = 'prunable' in e ? 0 : await git(e.worktree, ['status', '--porcelain']).then((out) => out.split('\n').filter(Boolean).length, () => null);
+    return {
+      path: e.worktree,
+      name: basename(e.worktree),
+      branch: e.branch?.replace(/^refs\/heads\//, '') ?? '',
+      head: e.HEAD ?? '',
+      claude: dirname(e.worktree).endsWith(join('.claude', 'worktrees')),
+      locked: 'locked' in e,
+      prunable: 'prunable' in e,
+      pid,
+      running: !!pid && alive(pid),
+      commands: started.filter((cwd) => cwd && inside(cwd, e.worktree)).length,
+      changes,
+    };
+  }));
+  return { root: main.worktree, worktrees };
+}
+
 // Removes the worktree `claude --worktree <name>` made in the repo at `cwd` (.claude/worktrees/<name>) once its task
-// is completed. The task's session is stopped first, since claude runs inside the worktree. git refuses a worktree
-// with changes or untracked files, so nothing unsaved is lost; its branch is kept.
+// is completed, or, given `path`, any worktree but the main checkout (Dev's Worktrees panel). The task's session is
+// stopped first, since claude runs inside the worktree. git refuses a worktree with changes or untracked files, so
+// nothing unsaved is lost; its branch is kept.
 // Answers { removed: path }, or { missing: true } when the folder or the worktree is already gone.
 async function removeWorktree(req, res, cors) {
   const body = await jsonBody(req, res, cors);
   if (!body) return;
   const name = String(body.name ?? '');
-  if (!WORKTREE_NAME.test(name)) return res.writeHead(400, cors).end('No worktree name.');
+  const path = typeof body.path === 'string' && body.path ? resolve(expand(body.path)) : '';
+  if (!path && !WORKTREE_NAME.test(name)) return res.writeHead(400, cors).end('No worktree name.');
   const reply = (data) => res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(data));
   const id = String(body.session ?? '');
   // Without a folder, the repo is the one the session's first command started in.
@@ -479,19 +522,22 @@ async function removeWorktree(req, res, cors) {
   } catch (err) {
     return res.writeHead(400, cors).end(`Not a git repository: ${err.message}`);
   }
-  // The first entry is the main checkout, never removed.
-  const entries = list.trim().split(/\n\n+/).slice(1)
-    .map((block) => Object.fromEntries(block.split('\n').map((line) => [line.split(' ')[0], line.slice(line.indexOf(' ') + 1)])));
-  const tree = entries.find((e) => e.worktree && basename(e.worktree) === name && dirname(e.worktree).endsWith(join('.claude', 'worktrees')));
+  // The first entry is the main checkout, never removed. git runs there, as `dir` may be the folder removed.
+  const [main, ...entries] = worktreeEntries(list);
+  const tree = path
+    ? entries.find((e) => e.worktree === path)
+    : entries.find((e) => e.worktree && basename(e.worktree) === name && dirname(e.worktree).endsWith(join('.claude', 'worktrees')));
   if (!tree) return reply({ missing: true });
+  const top = main?.worktree || dir;
   try {
     // claude locks its worktree while it runs; a lock whose claude has ended is left over.
     if ('locked' in tree) {
-      const pid = Number(/\bpid (\d+)/.exec(tree.locked)?.[1]);
+      const pid = lockPid(tree);
       if (pid && alive(pid)) return res.writeHead(409, cors).end(`claude still runs in ${tree.worktree} (pid ${pid}).`);
-      await git(dir, ['worktree', 'unlock', tree.worktree]);
+      await git(top, ['worktree', 'unlock', tree.worktree]);
     }
-    await git(dir, ['worktree', 'remove', tree.worktree]);
+    // A worktree whose folder is gone only needs git to forget it.
+    await git(top, 'prunable' in tree ? ['worktree', 'prune'] : ['worktree', 'remove', tree.worktree]);
   } catch (err) {
     return res.writeHead(409, cors).end(err.message);
   }
@@ -859,6 +905,15 @@ createServer(async (req, res) => {
     const params = new URL(req.url, 'http://terminal').searchParams;
     try {
       const body = path === '/git' ? await gitStatus(params.get('path') ?? '') : await gitDiff(params);
+      res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(body));
+    } catch (err) {
+      res.writeHead(400, cors).end(err.message);
+    }
+    return;
+  }
+  if (req.method === 'GET' && path === '/worktrees') {
+    try {
+      const body = await listWorktrees(new URL(req.url, 'http://terminal').searchParams.get('path') ?? '');
       res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(body));
     } catch (err) {
       res.writeHead(400, cors).end(err.message);

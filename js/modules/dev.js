@@ -16,6 +16,7 @@ import { readTheme, themedColors } from '../term-colors.js';
 import { explorer, editor, setRoot, hasOpenFiles, baseName } from './dev-files.js';
 import { sourceControl, refreshGit, decorOf, changeCount } from './dev-git.js';
 import { searchPanel } from './dev-search.js';
+import { worktreesPanel, refreshWorktrees } from './dev-worktrees.js';
 import { pickChip } from '../inline.js';
 import { projectIcon } from './projects.js';
 import { linkWatcher, moveToReview } from '../task-links.js';
@@ -30,7 +31,7 @@ const RECENT_SHOWN = 8;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 // Where this browser kept the open terminals before the runner did; read once, then removed.
 const OLD_SESSIONS_KEY = 'board:dev-sessions';
-// The side panel shown: 'files', 'search' or 'git'.
+// The side panel shown: 'files', 'search', 'git' or 'worktrees'.
 const SIDE_KEY = 'board:dev-side';
 
 // View state: the workspace, the sessions, the one shown, and what the runner said about itself.
@@ -40,7 +41,7 @@ let currentStore = null;
 function readSide() {
   try {
     const side = localStorage.getItem(SIDE_KEY);
-    return side === 'git' || side === 'search' ? side : 'files';
+    return ['git', 'search', 'worktrees'].includes(side) ? side : 'files';
   } catch {
     return 'files';
   }
@@ -70,6 +71,8 @@ const filesCtx = (store) => ({
   ready: () => !!view.info,
   refresh: () => store.refresh(),
   decor: decorOf,
+  store,
+  sessions: () => view.sessions,
   openTerminal: (path) => {
     const s = newSession(store, path);
     if (s) store.refresh();
@@ -775,7 +778,8 @@ function sideSwitcher(store) {
     tab('files', 'files', 'Explorer'),
     tab('search', 'search', 'Search'),
     tab('git', 'git-branch', count ? `Source control · ${count} changed ${count === 1 ? 'file' : 'files'}` : 'Source control',
-      count ? h('span', { class: 'ide-side-badge' }, count > 99 ? '99+' : count) : null));
+      count ? h('span', { class: 'ide-side-badge' }, count > 99 ? '99+' : count) : null),
+    tab('worktrees', 'worktree', 'Worktrees'));
 }
 
 function sessionTabs(store) {
@@ -944,6 +948,7 @@ function draw(root, store) {
   const ctx = filesCtx(store);
   // The tree's change colours and the panel's count come from git, read again when stale.
   if (view.info) refreshGit(ctx, rootPath(store, view.workspace));
+  if (view.info && view.side === 'worktrees') refreshWorktrees(ctx, rootPath(store, view.workspace));
 
   root.replaceChildren(
     h('div', { class: 'stack-lg dev' },
@@ -953,7 +958,9 @@ function draw(root, store) {
           ? sourceControl(ctx, workspacePicker(store), sideSwitcher(store), rootPath(store, view.workspace))
           : view.side === 'search'
             ? searchPanel(ctx, workspacePicker(store), sideSwitcher(store), rootPath(store, view.workspace))
-            : explorer(ctx, workspacePicker(store), sideSwitcher(store)),
+            : view.side === 'worktrees'
+              ? worktreesPanel(ctx, workspacePicker(store), sideSwitcher(store), rootPath(store, view.workspace))
+              : explorer(ctx, workspacePicker(store), sideSwitcher(store)),
         h('div', { class: hasOpenFiles() ? 'ide-main has-file' : 'ide-main' },
           editor(ctx),
           s ? terminal(store, s) : h('section', { class: 'card term' }, h('p', { class: 'muted small' }, 'Asking the runner for the open terminals…'))))));
