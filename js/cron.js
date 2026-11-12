@@ -11,8 +11,8 @@ import { openPositions } from './modules/positions.js';
 import { startDevSession, devPresets, devCommandOf } from './modules/dev.js';
 
 export const COLLECTION = 'cron';
-// tests: each flow's step test results, by flow id then step id.
-export const DEFAULTS = { flows: [], runs: [], tests: {} };
+// templates: flows saved as templates. tests: each flow's step test results, by flow id then step id.
+export const DEFAULTS = { flows: [], runs: [], templates: [], tests: {} };
 export const AI_TASK = 'task-cron';
 const MAX_RUNS = 60;
 const MINUTE = 60000;
@@ -414,15 +414,31 @@ export const TEMPLATES = [
   },
 ];
 
-// Templates write a data step's single source on the step itself, which reads shorter.
+// Built-in templates write a data step's single source on the step itself, which reads shorter. A saved template
+// keeps its steps whole, without ids, and its sources get new ids so two flows made from it share none.
 function templateStep(s) {
-  if (s.type !== 'gather' || s.sources) return { ...makeStep(s.type), ...s };
+  if (s.type !== 'gather') return { ...makeStep(s.type), ...s };
+  if (s.sources) return { ...makeStep(s.type), ...s, sources: s.sources.map((x) => ({ ...makeSource(x.source), ...x, id: uid() })) };
   const { type, source, append, ...fields } = s;
   return { ...makeStep(type), sources: [makeSource(source, fields)], append: Boolean(append) };
 }
 
 export function flowFromTemplate(t) {
-  return makeFlow({ name: t.name, schedule: { ...makeFlow().schedule, ...t.schedule },steps: t.steps.map(templateStep) });
+  return makeFlow({ name: t.name, schedule: { ...makeFlow().schedule, ...t.schedule }, projectId: t.projectId ?? '', steps: t.steps.map(templateStep) });
+}
+
+// A flow saved as a template: its schedule, project and steps. {{stepN}} still points at the right step, since the
+// steps keep their order.
+export function templateFromFlow(flow, { name, about }) {
+  return {
+    id: uid(),
+    name,
+    about,
+    schedule: structuredClone(flow.schedule),
+    projectId: flowProjectId(flow),
+    steps: structuredClone(flow.steps).map(({ id, ...step }) => step),
+    created: now(),
+  };
 }
 
 // --- Schedule ---

@@ -9,7 +9,7 @@ import { toast } from '../toast.js';
 import {
   COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, TEMPLATES, devRunOptions, devRunValue, devCommandPreview, daysOf,
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
-  makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
+  makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, templateFromFlow, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
   testStep, testsOf, isTesting, clearTests, varsTree, pathTo, remapStepRefs, parseData,
 } from '../cron.js';
 import { modelForTask } from './settings.js';
@@ -23,7 +23,7 @@ const TABS = [['flows', 'Flows'], ['runs', 'Runs'], ['templates', 'Templates']];
 const SUBTITLES = {
   flows: 'Recurring flows that gather data from the board, ask an AI model, and turn the answer into a task, a notification or work for claude in Dev.',
   runs: 'What every flow did, step by step.',
-  templates: 'Starting points. A template becomes a paused flow you can adjust before switching it on.',
+  templates: 'Starting points, and the flows you saved as templates. A template becomes a paused flow you can adjust before switching it on.',
 };
 
 const typeOf = (type) => STEP_TYPES.find(([t]) => t === type) ?? [type, type, 'info', ''];
@@ -183,10 +183,48 @@ function openNewFlow(store) {
 
 // --- Templates tab ---
 
-function templateCard(store, { name, about, schedule, steps, blank = false }) {
+// Saves the flow as a template of the Templates tab, under a name and a short description.
+function saveAsTemplate(store, flow) {
+  const dialog = openDialog({
+    title: 'Save as template',
+    body: h('form', {
+      class: 'stack',
+      onsubmit: (e) => {
+        e.preventDefault();
+        const data = new FormData(e.currentTarget);
+        const name = String(data.get('name') ?? '').trim() || flow.name;
+        const t = templateFromFlow(flow, { name, about: String(data.get('about') ?? '').trim() });
+        store.update(COLLECTION, (d) => {
+          d.templates ??= [];
+          d.templates.unshift(t);
+        });
+        dialog.close();
+        toast(`Saved “${name}” as a template`);
+      },
+    },
+      field('Name', h('input', { name: 'name', value: flow.name, autocomplete: 'off', required: true })),
+      field('Description (optional)', h('textarea', { name: 'about', rows: 3, placeholder: 'What the flow does' })),
+      h('p', { class: 'muted small' }, 'The template keeps the schedule, the project and every step. A flow made from it starts paused.'),
+      h('div', { class: 'row' }, h('button', { type: 'submit', class: 'primary' }, icon('bookmark'), 'Save template'))),
+  });
+}
+
+function removeTemplate(store, t) {
+  const before = structuredClone(store.get(COLLECTION).templates ?? []);
+  store.update(COLLECTION, (d) => {
+    d.templates = (d.templates ?? []).filter((x) => x.id !== t.id);
+  });
+  toast(`Removed the template “${t.name}”`, { undo: () => store.update(COLLECTION, (d) => { d.templates = before; }) });
+}
+
+function templateCard(store, { name, about, schedule, steps, projectId = '', blank = false }, { remove = null } = {}) {
+  const project = projectId ? store.get('projects').projects.find((p) => p.id === projectId) : null;
   return h('article', { class: 'card stack cron-template-card' },
-    h('h3', null, name),
-    h('p', { class: 'muted small grow' }, about),
+    h('div', { class: 'row between' },
+      h('h3', null, name),
+      remove ? h('button', { type: 'button', class: 'icon-btn', title: 'Remove template', 'aria-label': `Remove the template “${name}”`, onclick: remove }, icon('trash')) : null),
+    h('p', { class: 'muted small grow' }, about || 'Saved from a flow.'),
+    project ? h('span', { class: 'muted small cron-flow-meta' }, projectIcon(project), h('span', { class: 'cron-flow-project' }, project.name)) : null,
     h('div', { class: 'cron-template-steps', 'aria-label': 'Steps' },
       h('span', { class: 'flow-node-icon kind-trigger', title: scheduleLabel(schedule) }, icon('clock')),
       steps.map((s) => {
@@ -199,7 +237,8 @@ function templateCard(store, { name, about, schedule, steps, blank = false }) {
       class: 'btn-small primary',
       onclick: () => {
         view.tab = 'flows';
-        const flow = blank ? makeFlow({ steps: [makeStep('ai')] }) : flowFromTemplate({ name, schedule, steps });
+        // A template's project that was removed since is dropped.
+        const flow = blank ? makeFlow({ steps: [makeStep('ai')] }) : flowFromTemplate({ name, schedule, steps, projectId: project ? projectId : '' });
         // A flow made while the list shows one project starts in it.
         if (view.project && view.project !== NO_PROJECT) flow.projectId = view.project;
         addFlow(store, flow);
@@ -209,7 +248,16 @@ function templateCard(store, { name, about, schedule, steps, blank = false }) {
 
 function templatesTab(store) {
   const blank = { name: 'Blank flow', about: 'One AI step to start with. Add data, conditions and outputs around it.', schedule: makeFlow().schedule, steps: [{ type: 'ai' }], blank: true };
-  return h('div', { class: 'cron-template-grid' }, [...TEMPLATES, blank].map((t) => templateCard(store, t)));
+  const builtIn = h('div', { class: 'cron-template-grid' }, [...TEMPLATES, blank].map((t) => templateCard(store, t)));
+  const saved = store.get(COLLECTION).templates ?? [];
+  if (!saved.length) return builtIn;
+  return h('div', { class: 'stack-lg' },
+    h('section', { class: 'stack' },
+      h('h3', null, 'Your templates'),
+      h('div', { class: 'cron-template-grid' }, saved.map((t) => templateCard(store, t, { remove: () => removeTemplate(store, t) })))),
+    h('section', { class: 'stack' },
+      h('h3', null, 'Starting points'),
+      builtIn));
 }
 
 // --- Runs tab ---
@@ -895,6 +943,7 @@ function editor(store, flow) {
             onclick: () => startRun(store, flow, { dry: true }),
           }, icon('filter'), 'Test run'),
           h('button', { type: 'button', class: 'btn-small primary', disabled: busy || !flow.steps.length, onclick: () => startRun(store, flow) }, icon('play'), busy ? 'Running…' : 'Run now'),
+          h('button', { type: 'button', class: 'icon-btn', title: 'Save as template', 'aria-label': 'Save as template', disabled: !flow.steps.length, onclick: () => saveAsTemplate(store, flow) }, icon('bookmark')),
           h('button', { type: 'button', class: 'icon-btn', title: 'Duplicate flow', 'aria-label': 'Duplicate flow', onclick: () => duplicateFlow(store, flow) }, icon('copy')),
           h('button', { type: 'button', class: 'icon-btn', title: 'Delete flow', 'aria-label': 'Delete flow', onclick: () => deleteFlow(store, flow) }, icon('trash')))),
       h('div', { class: 'row cron-fields' },
