@@ -39,7 +39,7 @@ export function watchRunners(store, onChange) {
   listeners.add(onChange);
   if (watching) return;
   watching = true;
-  read(store);
+  read(store).then(() => findFolder(store));
   setInterval(() => document.hidden || read(store), READ_MS);
   document.addEventListener('visibilitychange', () => document.hidden || read(store));
 }
@@ -75,3 +75,17 @@ export async function runJob(id, params) {
 export const workerStatus = () => workerCall('GET', '/status', null, 3000).catch(() => null);
 
 export const setWorkerFolder = (path) => workerCall('POST', '/config', { dataFolder: path });
+
+// Asks the runners to find this tab's folder by its name and folderId. { ok, folder } when exactly one matched.
+export const findWorkerFolder = (store) =>
+  workerCall('POST', '/config/find', { name: store.folderName, folderId: store.get('settings').folderId ?? '' }, 10000);
+
+// When the runners answer but were never told where the data folder is, they look for this tab's folder themselves,
+// so a fresh `bun start` works without a trip to Settings → Runners.
+async function findFolder(store) {
+  if (runnersOnline()) return;
+  const status = await workerStatus();
+  if (!status || status.folder?.path || status.folder?.from) return;
+  const answer = await findWorkerFolder(store).catch(() => null);
+  if (answer?.ok) setTimeout(() => read(store), 2000);
+}
