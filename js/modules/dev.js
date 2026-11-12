@@ -947,6 +947,7 @@ function draw(root, store) {
         h('div', { class: hasOpenFiles() ? 'ide-main has-file' : 'ide-main' },
           editor(ctx),
           s ? terminal(store, s) : h('section', { class: 'card term' }, h('p', { class: 'muted small' }, 'Asking the runner for the open terminals…'))))));
+  requestAnimationFrame(fillWindow);
   if (!s) return;
   requestAnimationFrame(() => {
     if (focused) s.el.out.focus({ preventScroll: true });
@@ -954,6 +955,18 @@ function draw(root, store) {
     paint(s);
   });
 }
+
+// The page fills the window below where it starts, which moves with the top bar's wrapping and the banners above it.
+function fillWindow() {
+  const dev = document.querySelector('.dev');
+  if (!dev) return;
+  // offsetTop, not the bounding box: the entrance animation moves the page while it plays.
+  let top = 0;
+  for (let el = dev; el; el = el.offsetParent) top += el.offsetTop;
+  const below = parseFloat(getComputedStyle(dev.parentElement).paddingBottom) || 0;
+  dev.style.setProperty('--dev-top', `${Math.round(top + below)}px`);
+}
+addEventListener('resize', fillWindow);
 
 // The system theme changed (with the board following it): draw the terminals in the new colours.
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
