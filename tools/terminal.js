@@ -342,14 +342,18 @@ async function removeWorktree(req, res, cors) {
   if (!WORKTREE_NAME.test(name)) return res.writeHead(400, cors).end('No worktree name.');
   const reply = (data) => res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(data));
   const id = String(body.session ?? '');
+  // Without a folder, the repo is the one the session's first command started in.
+  let cwd = String(body.cwd ?? '');
   if (SESSION_ID.test(id)) {
     const s = await sessionOf(id);
     stopJob(s.run);
     for (let waited = 0; s.run && waited < KILL_AFTER_MS + 2000; waited += 100) await new Promise((r) => setTimeout(r, 100));
+    cwd ||= s.events.find((e) => e.t === 'start')?.cwd ?? '';
   }
+  if (!cwd) return reply({ missing: true });
   let dir;
   try {
-    dir = await folderOf(String(body.cwd ?? ''));
+    dir = await folderOf(cwd);
   } catch {
     return reply({ missing: true });
   }
