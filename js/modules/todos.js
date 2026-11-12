@@ -9,8 +9,8 @@ import { openDialog } from '../modal.js';
 import { issuesOf, prsOf, moveToReview } from '../task-links.js';
 import { startClaudeSession, openSession, runnerOf } from './dev.js';
 import { sessionStatus } from '../terminal.js';
-import { imagesOf, imageDrop, imageStrip, imagePathsFor } from '../task-images.js';
-import { dragsFiles } from '../images.js';
+import { imagesOf, imageDrop, imageStrip, imagePathsFor, addImages } from '../task-images.js';
+import { dragsFiles, imageFiles } from '../images.js';
 import { ask, parseJson } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
@@ -113,11 +113,15 @@ function categoriesFor(store, projectId) {
 }
 // "buy milk #home" files the item under project "home" (created if missing).
 // Extra lines from a multi-line paste arrive as the description.
+// Images pasted or dropped on the add field go to the task it adds.
 function addItem(store, raw, description = '') {
   let text = raw.trim();
   const tag = text.match(/(?:^|\s)#([\w-]+)/);
   if (tag) text = text.replace(tag[0], ' ').replace(/\s+/g, ' ').trim();
-  if (!text) return;
+  if (!text) {
+    if (pending.length) toast('Give the task a title, then add it with its images');
+    return;
+  }
 
   let projectId = isProjectFilter(view.filter) ? view.filter : null;
   if (tag) {
@@ -125,12 +129,64 @@ function addItem(store, raw, description = '') {
       ?? createProject(store, tag[1]).project;
     projectId = project.id;
   }
-  store.update(COLLECTION, (d) =>
-    d.items.push(makeTask({ text, description, projectId, due: view.filter === 'today' ? todayISO() : '' })));
+  const task = makeTask({ text, description, projectId, due: view.filter === 'today' ? todayISO() : '' });
+  store.update(COLLECTION, (d) => d.items.push(task));
+  if (pending.length) {
+    addImages(store, task.id, pending.map((p) => p.file));
+    clearPending();
+  }
+}
+
+// --- Images waiting on the add field, shown under it until the task is added ---
+
+const pending = []; // { file, url }
+let pendingStrip = null;
+
+function clearPending() {
+  for (const p of pending.splice(0)) URL.revokeObjectURL(p.url);
+  drawPending();
+}
+
+function takePending(files) {
+  pending.push(...files.map((file) => ({ file, url: URL.createObjectURL(file) })));
+  drawPending();
+}
+
+// Drawn in place, since the page waits to rebuild while the add field holds typed text.
+function drawPending() {
+  if (!pendingStrip) return;
+  pendingStrip.hidden = !pending.length;
+  pendingStrip.replaceChildren(...pending.map((p) =>
+    h('div', { class: 'task-image' },
+      h('span', { class: 'task-image-open', title: p.file.name || 'Pasted image' }, h('img', { src: p.url, alt: p.file.name || 'Pasted image' })),
+      h('button', {
+        type: 'button',
+        class: 'icon-btn task-image-remove',
+        title: 'Remove the image',
+        'aria-label': 'Remove the image',
+        onclick: () => {
+          pending.splice(pending.indexOf(p), 1);
+          URL.revokeObjectURL(p.url);
+          drawPending();
+        },
+      }, icon('x')))),
+    pending.length ? h('span', { class: 'muted small' }, pending.length === 1 ? 'Added with the task' : `${pending.length} images, added with the task`) : '');
+}
+
+function pendingImagesStrip() {
+  pendingStrip = h('div', { class: 'task-images quick-images' });
+  drawPending();
+  return pendingStrip;
 }
 
 // Pasting several lines: first non-empty line is the title, the rest is the description.
 function pasteAsTodo(store, e) {
+  const files = imageFiles(e.clipboardData);
+  if (files.length) {
+    e.preventDefault();
+    takePending(files);
+    return;
+  }
   const raw = e.clipboardData?.getData('text/plain') ?? '';
   if (!/\r?\n/.test(raw.trim())) return; // single line: let the browser paste normally
   e.preventDefault();
@@ -1461,13 +1517,22 @@ function draw(root, store) {
         },
           h('input', {
             name: 'todo',
-            placeholder: 'Add a task… #project to file it, paste several lines for a description',
+            placeholder: 'Add a task… #project to file it, paste several lines for a description, or an image',
             'aria-label': 'New todo',
             autocomplete: 'off',
             'data-autofocus': true,
             onpaste: (e) => pasteAsTodo(store, e),
+            ondragover: (e) => dragsFiles(e) && e.preventDefault(),
+            ondrop: (e) => {
+              if (!dragsFiles(e)) return;
+              e.preventDefault();
+              const files = imageFiles(e.dataTransfer);
+              if (files.length) takePending(files);
+              else toast('Only PNG, JPEG, GIF and WebP images can be added');
+            },
           }),
-          h('button', { class: 'primary', type: 'submit' }, 'Add')),
+          h('button', { class: 'primary', type: 'submit' }, 'Add'),
+          pendingImagesStrip()),
 
         h('div', { class: ['todo-table', view.layout === 'table' ? '' : 'no-columns', showDue ? '' : 'no-due'].filter(Boolean).join(' ') },
           h('div', { class: 'todo-row todo-head' },
