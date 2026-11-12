@@ -24,6 +24,9 @@ export const DEFAULTS = {
   github: { repos: {} },
   webstats: { bing: {} },
   fx: { days: {} },
+  cron: { flows: [], runs: [], templates: [], tests: {} },
+  dev: { history: [], runner: '', presets: [] },
+  pools: { cache: {} },
 };
 
 export function createNodeStore(dir, { log } = {}) {

@@ -14,6 +14,7 @@ import { chainsCard } from './settings-chains.js';
 import { contractsCard } from './settings-contracts.js';
 import { devEnvironmentCard } from './settings-dev.js';
 import { runnersCard } from './settings-runners.js';
+import { modelForTask } from '../models.js';
 import { logo } from './positions.js';
 
 const COLLECTION = 'settings';
@@ -81,12 +82,8 @@ const SECTION_GROUPS = [
 ];
 const PAGES = SECTION_GROUPS.flatMap((g) => g.items.map(([key]) => key));
 
-// Model used by a task: its own pin, else the default model. Empty string when neither is set.
-export function modelForTask(store, taskId) {
-  const models = store.get(COLLECTION).models;
-  const task = models.tasks.find((t) => t.id === taskId);
-  return task?.model || models.default || '';
-}
+export { modelForTask };
+
 
 // UI state: current section, last test result per service, whether a key is shown, and the model list.
 const view = { section: 'github', results: {}, reveal: {}, catalog: { status: 'idle' } };

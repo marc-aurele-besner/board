@@ -11,10 +11,11 @@ import {
   COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, TEMPLATES, devRunOptions, devRunValue, devCommandPreview, daysOf,
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, templateFromFlow, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
-  testStep, testsOf, isTesting, clearTests, varsTree, pathTo, remapStepRefs, parseData, projectVars, runState, devWaits, DEV_WAIT_MINUTES,
+  testStep, testsOf, isTesting, clearTests, useDevStarter, varsTree, pathTo, remapStepRefs, parseData, projectVars, runState, devWaits, DEV_WAIT_MINUTES,
 } from '../cron.js';
-import { modelForTask } from './settings.js';
-import { openSession, runnerOf, liveSession, onSessionPaint, exitText, terminalView, terminalBackground } from './dev.js';
+import { modelForTask } from '../models.js';
+import { openSession, runnerOf, liveSession, onSessionPaint, exitText, terminalView, terminalBackground, startDevSession } from './dev.js';
+import { runJob } from '../runners.js';
 import { attachSession, sessionStatus } from '../terminal.js';
 import { createTerminal } from '../vt.js';
 import { hasProfileSources } from '../profile.js';
@@ -107,15 +108,26 @@ function setEnabled(store, flow, enabled) {
   });
 }
 
+// A test run of a step here opens its Dev terminal on this page.
+useDevStarter(startDevSession);
+
+// Run now asks the runners (tools/jobs/cron.js), so the run is the same as a scheduled one and goes on when this tab
+// closes; it shows in Runs as it goes, through cron.json. A test run (dry) runs here, like Test step, so its
+// terminals and data show at once.
 function startRun(store, flow, { dry = false } = {}) {
   if (isRunning(flow.id)) return;
+  if (!dry) {
+    runJob('cron', { flowId: flow.id })
+      .then(() => toast(`“${flow.name}” started in the runners. It shows in Runs as it goes.`))
+      .catch((err) => toast(err.message));
+    return;
+  }
   const run = runFlow(store, flow.id, { manual: true, dry });
   store.refresh();
-  const what = dry ? 'Test run of' : '';
   run.then((r) => toast(
-    r?.status === 'ok' ? `${what} “${flow.name}” finished`.trim()
-      : r?.status === 'stopped' ? `${what} “${flow.name}” stopped early`.trim()
-        : `${what} “${flow.name}” failed: ${r?.error ?? 'unknown error'}`.trim(),
+    r?.status === 'ok' ? `Test run of “${flow.name}” finished`
+      : r?.status === 'stopped' ? `Test run of “${flow.name}” stopped early`
+        : `Test run of “${flow.name}” failed: ${r?.error ?? 'unknown error'}`,
   ));
 }
 
@@ -645,7 +657,7 @@ function triggerForm(store, flow) {
     hint,
     h('p', { class: 'muted small' },
       flow.enabled ? `Next run: ${timeOf(nextRun(flow)?.toISOString())}. ` : 'The flow is paused. ',
-      'Flows run only while the board is open; a run missed while it was closed happens once when you open it.'));
+      'Flows run in the runners, whether or not the board is open, while bun start runs. A run missed while they were stopped (or the Mac slept) happens once when they start again.'));
 }
 
 const SOURCE_ABOUT = {

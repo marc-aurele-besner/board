@@ -8,7 +8,6 @@ import { modules } from './modules/index.js';
 import { migrateLegacyProjects, migrateProjectShape } from './modules/projects.js';
 import { bell, COLLECTION as NOTIFICATIONS, DEFAULTS as NOTIFICATION_DEFAULTS } from './notifications.js';
 import { openPalette } from './palette.js';
-import { startBackground } from './background.js';
 import { watchRunners, runnersOnline, runnersKnown } from './runners.js';
 import { GOOGLE, GOOGLE_DEFAULTS, useGoogleStore } from './google.js';
 import { CALENDAR, CALENDAR_DEFAULTS } from './gcal.js';
@@ -246,7 +245,6 @@ async function open(handle) {
   if (!sample) {
     // The runners report the folderId they read, so Settings can tell when they write to another folder.
     if (!store.get('settings').folderId) store.update('settings', (d) => { d.folderId = uid(); });
-    startBackground(store);
     watchRunners(store, onRunners);
   }
   // Another tab or browser may save to the same folder: bring its changes in while this one is in view.

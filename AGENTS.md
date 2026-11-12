@@ -56,7 +56,6 @@ js/google.js          every Google sign-in, kept in google.json; the sign-in pop
 js/google-core.js     Google tokens without the DOM: live access tokens, googleFetch; only the runners renew a token
 js/gmail.js           the Inbox's Gmail reads: one sign-in per account, its email list, and one email's body
 js/gcal.js            Calendar's Google reads: one sign-in per account, its calendar list; events read by the runners into calendar.json
-js/background.js      the Cron timer, while the board is open; the rest runs in the runners
 js/runner-jobs.js     the jobs the runners do, with their labels and default intervals (shared by the worker and Settings)
 js/runners.js         the board's side of the runners: their heartbeat in runners.json, Run now, their data folder's path
 js/modules/settings-runners.js  Settings → Runners: the worker's status and folder, and each job's switch, interval and Run now
@@ -66,6 +65,9 @@ js/task-images.js     a task's images: kept in the data folder, shown on the tas
 js/task-worktrees.js  the worktrees Dev sessions made for tasks; removed through the runner once their tasks are done
 js/modules/dev-worktrees.js  Dev's Worktrees panel: the repo's worktrees, whether each is in use, and removing them
 js/dev-usage.js       what a task's claude session used (model, effort, tokens, cost), kept in usage.json `dev`
+js/dev-core.js        Dev without the DOM: runner address, presets, a project's Dev command, starting a terminal on the runner
+js/models.js          the model an AI task uses (Settings → Models & tasks)
+js/defi/positions-read.js  open Liquidity Pools positions as of the last saved read, for Cron
 js/capture.js         parseTask(), parseMoney() and makeTask(): one place for a task's shape
 js/palette.js         the Cmd/Ctrl+K search palette: jump, or capture a task, a Money entry or a recipe link
 js/search.js          what the full search page (modules/search.js, hidden) looks through, grouped by kind
@@ -89,6 +91,7 @@ tools/jobs/monitoring.js  deadlines, budgets, site checks, status pages and the 
 tools/jobs/telegram.js  long-polls the bot and turns messages into tasks (a `loop` job: it starts again at once)
 tools/jobs/github.js, webstats.js, fx.js  GitHub counts (github.json), Bing data (webstats.json), exchange rates (fx.json)
 tools/jobs/dev-usage.js, worktrees.js  what claude sessions used; removing done tasks' worktrees through the command runner
+tools/jobs/cron.js    starts due Cron flows every minute, and one flow on Run now
 tools/jobs/google.js  renews Google access tokens; a tab that finds one expired asks it through POST /run/google
 tools/check-imports.js  loads every worker module under plain Node, to catch a missing import or a DOM call at load time
 tools/check-merge.js  the worker and a tab change two fields of one file; both must survive
