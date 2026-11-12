@@ -1,3 +1,4 @@
+// @ts-check
 // Cron flows: a schedule that starts a chain of steps (gather data → AI → task or notification).
 // Each step gets the previous step's output as {{input}}. The runners (tools/jobs/cron.js) run due flows, whether or not the board is open.
 import { uid, now, todayISO, statusOf } from './ui.js';
@@ -13,6 +14,30 @@ import { sessionStatus, sessionOutcome, exitClaude } from './terminal.js';
 import { forgetWorktree } from './task-worktrees.js';
 import { findGithubLinks, plainOutput, addTaskLinks, prsOf } from './task-links.js';
 import { buildProfile, profileOf, hasProfileSources } from './profile.js';
+/** @import { DataStore, Store, CronStep, CronSource, CronFlow, CronSchedule, CronTemplate, CronRun, CronRunStep, CronRunCurrent, CronTest, CronPr, Project, Task, DevPreset, SiteLogEntry, TaskLink } from '../types/data' */
+// The variables a step's templates read; $data holds what a name reads into with a path.
+/** @typedef {{ [name: string]: unknown, $data?: Record<string, unknown> }} Vars */
+// A step's result: what a test saves, with the variables the step saw.
+/** @typedef {CronTest & { vars: Vars }} StepResult */
+// The Dev terminal a step started (ctx.started).
+/** @typedef {Omit<CronRunCurrent, 'stepId'>} StartedInfo */
+/**
+ * What passes between the steps of a run or a test (see runStep()).
+ * @typedef {object} RunCtx
+ * @property {StepResult[]} results
+ * @property {string} note
+ * @property {boolean} [dry]
+ * @property {boolean} [live]
+ * @property {string} [runId]
+ * @property {boolean} [nothing]
+ * @property {boolean} [stop]
+ * @property {unknown} [data]
+ * @property {string} [from]
+ * @property {Task | null} [task]
+ * @property {(info: StartedInfo) => void} [started]
+ * @property {() => void} [beat]
+ * @property {DataStore} [store]
+ */
 
 export const COLLECTION = 'cron';
 // templates: flows saved as templates. tests: each flow's step test results, by flow id then step id.
@@ -35,35 +60,46 @@ export const STEP_TYPES = [
 // What a "Run in Dev" step starts: the project's Dev command ('claude'), a preset from Settings → Dev environment
 // ('preset', step.preset), a Dev command typed on the step ('custom', step.devCommand), each with the Dev prompt,
 // or a plain shell command with no prompt ('command').
+/** @param {DataStore} store */
 export function devRunOptions(store) {
   return [
     ['claude', 'Project’s Dev command'],
-    ...devPresets(store).map((p) => [`preset:${p.id}`, `Preset: ${p.name}`]),
+    ...devPresets(store).map((/** @type {DevPreset} */ p) => [`preset:${p.id}`, `Preset: ${p.name}`]),
     ['custom', 'Custom Dev command'],
     ['command', 'Shell command (no prompt)'],
   ];
 }
+/** @param {CronStep} step */
 export const devRunValue = (step) => (step.mode === 'preset' ? `preset:${step.preset}` : step.mode || 'claude');
 
 // The Dev command a step starts with its prompt, or '' for the project's own.
+/**
+ * @param {DataStore} store
+ * @param {CronStep} step
+ */
 function stepDevCommand(store, step) {
   if (step.mode === 'custom') {
     if (!String(step.devCommand ?? '').trim()) throw new Error('Enter the Dev command to run.');
     return step.devCommand;
   }
   if (step.mode !== 'preset') return '';
-  const preset = devPresets(store).find((p) => p.id === step.preset);
+  const preset = devPresets(store).find((/** @type {DevPreset} */ p) => p.id === step.preset);
   if (!preset?.command?.trim()) throw new Error('The preset of this step was removed. Choose another in Settings → Dev environment.');
   return preset.command;
 }
 
 // The command a Dev step runs before its prompt, to show it in the editor.
+/**
+ * @param {DataStore} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ */
 export function devCommandPreview(store, flow, step) {
   if (step.mode === 'command') return '';
   try {
     return stepDevCommand(store, step) || devCommandOf(store, store.get('projects').projects.find((p) => p.id === withFlowProject(flow, step).projectId));
   } catch (err) {
-    return err.message;
+    return /** @type {Error} */ (err).message;
   }
 }
 
@@ -75,6 +111,7 @@ export const PROFILE_EDITED = [
 ];
 
 // Steps saved before the choice had keepEdited, which stopped the run; they now update the profile and keep the edits.
+/** @param {CronStep} step */
 export const profileEditedMode = (step) => (PROFILE_EDITED.some(([k]) => k === step.onEdited) ? step.onEdited : step.keepEdited === false ? 'replace' : 'merge');
 
 export const STOP_WHEN = [
@@ -85,6 +122,7 @@ export const STOP_WHEN = [
 ];
 
 // What a source gives when it finds nothing. Later steps still get it, and "Stop if" can end the run on it.
+/** @type {Record<string, string>} */
 const NOTHING = {
   open: 'No open tasks.',
   due: 'Nothing is due within 7 days.',
@@ -130,9 +168,15 @@ export const SOURCES = [
   ['text', 'Fixed text', 'align-left'],
 ];
 
+/**
+ * @param {string} [source]
+ * @param {Partial<CronSource>} [fields]
+ * @returns {CronSource}
+ */
 export const makeSource = (source = 'open', fields = {}) => ({ id: uid(), source, label: '', projectId: '', url: '', text: '', count: 5, follow: 3, flowId: '', ...fields });
 
 // A data step's sources. Steps saved before a step could hold several kept one source in the step itself.
+/** @param {CronStep} step */
 export function sourcesOf(step) {
   if (Array.isArray(step.sources)) return step.sources;
   return [makeSource(step.source || 'open', { id: step.id, projectId: step.projectId ?? '', url: step.url ?? '', text: step.text ?? '', count: step.count ?? 5 })];
@@ -140,8 +184,10 @@ export function sourcesOf(step) {
 
 // The flow's project: data, task and Dev steps use it unless they choose another. A flow saved before flows had a
 // project takes the one project its steps share, if they share one.
+/** @param {CronFlow | null | undefined} flow */
 export function flowProjectId(flow) {
   if (typeof flow?.projectId === 'string') return flow.projectId;
+  /** @type {Set<string>} */
   const ids = new Set();
   for (const s of flow?.steps ?? []) {
     if (s.type === 'gather') sourcesOf(s).forEach((x) => x.projectId && ids.add(x.projectId));
@@ -151,9 +197,18 @@ export function flowProjectId(flow) {
 }
 
 // A step or source with its project filled in from the flow when it has none of its own.
+/**
+ * @template {{ projectId?: string }} T
+ * @param {CronFlow} flow
+ * @param {T} item
+ */
 export const withFlowProject = (flow, item) => ({ ...item, projectId: item.projectId || flowProjectId(flow) });
 
 // The heading a source's data gets when it sits next to other data: its own label, else what it reads.
+/**
+ * @param {DataStore} store
+ * @param {CronSource} src
+ */
 export function sourceLabel(store, src) {
   if (String(src.label ?? '').trim()) return src.label.trim();
   const base = SOURCES.find(([k]) => k === src.source)?.[1] ?? src.source;
@@ -171,19 +226,31 @@ const PAGE_CHARS = 12000;
 const LINKED_CHARS = 4000;
 export const MAX_FOLLOW = 10;
 
+/**
+ * @param {string} text
+ * @param {number} max
+ */
 const cutPage = (text, max) => (text.length > max ? `${text.slice(0, max)}\n\n[The rest of the page was cut.]` : text);
 // Images the reader still leaves in, as ![alt](src) or a link around one, only take room.
+/** @param {string} text */
 const dropImages = (text) => text.replace(/\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)/g, '').replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/\n{3,}/g, '\n\n');
 
 // The pages of the same site a page links to, best first: a page under this one (a post under /blog) before one
 // elsewhere, a link with a title or a summary before a one-word menu entry, and an article before a section.
 // Files, sign-in and legal pages are left out.
+/** @typedef {{ url: string, text: string, score: number, at: number }} PageLink */
+/**
+ * @param {string} markdown
+ * @param {string} pageUrl
+ */
 export function pageLinks(markdown, pageUrl) {
   let base;
   try { base = new URL(pageUrl); } catch { return []; }
   const own = base.pathname.replace(/\/+$/, '');
   const skip = /\.(png|jpe?g|gif|svg|webp|ico|pdf|zip|xml|json|css|js|mp4|mp3)$|\/(login|log-in|signin|sign-in|signup|sign-up|register|account|cart|checkout|privacy|terms|cookies?|legal)(\/|$)|\/(cdn-cgi|wp-admin|wp-json)\//i;
+  /** @param {URL} u */
   const host = (u) => u.hostname.replace(/^www\./, '');
+  /** @type {Map<string, PageLink>} */
   const byKey = new Map();
   for (const [, text, href] of markdown.matchAll(/\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
     let u;
@@ -205,9 +272,12 @@ export function pageLinks(markdown, pageUrl) {
   const ranked = [...byKey.values()].sort((a, b) => b.score - a.score || a.at - b.at);
   // Taken in turns across the site's sections (a guide, a combo, an emoji…), so a home page's few reads cover
   // more than its first list of cards. Under one section, as a blog's posts are, the order stays as ranked.
+  /** @param {PageLink} l */
   const section = (l) => new URL(l.url).pathname.slice(own.length).split('/').filter(Boolean)[0] ?? '';
+  /** @type {Map<string, PageLink[]>} */
   const groups = new Map();
   for (const l of ranked) groups.set(section(l), [...(groups.get(section(l)) ?? []), l]);
+  /** @type {PageLink[]} */
   const spread = [];
   for (let i = 0; spread.length < ranked.length; i++) for (const g of groups.values()) if (g[i]) spread.push(g[i]);
   return spread;
@@ -215,6 +285,10 @@ export function pageLinks(markdown, pageUrl) {
 
 export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+/**
+ * @param {string} type
+ * @returns {CronStep}
+ */
 export function makeStep(type) {
   const base = { id: uid(), type };
   if (type === 'gather') return { ...base, sources: [makeSource()], append: false };
@@ -226,6 +300,10 @@ export function makeStep(type) {
   return { ...base, text: '{{flow}}: {{input}}' };
 }
 
+/**
+ * @param {Partial<CronFlow>} [fields]
+ * @returns {CronFlow}
+ */
 export function makeFlow(fields = {}) {
   return {
     id: uid(),
@@ -441,6 +519,10 @@ export const TEMPLATES = [
 
 // Built-in templates write a data step's single source on the step itself, which reads shorter. A saved template
 // keeps its steps whole, without ids, and its sources get new ids so two flows made from it share none.
+/**
+ * @param {Omit<CronStep, 'id'>} s
+ * @returns {CronStep}
+ */
 function templateStep(s) {
   if (s.type !== 'gather') return { ...makeStep(s.type), ...s };
   if (s.sources) return { ...makeStep(s.type), ...s, sources: s.sources.map((x) => ({ ...makeSource(x.source), ...x, id: uid() })) };
@@ -448,12 +530,19 @@ function templateStep(s) {
   return { ...makeStep(type), sources: [makeSource(source, fields)], append: Boolean(append) };
 }
 
+// A built-in template has no id or project.
+/** @param {Pick<CronTemplate, 'name' | 'schedule' | 'steps'> & { projectId?: string }} t */
 export function flowFromTemplate(t) {
   return makeFlow({ name: t.name, schedule: { ...makeFlow().schedule, ...t.schedule }, projectId: t.projectId ?? '', steps: t.steps.map(templateStep) });
 }
 
 // A flow saved as a template: its schedule, project and steps. {{stepN}} still points at the right step, since the
 // steps keep their order.
+/**
+ * @param {CronFlow} flow
+ * @param {{ name: string, about: string }} fields
+ * @returns {CronTemplate}
+ */
 export function templateFromFlow(flow, { name, about }) {
   return {
     id: uid(),
@@ -468,6 +557,10 @@ export function templateFromFlow(flow, { name, about }) {
 
 // --- Schedule ---
 
+/**
+ * @param {Date} d
+ * @param {string | undefined} time
+ */
 const atTime = (d, time) => {
   const [hh, mm] = String(time || '00:00').split(':').map(Number);
   const x = new Date(d);
@@ -487,11 +580,21 @@ export const REPEATS = [
 export const SHORT_DAYS = WEEKDAYS.map((d) => d.slice(0, 3));
 export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 export const SHORT_MONTHS = MONTHS.map((m) => m.slice(0, 3));
+/** @param {number} d */
 const validDay = (d) => Number.isInteger(d) && d >= 0 && d <= 6;
+/**
+ * @param {unknown} t
+ * @returns {t is string}
+ */
 export const validTime = (t) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(t ?? ''));
+/**
+ * @template {string | number} T
+ * @param {T[]} list
+ */
 const uniqueSorted = (list) => [...new Set(list)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
 // The weekdays a slot may fall on, or null for every day. A bad value falls back, so the day search always ends.
+/** @param {CronSchedule} s */
 export function daysOf(s) {
   if (s.every === 'weekly') return [validDay(Number(s.weekday)) ? Number(s.weekday) : 1];
   if (s.every !== 'days') return null;
@@ -500,12 +603,14 @@ export function daysOf(s) {
 }
 
 // The times of day a slot falls at. Flows saved with a single `time` keep it.
+/** @param {CronSchedule} s */
 export function timesOf(s) {
   const list = (Array.isArray(s.times) && s.times.length ? s.times : [s.time]).filter(validTime);
   return list.length ? uniqueSorted(list) : ['08:00'];
 }
 
 // The days of the month a monthly flow runs on. Flows saved with a single `day` keep it.
+/** @param {CronSchedule} s */
 export function monthDaysOf(s) {
   const list = (Array.isArray(s.monthDays) && s.monthDays.length ? s.monthDays : [s.day])
     .map(Number).filter((d) => Number.isInteger(d) && d >= 1 && d <= 31);
@@ -513,6 +618,7 @@ export function monthDaysOf(s) {
 }
 
 // The months (0 to 11) a monthly flow runs in. Empty means all of them.
+/** @param {CronSchedule} s */
 export function monthsOf(s) {
   const list = (Array.isArray(s.months) ? s.months : []).map(Number).filter((m) => Number.isInteger(m) && m >= 0 && m <= 11);
   return list.length ? uniqueSorted(list) : MONTHS.map((_, i) => i);
@@ -520,6 +626,8 @@ export function monthsOf(s) {
 
 // --- Cron expressions: minute, hour, day of the month, month, day of the week ---
 
+/** @typedef {{ name: string, min: number, max: number, names?: string[] }} CronField */
+/** @type {CronField[]} */
 const CRON_FIELDS = [
   { name: 'minute', min: 0, max: 59 },
   { name: 'hour', min: 0, max: 23 },
@@ -527,13 +635,20 @@ const CRON_FIELDS = [
   { name: 'month', min: 1, max: 12, names: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'] },
   { name: 'day of the week', min: 0, max: 7, names: ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] },
 ];
+/** @type {Record<string, string>} */
 const CRON_MACROS = {
   '@yearly': '0 0 1 1 *', '@annually': '0 0 1 1 *', '@monthly': '0 0 1 * *', '@weekly': '0 0 * * 0',
   '@daily': '0 0 * * *', '@midnight': '0 0 * * *', '@hourly': '0 * * * *',
 };
 
+/**
+ * @param {string} text
+ * @param {CronField} field
+ */
 function cronField(text, { name, min, max, names }) {
+  /** @type {Set<number>} */
   const values = new Set();
+  /** @param {string} v */
   const value = (v) => {
     const i = names ? names.indexOf(v) : -1;
     const n = i >= 0 ? i + min : /^\d+$/.test(v) ? Number(v) : NaN;
@@ -559,6 +674,7 @@ function cronField(text, { name, min, max, names }) {
 }
 
 // Throws with a readable message when the expression is not valid.
+/** @param {string | undefined} expr */
 export function parseCron(expr) {
   const text = String(expr ?? '').trim().toLowerCase();
   const parts = (CRON_MACROS[text] ?? text).split(/\s+/).filter(Boolean);
@@ -569,16 +685,18 @@ export function parseCron(expr) {
   return { minutes, hours, dom, months, dow, either: !parts[2].startsWith('*') && !parts[4].startsWith('*') };
 }
 
+/** @param {string | undefined} expr */
 export function cronError(expr) {
   try {
     parseCron(expr);
     return '';
   } catch (err) {
-    return err.message;
+    return /** @type {Error} */ (err).message;
   }
 }
 
 // A cron expression for the schedule as it is, so switching to Custom starts from what the flow already does.
+/** @param {CronSchedule} s */
 export function cronOf(s) {
   if (s.every === 'custom') return String(s.cron ?? '').trim() || '0 8 * * *';
   if (s.every === 'interval') {
@@ -601,12 +719,17 @@ export function cronOf(s) {
 
 // --- Slots ---
 
+/** @param {string | undefined} time */
 const minutesOf = (time) => {
   const [hh, mm] = String(time || '00:00').split(':').map(Number);
   return (hh || 0) * 60 + (mm || 0);
 };
 
 // A fixed schedule as the days it runs on and the minutes of the day it runs at, or null when it has none.
+/**
+ * @param {CronSchedule} s
+ * @returns {{ times: number[], day: (d: Date) => boolean } | null}
+ */
 function planOf(s) {
   if (s.every === 'custom') {
     let c;
@@ -615,6 +738,7 @@ function planOf(s) {
     } catch {
       return null;
     }
+    /** @type {number[]} */
     const times = [];
     for (const hh of [...c.hours].sort((a, b) => a - b)) for (const mm of [...c.minutes].sort((a, b) => a - b)) times.push(hh * 60 + mm);
     return {
@@ -648,6 +772,10 @@ function planOf(s) {
 
 // Long enough to reach a 29 February; an expression that never matches (30 February) gives no slot.
 const SEARCH_DAYS = 366 * 8;
+/**
+ * @param {Date} d
+ * @param {number} m
+ */
 const withMinutes = (d, m) => {
   const x = new Date(d);
   x.setHours(Math.floor(m / 60), m % 60, 0, 0);
@@ -655,6 +783,10 @@ const withMinutes = (d, m) => {
 };
 
 // The latest slot at or before `at`, or null. An interval has no fixed slot, so its next run follows the last one.
+/**
+ * @param {CronSchedule} s
+ * @param {Date} at
+ */
 function lastSlot(s, at) {
   const plan = planOf(s);
   if (!plan?.times.length) return null;
@@ -671,6 +803,10 @@ function lastSlot(s, at) {
 }
 
 // The first slot after `at`, or null.
+/**
+ * @param {CronSchedule} s
+ * @param {Date} at
+ */
 function nextSlot(s, at) {
   const plan = planOf(s);
   if (!plan?.times.length) return null;
@@ -687,15 +823,27 @@ function nextSlot(s, at) {
 }
 
 // The next few slots of a fixed schedule, to preview a custom expression.
+/**
+ * @param {CronSchedule} s
+ * @param {number} [count]
+ * @param {Date} [at]
+ */
 export function upcomingSlots(s, count = 3, at = new Date()) {
+  /** @type {Date[]} */
   const out = [];
+  /** @type {Date | null} */
   let t = at;
   while (out.length < count && (t = nextSlot(s, t))) out.push(t);
   return out;
 }
 
 // An interval flow's active hours. A From later than To wraps past midnight (22:00 to 06:00).
+/** @param {CronSchedule} s */
 const hasWindow = (s) => Boolean(s.from && s.to && s.from !== s.to);
+/**
+ * @param {CronSchedule} s
+ * @param {Date} at
+ */
 function inWindow(s, at) {
   if (!hasWindow(s)) return true;
   const m = at.getHours() * 60 + at.getMinutes();
@@ -703,6 +851,10 @@ function inWindow(s, at) {
   const b = minutesOf(s.to);
   return a < b ? m >= a && m < b : m >= a || m < b;
 }
+/**
+ * @param {CronSchedule} s
+ * @param {Date} t
+ */
 function intoWindow(s, t) {
   if (inWindow(s, t)) return t;
   const x = atTime(t, s.from);
@@ -711,11 +863,17 @@ function intoWindow(s, t) {
 }
 
 // The later of the last run and the moment the flow was switched on, so switching a flow on never replays a past slot.
+/** @param {CronFlow} f */
 const sinceOf = (f) => Math.max(Date.parse(f.lastRun) || 0, Date.parse(f.enabledAt || f.created) || 0);
 
+/** @param {CronSchedule} s */
 const intervalMs = (s) => Math.max(5, Number(s.minutes) || 60) * MINUTE;
 
 // The next run, or null when the schedule never matches (an invalid or impossible cron expression).
+/**
+ * @param {CronFlow} flow
+ * @param {Date} [at]
+ */
 export function nextRun(flow, at = new Date()) {
   const s = flow.schedule;
   if (s.every === 'interval') {
@@ -726,17 +884,23 @@ export function nextRun(flow, at = new Date()) {
 }
 
 // Due when a slot has passed since the last run, or since the flow was switched on. A missed slot runs once, not once per slot.
+/**
+ * @param {CronFlow} flow
+ * @param {Date} [at]
+ */
 export function isDue(flow, at = new Date()) {
   if (!flow.enabled || !flow.steps.length) return false;
   const since = sinceOf(flow);
   const s = flow.schedule;
   if (s.every === 'interval') return at.getTime() - since >= intervalMs(s) && inWindow(s, at);
   const last = lastSlot(s, at);
-  return Boolean(last) && last.getTime() > since;
+  return Boolean(last) && /** @type {Date} */ (last).getTime() > since;
 }
 
+/** @param {string[]} items */
 const listLabel = (items) => (items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
 
+/** @param {number[]} days */
 function daysLabel(days) {
   const key = days.join('');
   if (key === '12345') return 'Weekdays';
@@ -747,6 +911,7 @@ function daysLabel(days) {
   return [...days].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((d) => SHORT_DAYS[d]).join(', ');
 }
 
+/** @param {CronSchedule} s */
 export function scheduleLabel(s) {
   if (s.every === 'interval') {
     const m = Math.max(5, Number(s.minutes) || 60);
@@ -755,7 +920,7 @@ export function scheduleLabel(s) {
   }
   if (s.every === 'custom') return `Cron ${String(s.cron ?? '').trim() || '(empty)'}`;
   const at = `at ${listLabel(timesOf(s))}`;
-  if (s.every === 'weekly' || s.every === 'days') return `${daysLabel(daysOf(s))} ${at}`;
+  if (s.every === 'weekly' || s.every === 'days') return `${daysLabel(/** @type {number[]} */ (daysOf(s)))} ${at}`;
   if (s.every === 'monthly') {
     const days = monthDaysOf(s);
     const months = monthsOf(s);
@@ -779,6 +944,10 @@ export function scheduleLabel(s) {
 const VAR = /\{\{\s*([A-Za-z_]\w*)((?:\.[\w-]+|\[\d+\]|\["[^"\]]*"\])*)\s*\}\}/g;
 
 // A model often wraps JSON in a code fence; anything else that is not JSON stays text.
+/**
+ * @param {unknown} text
+ * @returns {unknown}
+ */
 export function parseData(text) {
   const t = String(text ?? '').trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n?```$/, '$1').trim();
   if (!/^[[{]/.test(t)) return null;
@@ -789,18 +958,28 @@ export function parseData(text) {
   }
 }
 
+/** @param {unknown} v */
 const asText = (v) => (v == null ? '' : typeof v === 'string' ? v : JSON.stringify(v, null, 2));
 
+/**
+ * @param {unknown} value
+ * @param {string} path
+ */
 function walk(value, path) {
   let v = value;
   for (const [, key, index, quoted] of path.matchAll(/\.([\w-]+)|\[(\d+)\]|\["([^"\]]*)"\]/g)) {
     if (v == null || typeof v !== 'object') return undefined;
-    v = v[key ?? quoted ?? Number(index)];
+    v = /** @type {Record<string, unknown>} */ (v)[key ?? quoted ?? Number(index)];
   }
   return v;
 }
 
 // The value of one {{name.path}}, or undefined when there is none, so the placeholder stays as written.
+/**
+ * @param {Vars} vars
+ * @param {string} name
+ * @param {string} [path]
+ */
 function lookup(vars, name, path) {
   if (!(name in vars) || name === '$data') return undefined;
   if (!path) return asText(vars[name]);
@@ -808,6 +987,11 @@ function lookup(vars, name, path) {
   return v === undefined ? undefined : asText(v);
 }
 
+/**
+ * @param {string | undefined} template
+ * @param {Vars} vars
+ * @param {(text: string) => string} [quote]
+ */
 const fill = (template, vars, quote = (x) => x) =>
   String(template ?? '').replace(VAR, (m, name, path) => {
     const v = lookup(vars, name, path);
@@ -816,7 +1000,12 @@ const fill = (template, vars, quote = (x) => x) =>
 
 // The template cut into plain text and filled variables, for the editor's preview: a part with `name` was a
 // placeholder, and `missing` says nothing filled it yet.
+/**
+ * @param {string | undefined} template
+ * @param {Vars} vars
+ */
 export function fillParts(template, vars) {
+  /** @type {{ text: string, name?: string, missing?: boolean }[]} */
   const parts = [];
   let at = 0;
   const text = String(template ?? '');
@@ -832,6 +1021,7 @@ export function fillParts(template, vars) {
 
 // A project as {{project}} reads it: its name as text, and with a path its parts ({{project.website}},
 // {{project.repo}}, {{project.directory}}). Empty fields stay as '' so a template reads the same for every project.
+/** @param {Project | null | undefined} project */
 export function projectVars(project) {
   if (!project) return null;
   const repos = project.github?.repos ?? [];
@@ -858,9 +1048,16 @@ export function projectVars(project) {
 // The variables a step sees: its input, the run's date and flow, the project, and every earlier step's output by
 // number. $data holds what each name reads into with a path: parsed JSON, or what the step made.
 // The project is the step's or source's own when it has one, else the flow's. A data step's sources each choose theirs.
+/**
+ * @param {CronFlow} flow
+ * @param {Pick<RunCtx, 'results' | 'from' | 'store'>} ctx
+ * @param {{ type?: string, from?: string, projectId?: string } | null} [step]
+ * @param {DataStore} [store]
+ */
 function varsFor(flow, ctx, step = null, store = ctx.store) {
   const results = ctx.results ?? [];
   const prev = pipedResult(results, step?.from ?? ctx.from);
+  /** @type {Vars & { $data: Record<string, unknown> }} */
   const vars = { input: prev?.output ?? '', date: todayISO(), flow: flow.name, $data: { input: prev?.data ?? null } };
   const projectId = (step?.type !== 'gather' && step?.projectId) || flowProjectId(flow);
   const project = projectVars(projectId && store ? store.get('projects').projects.find((p) => p.id === projectId) : null);
@@ -878,6 +1075,11 @@ function varsFor(flow, ctx, step = null, store = ctx.store) {
 // What a step reads as {{input}}: the step before it by default, a chosen earlier step (its id), or nothing ('none'),
 // so a flow can branch: two steps can both read the same data step. A source of a data step reads its step's input.
 export const INPUT_NONE = 'none';
+/**
+ * @template {{ stepId?: string }} R
+ * @param {R[]} results
+ * @param {string} [from]
+ */
 export function pipedResult(results, from = '') {
   if (from === INPUT_NONE) return null;
   return from ? results.find((r) => r.stepId === from) ?? null : results.at(-1) ?? null;
@@ -885,6 +1087,7 @@ export function pipedResult(results, from = '') {
 
 // A step can only read one before it: after a move, an add or a remove, a pipe from a step that is gone or now comes
 // later goes back to the step before.
+/** @param {CronStep[]} steps */
 export function fixPipes(steps) {
   steps.forEach((s, i) => {
     if (s.from && s.from !== INPUT_NONE && !steps.slice(0, i).some((x) => x.id === s.from)) delete s.from;
@@ -892,6 +1095,10 @@ export function fixPipes(steps) {
 }
 
 // Puts the steps in a new order and renumbers every {{stepN}} to follow its step.
+/**
+ * @param {CronFlow} f
+ * @param {CronStep[]} next
+ */
 export function reorderSteps(f, next) {
   const at = new Map(next.map((s, i) => [s.id, i + 1]));
   remapStepRefs(next, (n) => at.get(f.steps[n - 1]?.id) ?? null);
@@ -900,11 +1107,17 @@ export function reorderSteps(f, next) {
 }
 
 // The path to one key, in the form a variable reads it.
+/**
+ * @param {string} path
+ * @param {string | number} key
+ */
 export const pathTo = (path, key) =>
   (typeof key === 'number' ? `${path}[${key}]` : /^[\w-]+$/.test(key) ? `${path}.${key}` : /^[^"\]]*$/.test(key) ? `${path}["${key}"]` : null);
 
 // The variables as one JSON tree for the editor: a key's path is what a click on it puts in a field.
+/** @param {Vars} vars */
 export function varsTree(vars) {
+  /** @type {Record<string, unknown>} */
   const tree = {};
   for (const [k, v] of Object.entries(vars ?? {})) {
     if (k === '$data') continue;
@@ -916,29 +1129,45 @@ export function varsTree(vars) {
 
 // Moving, adding or removing a step changes the numbers after it, so references follow their step.
 // `map` turns an old 1-based number into the new one, or null for a removed step.
+/**
+ * @param {Array<Omit<CronStep, 'id'>>} steps
+ * @param {(n: number) => number | null | undefined} map
+ */
 export function remapStepRefs(steps, map) {
+  /** @param {string} text */
   const fix = (text) => text.replace(/(\{\{\s*)step(\d+)(?=[.[\s}])/g, (m, open, n) => {
     const to = map(Number(n));
     return to == null ? `${open}removedStep` : `${open}step${to}`;
   });
+  /** @param {object} o */
   const visit = (o) => {
     for (const [k, v] of Object.entries(o)) {
-      if (typeof v === 'string' && v.includes('{{')) o[k] = fix(v);
+      if (typeof v === 'string' && v.includes('{{')) /** @type {Record<string, unknown>} */ (o)[k] = fix(v);
       else if (Array.isArray(v)) v.forEach((x) => x && typeof x === 'object' && visit(x));
     }
   };
   steps.forEach(visit);
 }
 
+/**
+ * @param {DataStore} store
+ * @param {Task[]} list
+ */
 function taskLines(store, list) {
   const projects = store.get('projects').projects;
+  /** @param {string | null} id */
   const nameOf = (id) => projects.find((p) => p.id === id)?.name ?? 'Personal';
   return list.map((t) => `- ${t.text} [${nameOf(t.projectId)}${t.priority && t.priority !== 'none' ? `, ${t.priority}` : ''}${t.due ? `, due ${t.due}` : ''}]`).join('\n');
 }
 
 // The page a web page step reads: a project's website, a path on it (/blog), or any address.
 // With a project, a full link (with or without https://) is read as it is, so a project can point at its docs or repo.
+/** @param {string} raw */
 const looksLikeLink = (raw) => /^https?:\/\//i.test(raw) || /^[\w-]+(\.[\w-]+)+(:\d+)?(\/|$)/.test(raw);
+/**
+ * @param {DataStore} store
+ * @param {{ url?: string, projectId?: string }} step
+ */
 export function pageUrl(store, step) {
   const raw = String(step.url ?? '').trim();
   if (step.projectId) {
@@ -956,7 +1185,13 @@ export function pageUrl(store, step) {
   return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
 }
 
+/**
+ * @param {DataStore} store
+ * @param {string} type
+ * @param {string} month
+ */
 function moneyTotals(store, type, month) {
+  /** @type {Record<string, number>} */
   const totals = {};
   for (const e of store.get('finance').entries) {
     if (e.type !== type || !e.date?.startsWith(month)) continue;
@@ -966,8 +1201,17 @@ function moneyTotals(store, type, month) {
   return Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([k, v]) => `- ${k}: ${v.toFixed(2)}`).join('\n');
 }
 
+// What the pools sources read of a row of openPositions() (js/defi/positions-read.js).
+/** @typedef {{ pair: string, chain: string, tokenId: string | number, inRange: boolean, value?: number | null, fees?: number | null }} PoolRow */
+
 // One source's data as plain text, or '' when it found nothing. A page address and fixed text take variables, so
 // a source can read {{project.repoUrl}} or quote {{project.description}}.
+/**
+ * @param {DataStore} store
+ * @param {CronSource} step
+ * @param {CronFlow} flow
+ * @param {Vars} [vars]
+ */
 async function gather(store, step, flow, vars = {}) {
   if (step.source === 'page') {
     const url = pageUrl(store, { ...step, url: fill(step.url, vars) });
@@ -977,6 +1221,7 @@ async function gather(store, step, flow, vars = {}) {
     const follow = Math.min(MAX_FOLLOW, Math.max(0, Number(step.follow) || 0));
     if (!follow || !text) return main;
     // A page that fails to read is skipped, so one dead link does not fail the step.
+    /** @type {string[]} */
     const linked = [];
     for (const link of pageLinks(text, url).slice(0, follow)) {
       try {
@@ -991,6 +1236,7 @@ async function gather(store, step, flow, vars = {}) {
     const count = Math.min(20, Math.max(1, Number(step.count) || 5));
     const past = store.get(COLLECTION).runs.filter((r) => r.flowId === flow.id && r.status === 'ok' && !r.dry).slice(0, count);
     // The start of each is enough to avoid repeating a topic, and keeps a long blog post from filling the prompt.
+    /** @param {string} text */
     const excerpt = (text) => (text.length > 800 ? `${text.slice(0, 800)}…` : text);
     return past.map((r) => `### ${r.at.slice(0, 10)}\n${excerpt(r.steps.at(-1)?.output ?? '')}`).join('\n\n');
   }
@@ -1034,22 +1280,27 @@ async function gather(store, step, flow, vars = {}) {
   }
   if (step.source === 'sites') {
     const since = Date.now() - 24 * 60 * MINUTE;
-    const lines = sitesOf(store).flatMap((p) => {
+    const lines = sitesOf(store).flatMap((/** @type {Project} */ p) => {
       const s = siteData(store, p.id);
-      const log = (s.log ?? []).filter((e) => e.level !== 'info' && Date.parse(e.at) >= since);
+      const log = (s.log ?? []).filter((/** @type {SiteLogEntry} */ e) => e.level !== 'info' && Date.parse(e.at) >= since);
       const down = s.health?.status === 'down' ? [`- ${p.name}: down as of the last check`] : [];
-      return [...down, ...log.map((e) => `- ${p.name} (${e.level === 'error' ? 'error' : 'warning'}): ${e.text}`)];
+      return [...down, ...log.map((/** @type {SiteLogEntry} */ e) => `- ${p.name} (${e.level === 'error' ? 'error' : 'warning'}): ${e.text}`)];
     });
     return lines.join('\n');
   }
   if (step.source === 'pools' || step.source === 'pools-out') {
+    /** @param {number | null | undefined} n */
     const usd = (n) => (n == null ? 'unknown' : `$${n.toFixed(2)}`);
-    const rows = openPositions(store).filter((r) => step.source === 'pools' || !r.inRange);
-    return rows.map((r) => `- ${r.pair} on ${r.chain} #${r.tokenId}: ${r.inRange ? 'in range' : 'out of range'}, value ${usd(r.value)}, unclaimed fees ${usd(r.fees)}`).join('\n');
+    const rows = openPositions(store).filter((/** @type {PoolRow} */ r) => step.source === 'pools' || !r.inRange);
+    return rows.map((/** @type {PoolRow} */ r) => `- ${r.pair} on ${r.chain} #${r.tokenId}: ${r.inRange ? 'in range' : 'out of range'}, value ${usd(r.value)}, unclaimed fees ${usd(r.fees)}`).join('\n');
   }
   return fill(step.text, vars);
 }
 
+/**
+ * @param {DataStore} store
+ * @param {Task[]} open
+ */
 function projectsOverview(store, open) {
   return store.get('projects').projects.map((p) => {
     const count = open.filter((t) => t.projectId === p.id).length;
@@ -1060,6 +1311,10 @@ function projectsOverview(store, open) {
 
 // The events of every shown calendar from today on, for `days` days. Calendar sign-ins last one session,
 // so a flow fails until they are renewed.
+/**
+ * @param {DataStore} store
+ * @param {number} days
+ */
 async function gatherCalendar(store, days) {
   if (!calendarAccounts(store).length) throw new Error('Connect a Google Calendar in Settings first.');
   const from = new Date();
@@ -1070,13 +1325,20 @@ async function gatherCalendar(store, days) {
   if (!events.length && (waiting.length || errors.length)) {
     throw new Error(waiting.length ? `Sign in again to ${waiting.join(', ')} in Calendar.` : errors.join(' · '));
   }
+  /** @param {string} v */
   const clock = (v) => eventDate(v).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   // Over several days each event says its day.
+  /** @param {string} v */
   const day = (v) => (days > 1 ? `${eventDate(v).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} ` : '');
   return events.map((e) => `- ${day(e.start)}${e.allDay ? 'All day' : `${clock(e.start)}–${clock(e.end)}`}: ${e.title}${e.location ? ` (${e.location})` : ''}`).join('\n');
 }
 
 // Whether a "Stop if" step ends the run, given its input and whether the last data step found nothing.
+/**
+ * @param {CronStep} step
+ * @param {string} input
+ * @param {boolean | undefined} nothing
+ */
 function stopsOn(step, input, nothing) {
   const text = String(step.text ?? '').trim().toLowerCase();
   if (step.when === 'empty') return !input.trim();
@@ -1085,6 +1347,7 @@ function stopsOn(step, input, nothing) {
   return nothing;
 }
 
+/** @param {CronStep} step */
 export function stopLabel(step) {
   const label = STOP_WHEN.find(([k]) => k === step.when)?.[1] ?? STOP_WHEN[0][1];
   return step.when === 'contains' || step.when === 'lacks' ? `${label} “${step.text || '…'}”` : label;
@@ -1092,11 +1355,17 @@ export function stopLabel(step) {
 
 // A shell word: single quotes keep newlines, quotes and $ as they are. A leading ~/ (a project's folder) stays
 // outside them, so the shell still expands it.
+/** @param {string} text */
 const quoteWord = (text) => `'${String(text).replace(/'/g, `'\\''`)}'`;
+/** @param {string} text */
 const shellQuote = (text) => (/^~\//.test(text) ? `~/${quoteWord(text.slice(2))}` : quoteWord(text));
 
 // The task a "Create task" step made in this run, as claude gets a task from its Dev button: a checklist line,
 // then its description indented. In a test run no task is made, so it is the title the step would give it.
+/**
+ * @param {Task | null} task
+ * @param {string} fallback
+ */
 function taskText(task, fallback) {
   if (!task) return fallback;
   const desc = (task.description ?? '').trim();
@@ -1111,22 +1380,40 @@ export const DEV_WAIT_MINUTES = 60;
 const WAIT_POLL_MS = 5000;
 const SETTLE_MS = 30000;
 const ENDED = ['done', 'failed', 'stopped', 'idle'];
+/** @param {number} ms */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Whether a Dev step waits for its terminal: as the step says, else when a step follows it.
+/**
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ */
 export const devWaits = (flow, step) => step.wait ?? flow.steps.findIndex((s) => s.id === step.id) < flow.steps.length - 1;
 
 // A claude Dev step with another Run in Dev after it can ask for its final answer as JSON, which the next one reads
 // as {{stepN.json}}. Only offered there, so a step moved last stops asking.
 export const DEV_JSON_PROMPT = 'Output format: Output the final output in valid JSON';
+/**
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ */
 export const devJsonOffered = (flow, step) =>
   step.mode !== 'command' && flow.steps.slice(flow.steps.findIndex((s) => s.id === step.id) + 1).some((s) => s.type === 'dev');
+/**
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ */
 export const devJson = (flow, step) => Boolean(step.json) && devJsonOffered(flow, step);
 
 // The last JSON object or array in a terminal's output. claude draws its answer after a ⏺ and wraps long lines with
 // an indent, so a block that does not parse as printed is tried again with its line breaks taken out.
 const JSON_SCAN = 40000;
+/**
+ * @param {string} text
+ * @param {number} start
+ */
 function closingOf(text, start) {
+  /** @type {string[]} */
   const stack = [];
   let str = false;
   for (let i = start; i < text.length; i++) {
@@ -1143,8 +1430,10 @@ function closingOf(text, start) {
   }
   return -1;
 }
+/** @param {unknown} output */
 export function lastJson(output) {
   const text = String(output ?? '').slice(-JSON_SCAN).replace(/⏺/g, ' ');
+  /** @param {string} t */
   const parse = (t) => {
     for (const s of [t, t.replace(/\n[ \t]*/g, ' ')]) {
       try {
@@ -1153,6 +1442,7 @@ export function lastJson(output) {
     }
     return null;
   };
+  /** @type {unknown} */
   let found;
   for (let i = 0; i < text.length; i++) {
     if (text[i] !== '{' && text[i] !== '[') continue;
@@ -1168,6 +1458,12 @@ export function lastJson(output) {
   return found;
 }
 
+/**
+ * @param {DataStore} store
+ * @param {string} session
+ * @param {number | undefined} minutes
+ * @param {() => void} [beat]
+ */
 async function waitForSession(store, session, minutes, beat) {
   const deadline = Date.now() + Math.max(1, Number(minutes) || DEV_WAIT_MINUTES) * MINUTE;
   let quietSince = 0;
@@ -1180,7 +1476,7 @@ async function waitForSession(store, session, minutes, beat) {
       if (!status) throw Object.assign(new Error('The terminal was closed in Dev before it finished.'), { final: true });
     } catch (err) {
       // A runner restarting is not the end of the work; a few misses in a row are.
-      if (err.final || ++misses >= 6) throw err.final ? err : new Error(`Lost the terminal runner: ${err.message}`);
+      if (/** @type {{ final?: boolean }} */ (err).final || ++misses >= 6) throw /** @type {{ final?: boolean }} */ (err).final ? err : new Error(`Lost the terminal runner: ${/** @type {Error} */ (err).message}`);
     }
     if (status && ENDED.includes(status.state)) return status;
     if (status?.state === 'waiting') {
@@ -1195,6 +1491,11 @@ async function waitForSession(store, session, minutes, beat) {
 
 // claude stays open once done. It is sent /exit and asked to remove its worktree when nothing in it would be lost
 // (tools/terminal.js decides); the task forgets a removed worktree. Says what happened, for the step's note.
+/**
+ * @param {DataStore} store
+ * @param {string} session
+ * @param {{ name: string }} worktree
+ */
 async function endClaude(store, session, worktree) {
   try {
     const r = await exitClaude(runnerOf(store), session);
@@ -1205,22 +1506,47 @@ async function endClaude(store, session, worktree) {
     if (r.kept) return `claude exited; its worktree was kept (${r.kept})`;
     return r.ended ? 'claude exited' : 'claude did not exit';
   } catch (err) {
-    return `claude was left open (${err.message})`;
+    return `claude was left open (${/** @type {Error} */ (err).message})`;
   }
 }
 
+/** @type {Record<string, string>} */
 const STATE_TEXT = { waiting: 'finished, waiting for input', done: 'finished', failed: 'ended with an error', stopped: 'was stopped', idle: 'ended' };
+/** @type {Record<string, string>} */
 const FILE_STATUS = { A: 'added', M: 'modified', D: 'deleted', R: 'renamed', C: 'copied', T: 'type changed', '?': 'untracked' };
 const OUTPUT_KEPT = 4000;
 
 // What the terminal left: the runner's git view of the folder it worked in, and the links in its output. A PR the
 // prompt already named is not counted as one it opened.
+/**
+ * What the runner's git view of a folder holds, as far as it is read here (tools/terminal.js).
+ * @typedef {object} RawOutcome
+ * @property {string} [output]
+ * @property {boolean} [repo]
+ * @property {string} [error]
+ * @property {string} [branch]
+ * @property {string} [base]
+ * @property {string} [commit]
+ * @property {string} [short]
+ * @property {string} [subject]
+ * @property {unknown[]} [commits]
+ * @property {{ status: string, path: string, from?: string }[]} [files]
+ * @property {number} [more]
+ * @property {number} [uncommitted]
+ * @property {string} [upstream]
+ * @property {number} [ahead]
+ */
+/**
+ * @param {DataStore} store
+ * @param {{ session: string, path: string, prompt: string, task: Task | null, json: boolean }} where
+ */
 async function devOutcome(store, { session, path, prompt, task, json }) {
+  /** @type {RawOutcome} */
   let raw = { output: '', repo: false };
   try {
     raw = await sessionOutcome(runnerOf(store), { session, path });
   } catch (err) {
-    raw.error = err.message;
+    raw.error = /** @type {Error} */ (err).message;
   }
   const text = plainOutput(raw.output ?? '').replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   const known = new Set(findGithubLinks(prompt).map((l) => l.url.toLowerCase()));
@@ -1228,7 +1554,8 @@ async function devOutcome(store, { session, path, prompt, task, json }) {
   // A PR Dev already added to the task (its link watcher reads the terminal while Dev shows it) counts too.
   const saved = task ? prsOf(store.get('todos').items.find((t) => t.id === task.id) ?? {}) : [];
   const fresh = links.filter((l) => l.kind === 'pr');
-  const prs = [...saved.filter((p) => !fresh.some((l) => l.url.toLowerCase() === p.url.toLowerCase())), ...fresh];
+  const prs = [...saved.filter((/** @type {TaskLink} */ p) => !fresh.some((l) => l.url.toLowerCase() === p.url.toLowerCase())), ...fresh];
+  /** @param {CronPr} pr */
   const pick = ({ repo, number, url }) => ({ repo, number, url });
   return {
     links,
@@ -1256,6 +1583,11 @@ async function devOutcome(store, { session, path, prompt, task, json }) {
 }
 
 // The outcome as text, for {{input}}: what a model or the next Dev prompt reads first.
+/** @typedef {Awaited<ReturnType<typeof devOutcome>>['data']} DevOutcome */
+/**
+ * @param {DevOutcome} o
+ * @param {{ terminal: number, where: string, state: string }} at
+ */
 function outcomeText(o, { terminal, where, state }) {
   const lines = [`Dev terminal ${terminal} ${STATE_TEXT[state] ?? 'ended'}, in ${where}.`];
   if (o.branch) lines.push(`Branch: ${o.branch}${o.base ? ` (from ${o.base}, ${o.commits.length} commit${o.commits.length === 1 ? '' : 's'})` : ''}${o.pushed ? ', pushed' : ''}`);
@@ -1283,6 +1615,14 @@ const OUTCOME_SHAPE = { terminal: 0, session: '', branch: '', base: '', commit: 
 // Starts claude (or a command) in a new Dev terminal. With steps after it, the run waits for the terminal and passes
 // on what it did; otherwise it moves on at once. The task made earlier in the run goes with it, as when it is handed
 // over from Tasks: it moves to In progress, keeps the terminal and its worktree, and gets the issues and PRs claude prints.
+/**
+ * @param {DataStore} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {string} input
+ * @param {Vars} vars
+ * @param {RunCtx} ctx
+ */
 async function runDev(store, flow, step, input, vars, ctx) {
   const claude = step.mode !== 'command';
   const task = ctx.task ?? null;
@@ -1307,7 +1647,8 @@ async function runDev(store, flow, step, input, vars, ctx) {
     ctx.data = { ...(claude ? { devCommand: devCommand || null, prompt } : { command }), folder: where, ...(waits ? { ...OUTCOME_SHAPE, ...(json ? { json: {} } : {}) } : {}) };
     return claude ? prompt : command;
   }
-  const { id, n, worktree } = await devStarter({ store, claude, prompt, command, devCommand, projectId, taskIds: task ? [task.id] : [], title: task?.text || flow.name });
+  // Cast until js/dev-core.js is checked: it infers taskIds as never[] from its default.
+  const { id, n, worktree } = await devStarter(/** @type {Parameters<typeof startRunnerSession>[0]} */ ({ store, claude, prompt, command, devCommand, projectId, taskIds: task ? [task.id] : [], title: task?.text || flow.name }));
   if (task) {
     store.update('todos', (d) => {
       const t = d.items.find((x) => x.id === task.id);
@@ -1328,8 +1669,9 @@ async function runDev(store, flow, step, input, vars, ctx) {
     ctx.note = `${ctx.dry ? 'Test: started' : 'Started'} in ${on}.`;
     // Nothing waits for it, but claude is still ended once it is done, in the background.
     if (worktree) {
+      // then() cannot infer the type of `false && a promise`; the cast only widens what the callback returns.
       waitForSession(store, id, step.waitMinutes ?? DEV_WAIT_MINUTES)
-        .then((status) => status.state === 'waiting' && endClaude(store, id, worktree))
+        .then(/** @type {(status: { state: string }) => Promise<string | false>} */ ((status) => status.state === 'waiting' && endClaude(store, id, worktree)))
         .catch(() => {});
     }
     return input;
@@ -1341,7 +1683,7 @@ async function runDev(store, flow, step, input, vars, ctx) {
   // The PR and issues go to the task even when Dev was not open to see them printed.
   // The session has ended or waits for its user by now, so a PR moves the task on to review.
   if (task && links.length) addTaskLinks(store, [task.id], links, { review: true });
-  ctx.data = { ...ctx.data, ...data };
+  ctx.data = { .../** @type {object} */ (ctx.data), ...data };
   // Its work was read above, so claude can go, and its worktree with it.
   const ended = worktree && status.state === 'waiting' ? await endClaude(store, id, worktree) : '';
   ctx.note = `${ctx.dry ? 'Test: ran' : 'Ran'} in ${on}; it ${STATE_TEXT[status.state] ?? 'ended'}${data.pr ? `, PR #${data.pr.number}` : ''}${ended ? `; ${ended}` : ''}.`;
@@ -1350,6 +1692,12 @@ async function runDev(store, flow, step, input, vars, ctx) {
 
 // Rebuilds the project's profile through the same call as Projects → Profile. A profile edited by hand never blocks
 // the run: by default it is updated with the edits kept; the step can also replace it or leave it as it is.
+/**
+ * @param {DataStore} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {RunCtx} ctx
+ */
 async function runProfile(store, flow, step, ctx) {
   const projectId = withFlowProject(flow, step).projectId;
   if (!projectId) throw new Error('Choose the project whose profile to refresh.');
@@ -1378,6 +1726,13 @@ async function runProfile(store, flow, step, ctx) {
 // ctx carries what passes between steps besides the text: whether the last data step found nothing, whether this is
 // a test run, and a note a step leaves for the run log (what it would have done, or why the run stopped).
 // A step may set ctx.data to what it made, for paths such as {{step3.title}}; by default its output is read as JSON.
+/**
+ * @param {DataStore} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {string} input
+ * @param {RunCtx} ctx
+ */
 async function runStep(store, flow, step, input, ctx) {
   const vars = varsFor(flow, ctx, step, store);
   if (step.type === 'gather') {
@@ -1430,7 +1785,7 @@ async function runStep(store, flow, step, input, ctx) {
     // The run that made it, so the task can open it (Tasks shows a Cron button).
     if (ctx.runId) task.cronRun = ctx.runId;
     store.update('todos', (d) => d.items.push(task));
-    ctx.data.id = task.id;
+    /** @type {{ id?: string }} */ (ctx.data).id = task.id;
     if (ctx.dry) ctx.note = `Test run: created the task “${title}”${due ? ` due ${due}` : ''}.`;
     // A "Run in Dev" step later in the run works on this task.
     ctx.task = task;
@@ -1450,10 +1805,19 @@ async function runStep(store, flow, step, input, ctx) {
   throw new Error(`Unknown step “${step.type}”.`);
 }
 
+/** @type {Set<string>} */
 const running = new Set();
+/** @param {string} id */
 export const isRunning = (id) => running.has(id) || testing.has(id);
 
 // Runs one step on what ctx holds from the steps before it, and adds its result to ctx.results.
+/**
+ * @param {DataStore} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {RunCtx} ctx
+ * @returns {Promise<StepResult>}
+ */
 async function stepOnce(store, flow, step, ctx) {
   const started = Date.now();
   ctx.note = '';
@@ -1468,7 +1832,7 @@ async function stepOnce(store, flow, step, ctx) {
     ctx.results.push(result);
     return result;
   } catch (err) {
-    return { ok: false, vars, output: err.message, data: null, note: '', ms: Date.now() - started, at: now() };
+    return { ok: false, vars, output: /** @type {Error} */ (err).message, data: null, note: '', ms: Date.now() - started, at: now() };
   }
 }
 
@@ -1477,15 +1841,31 @@ async function stepOnce(store, flow, step, ctx) {
 // before it left. The results are kept in cron.json, so they are there after a reload and in another browser on the
 // same folder. Only what cannot be rebuilt is saved: a step's variables come from the results before it, and its
 // data from its output when it was read from the output.
+/** @type {Set<string>} */
 const testing = new Set();
+/** @param {string} flowId */
 export const isTesting = (flowId) => testing.has(flowId);
+/**
+ * @param {unknown} a
+ * @param {unknown} b
+ */
 const same = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
 
+/**
+ * @param {CronTest & { vars?: Vars }} r
+ * @returns {CronTest}
+ */
 function packTest(r) {
   const { vars, data, ...rest } = r;
   return r.ok && same(data, parseData(r.output) ?? r.output) ? rest : { ...rest, data };
 }
 
+/**
+ * @param {DataStore} store
+ * @param {string} flowId
+ * @param {string} stepId
+ * @param {CronTest & { vars?: Vars }} result
+ */
 function saveTest(store, flowId, stepId, result) {
   store.update(COLLECTION, (d) => {
     d.tests ??= {};
@@ -1495,12 +1875,18 @@ function saveTest(store, flowId, stepId, result) {
 }
 
 // flowId's test results as stepId → result, each with the variables and data the editor shows.
+/**
+ * @param {DataStore} store
+ * @param {string} flowId
+ */
 export function testsOf(store, flowId) {
+  /** @type {Map<string, StepResult>} */
   const map = new Map();
   const { flows, tests } = store.get(COLLECTION);
   const saved = tests?.[flowId];
   const flow = flows.find((f) => f.id === flowId);
   if (!saved || !flow) return map;
+  /** @type {StepResult[]} */
   const results = [];
   for (const step of flow.steps) {
     const r = saved[step.id];
@@ -1513,6 +1899,11 @@ export function testsOf(store, flowId) {
 }
 
 // Drops flowId's test results: all of them, or only those of the steps in `stepIds`.
+/**
+ * @param {DataStore} store
+ * @param {string} flowId
+ * @param {string[]} [stepIds]
+ */
 export function clearTests(store, flowId, stepIds) {
   const saved = store.get(COLLECTION).tests?.[flowId];
   if (!saved || (stepIds && !stepIds.some((id) => id in saved))) return;
@@ -1526,6 +1917,12 @@ export function clearTests(store, flowId, stepIds) {
 // does not keep the next step from being tested, since testing it is the point.
 // With `live`, a Run in Dev step starts its terminal (the steps before it stay tests). While it waits for the
 // terminal, its test shows the terminal already.
+/**
+ * @param {Store} store
+ * @param {string} flowId
+ * @param {string} stepId
+ * @param {{ live?: boolean }} [options]
+ */
 export async function testStep(store, flowId, stepId, { live = false } = {}) {
   const flow = store.get(COLLECTION).flows.find((f) => f.id === flowId);
   if (!flow || running.has(flowId) || testing.has(flowId)) return null;
@@ -1534,6 +1931,7 @@ export async function testStep(store, flowId, stepId, { live = false } = {}) {
   testing.add(flowId);
   store.refresh();
   const saved = testsOf(store, flowId);
+  /** @type {RunCtx} */
   const ctx = { dry: true, nothing: false, stop: false, note: '', results: [] };
   let last = null;
   try {
@@ -1561,8 +1959,28 @@ export async function testStep(store, flowId, stepId, { live = false } = {}) {
 
 // What a run keeps of a step besides its output, so the Runs tab can link to what it made: the task, the terminal,
 // and a Dev step's branch, commit and PR.
+/**
+ * What a step's data holds, as far as it is kept: a task step's task, a Dev step's terminal and outcome.
+ * @typedef {object} StepMade
+ * @property {string} [id]
+ * @property {string} [session]
+ * @property {string} [cwd]
+ * @property {number} [terminal]
+ * @property {string} [worktree]
+ * @property {string} [branch]
+ * @property {string} [commit]
+ * @property {string} [commitShort]
+ * @property {CronPr | null} [pr]
+ * @property {unknown[]} [files]
+ * @property {number} [moreFiles]
+ */
+/**
+ * @param {CronStep} step
+ * @param {StepResult} result
+ */
 function stepRecord(step, result) {
-  const d = result.ok && result.data && typeof result.data === 'object' ? result.data : null;
+  const d = result.ok && result.data && typeof result.data === 'object' ? /** @type {StepMade} */ (result.data) : null;
+  /** @type {CronRunStep} */
   const out = { stepId: step.id, type: step.type, ok: result.ok, output: result.output.slice(0, 4000), note: result.note, ms: result.ms };
   if (step.type === 'task' && d?.id) out.taskId = d.id;
   if (step.type === 'dev' && d?.session) {
@@ -1581,10 +1999,16 @@ function stepRecord(step, result) {
 // The run is saved as it goes, so the Runs tab shows it while it runs, with the terminal it is waiting on.
 // A test run (dry) leaves the schedule alone, sends no notification and is not read back as the flow's history; it
 // does make its tasks and start its terminals, so the whole flow is tried as it will run. AI steps call the model.
+/**
+ * @param {DataStore} store
+ * @param {string} flowId
+ * @param {{ manual?: boolean, dry?: boolean }} [options]
+ */
 export async function runFlow(store, flowId, { manual = false, dry = false } = {}) {
   const flow = store.get(COLLECTION).flows.find((f) => f.id === flowId);
   if (!flow || isRunning(flowId)) return null;
   running.add(flowId);
+  /** @type {CronRun} */
   const run = { id: uid(), flowId, at: now(), manual: manual || dry, dry, status: 'running', steps: [], error: '', beat: now() };
   const save = () => store.update(COLLECTION, (d) => {
     const copy = structuredClone(run);
@@ -1599,6 +2023,7 @@ export async function runFlow(store, flowId, { manual = false, dry = false } = {
     if (f && !dry && i < 0) f.lastRun = run.at;
   });
   save();
+  /** @type {RunCtx} */
   const ctx = {
     dry,
     live: dry,
@@ -1609,7 +2034,7 @@ export async function runFlow(store, flowId, { manual = false, dry = false } = {
     results: [],
     // A run waiting on a terminal says now and then that it is still alive, so one cut short by a reload shows as such.
     beat: () => {
-      if (Date.now() - Date.parse(run.beat) < MINUTE) return;
+      if (Date.now() - Date.parse(/** @type {string} */ (run.beat)) < MINUTE) return;
       run.beat = now();
       save();
     },
@@ -1641,8 +2066,8 @@ export async function runFlow(store, flowId, { manual = false, dry = false } = {
     if (run.status === 'running') run.status = 'ok';
   } catch (err) {
     run.status = 'error';
-    run.error = err.message;
-    if (!dry) notify(store, { kind: 'cron', text: `Flow “${flow.name}” failed: ${err.message}`, href: `#/cron?tab=runs&run=${run.id}` });
+    run.error = /** @type {Error} */ (err).message;
+    if (!dry) notify(store, { kind: 'cron', text: `Flow “${flow.name}” failed: ${/** @type {Error} */ (err).message}`, href: `#/cron?tab=runs&run=${run.id}` });
   } finally {
     running.delete(flowId);
     delete run.current;
@@ -1654,22 +2079,30 @@ export async function runFlow(store, flowId, { manual = false, dry = false } = {
 
 // The latest run that started a Dev terminal (`session`) or made a worktree (its `worktree` name), else the run that
 // made a task (`runId`, the task's cronRun). Dev shows a button to it on the terminal and the worktree.
+/**
+ * @param {DataStore} store
+ * @param {{ session?: string, worktree?: string, runId?: string }} find
+ */
 export function cronRunOf(store, { session = '', worktree = '', runId = '' }) {
   const runs = store.get(COLLECTION)?.runs ?? [];
+  /** @param {CronRunStep | CronRunCurrent | undefined} x */
   const ran = (x) => x && ((session && x.session === session) || (worktree && x.worktree === worktree));
   return runs.find((r) => [...(r.steps ?? []), r.current].some(ran)) ?? (runId ? runs.find((r) => r.id === runId) : null) ?? null;
 }
+/** @param {{ id: string }} run */
 export const cronRunHref = (run) => `#/cron?run=${encodeURIComponent(run.id)}`;
 
 // How a Dev step starts its terminal. The runners start it on the command runner and add it to its list of open
 // terminals; the board's Cron page (a step's test, or a test run) opens it in Dev at once (modules/dev.js).
 let devStarter = startRunnerSession;
+/** @param {typeof startRunnerSession} fn */
 export const useDevStarter = (fn) => {
   devStarter = fn;
 };
 
 // A run marked running that nothing has touched for a while was cut short: the runners stopped, or the tab closed.
 const STALE_MS = 3 * MINUTE;
+/** @param {CronRun} r */
 export const runState = (r) => (r.status === 'running' && !running.has(r.flowId) && Date.now() - Date.parse(r.beat || r.at) > STALE_MS ? 'lost' : r.status);
 
 // Due flows are started by the runners only (tools/jobs/cron.js), so a due flow runs once, however many tabs are open.
