@@ -6,6 +6,7 @@ import { getCatalog } from '../model-picker.js';
 import { fetchActivity } from '../github.js';
 import { setupBanner } from '../integrations.js';
 import { analyticsTab, searchTab, sortTable } from './monitoring-web.js';
+import { runnersTab } from './monitoring-runners.js';
 import { contractsActivityTab, contractsActivitySerialize, contractsActivityRestore } from './monitoring-contracts.js';
 import { usageRecords, sumUsage, modelName, modelsByUse, fmtDuration, tokensOf } from '../dev-usage.js';
 import { sessionStatus } from '../terminal.js';
@@ -14,13 +15,14 @@ import { runnerOf } from '../dev-core.js';
 const COLLECTION = 'usage';
 const DAY = 86400000;
 const HOUR = 3600000;
-const TABS = [['ai', 'AI usage'], ['github', 'GitHub activity'], ['analytics', 'Web analytics'], ['search', 'Search'], ['contracts', 'Contracts']];
+const TABS = [['ai', 'AI usage'], ['github', 'GitHub activity'], ['analytics', 'Web analytics'], ['search', 'Search'], ['contracts', 'Contracts'], ['runners', 'Board runners']];
 const SUBTITLES = {
   ai: 'AI calls made by the board, and what the claude sessions Dev ran for tasks used.',
   github: 'Commits, pull requests and issues across the repos linked to your projects.',
   analytics: 'Visitors and page views for each project website, from Google Analytics.',
   search: 'How each project website shows up in Google and Bing search.',
   contracts: 'Transactions and events on the smart contracts saved in Settings.',
+  runners: 'The processes bun start runs on this computer, and how each background job of the worker is doing.',
 };
 const PERIODS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['7', '7 days'], ['30', '30 days'], ['90', '90 days']];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -290,6 +292,7 @@ const LIVE_POLL_MS = 5000;
 const live = { status: {}, ids: [], timer: 0 };
 const LIVE_STATES = { working: 'Working', waiting: 'Waiting for you' };
 const aiShown = () => location.hash.startsWith('#/monitoring') && view.tab === 'ai';
+const runnersShown = () => location.hash.startsWith('#/monitoring') && view.tab === 'runners';
 
 // Asks for `ids` now and every few seconds while the AI tab is shown; the page draws again only when a state changed.
 function pollLive(store, ids) {
@@ -594,6 +597,7 @@ function draw(root, store) {
     : view.tab === 'analytics' ? analyticsTab(store, view, w)
       : view.tab === 'search' ? searchTab(store, view, w)
       : view.tab === 'contracts' ? contractsActivityTab(store, w, view.period)
+      : view.tab === 'runners' ? runnersTab(store, runnersShown)
         : aiTab(store, w);
   const periodName = PERIODS.find(([k]) => k === view.period)?.[1] ?? '';
 
@@ -614,7 +618,8 @@ function draw(root, store) {
               store.refresh();
             },
           }, label))),
-      h('div', { class: 'period-row' },
+      // The runners have no period: they show how things stand now.
+      view.tab === 'runners' ? null : h('div', { class: 'period-row' },
         h('span', { class: 'muted small' }, `Showing ${periodName.toLowerCase()}`),
         h('div', { class: 'period', role: 'group', 'aria-label': 'Period' },
           PERIODS.map(([key, label]) =>
@@ -637,6 +642,10 @@ export default {
   collection: COLLECTION,
   defaults: { entries: [] },
   render: draw,
+  // The heartbeat's run times change every few seconds; only the Board runners tab shows them.
+  get readsRunners() {
+    return view.tab === 'runners' ? 'all' : false;
+  },
   serialize: () => {
     const web = view.tab === 'analytics' || view.tab === 'search';
     return {
