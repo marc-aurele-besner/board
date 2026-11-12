@@ -1,16 +1,20 @@
+// @ts-check
 // Solidity ABI encoding and decoding, enough for calls, transactions and event logs: every static and dynamic type,
 // fixed and dynamic arrays, and tuples. Hex strings without 0x inside; 0x at the edges.
 import { keccak256 } from './keccak.js';
+/** @import { Param, Fn, AbiValue, Log } from '../types/abi' */
+/** @import { AbiItem } from '../types/data' */
 
 const W = 64; // one 32-byte word, in hex characters
-const strip = (hex) => String(hex ?? '').replace(/^0x/i, '');
-const word = (big) => big.toString(16).padStart(W, '0');
-const padRight = (hex) => hex.padEnd(Math.ceil(hex.length / W) * W, '0');
-const toHex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
-const fromHex = (hex) => new Uint8Array(hex.match(/../g)?.map((b) => parseInt(b, 16)) ?? []);
-const utf8Hex = (text) => toHex(new TextEncoder().encode(text));
+const strip = (/** @type {unknown} */ hex) => String(hex ?? '').replace(/^0x/i, '');
+const word = (/** @type {bigint} */ big) => big.toString(16).padStart(W, '0');
+const padRight = (/** @type {string} */ hex) => hex.padEnd(Math.ceil(hex.length / W) * W, '0');
+const toHex = (/** @type {Uint8Array} */ bytes) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+const fromHex = (/** @type {string} */ hex) => new Uint8Array(hex.match(/../g)?.map((b) => parseInt(b, 16)) ?? []);
+const utf8Hex = (/** @type {string} */ text) => toHex(new TextEncoder().encode(text));
 
 // "uint256[2][]" -> { base: "uint256", dims: [2, null] }, outermost dimension last.
+/** @param {Param} param */
 function typeOf(param) {
   const m = String(param.type).match(/^([^[]+)((\[\d*\])*)$/);
   if (!m) throw new Error(`Unknown type ${param.type}.`);
@@ -19,23 +23,26 @@ function typeOf(param) {
 }
 
 // The same parameter one array level in, or null when it is not an array.
+/** @param {Param} param @returns {{ param: Param, size: number | null } | null} */
 function inner(param) {
   const { dims } = typeOf(param);
   if (!dims.length) return null;
-  const size = dims.at(-1);
+  const size = /** @type {number | null} */ (dims.at(-1));
   return { param: { ...param, type: param.type.replace(/\[\d*\]$/, '') }, size };
 }
 
+/** @param {Param} param @returns {string} */
 export function canonical(param) {
   const { base, dims } = typeOf(param);
   const head = base === 'tuple' ? `(${(param.components ?? []).map(canonical).join(',')})` : base === 'uint' ? 'uint256' : base === 'int' ? 'int256' : base;
   return head + dims.map((d) => `[${d ?? ''}]`).join('');
 }
 
-export const signature = (item) => `${item.name}(${(item.inputs ?? []).map(canonical).join(',')})`;
-export const selector = (item) => keccak256(utf8Hex(signature(item))).slice(0, 10);
-export const topicOf = (event) => keccak256(utf8Hex(signature(event)));
+export const signature = (/** @type {Fn} */ item) => `${item.name}(${(item.inputs ?? []).map(canonical).join(',')})`;
+export const selector = (/** @type {Fn} */ item) => keccak256(utf8Hex(signature(item))).slice(0, 10);
+export const topicOf = (/** @type {Fn} */ event) => keccak256(utf8Hex(signature(event)));
 
+/** @param {Param} param @returns {boolean} */
 function isDynamic(param) {
   const arr = inner(param);
   if (arr) return arr.size === null || isDynamic(arr.param);
@@ -46,16 +53,18 @@ function isDynamic(param) {
 }
 
 // Bytes a static parameter takes in the head.
+/** @param {Param} param @returns {number} */
 function headSize(param) {
   if (isDynamic(param)) return 32;
   const arr = inner(param);
-  if (arr) return arr.size * headSize(arr.param);
+  if (arr) return /** @type {number} */ (arr.size) * headSize(arr.param); // static, so a fixed size
   if (typeOf(param).base === 'tuple') return (param.components ?? []).reduce((n, c) => n + headSize(c), 0);
   return 32;
 }
 
 // --- Encoding ---
 
+/** @param {Param[]} params @param {AbiValue[]} values @returns {string} */
 function encodeTuple(params, values) {
   let heads = '';
   let tails = '';
@@ -70,6 +79,7 @@ function encodeTuple(params, values) {
   return heads + tails;
 }
 
+/** @param {Param} param @param {AbiValue} value @returns {string} */
 function encodeOne(param, value) {
   const arr = inner(param);
   if (arr) {
@@ -98,19 +108,20 @@ function encodeOne(param, value) {
   throw new Error(`Unsupported type ${param.type}.`);
 }
 
-export const encodeArgs = (params, values) => encodeTuple(params, values);
-export const encodeCall = (fn, values) => `${selector(fn)}${encodeTuple(fn.inputs ?? [], values)}`;
+export const encodeArgs = (/** @type {Param[]} */ params, /** @type {AbiValue[]} */ values) => encodeTuple(params, values);
+export const encodeCall = (/** @type {Fn} */ fn, /** @type {AbiValue[]} */ values) => `${selector(fn)}${encodeTuple(fn.inputs ?? [], values)}`;
 
 // --- Decoding ---
 
-const readWord = (hex, at) => {
+const readWord = (/** @type {string} */ hex, /** @type {number} */ at) => {
   const w = hex.slice(at * 2, at * 2 + W);
   if (w.length < W) throw new Error('The answer is shorter than the ABI says.');
   return w;
 };
-const readUint = (hex, at) => BigInt(`0x${readWord(hex, at)}`);
+const readUint = (/** @type {string} */ hex, /** @type {number} */ at) => BigInt(`0x${readWord(hex, at)}`);
 
 // at: byte offset of the tuple's head in hex.
+/** @param {Param[]} params @param {string} hex @param {number} at @returns {AbiValue[]} */
 function decodeTuple(params, hex, at) {
   let pos = at;
   return params.map((p) => {
@@ -122,6 +133,7 @@ function decodeTuple(params, hex, at) {
   });
 }
 
+/** @param {Param} param @param {string} hex @param {number} at @returns {AbiValue} */
 function decodeOne(param, hex, at) {
   const arr = inner(param);
   if (arr) {
@@ -150,10 +162,11 @@ function decodeOne(param, hex, at) {
   throw new Error(`Unsupported type ${param.type}.`);
 }
 
-export const decodeArgs = (params, data) => decodeTuple(params, strip(data), 0);
+export const decodeArgs = (/** @type {Param[]} */ params, /** @type {string} */ data) => decodeTuple(params, strip(data), 0);
 
 // An event log, decoded by the event its first topic names, or null when the ABI has no such event.
 // Indexed strings, bytes, arrays and tuples are stored as their hash, so those come back as the hash.
+/** @template {Fn} E @param {E[]} events @param {Log} log */
 export function decodeLog(events, log) {
   const event = events.find((e) => topicOf(e) === String(log.topics?.[0]).toLowerCase());
   if (!event) return null;
@@ -164,7 +177,7 @@ export function decodeLog(events, log) {
   let d = 0;
   const args = inputs.map((p) => {
     if (!p.indexed) return data[d++];
-    const topic = strip(log.topics[t++]);
+    const topic = strip(/** @type {string[]} */ (log.topics)[t++]); // the event was found by its first topic
     return isDynamic(p) || typeOf(p).base === 'tuple' ? `0x${topic}` : decodeOne(p, topic, 0);
   });
   return { event, args };
@@ -173,21 +186,23 @@ export function decodeLog(events, log) {
 // --- ABI files and typed input ---
 
 // An ABI pasted as JSON: an array, or an object with an "abi" field (Hardhat and Foundry artifacts).
+/** @param {unknown} text @returns {AbiItem[]} */
 export function parseAbi(text) {
   const json = typeof text === 'string' ? JSON.parse(text) : text;
   const list = Array.isArray(json) ? json : Array.isArray(json?.abi) ? json.abi : null;
   if (!list) throw new Error('An ABI is a JSON list of functions and events.');
-  return list.filter((x) => x && typeof x === 'object');
+  return list.filter((/** @type {unknown} */ x) => x && typeof x === 'object');
 }
 
-const isView = (f) => f.stateMutability === 'view' || f.stateMutability === 'pure' || f.constant === true;
-export const functionsOf = (abi) => abi.filter((x) => x.type === 'function' || (!x.type && x.name));
-export const readsOf = (abi) => functionsOf(abi).filter(isView);
-export const writesOf = (abi) => functionsOf(abi).filter((f) => !isView(f));
-export const eventsOf = (abi) => abi.filter((x) => x.type === 'event');
-export const isPayable = (f) => f.stateMutability === 'payable' || f.payable === true;
+const isView = (/** @type {AbiItem} */ f) => f.stateMutability === 'view' || f.stateMutability === 'pure' || f.constant === true;
+export const functionsOf = (/** @type {AbiItem[]} */ abi) => abi.filter((x) => x.type === 'function' || (!x.type && x.name));
+export const readsOf = (/** @type {AbiItem[]} */ abi) => functionsOf(abi).filter(isView);
+export const writesOf = (/** @type {AbiItem[]} */ abi) => functionsOf(abi).filter((f) => !isView(f));
+export const eventsOf = (/** @type {AbiItem[]} */ abi) => abi.filter((x) => x.type === 'event');
+export const isPayable = (/** @type {AbiItem} */ f) => f.stateMutability === 'payable' || f.payable === true;
 
 // A value typed in a field, for one parameter. Arrays and tuples are typed as JSON.
+/** @param {Param} param @param {unknown} text @returns {AbiValue} */
 export function parseInput(param, text) {
   const raw = String(text ?? '').trim();
   const { base, dims } = typeOf(param);
@@ -203,6 +218,7 @@ export function parseInput(param, text) {
   return coerce(param, raw);
 }
 
+/** @param {Param} param @param {AbiValue} value @returns {AbiValue} */
 function coerce(param, value) {
   const label = param.name || param.type;
   const arr = inner(param);
@@ -213,7 +229,7 @@ function coerce(param, value) {
   const { base } = typeOf(param);
   if (base === 'tuple') {
     const comps = param.components ?? [];
-    const list = Array.isArray(value) ? value : comps.map((c) => value?.[c.name]);
+    const list = Array.isArray(value) ? value : comps.map((c) => value?.[/** @type {string} */ (c.name)]);
     return comps.map((c, i) => coerce(c, list[i]));
   }
   const s = typeof value === 'string' ? value.trim() : value;
@@ -250,6 +266,7 @@ function coerce(param, value) {
 }
 
 // A decoded value as text: numbers in full, tuples and arrays as JSON.
+/** @param {unknown} value */
 export function show(value) {
   if (typeof value === 'bigint') return value.toString();
   if (Array.isArray(value)) return JSON.stringify(value, (_, v) => (typeof v === 'bigint' ? v.toString() : v));
@@ -257,6 +274,7 @@ export function show(value) {
 }
 
 // "1.5" in a coin with 18 decimals -> 1500000000000000000n.
+/** @param {unknown} text */
 export function parseUnits(text, decimals = 18) {
   const s = String(text ?? '').trim();
   if (!s) return 0n;
