@@ -144,7 +144,6 @@ export const isConnected = (service) => hasToken(WEB) && tokenScopes(WEB).includ
  * @param {string} name
  * @param {string} url
  * @param {RequestInit & { headers?: Record<string, string> }} [options]
- * @returns {Promise<unknown>}
  */
 export async function googleFetch(service, name, url, options = {}) {
   if (!isConnected(service)) throw new Error(`Connect ${name} in Settings first.`);
