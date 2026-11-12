@@ -29,7 +29,7 @@ const OLD_SESSIONS_KEY = 'board:dev-sessions';
 const SIDE_KEY = 'board:dev-side';
 
 // View state: the workspace, the sessions, the one shown, and what the runner said about itself.
-const view = { side: readSide(), workspace: 'board', sessions: [], active: '', wanted: 0, info: null, infoError: '', checking: false, count: 0, pending: null, queued: null, opening: null, restored: false };
+const view = { side: readSide(), workspace: 'board', sessions: [], active: '', wanted: 0, info: null, infoError: '', checking: false, count: 0, pending: null, queued: null, opening: null, restored: false, back: '' };
 let currentStore = null;
 
 function readSide() {
@@ -543,9 +543,29 @@ export function openSession({ id, cwd = '', taskIds = [] }) {
   showDev();
 }
 
+// A task's Dev button remembers the page it was on, so Dev offers a way back to it.
 function showDev() {
-  if (location.hash.startsWith('#/dev')) currentStore?.refresh();
-  else location.hash = '#/dev';
+  if (location.hash.startsWith('#/dev')) return currentStore?.refresh();
+  view.back = location.hash;
+  location.hash = '#/dev';
+}
+
+// Leaving Dev any other way forgets the page to go back to.
+window.addEventListener('hashchange', () => {
+  if (!location.hash.startsWith('#/dev')) view.back = '';
+});
+
+function backButton() {
+  if (!view.back) return null;
+  return h('button', {
+    type: 'button',
+    class: 'icon-btn',
+    title: 'Back to the page you came from',
+    'aria-label': 'Back to the page you came from',
+    onclick: () => {
+      location.hash = view.back;
+    },
+  }, icon('arrow-left'));
 }
 
 function showOpening(store) {
@@ -725,6 +745,7 @@ function terminal(store, s) {
 
   return h('section', { class: 'card term' },
     h('div', { class: 'term-head' },
+      backButton(),
       sessionTabs(store),
       h('code', { class: 'term-cwd', title: s.cwd }, s.cwd || '…'),
       h('div', { class: 'row term-actions' },
