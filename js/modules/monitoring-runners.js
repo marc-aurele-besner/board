@@ -1,3 +1,4 @@
+// @ts-check
 // Monitoring → Board runners: the processes `bun start` runs (the static server, the command runner and the worker),
 // and the status of each job the worker runs. Settings → Runners is where the jobs are switched and timed.
 import { h, icon, refreshIcon, empty } from '../ui.js';
@@ -7,20 +8,31 @@ import { runnerInfo } from '../terminal.js';
 import { runnerOf } from '../dev-core.js';
 import { sortTable } from './monitoring-web.js';
 import { when, exact, outcome, runNow, runningNow } from './settings-runners.js';
+/** @import { Store, RunnerJobState, RunnerWorker, IconName } from '../../types/data' */
+/** @import { RunnerInfo } from '../../types/terminal' */
+/** @import { Child } from '../../types/ui' */
+/** @typedef {typeof JOBS[number]} Job */
+/** @typedef {{ job: Job, cfg: ReturnType<typeof jobConfig>, s: RunnerJobState | null, state: string }} JobRow */
+// A column of sortTable() (js/modules/monitoring-web.js). Each column's value has its own type, so format takes never.
+/** @typedef {{ label: string, num?: boolean, value: (r: JobRow) => unknown, format?: (v: never, r: JobRow) => Child }} JobColumn */
 
 const POLL_MS = 10000;
 const HOUR = 3600000;
 // What the two processes the heartbeat does not cover answered, asked while the tab is shown.
 // term: the command runner's /info, null when it does not answer. serve: whether this page's server sends no-cache.
+/** @type {{ term: RunnerInfo | null | undefined, serve: boolean | null | undefined, timer: number | string }} */
 const probe = { term: undefined, serve: undefined, timer: 0 };
 // filter: one job state, or null for every job. layout: 'cards' or 'list'.
+/** @type {{ filter: string | null, layout: string }} */
 const view = { filter: null, layout: 'cards' };
 
 // Each job state's name, in the order the ring and the legend show them. The rs-<state> class sets its colour.
 const STATES = [['ok', 'OK'], ['running', 'Running'], ['waiting', 'Waiting'], ['pending', 'Not run yet'], ['failed', 'Failed'], ['off', 'Off']];
 const NAME = Object.fromEntries(STATES);
+/** @type {Record<string, number>} */
 const RANK = { failed: 0, waiting: 1, running: 2, pending: 3, ok: 4, off: 5 };
 
+/** @param {Store} store */
 async function ask(store) {
   const [term, serve] = await Promise.all([
     runnerInfo(runnerOf(store)).catch(() => null),
@@ -35,6 +47,10 @@ async function ask(store) {
 }
 
 // Asks now and every few seconds while `shown()` holds; draws again only when an answer changed.
+/**
+ * @param {Store} store
+ * @param {() => boolean} shown
+ */
 function poll(store, shown) {
   if (probe.timer) return;
   const step = async () => {
@@ -46,6 +62,7 @@ function poll(store, shown) {
   probe.timer = setTimeout(step, 0);
 }
 
+/** @param {string} at */
 function uptime(at) {
   const ms = Date.now() - Date.parse(at);
   if (!(ms > 0)) return '—';
@@ -53,11 +70,18 @@ function uptime(at) {
   return m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${Math.floor(m / 1440)} d ${Math.floor((m % 1440) / 60)} h`;
 }
 
+/** @param {number | null | undefined} ms */
 const took = (ms) => (ms === undefined || ms === null ? '—' : ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`);
+/** @param {{ every: number }} cfg */
 const every = (cfg) => (cfg.every < 1 ? `Every ${Math.round(cfg.every * 60)} s` : cfg.every >= 60 && cfg.every % 60 === 0 ? `Every ${cfg.every / 60} h` : `Every ${cfg.every} min`);
+/** @param {string} url */
 const host = (url) => url.replace(/^https?:\/\//, '');
 
 // One word per job for the counts, the colours and sorting.
+/**
+ * @param {Store} store
+ * @param {Job} job
+ */
 function stateOf(store, job) {
   const s = jobState(job.id);
   if (!jobConfig(store.get('settings'), job.id).on) return 'off';
@@ -68,6 +92,10 @@ function stateOf(store, job) {
 }
 
 // The ring of job states, drawn with a conic gradient so it needs no SVG.
+/**
+ * @param {Record<string, number>} counts
+ * @param {number} total
+ */
 function ring(counts, total) {
   let at = 0;
   const stops = STATES.filter(([k]) => counts[k]).map(([k]) => {
@@ -81,6 +109,11 @@ function ring(counts, total) {
       h('span', { class: 'muted small' }, 'jobs OK')));
 }
 
+/**
+ * @param {Store} store
+ * @param {JobRow[]} rows
+ * @param {boolean} online
+ */
 function hero(store, rows, online) {
   const counts = Object.fromEntries(STATES.map(([k]) => [k, rows.filter((r) => r.state === k).length]));
   const beat = heartbeat()?.worker;
@@ -110,6 +143,15 @@ function hero(store, rows, online) {
         }, h('span', { class: 'rs-dot' }), label, h('strong', null, String(counts[k])))))));
 }
 
+/**
+ * @param {string} name
+ * @param {IconName} iconName
+ * @param {string} tone
+ * @param {string} status
+ * @param {string} metric
+ * @param {string[]} lines
+ * @param {HTMLElement | null} [meter]
+ */
 function proc(name, iconName, tone, status, metric, lines, meter = null) {
   return h('section', { class: `card rs-proc rs-${tone}` },
     h('div', { class: 'rs-proc-head' },
@@ -120,6 +162,7 @@ function proc(name, iconName, tone, status, metric, lines, meter = null) {
     lines.filter(Boolean).map((l) => h('p', { class: 'muted small' }, l)));
 }
 
+/** @param {Store} store */
 function processes(store) {
   const beat = heartbeat()?.worker;
   const online = runnersOnline();
@@ -138,23 +181,31 @@ function processes(store) {
       term ? h('div', { class: 'rs-meter', title: `${term.running} of ${term.max} commands running` },
         h('span', { style: { '--p': String(Math.min(1, term.running / (term.max || 1))) } })) : null),
     proc('Worker', 'cpu', online ? 'ok' : 'failed', online ? 'Online' : 'Offline',
-      online ? `Up ${uptime(beat.startedAt)}` : 'Stopped',
+      // Online means a heartbeat was read.
+      online ? `Up ${uptime(/** @type {RunnerWorker} */ (beat).startedAt)}` : 'Stopped',
       online
-        ? [`Process ${beat.pid}, last heartbeat ${when(beat.beatAt)}.`]
+        ? [`Process ${/** @type {RunnerWorker} */ (beat).pid}, last heartbeat ${when(/** @type {RunnerWorker} */ (beat).beatAt)}.`]
         : [beat?.beatAt ? `No heartbeat since ${exact(beat.beatAt)}.` : 'Has not written to this folder yet.', 'Start the board with bun start.']));
 }
 
 // How far the job is between its last run and its next one. The bar keeps filling by itself until the run is due.
+/** @param {JobRow} r */
 function countdown(r) {
   if (r.state === 'running' || (r.job.fixed && r.state !== 'off')) return h('div', { class: 'rs-track busy' }, h('span'));
   const last = Date.parse(r.s?.lastRunAt ?? '');
   const next = Date.parse(r.s?.nextRunAt ?? '');
   if (r.state === 'off' || !(next > last)) return h('div', { class: 'rs-track' });
   const p = Math.min(1, Math.max(0, (Date.now() - last) / (next - last)));
-  return h('div', { class: 'rs-track', title: `Next run ${exact(r.s.nextRunAt)}` },
+  return h('div', { class: 'rs-track', title: `Next run ${exact(/** @type {RunnerJobState} */ (r.s).nextRunAt)}` },
     h('span', { style: { '--p': String(p), '--left': `${Math.max(0, next - Date.now())}ms` } }));
 }
 
+/**
+ * @param {Store} store
+ * @param {JobRow} r
+ * @param {boolean} online
+ * @param {number} i
+ */
 function jobTile(store, r, online, i) {
   const note = r.state === 'failed' ? r.s?.error : r.state === 'waiting' ? r.s?.waiting : null;
   const next = r.state === 'off' ? 'Off'
@@ -177,14 +228,19 @@ function jobTile(store, r, online, i) {
       h('span', { title: exact(r.s?.nextRunAt) }, next)));
 }
 
+/**
+ * @param {Store} store
+ * @param {JobRow[]} rows
+ * @param {boolean} online
+ */
 function jobTable(store, rows, online) {
-  return sortTable('runner-jobs', [
+  return sortTable('runner-jobs', /** @satisfies {JobColumn[]} */ ([
     {
       label: 'Job', value: (r) => r.job.label,
       format: (v, r) => h('div', null,
         h('strong', null, v),
         r.state === 'failed' || r.state === 'waiting'
-          ? h('div', { class: r.state === 'failed' ? 'small error' : 'muted small' }, r.s.error || r.s.waiting)
+          ? h('div', { class: r.state === 'failed' ? 'small error' : 'muted small' }, /** @type {RunnerJobState} */ (r.s).error || /** @type {RunnerJobState} */ (r.s).waiting)
           : null),
     },
     { label: 'Status', value: (r) => RANK[r.state], format: (v, r) => outcome(r.state === 'running' ? { ...r.s, running: true } : r.s, r.cfg.on) },
@@ -201,12 +257,15 @@ function jobTable(store, rows, online) {
         onclick: () => runNow(store, r.job),
       }, refreshIcon(r.state === 'running'), 'Run now'),
     },
-  ], rows);
+  ]), rows);
 }
 
 // How long each job's last run took, longest first, on one scale.
+/** @typedef {JobRow & { s: RunnerJobState & { durationMs: number } }} TimedRow */
+/** @param {JobRow[]} rows */
 function durations(rows) {
-  const timed = rows.filter((r) => r.s?.durationMs > 0 && !r.job.fixed).sort((a, b) => b.s.durationMs - a.s.durationMs);
+  // undefined > 0 is false: a job that has not run has no duration.
+  const timed = rows.filter(/** @returns {r is TimedRow} */ (r) => /** @type {number} */ (r.s?.durationMs) > 0 && !r.job.fixed).sort((a, b) => b.s.durationMs - a.s.durationMs);
   const max = timed[0]?.s.durationMs ?? 1;
   return h('section', { class: 'card stack' },
     h('h3', null, 'Last run time'),
@@ -219,6 +278,7 @@ function durations(rows) {
 }
 
 // Every run due in the next hour, one lane per job, so the busy minutes stand out.
+/** @param {JobRow[]} rows */
 function nextHour(rows) {
   const now = Date.now();
   const lanes = rows
@@ -226,6 +286,7 @@ function nextHour(rows) {
     .map((r) => {
       const step = r.cfg.every * 60000;
       let at = Math.max(now, Date.parse(r.s?.nextRunAt ?? '') || now);
+      /** @type {number[]} */
       const runs = [];
       for (; at <= now + HOUR && runs.length < 60; at += step) runs.push((at - now) / HOUR);
       return { r, runs };
@@ -246,9 +307,10 @@ function nextHour(rows) {
       : empty('No run is due in the next hour.'));
 }
 
+/** @param {Store} store */
 function layoutSwitch(store) {
   return h('div', { class: 'segmented rs-layout', role: 'group', 'aria-label': 'View' },
-    [['cards', 'Cards', 'cards'], ['list', 'List', 'list']].map(([key, label, iconName]) =>
+    /** @type {[string, string, IconName][]} */ ([['cards', 'Cards', 'cards'], ['list', 'List', 'list']]).map(([key, label, iconName]) =>
       h('button', {
         type: 'button',
         class: view.layout === key ? 'seg active' : 'seg',
@@ -260,6 +322,10 @@ function layoutSwitch(store) {
       }, icon(iconName), label)));
 }
 
+/**
+ * @param {Store} store
+ * @param {() => boolean} shown
+ */
 export function runnersTab(store, shown) {
   poll(store, shown);
   const online = runnersOnline();
