@@ -7,7 +7,7 @@ import { uid, now } from './ui.js';
 import { listFolder, readFile, gitStatus } from './terminal.js';
 import { fetchRepoOverview } from './github.js';
 import { readPageText } from './sitecheck.js';
-import { runnerOf } from './modules/dev.js';
+import { runnerOf } from './dev-core.js';
 
 // Word caps on what is sent, so a large repo cannot run up the cost of a build.
 const PAGE_WORDS = 1500;

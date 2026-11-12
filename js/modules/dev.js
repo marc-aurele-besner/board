@@ -21,6 +21,9 @@ import { pickChip } from '../inline.js';
 import { projectIcon } from './projects.js';
 import { linkWatcher, moveToReview } from '../task-links.js';
 import { recordOfSession, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
+import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand } from '../dev-core.js';
+
+export { runnerOf, devPresets, DEFAULT_DEV_COMMAND, devCommandOf };
 
 const COLLECTION = 'dev';
 // presets: commands named in Settings → Dev environment ({ id, name, command }), which projects pick instead of
@@ -47,8 +50,6 @@ function readSide() {
   }
 }
 
-export const runnerOf = (store) => store.get(COLLECTION).runner || TERMINAL_RUNNER;
-export const devPresets = (store) => store.get(COLLECTION).presets ?? [];
 const maxSessions = () => view.info?.max ?? 12;
 const activeSession = () => view.sessions.find((s) => s.id === view.active) ?? view.sessions[0];
 const projectsWithFolder = (store) => store.get('projects').projects.filter((p) => p.localPath);
@@ -587,35 +588,12 @@ async function checkRunner(store) {
   }
 }
 
-// A shell word: single quotes keep newlines, quotes and $ in the prompt as typed.
-const shellQuote = (text) => `'${text.replace(/'/g, `'\\''`)}'`;
-
-// The command a task is handed to; a project can set its own in its Dev command field.
-export const DEFAULT_DEV_COMMAND = 'claude --dangerously-skip-permissions --worktree';
-
 // What claude used in a task's terminal so far, read from its transcript (dev-usage.js).
 function sessionUsage(store, s) {
   const record = recordOfSession(store, s.id);
   if (!record) return null;
   const sum = sumUsage([record]);
   return h('span', { class: 'muted small term-usage', title: usageTitle(sum) }, icon('cpu'), usageLine(sum));
-}
-
-// The command a project's tasks are handed to: its preset's, else its own Dev command, else the default.
-// A preset that was removed is skipped, so the project falls back to its own command.
-export function devCommandOf(store, project) {
-  const preset = project?.devPreset ? devPresets(store).find((x) => x.id === project.devPreset) : null;
-  return preset?.command?.trim() || project?.devCommand?.trim() || DEFAULT_DEV_COMMAND;
-}
-
-// A worktree flag with no name: claude would pick a random one, which the tasks could not find again.
-const BARE_WORKTREE = /(^|\s)(--worktree|-w)(?=\s+-|\s*$)/;
-
-// A name claude accepts for a worktree (and its branch, worktree-<name>): the task's words, then the session's id,
-// so two sessions on one task get two worktrees.
-function worktreeName(title, id) {
-  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40).replace(/^-+|-+$/g, '');
-  return `${slug || 'task'}-${id.replace(/-/g, '').slice(0, 6)}`;
 }
 
 // Opens Dev with a new terminal that runs claude on a prompt, in the project's folder when it has one.
@@ -630,19 +608,6 @@ export function startClaudeSession({ store, prompt, projectId = '', taskIds = []
   view.queued = { id, prompt, projectId, taskIds, command };
   showDev();
   return { id, worktree };
-}
-
-// The project's Dev command (or the default), with a name for the worktree it makes. `fallbackCwd` is the folder
-// used when the project has none.
-function claudeCommand(store, projectId, title, id, fallbackCwd, override = '') {
-  const project = store.get('projects').projects.find((p) => p.id === projectId);
-  let command = override.trim() || devCommandOf(store, project);
-  let worktree = null;
-  if (BARE_WORKTREE.test(command)) {
-    worktree = { name: worktreeName(title, id), cwd: project?.localPath || fallbackCwd };
-    command = command.replace(BARE_WORKTREE, `$1$2 ${worktree.name}`);
-  }
-  return { command, worktree };
 }
 
 // Starts a command in a new Dev terminal and stays on the page shown, for work the board starts by itself (Cron).
