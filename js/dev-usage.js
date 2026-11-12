@@ -1,7 +1,10 @@
+// @ts-check
 // What the claude sessions Dev ran for tasks actually used: models, provider, effort, tokens, cost and time, read by
 // the command runner from Claude Code's transcripts (tools/usage.js). Each session's worktree gets a record in
 // usage.json (`dev`, by worktree name) that names its tasks, so the record outlives the task's worktree entry,
 // which goes once the worktree is removed. Records are read again while their tasks are open, and for a day after.
+/** @import { DataStore, DevUsage, DevModelUsage, TaskWorktree } from '../types/data' */
+/** @import { WorktreeUsage } from '../types/terminal' */
 import { worktreeUsage, TERMINAL_RUNNER } from './terminal.js';
 import { statusOf } from './ui.js';
 
@@ -9,13 +12,16 @@ const COLLECTION = 'usage';
 const DAY = 86400000;
 // Records read in one call to the runner, the most recent first.
 const BATCH = 40;
+/** @type {(keyof WorktreeUsage)[]} */
 const FIELDS = ['sessions', 'billing', 'models', 'cost', 'extraCost', 'duration', 'apiDuration', 'linesAdded', 'linesRemoved', 'efforts', 'replies', 'start', 'end'];
 
-const runnerOf = (store) => store.get('dev')?.runner || TERMINAL_RUNNER;
-export const devUsage = (store) => store.get(COLLECTION).dev ?? {};
+const runnerOf = (/** @type {DataStore} */ store) => store.get('dev')?.runner || TERMINAL_RUNNER;
+export const devUsage = (/** @type {DataStore} */ store) => store.get(COLLECTION).dev ?? {};
+/** @type {(r: DevUsage | undefined) => r is DevUsage & { sessions: number }} */
 const hasUsage = (r) => !!r?.sessions;
 
 // Keeps a record for each worktree a task holds, so it is read again after the worktree and its entry are gone.
+/** @param {DataStore} store @param {{ worktree: TaskWorktree, taskIds: string[] }[]} list */
 export function rememberWorktrees(store, list) {
   const known = devUsage(store);
   const missing = list.filter(({ worktree, taskIds }) => {
@@ -34,12 +40,14 @@ export function rememberWorktrees(store, list) {
 }
 
 // Each worktree the tasks hold, with the tasks.
+/** @param {DataStore} store */
 function heldWorktrees(store) {
+  /** @type {Map<string, { worktree: TaskWorktree, taskIds: string[] }>} */
   const all = new Map();
   for (const task of store.get('todos').items) {
     for (const w of task.worktrees ?? []) {
       if (!all.has(w.name)) all.set(w.name, { worktree: w, taskIds: [] });
-      all.get(w.name).taskIds.push(task.id);
+      /** @type {{ taskIds: string[] }} */ (all.get(w.name)).taskIds.push(task.id);
     }
   }
   return [...all.values()];
@@ -47,6 +55,7 @@ function heldWorktrees(store) {
 
 // A record still changes while a task of it is open, and shortly after its last activity (claude writes its final
 // totals as it quits, which can follow the task being completed).
+/** @param {DataStore} store @param {DevUsage} r */
 function live(store, r) {
   const tasks = store.get('todos').items.filter((t) => r.taskIds?.includes(t.id));
   if (tasks.some((t) => statusOf(t) !== 'done')) return true;
@@ -57,6 +66,10 @@ function live(store, r) {
 let busy = false;
 // Reads the usage of the live records and saves what changed. `read` takes [{ name, cwd }] and answers by name; the
 // runners read the transcripts themselves (tools/usage.js), without asking the command runner.
+/**
+ * @param {DataStore} store
+ * @param {(list: { name: string, cwd: string }[]) => Promise<Record<string, WorktreeUsage>>} [read]
+ */
 export async function refreshDevUsage(store, read = (list) => worktreeUsage(runnerOf(store), list)) {
   if (busy) return;
   rememberWorktrees(store, heldWorktrees(store));
@@ -75,7 +88,7 @@ export async function refreshDevUsage(store, read = (list) => worktreeUsage(runn
     store.update(COLLECTION, (d) => {
       for (const [name, u] of changed) {
         if (!d.dev?.[name]) continue;
-        for (const k of FIELDS) d.dev[name][k] = u[k];
+        for (const k of FIELDS) /** @type {Partial<Record<keyof WorktreeUsage, unknown>>} */ (d.dev[name])[k] = u[k];
       }
       for (const name of gone) if (d.dev?.[name]) d.dev[name].billing = null;
     });
@@ -86,14 +99,22 @@ export async function refreshDevUsage(store, read = (list) => worktreeUsage(runn
 
 // --- Reading the records ---
 
-export const tokensOf = (m) => m.input + m.output + m.cacheRead + m.cacheWrite;
+export const tokensOf = (/** @type {DevModelUsage} */ m) => m.input + m.output + m.cacheRead + m.cacheWrite;
 
 // Records added up: { records, sessions, cost (null when no session reported one yet), costPartial, extraCost (the
 // part billed beyond the Claude plan: extra usage, an API key, Bedrock or Vertex), included (cost - extraCost),
 // billing ('plan', 'api', or '' when unknown or mixed), tokens, models
 // (by id, with provider), providers, effort (the one used most), duration (ms of work), linesAdded, linesRemoved,
 // start, end }.
+/**
+ * @typedef {{ records: number, sessions: number, cost: number | null, costPartial: boolean, extraCost: number | null,
+ *   included: number | null, billing: string, tokens: number, models: Record<string, DevModelUsage>, providers: string[],
+ *   efforts: Record<string, number>, effort: string, duration: number, linesAdded: number, linesRemoved: number,
+ *   start: number | null, end: number | null }} UsageSum
+ */
+/** @param {DevUsage[]} records @returns {UsageSum} */
 export function sumUsage(records) {
+  /** @type {UsageSum} */
   const out = { records: 0, sessions: 0, cost: null, costPartial: false, extraCost: null, included: null, billing: '', tokens: 0, models: {}, providers: [], efforts: {}, effort: '', duration: 0, linesAdded: 0, linesRemoved: 0, start: null, end: null };
   const billings = new Set();
   for (const r of records) {
@@ -109,7 +130,7 @@ export function sumUsage(records) {
     }
     for (const [id, m] of Object.entries(r.models ?? {})) {
       const t = (out.models[id] ??= { provider: m.provider, input: 0, output: 0, thinking: 0, cacheRead: 0, cacheWrite: 0, cost: null, extraCost: null });
-      for (const k of ['input', 'output', 'thinking', 'cacheRead', 'cacheWrite']) t[k] += m[k] ?? 0;
+      for (const k of /** @type {const} */ (['input', 'output', 'thinking', 'cacheRead', 'cacheWrite'])) t[k] += m[k] ?? 0;
       if (m.cost !== null && m.cost !== undefined) {
         t.cost = (t.cost ?? 0) + m.cost;
         t.extraCost = (t.extraCost ?? 0) + (m.extraCost ?? 0);
@@ -124,27 +145,30 @@ export function sumUsage(records) {
     if (r.start) out.start = out.start === null ? r.start : Math.min(out.start, r.start);
     if (r.end) out.end = out.end === null ? r.end : Math.max(out.end, r.end);
   }
-  if (out.cost !== null) out.included = Math.max(0, out.cost - out.extraCost);
+  // extraCost is set with cost, so it is a number here.
+  if (out.cost !== null) out.included = Math.max(0, out.cost - /** @type {number} */ (out.extraCost));
   out.billing = billings.size === 1 ? [...billings][0] : '';
   out.providers = [...new Set(Object.values(out.models).map((m) => m.provider))];
   out.effort = Object.entries(out.efforts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
   return out;
 }
 
-export const recordsOfTask = (store, taskId) => Object.values(devUsage(store)).filter((r) => r.taskIds?.includes(taskId) && hasUsage(r));
-export const recordOfSession = (store, sessionId) => Object.values(devUsage(store)).find((r) => r.session === sessionId && hasUsage(r)) ?? null;
-export const usageRecords = (store) => Object.values(devUsage(store)).filter(hasUsage);
+export const recordsOfTask = (/** @type {DataStore} */ store, /** @type {string} */ taskId) => Object.values(devUsage(store)).filter((r) => r.taskIds?.includes(taskId) && hasUsage(r));
+export const recordOfSession = (/** @type {DataStore} */ store, /** @type {string} */ sessionId) => Object.values(devUsage(store)).find((r) => r.session === sessionId && hasUsage(r)) ?? null;
+export const usageRecords = (/** @type {DataStore} */ store) => Object.values(devUsage(store)).filter(hasUsage);
 
 // The models by name, the one with the most output first: "claude-opus-5-5" reads "Opus 5.5".
+/** @param {string} id */
 export function modelName(id) {
   const m = /claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?![\d])/.exec(id);
   if (!m) return id;
   return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ''}`;
 }
-export const modelsByUse = (sum) => Object.entries(sum.models).sort((a, b) => b[1].output - a[1].output).map(([id]) => id);
+export const modelsByUse = (/** @type {UsageSum} */ sum) => Object.entries(sum.models).sort((a, b) => b[1].output - a[1].output).map(([id]) => id);
 
-export const fmtTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
-export const fmtCost = (n) => (n === null ? '' : n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
+export const fmtTokens = (/** @type {number} */ n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
+export const fmtCost = (/** @type {number | null} */ n) => (n === null ? '' : n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
+/** @param {number} ms */
 export function fmtDuration(ms) {
   const min = Math.round(ms / 60000);
   if (min < 1) return '< 1 min';
@@ -153,18 +177,20 @@ export function fmtDuration(ms) {
 }
 
 // One line for a task or a terminal: "Opus 5.5 · medium · 2.1M tokens · $4.56 · 9 min".
+/** @param {UsageSum} sum */
 export function usageLine(sum) {
   const models = modelsByUse(sum).map(modelName);
   return [
     models.slice(0, 2).join(' + ') + (models.length > 2 ? ` +${models.length - 2}` : ''),
     sum.effort ? `${sum.effort} effort` : '',
     `${fmtTokens(sum.tokens)} tokens`,
-    sum.cost !== null ? `${sum.costPartial ? '≥ ' : ''}${fmtCost(sum.cost)}${sum.extraCost >= 0.005 ? ` (${fmtCost(sum.extraCost)} extra)` : ''}` : '',
+    sum.cost !== null ? `${sum.costPartial ? '≥ ' : ''}${fmtCost(sum.cost)}${/** @type {number} */ (sum.extraCost) >= 0.005 ? ` (${fmtCost(sum.extraCost)} extra)` : ''}` : '',
     sum.duration ? fmtDuration(sum.duration) : '',
   ].filter(Boolean).join(' · ');
 }
 
 // The details behind the line, for a tooltip.
+/** @param {UsageSum} sum */
 export function usageTitle(sum) {
   const lines = modelsByUse(sum).map((id) => {
     const m = sum.models[id];
