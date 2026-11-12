@@ -6,7 +6,7 @@ import { setupBanner } from '../integrations.js';
 import { positionFields, positionError } from '../position-input.js';
 import { poolsChanged } from '../automations.js';
 import { insightsPanel } from '../pool-insights.js';
-import { readPositions, poolState, tokenMeta, isAddressSymbol, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey, nodeUrls } from '../uniswap.js';
+import { readPositions, poolState, tokenMeta, isAddressSymbol, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, tokenList, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey, nodeUrls } from '../uniswap.js';
 import { chainById, explorerUrl, etherscanKey } from '../chains.js';
 import { walletsTab, walletsView } from './defi-wallets.js';
 import { lendingTab, lendingView } from './defi-lending.js';
@@ -43,6 +43,7 @@ let aprBusy = ''; // the window whose swaps are being read
 let aprAgain = false; // read again when done: the rows changed meanwhile
 let logoMap = new Map(); // "chainId:token address" -> logo URL, from the token list
 let logosAsked = false;
+let listedSyms = new Map(); // "chainId:token address" and "chainId:short address" -> symbol, from the token list
 const seen = new Set(); // rows already on screen: only new ones animate in
 const shownTotals = { value: 0, fees: 0 }; // the totals on screen, so a change counts from there
 
@@ -165,11 +166,14 @@ function collectsOf(before, rows, now) {
       ref: r.ref,
       pair: r.pair,
       chain: r.chain,
+      chainId: r.chainId,
       tokenId: r.tokenId,
       a0: o.fee0,
       a1: o.fee1,
       sym0: r.sym0,
       sym1: r.sym1,
+      addr0: r.addr0,
+      addr1: r.addr1,
       usd: p0 != null && p1 != null ? o.fee0 * p0 + o.fee1 * p1 : null,
     });
   }
@@ -329,7 +333,12 @@ function savedRows(store, cfg, keys) {
   const manual = new Set(addedPositions(cfg).map((x) => refOf(x.version, x.chainId, x.tokenId)));
   return keys.flatMap((key) => (cache[key]?.rows ?? [])
     .filter((r) => wallets.has(r.wallet) || manual.has(r.ref))
-    .map((r) => ({ ...r, max: r.max ?? Infinity, staleAt: cache[key].at })));
+    .map((r) => {
+      // A symbol saved as an address while it could not be read is looked up again.
+      const sym0 = knownSymbol(r.chainId, r.sym0, r.addr0);
+      const sym1 = knownSymbol(r.chainId, r.sym1, r.addr1);
+      return { ...r, sym0, sym1, pair: `${sym0} / ${sym1}`, max: r.max ?? Infinity, staleAt: cache[key].at };
+    }));
 }
 const cacheKeys = (chains) => chains.flatMap((c) => (c.v4 ? [`${c.id}:v3`, `${c.id}:v4`] : [`${c.id}:v3`]));
 const enabledChains = (cfg) => CHAINS.filter((chain) => chainSettings(cfg, chain).enabled);
@@ -647,18 +656,21 @@ function fixSymbols(d, chain, rows = []) {
   const byRef = new Map(rows.map((r) => [r.ref, r]));
   let changed = false;
   d.collected = (d.collected ?? []).map((c) => {
-    if (c.chainId !== chain.id) return c;
-    const s0 = isAddressSymbol(c.sym0) && c.addr0 ? known.get(c.addr0.toLowerCase()) : null;
-    const s1 = isAddressSymbol(c.sym1) && c.addr1 ? known.get(c.addr1.toLowerCase()) : null;
-    // An entry logged by hand keeps only the pair name: its position's row gives the symbols.
+    // Entries seen by the board kept no chain id or addresses before: the chain's name and the row give them.
+    if ((c.chainId ?? (c.chain === chain.name ? chain.id : null)) !== chain.id) return c;
     const row = byRef.get(c.ref);
+    const addr0 = c.addr0 ?? row?.addr0;
+    const addr1 = c.addr1 ?? row?.addr1;
+    const s0 = isAddressSymbol(c.sym0) && addr0 ? known.get(String(addr0).toLowerCase()) : null;
+    const s1 = isAddressSymbol(c.sym1) && addr1 ? known.get(String(addr1).toLowerCase()) : null;
+    // An entry logged by hand keeps only the pair name: its position's row gives the symbols.
     const pairFix = !c.sym0 && row && String(c.pair ?? '').split('/').some((t) => isAddressSymbol(t.trim())) && !/0x/i.test(row.pair) ? row.pair : null;
     if (!s0 && !s1 && !pairFix) return c;
     changed = true;
     if (pairFix) return { ...c, pair: pairFix };
     const sym0 = s0 ?? c.sym0;
     const sym1 = s1 ?? c.sym1;
-    return { ...c, sym0, sym1, pair: `${sym0} / ${sym1}` };
+    return { ...c, chainId: chain.id, addr0, addr1, sym0, sym1, pair: `${sym0} / ${sym1}` };
   });
   return changed;
 }
@@ -667,16 +679,20 @@ function fixSymbols(d, chain, rows = []) {
 // held: their symbols are read from the node, or the token list.
 async function fixLeftSymbols(store, chain, node) {
   const left = new Set();
-  for (const c of collectedOf(store)) {
-    if (c.chainId !== chain.id) continue;
-    if (isAddressSymbol(c.sym0) && c.addr0) left.add(c.addr0);
-    if (isAddressSymbol(c.sym1) && c.addr1) left.add(c.addr1);
+  const rows = new Map(state.rows.map((r) => [r.ref, r]));
+  for (const c of store.get(COLLECTION)?.collected ?? []) {
+    if ((c.chainId ?? (c.chain === chain.name ? chain.id : null)) !== chain.id) continue;
+    const row = rows.get(c.ref);
+    const addr0 = c.addr0 ?? row?.addr0;
+    const addr1 = c.addr1 ?? row?.addr1;
+    if (isAddressSymbol(c.sym0) && addr0) left.add(addr0);
+    if (isAddressSymbol(c.sym1) && addr1) left.add(addr1);
   }
   const ask = [...left].filter((a) => !tokenInfo.has(tokenKey(chain, a)) || tokenInfo.get(tokenKey(chain, a)).guessed);
   if (!left.size) return;
   await Promise.all(ask.map(async (a) => tokenInfo.set(tokenKey(chain, a), await tokenMeta(node, a, chain))));
   const d = structuredClone(store.get(COLLECTION) ?? {});
-  if (fixSymbols(d, chain)) store.update(COLLECTION, (x) => { x.collected = d.collected; });
+  if (fixSymbols(d, chain, state.rows.filter((r) => r.chainId === chain.id))) store.update(COLLECTION, (x) => { x.collected = d.collected; });
 }
 
 // What a row needs for reading its collect transactions.
@@ -900,10 +916,54 @@ function collectCoverage(store) {
 function askLogos(store) {
   if (logosAsked) return;
   logosAsked = true;
-  tokenLogos().then((map) => {
+  Promise.all([tokenLogos(), tokenList()]).then(([map, tokens]) => {
     logoMap = map;
+    listedSyms = new Map(tokens.filter((t) => t.symbol).flatMap((t) => [
+      [`${t.chainId}:${t.address.toLowerCase()}`, t.symbol],
+      [`${t.chainId}:${shortAddress(t.address).toLowerCase()}`, t.symbol],
+    ]));
     store.refresh();
   });
+}
+
+// The symbol of a token saved as its short address, from the rows read, the symbols read since, or the token list.
+// An entry that kept no address is matched by its short address.
+function knownSymbol(chainId, sym, addr) {
+  if (!isAddressSymbol(sym)) return sym;
+  const keys = [addr && String(addr).toLowerCase(), String(sym).toLowerCase()].filter(Boolean);
+  for (const k of keys) {
+    for (const r of state.rows) {
+      if (r.chainId !== chainId) continue;
+      const a0 = String(r.addr0).toLowerCase();
+      const a1 = String(r.addr1).toLowerCase();
+      if ((k === a0 || k === shortAddress(a0)) && !isAddressSymbol(r.sym0)) return r.sym0;
+      if ((k === a1 || k === shortAddress(a1)) && !isAddressSymbol(r.sym1)) return r.sym1;
+    }
+    for (const [key, m] of tokenInfo) {
+      const [id, a] = key.split(':');
+      const low = a.toLowerCase();
+      if (Number(id) === chainId && !m.guessed && (k === low || k === shortAddress(low))) return m.symbol;
+    }
+    const listed = listedSyms.get(`${chainId}:${k}`);
+    if (listed) return listed;
+  }
+  return sym;
+}
+
+// A fee log entry as shown: tokens saved as an address while their symbol could not be read get their symbol.
+function named(c) {
+  const chainId = c.chainId ?? CHAINS.find((x) => x.name === c.chain)?.id;
+  const row = c.ref ? state.rows.find((r) => r.ref === c.ref) : null;
+  if (c.sym0 || c.sym1) {
+    const sym0 = knownSymbol(chainId, c.sym0, c.addr0 ?? row?.addr0);
+    const sym1 = knownSymbol(chainId, c.sym1, c.addr1 ?? row?.addr1);
+    return sym0 === c.sym0 && sym1 === c.sym1 ? c : { ...c, sym0, sym1, pair: `${sym0} / ${sym1}` };
+  }
+  // An entry logged by hand keeps only the pair name.
+  const parts = String(c.pair ?? '').split('/').map((t) => t.trim());
+  if (parts.length !== 2 || !parts.some(isAddressSymbol)) return c;
+  const pair = parts.map((t, i) => knownSymbol(chainId, t, row?.[i ? 'addr1' : 'addr0'])).join(' / ');
+  return pair === c.pair ? c : { ...c, pair };
 }
 
 const amount = (n) => (n >= 1000 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toFixed(2) : n.toPrecision(4));
@@ -1380,7 +1440,7 @@ function bucketTip(key, group, list) {
   ];
 }
 
-const collectedOf = (store) => store.get(COLLECTION)?.collected ?? [];
+const collectedOf = (store) => (store.get(COLLECTION)?.collected ?? []).map(named);
 
 // What the log holds per position, in USD, for the closed cards.
 function collectedByRef(store) {
