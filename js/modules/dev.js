@@ -553,16 +553,61 @@ function worktreeName(title, id) {
 // makes none, or names its own.
 export function startClaudeSession({ store, prompt, projectId = '', taskIds = [], title = '' }) {
   const id = uid();
+  const { command, worktree } = claudeCommand(store, projectId, title, id, rootPath(store, view.workspace));
+  view.queued = { id, prompt, projectId, taskIds, command };
+  showDev();
+  return { id, worktree };
+}
+
+// The project's Dev command (or the default), with a name for the worktree it makes. `fallbackCwd` is the folder
+// used when the project has none.
+function claudeCommand(store, projectId, title, id, fallbackCwd) {
   const project = store.get('projects').projects.find((p) => p.id === projectId);
   let command = project?.devCommand?.trim() || DEFAULT_DEV_COMMAND;
   let worktree = null;
   if (BARE_WORKTREE.test(command)) {
-    worktree = { name: worktreeName(title, id), cwd: project?.localPath || rootPath(store, view.workspace) };
+    worktree = { name: worktreeName(title, id), cwd: project?.localPath || fallbackCwd };
     command = command.replace(BARE_WORKTREE, `$1$2 ${worktree.name}`);
   }
-  view.queued = { id, prompt, projectId, taskIds, command };
-  showDev();
-  return { id, worktree };
+  return { command, worktree };
+}
+
+// Starts a command in a new Dev terminal and stays on the page shown, for work the board starts by itself (Cron).
+// With `claude`, `prompt` goes to claude as a task's Dev button sends it; otherwise `command` runs as typed. The
+// terminal opens in the project's folder, or the board's when there is none. Resolves to { id, n, worktree } once
+// the runner started it; fails when the runner cannot be reached or refuses.
+export async function startDevSession({ store, claude = false, prompt = '', command = '', projectId = '', taskIds = [], title = '' }) {
+  const base = runnerOf(store);
+  const info = view.info ?? await runnerInfo(base);
+  const project = store.get('projects').projects.find((p) => p.id === projectId);
+  const cwd = project?.localPath || info.root || '';
+  const id = uid();
+  let worktree = null;
+  if (claude) {
+    ({ command, worktree } = claudeCommand(store, projectId, title, id, cwd));
+    command = `${command} -- ${shellQuote(prompt)}`;
+  }
+  // The terminal is not on the page yet: it starts at a usual size and is fitted once shown.
+  await runCommand(base, { session: id, command, cwd, cols: 120, rows: 32, theme: currentTheme().dark ? 'dark' : 'light' });
+  const tasks = claude ? taskIds : [];
+  let n;
+  if (view.restored) {
+    // Dev has its list: the terminal joins it, and its output streams in like any other's.
+    currentStore ??= store;
+    const s = makeSession({ id, cwd, tasks, prompt: claude ? prompt : '' });
+    n = s.n;
+    saveSessions();
+    if (view.info) attach(store, s);
+    store.refresh();
+  } else {
+    // Dev was not opened on this page: the runner's list gets the terminal, and Dev reads it from there.
+    const saved = await listSessions(base).catch(() => null);
+    const list = { active: saved?.active ?? '', sessions: saved?.sessions ?? [] };
+    n = Math.max(0, ...list.sessions.map((x) => Number(x.n) || 0)) + 1;
+    list.sessions.push({ id, n, cwd, ...(tasks.length ? { tasks, prompt } : {}) });
+    await saveSessionList(base, list).catch(() => {});
+  }
+  return { id, n, worktree };
 }
 
 // Opens Dev on a terminal session a task started. One this page does not list (closed here, or started in another
