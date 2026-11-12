@@ -66,8 +66,9 @@ export interface CronStep {
   prompt?: string;
   system?: string;
   model?: string;
-  // task
+  // task; a missing description is the input, as before it could be written.
   title?: string;
+  description?: string;
   priority?: string;
   due?: string;
   // task, profile, dev, old gather; '' follows the flow's project.

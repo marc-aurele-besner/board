@@ -58,7 +58,7 @@ export const STEP_TYPES = [
   ['format', 'Format', 'align-left', 'Reshapes the input into cleaner text, a list with one line per item, or named JSON fields.'],
   ['parse', 'Parse JSON', 'code', 'Finds the JSON in a text, such as a model’s or claude’s answer, even with prose around it or cut off, and passes it on as data.'],
   ['loop', 'Loop over items', 'repeat', 'Runs the next steps once for each item of a list, then passes on what they gave for all of them.'],
-  ['task', 'Create task', 'check-square', 'Adds a task with the output as its description.'],
+  ['task', 'Create task', 'check-square', 'Adds a task with a title and description you write, the output by default.'],
   ['notify', 'Notify', 'bell', 'Posts the output under the bell (and Telegram if enabled).'],
   ['profile', 'Refresh project profile', 'refresh', 'Rebuilds a project’s profile from its folder, repos and website, as Projects does.'],
   ['dev', 'Run in Dev', 'terminal', 'Hands a prompt to the project’s Dev command, a preset or your own, in a new Dev terminal.'],
@@ -301,7 +301,7 @@ export function makeStep(type) {
   const base = { id: uid(), type };
   if (type === 'gather') return { ...base, sources: [makeSource()], append: false };
   if (type === 'ai') return { ...base, prompt: 'Summarize this in five bullet points:\n\n{{input}}', system: '', model: '' };
-  if (type === 'task') return { ...base, title: '{{flow}} · {{date}}', projectId: '', priority: 'none', due: '' };
+  if (type === 'task') return { ...base, title: '{{flow}} · {{date}}', description: '{{input}}', projectId: '', priority: 'none', due: '' };
   if (type === 'stop') return { ...base, when: 'nothing', text: '' };
   if (type === 'profile') return { ...base, projectId: '', onEdited: 'merge' };
   if (type === 'format') return { ...base, mode: 'text', text: '{{input}}', items: '{{input}}', itemText: '- {{item}}', separator: 'line', fields: [makeField()] };
@@ -2057,7 +2057,8 @@ async function runStep(store, flow, step, input, ctx) {
     const title = fill(step.title || '{{input}}', vars).split('\n')[0].slice(0, 200).trim() || flow.name;
     const due = step.due === 'today' ? todayISO() : step.due === 'tomorrow' ? new Date(Date.now() + 24 * 60 * MINUTE).toISOString().slice(0, 10) : '';
     const projectId = withFlowProject(flow, step).projectId || null;
-    ctx.data = { title, description: input, projectId, priority: step.priority || 'none', due };
+    const description = fill(step.description ?? '{{input}}', vars).trim();
+    ctx.data = { title, description, projectId, priority: step.priority || 'none', due };
     // A test of the whole flow makes the task for real, so the Dev step after it can work on it.
     if (ctx.dry && !ctx.live) {
       ctx.note = `Test run: would create the task “${title}”${due ? ` due ${due}` : ''}.`;
@@ -2065,7 +2066,7 @@ async function runStep(store, flow, step, input, ctx) {
     }
     const task = makeTask({
       text: title,
-      description: input,
+      description,
       projectId,
       priority: step.priority || 'none',
       due,

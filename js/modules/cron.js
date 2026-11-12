@@ -1363,7 +1363,9 @@ function stepForm(store, flow, step) {
   if (step.type === 'task') {
     return h('div', { class: 'stack' },
       varField('Task title', h('input', { value: step.title, autocomplete: 'off', onchange: (/** @type {FieldEvent} */ e) => set({ title: e.target.value }) }), key('title'), names,
-        'The first line is used. The full input becomes the description.'),
+        'The first line is used.'),
+      varField('Description', h('textarea', { rows: 6, class: 'mono-text', onchange: (/** @type {FieldEvent} */ e) => set({ description: e.target.value }) }, step.description ?? '{{input}}'), key('description'), names,
+        'Markdown is fine. {{input}} is the output of the step before.', vars),
       h('div', { class: 'row cron-fields' },
         field('Project', stepProjectPick(store, flow, step.projectId, (projectId) => set({ projectId }), { none: 'Personal' })),
         field('Priority', select(step.priority, [['none', 'No priority'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], (priority) => set({ priority }))),

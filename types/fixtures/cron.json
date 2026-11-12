@@ -17,7 +17,7 @@
         },
         { "id": "step-2", "type": "ai", "prompt": "Summarize this:\n\n{{input}}", "system": "", "model": "" },
         { "id": "step-3", "type": "stop", "when": "contains", "text": "nothing" },
-        { "id": "step-4", "type": "task", "title": "{{flow}} · {{date}}", "projectId": "", "priority": "none", "due": "" },
+        { "id": "step-4", "type": "task", "title": "{{flow}} · {{date}}", "description": "{{input}}", "projectId": "", "priority": "none", "due": "" },
         { "id": "step-5", "type": "profile", "projectId": "", "onEdited": "merge", "keepEdited": true },
         { "id": "step-6", "type": "dev", "from": "step-2", "mode": "claude", "preset": "", "devCommand": "", "projectId": "", "prompt": "{{input}}", "command": "", "waitMinutes": 60, "wait": true, "json": false },
         { "id": "step-7", "type": "gather", "source": "history", "url": "", "count": 5, "follow": 3, "flowId": "", "text": "" },
