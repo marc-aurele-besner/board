@@ -13,11 +13,14 @@ import {
   testStep, testsOf, isTesting, clearTests, varsTree, pathTo, remapStepRefs, parseData, projectVars,
 } from '../cron.js';
 import { modelForTask } from './settings.js';
+import { openSession, runnerOf, liveSession, onSessionPaint, exitText } from './dev.js';
+import { attachSession } from '../terminal.js';
+import { createTerminal } from '../vt.js';
 
 // View state: the tab, the open flow, the selected node ('trigger' or a step id), the Runs tab's filter and the
 // flow list's project filter ('' for all, NO_PROJECT for flows without one).
 // field and cursor: the {{…}} field last focused and where its cursor was, for the variable chips and the test data.
-const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', project: '', field: '', cursor: null };
+const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', project: '', field: '', cursor: null, terms: new Set() };
 const NO_PROJECT = 'none';
 const TABS = [['flows', 'Flows'], ['runs', 'Runs'], ['templates', 'Templates']];
 const SUBTITLES = {
@@ -284,7 +287,7 @@ function runsTab(store) {
     shown.length
       ? h('ul', { class: 'cron-runs' }, shown.map((r) => {
           const flow = flows.find((f) => f.id === r.flowId) ?? null;
-          return runItem(flow, r, {
+          return runItem(store, flow, r, {
             flowName: flow?.name ?? 'Deleted flow',
             open: flow ? () => {
               view.tab = 'flows';
@@ -779,8 +782,8 @@ function moveStep(store, flow, id, by) {
 }
 
 // A test that fails on an earlier step leaves this one without data, so it says where it stopped.
-function runTest(store, flow, stepId) {
-  testStep(store, flow.id, stepId).then((r) => {
+function runTest(store, flow, stepId, opts) {
+  testStep(store, flow.id, stepId, opts).then((r) => {
     if (r && !r.ok) toast(`Test failed: ${r.output}`);
   });
 }
@@ -842,6 +845,8 @@ function testPanel(store, flow, step, index) {
           ? h('button', { type: 'button', class: 'btn-link small', onclick: () => { clearTests(store, flow.id); store.refresh(); } }, 'Clear test data')
           : null)),
     result?.note ? h('p', { class: 'muted small' }, result.note) : null,
+    // A Dev step tested in a terminal shows it here as it runs.
+    step.type === 'dev' && result?.ok && result.data?.session ? terminalViewer(store, result.data.session, result.data.cwd) : null,
     h('div', { class: 'cron-test-grid' },
       h('div', { class: 'cron-col' },
         h('span', { class: 'muted small' }, 'Input · click a key to add it at the cursor'),
@@ -872,6 +877,15 @@ function inspector(store, flow) {
           title: 'Runs the steps before this one that have no test data yet, then this one. Creates no task, sends no notification and starts no terminal.',
           onclick: () => runTest(store, flow, step.id),
         }, icon('play'), isTesting(flow.id) ? 'Testing…' : 'Test step'),
+        step.type === 'dev'
+          ? h('button', {
+              type: 'button',
+              class: 'btn-small',
+              disabled: isRunning(flow.id),
+              title: 'Tests the steps before this one, then starts this terminal for real in Dev and shows its output here. No task goes with it.',
+              onclick: () => runTest(store, flow, step.id, { live: true }),
+            }, icon('terminal'), 'Test in a terminal')
+          : null,
         h('button', { type: 'button', class: 'icon-btn', title: 'Move earlier', 'aria-label': 'Move earlier', disabled: index === 0, onclick: () => moveStep(store, flow, step.id, -1) }, icon('chevron-left')),
         h('button', { type: 'button', class: 'icon-btn', title: 'Move later', 'aria-label': 'Move later', disabled: index === flow.steps.length - 1, onclick: () => moveStep(store, flow, step.id, 1) }, icon('chevron-right')),
         h('button', {
@@ -895,8 +909,124 @@ function inspector(store, flow) {
       ? h('details', { class: 'cron-output', open: !output.ok },
           h('summary', null, output.ok ? `Output of the last run (${output.ms} ms)` : 'Last run failed here'),
           output.note ? h('p', { class: 'muted small' }, output.note) : null,
-          h('pre', { class: output.ok ? '' : 'error' }, output.output || '(empty)'))
+          h('pre', { class: output.ok ? '' : 'error' }, output.output || '(empty)'),
+          output.session ? terminalFold(store, output.session, output.cwd) : null)
       : null);
+}
+
+// --- Dev terminals ---
+// What a Run in Dev step's terminal printed. The runner keeps a terminal's output after it ends, until it is closed
+// in Dev, so a run's terminal can be read later. A viewer is made once per terminal and moved into each new page,
+// so its scroll survives re-renders; it reads the runner only while it is on the page. A terminal Dev reads already
+// is shown from Dev's copy.
+const viewers = new Map();
+const lineText = (line) => line.cells.map((c) => c?.c ?? ' ').join('').trimEnd();
+
+function drawViewer(v) {
+  v.frame = 0;
+  const live = v.mirror ? liveSession(v.session) : null;
+  const t = live?.term ?? v.term;
+  const running = live ? live.running : v.running;
+  const exit = live ? live.exit : v.exit;
+  const lines = [...t.history, ...t.screen.slice(0, t.used())].map(lineText);
+  while (lines.length && !lines.at(-1)) lines.pop();
+  const { pre } = v;
+  const atEnd = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
+  pre.textContent = lines.join('\n');
+  pre.hidden = !lines.length;
+  if (atEnd) pre.scrollTop = pre.scrollHeight;
+  v.status.textContent = {
+    loading: 'Reading the terminal…',
+    missing: 'The runner no longer has this terminal: it was closed in Dev.',
+    offline: 'Could not reach the terminal runner. Start it with bun start, then open this again.',
+  }[v.state] ?? (running ? 'Running' : exit ? exitText(exit) : 'Not started yet');
+}
+
+function attachViewer(store, v) {
+  const paintSoon = () => (v.frame ||= requestAnimationFrame(() => drawViewer(v)));
+  if (liveSession(v.session)) {
+    v.mirror = true;
+    v.state = 'live';
+    v.stop = onSessionPaint(paintSoon);
+    paintSoon();
+    return;
+  }
+  const ctl = new AbortController();
+  v.stop = () => ctl.abort();
+  const { term } = v;
+  attachSession(runnerOf(store), {
+    session: v.session,
+    signal: ctl.signal,
+    onEvent: (e) => {
+      if (e.t === 'session') {
+        v.state = e.known ? 'replay' : 'missing';
+        term.reset();
+        term.clear();
+      } else if (e.t === 'live') v.state = 'live';
+      else if (e.t === 'size') term.resize(e.cols, e.rows);
+      else if (e.t === 'start') {
+        Object.assign(v, { running: true, exit: null });
+        if (e.cols) term.resize(e.cols, e.rows);
+        term.note(`$ ${e.command}`, 't-cmd');
+      } else if (e.t === 'out' || e.t === 'err') term.write(e.d);
+      else if (e.t === 'exit') {
+        Object.assign(v, { running: false, exit: e.stopped ? { stopped: true, ms: e.ms } : { code: e.code, signal: e.signal, ms: e.ms } });
+      }
+      paintSoon();
+    },
+  }).then(() => {
+    if (ctl.signal.aborted) return;
+    // The stream ended: the runner stopped, or Dev took the terminal over. The next page reads it again.
+    if (v.state === 'loading') v.state = 'offline';
+    viewers.delete(v.session);
+    paintSoon();
+  });
+  paintSoon();
+}
+
+function terminalViewer(store, session, cwd = '') {
+  let v = viewers.get(session);
+  if (!v) {
+    v = { session, term: createTerminal({ cols: 120, rows: 32 }), state: 'loading', running: false, exit: null, frame: 0, mirror: false };
+    v.status = h('span', { class: 'muted small grow' });
+    v.pre = h('pre', { class: 'cron-term', hidden: true });
+    v.el = h('div', { class: 'cron-term-view stack' },
+      h('div', { class: 'row' },
+        v.status,
+        h('button', { type: 'button', class: 'btn-small', title: 'Open this terminal in Dev, to type in it', onclick: () => openSession({ id: session, cwd }) },
+          icon('terminal'), 'Open in Dev')),
+      v.pre);
+    viewers.set(session, v);
+    attachViewer(store, v);
+  }
+  return v.el;
+}
+
+// Viewers no longer on the page stop reading the runner.
+function sweepViewers() {
+  for (const v of viewers.values()) {
+    if (v.el.isConnected) continue;
+    v.stop?.();
+    viewers.delete(v.session);
+  }
+}
+window.addEventListener('hashchange', () => requestAnimationFrame(sweepViewers));
+
+// A terminal folded under a run's step; it is read once opened, and stays open through re-renders.
+function terminalFold(store, session, cwd) {
+  const open = view.terms.has(session);
+  return h('details', {
+    class: 'cron-output',
+    open,
+    ontoggle: (e) => {
+      if (e.target.open === view.terms.has(session)) return;
+      if (e.target.open) view.terms.add(session);
+      else view.terms.delete(session);
+      store.refresh();
+    },
+  },
+  h('summary', null, 'Terminal output'),
+  open ? terminalViewer(store, session, cwd) : null);
 }
 
 // --- Runs ---
@@ -905,7 +1035,7 @@ const RUN_STATUS = { ok: ['Done', 'done'], stopped: ['Stopped', 'plain'], error:
 
 // One run, folded: its status and time, and when opened each step's output. On the Runs tab it also names its flow
 // and links to it.
-function runItem(flow, r, { flowName = '', open = null } = {}) {
+function runItem(store, flow, r, { flowName = '', open = null } = {}) {
   const nameOf = (id) => {
     const i = flow ? flow.steps.findIndex((s) => s.id === id) : -1;
     return i < 0 ? 'Removed step' : `${i + 1}. ${typeOf(flow.steps[i].type)[1]}`;
@@ -924,7 +1054,8 @@ function runItem(flow, r, { flowName = '', open = null } = {}) {
       h('li', null,
         h('div', { class: 'row' }, h('strong', null, nameOf(s.stepId)), h('span', { class: 'muted small' }, `${s.ms} ms`)),
         s.note ? h('p', { class: 'muted small' }, s.note) : null,
-        h('pre', { class: s.ok ? '' : 'error' }, s.output || '(empty)'))))));
+        h('pre', { class: s.ok ? '' : 'error' }, s.output || '(empty)'),
+        s.session ? terminalFold(store, s.session, s.cwd) : null)))));
 }
 
 function runList(store, flow) {
@@ -932,7 +1063,7 @@ function runList(store, flow) {
   return h('section', { class: 'card stack' },
     h('h3', null, 'Runs'),
     runs.length
-      ? h('ul', { class: 'cron-runs' }, runs.map((r) => runItem(flow, r)))
+      ? h('ul', { class: 'cron-runs' }, runs.map((r) => runItem(store, flow, r)))
       : empty('No run yet. Use “Test run” to try the flow without creating anything.'));
 }
 
@@ -1009,6 +1140,7 @@ function draw(root, store) {
           },
         }, label))),
       body));
+  requestAnimationFrame(sweepViewers);
 }
 
 export default {
