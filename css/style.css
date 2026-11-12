@@ -2585,6 +2585,18 @@ button.sum-line:hover { background: var(--surface-2); }
 .scm-row .tree-action:disabled { opacity: 0.4; }
 @media (hover: none) { .scm-row .tree-action { display: inline-flex; opacity: 1; } }
 .scm-empty { align-items: flex-start; }
+
+/* Dev Worktrees: a dot for whether each is in use, and the bulk removals */
+.wt { flex: 1; min-height: 0; gap: 6px; }
+.wt-actions { flex-wrap: wrap; gap: 6px; flex: none; }
+.wt-actions .btn-small { display: inline-flex; align-items: center; gap: 5px; min-height: 0; padding: 4px 8px; font-size: 0.78rem; }
+.wt-actions .icon { width: 13px; height: 13px; }
+.wt-row .tree-item { padding-left: 6px; cursor: default; }
+.wt-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); opacity: 0.55; }
+.wt-dot.running { background: var(--income); opacity: 1; animation: pulse 1.4s ease-in-out infinite; }
+.wt-dot.held { background: var(--warn); opacity: 1; }
+.scm-row .wt-busy { display: inline-flex; opacity: 1; }
+.wt-error { margin: 0 0 4px 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .scm-branches { display: flex; flex-direction: column; max-height: min(40vh, 320px); overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
 .scm-branches .fp-row.active { color: var(--accent); }
 
