@@ -82,7 +82,7 @@ Every file has a `schemaVersion` field. Files are plain JSON and can be edited b
 | `settings.json` (blockchains) | `blockchains: { custom: [{id, name, rpc, explorer, symbol}], etherscan }`: chains added in Settings → Blockchains, and the Etherscan API key (a key saved before under `uniswap.etherscan` is still read). `rpc`, `node` and `explorer` hold one address or several, separated by spaces. The built-in chains keep their nodes, explorers and Liquidity Pools switch in `uniswap.chains: { <chainId>: {enabled, node, explorer} }`; an empty `node` or `explorer` uses the built-in ones. |
 | `settings.json` (contracts) | `contracts: [{id, label, chainId, address, projectId, abi}]`: the contracts Tools and Monitoring read, each with its ABI as JSON. |
 | `settings.json` (calendar) | `gcal: { accounts: [{email, projectId, labelId, calendars: [{id, name, color, on, projectId, labelId}]}] }`: the Google accounts Calendar reads and, per calendar, whether it is shown and its optional project and project label. An account's project and label apply to each of its calendars that has none of its own. Events are not saved here; they are cached in `google.json`. |
-| `google.json` | `{ tokens: { "<gmail\|gcal>:<address>" or "web": {refresh, access, expiresAt, scope, at} }, pictures: { <address>: url }, events: { "<address>\|<calendarId>": [{from, to, at, events}] } }`: every Google sign-in (Gmail and Calendar per account; `web` is Analytics and Search Console), with the refresh token the board renews it with, so any browser profile that opens the folder is connected. A removed sign-in leaves `{removed: true, at}`. Also each account's picture and Calendar's last reads. Keep it private: a refresh token reads that account's mail or calendar until you disconnect it or remove the board's access in your Google account. Deleting the file signs every account out. |
+| `google.json` | `{ tokens: { "<gmail\|gcal>:<address>" or "web": {refresh, access, expiresAt, scope, at} }, pictures: { <address>: url }, events: { "<address>\|<calendarId>": [{from, to, at, events}] } }`: every Google sign-in (Gmail and Calendar per account; `web` is Analytics and Search Console), with the refresh token the runners renew it with (Settings → Runners → Google sign-ins; a tab never renews one itself), so any browser profile that opens the folder is connected. A removed sign-in leaves `{removed: true, at}`. Also each account's picture and Calendar's last reads. Keep it private: a refresh token reads that account's mail or calendar until you disconnect it or remove the board's access in your Google account. Deleting the file signs every account out. |
 | `runners.json` | `{ worker: {pid, startedAt, beatAt, version, folderId}, jobs: { <job>: {lastRunAt, lastOkAt, nextRunAt, durationMs, ok, error, waiting, on, running, …counts} } }`: the runners' heartbeat, written only by them, every 30 s and after each job. A `beatAt` older than 90 s means they are not running. `folderId` is what they read from settings.json `folderId`, a random id the board writes once, so Settings can tell when they use another folder. settings.json `runners: { <job>: {every, on} }` holds each job's interval in minutes (empty: the default) and its switch. |
 | `notifications.json` | `{ items: [{id, kind, text, href, key, at, read}], prefs: { <kind>: {app, telegram} } }` |
 | `recipes.json` | `{ recipes: [{id, title, status: 'idea'\|'testing'\|'final', tags, ingredients, steps, notes, images, source, scans, versions: [{id, date, changes, rating, notes}], created}] }` |
@@ -94,7 +94,7 @@ The currency is set in `js/ui.js` (`CURRENCY`).
 
 ## Outside services
 
-Nothing runs on a server, and everything automatic runs only while the board is open. These features talk to other services from your browser, each only when you use or enable it:
+Nothing runs on a server. Automatic work runs either in an open board tab or in the runners on your machine (see Runners); each row says which. These features talk to other services, each only when you use or enable it:
 
 | Feature | Service | What is sent |
 | --- | --- | --- |
@@ -109,9 +109,10 @@ Nothing runs on a server, and everything automatic runs only while the board is 
 | Kitchen recipe photos | `openrouter.ai`, with your key | the dropped photos, shrunk to 1600 px |
 | Liquidity Pools AI insights | `openrouter.ai`, with your key | for each open position shown: its pair, chain, fee tier, price range, current price, value, unclaimed fees, fee APR and token split |
 | Telegram | `api.telegram.org` | your bot token, and the messages you exchange with your bot |
-| Calendar | Google Calendar API (`www.googleapis.com/calendar`), with your own OAuth Client ID | a read-only sign-in per account, renewed by itself (the Client ID and secret go to `oauth2.googleapis.com`), to list its calendars and read the events of the range on screen |
+| Calendar | Google Calendar API (`www.googleapis.com/calendar`), with your own OAuth Client ID | a read-only sign-in per account, renewed by the runners, to list its calendars and read the events of the range on screen |
 | Account pictures (Gmail, Calendar) | Google's profile endpoint (`www.googleapis.com/oauth2/v3/userinfo`) at sign-in, then the picture from `googleusercontent.com` | the account's sign-in token; the picture's address is kept in `google.json` |
-| Analytics, Search Console | Google, with your own OAuth Client ID | a read-only sign-in, renewed by itself |
+| Analytics, Search Console | Google, with your own OAuth Client ID | a read-only sign-in |
+| Google sign-in renewal (runners) | `oauth2.googleapis.com`, from the runners only | each sign-in's refresh token, with your Client ID and secret, about once an hour per account |
 | Liquidity Pools | each chain's node (public nodes by default, or the ones you set; each call goes to one of them) | your wallet addresses and the position numbers |
 | DeFi → Wallets | each chain's node, as above | your wallet addresses and the token addresses checked |
 | DeFi → Lending / Borrowing | each chain's node, as above (Aave v3's contracts on it) | your wallet addresses |
@@ -125,7 +126,7 @@ Nothing runs on a server, and everything automatic runs only while the board is 
 | Liquidity Pools and Wallets logos and token lists | `raw.githubusercontent.com` (Uniswap's token lists, Trust Wallet's chain logos) | nothing but the request itself |
 | GitHub organization logos | `github.com` (each `<org>.png` avatar) | the organization or repo owner name |
 | Inbox | Resend API, through `tools/relays.js` on your machine (Resend does not answer web pages directly) | each project's Resend API key, to list and read its emails |
-| Inbox (Gmail) | Gmail API (`gmail.googleapis.com`), with your own OAuth Client ID | a read-only sign-in per account, renewed by itself (the Client ID and secret go to `oauth2.googleapis.com`), to list and read its mail |
+| Inbox (Gmail) | Gmail API (`gmail.googleapis.com`), with your own OAuth Client ID | a read-only sign-in per account, renewed by the runners, to list and read its mail |
 | Bing search data | Bing Webmaster API, through `tools/relays.js` on your machine (Bing does not answer web pages directly) | your API key and the site address |
 
 The typefaces (Inter, Space Grotesk) are in `fonts/`, under the SIL Open Font License, so no font is fetched from another site.
