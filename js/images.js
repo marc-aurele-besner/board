@@ -5,7 +5,7 @@
 export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 
 // The image files of a paste or a drop (a ClipboardEvent's clipboardData or a DragEvent's dataTransfer).
-/** @param {DataTransfer | null | undefined} data */
+/** @param {{ files?: FileList | null } | null | undefined} data */
 export function imageFiles(data) {
   return [...(data?.files ?? [])].filter((f) => IMAGE_TYPES.includes(f.type));
 }
