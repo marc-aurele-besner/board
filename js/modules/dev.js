@@ -23,7 +23,7 @@ const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 const SESSIONS_KEY = 'board:dev-sessions';
 
 // View state: the workspace, the sessions, the one shown, and what the runner said about itself.
-const view = { workspace: 'board', sessions: [], active: '', info: null, infoError: '', checking: false, count: 0, pending: null, queued: null, restored: false };
+const view = { workspace: 'board', sessions: [], active: '', wanted: 0, info: null, infoError: '', checking: false, count: 0, pending: null, queued: null, restored: false };
 let currentStore = null;
 
 export const runnerOf = (store) => store.get(COLLECTION).runner || TERMINAL_RUNNER;
@@ -90,6 +90,15 @@ function restoreSessions() {
   }
   view.count = Math.max(view.count, ...view.sessions.map((s) => s.n));
   if (view.sessions.some((s) => s.id === saved?.active)) view.active = saved.active;
+}
+
+// The terminal the URL names (#/dev?term=<number>) is shown, over the one saved last.
+function showWanted() {
+  const s = view.sessions.find((x) => x.n === view.wanted);
+  view.wanted = 0;
+  if (!s || s.id === view.active) return;
+  view.active = s.id;
+  saveSessions();
 }
 
 function newSession(store, cwd = rootPath(store, view.workspace)) {
@@ -639,6 +648,7 @@ function draw(root, store) {
   theme = null;
   currentStore = store;
   if (!view.restored) restoreSessions();
+  if (view.wanted) showWanted();
   if (!view.info && !view.infoError && !view.checking) checkRunner(store);
   if (view.pending) {
     view.workspace = view.pending;
@@ -683,9 +693,16 @@ export default {
   collection: COLLECTION,
   defaults: DEFAULTS,
   render: draw,
-  serialize: () => ({}),
+  // The terminal shown is in the URL, so a refresh or a shared link opens it.
+  serialize: () => ({ term: view.sessions.length > 1 ? activeSession()?.n : '' }),
   // #/dev?project=<id> (from a project page) opens that project's folder, with a terminal in it.
   restore: (p = {}) => {
     if (p.project) view.pending = `p:${p.project}`;
+    const n = Number(p.term);
+    if (Number.isInteger(n) && n > 0) {
+      view.wanted = n;
+      // A link or the back button while Dev is open picks the terminal now.
+      if (view.restored) showWanted();
+    }
   },
 };
