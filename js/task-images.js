@@ -28,12 +28,20 @@ export async function addImages(store, id, files) {
       toast(`Could not save the image: ${err.message}`);
     }
   }
-  if (!images.length) return;
+  if (!images.length) return null;
   store.update(COLLECTION, (d) => {
     const item = d.items.find((i) => i.id === id);
     if (item) item.images = [...imagesOf(item), ...images];
   });
   toast(images.length === 1 ? 'Image added to the task' : `${images.length} images added to the task`);
+  return store.get(COLLECTION).items.find((i) => i.id === id) ?? null;
+}
+
+// The page waits to rebuild while a field has focus (the description being edited), so the strip is redrawn in place.
+async function addAndShow(store, id, files, el) {
+  const item = await addImages(store, id, files);
+  const strip = item && el?.querySelector('.task-images');
+  if (strip) strip.replaceWith(imageStrip(store, item));
 }
 
 async function removeImage(store, id, path) {
@@ -53,7 +61,7 @@ export function imageDrop(store, item) {
       const files = imageFiles(e.clipboardData);
       if (!files.length) return;
       e.preventDefault();
-      addImages(store, item.id, files);
+      addAndShow(store, item.id, files, e.currentTarget);
     },
     ondragover: (e) => {
       if (!dragsFiles(e)) return;
@@ -67,7 +75,7 @@ export function imageDrop(store, item) {
       e.stopPropagation();
       e.currentTarget.classList.remove('image-drop');
       const files = imageFiles(e.dataTransfer);
-      if (files.length) addImages(store, item.id, files);
+      if (files.length) addAndShow(store, item.id, files, e.currentTarget);
       else toast('Only PNG, JPEG, GIF and WebP images can be added');
     },
   };
