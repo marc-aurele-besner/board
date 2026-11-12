@@ -126,6 +126,7 @@ function projectFilter(store, flows) {
     className: 'field-pick project-field-pick cron-project-filter',
     onPick: (v) => {
       view.project = v ?? '';
+      view.flow = '';
       store.refresh();
     },
   });
@@ -716,8 +717,8 @@ function editor(store, flow) {
 
 function flowsTab(store) {
   const all = store.get(COLLECTION).flows;
-  // A filter whose project no flow uses any more is dropped.
-  if (!all.some(inFilter)) view.project = '';
+  // A filter whose project no flow uses any more is dropped, and so is one that hides the flow a link opened.
+  if (!all.some(inFilter) || all.some((f) => f.id === view.flow && !inFilter(f))) view.project = '';
   const flows = all.filter(inFilter);
   const flow = flows.find((f) => f.id === view.flow) ?? flows[0] ?? null;
   if (flow) view.flow = flow.id;
