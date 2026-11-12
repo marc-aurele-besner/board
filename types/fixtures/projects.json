@@ -6,6 +6,7 @@
       "color": "#3b6ea8",
       "description": "Example description.",
       "website": "https://example.com",
+      "iconUrl": "https://example.com/icon.png",
       "localPath": "~/example/project",
       "devCommand": "",
       "devPreset": "preset-1",
