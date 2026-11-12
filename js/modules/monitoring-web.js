@@ -134,7 +134,7 @@ const compare = (/** @type {unknown} */ a, /** @type {unknown} */ b) => {
 /**
  * @template R
  * @param {string} key
- * @param {SortColumn<R>[]} columns
+ * @param {SortColumn<NoInfer<R>>[]} columns
  * @param {R[]} rows
  * @param {((row: R) => string) | null} [rowClass]
  */
