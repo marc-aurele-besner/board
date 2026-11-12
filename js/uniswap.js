@@ -67,7 +67,12 @@ export function tokenList() {
     const res = await fetch(`${TOKEN_LIST_DIR}/${file}.json`);
     if (!res.ok) throw new Error(String(res.status));
     return res.json();
-  })).then((results) => results.filter((r) => r.status === 'fulfilled' && Array.isArray(r.value)).flatMap((r) => r.value));
+  })).then((results) => {
+    const ok = results.filter((r) => r.status === 'fulfilled' && Array.isArray(r.value));
+    // A list that failed to load is asked for again next time, so its tokens are not missing for the whole session.
+    if (ok.length < results.length) list = null;
+    return ok.flatMap((r) => r.value);
+  });
   return list;
 }
 export function tokenLogos() {
