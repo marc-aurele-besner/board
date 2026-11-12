@@ -1019,6 +1019,16 @@ button.danger { color: var(--danger); }
 .batch-bar .batch-count { font-weight: 600; }
 .todo-item.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .todo-item.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.todo-item.image-drop, .kanban-card.image-drop { box-shadow: inset 0 0 0 2px var(--accent); }
+.todo-desc:focus, .kanban-details:focus { outline: none; }
+.task-images { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.task-image { position: relative; }
+.task-image-open { display: block; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); overflow: hidden; cursor: zoom-in; }
+.task-image-open img { display: block; width: 72px; height: 54px; object-fit: cover; }
+.task-image-remove { position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; padding: 0; border-radius: 50%; background: var(--surface); border: 1px solid var(--border); opacity: 0; }
+.task-image:hover .task-image-remove, .task-image-remove:focus-visible { opacity: 1; }
+@media (hover: none) { .task-image-remove { opacity: 1; } }
+.task-image-add .icon { width: 14px; height: 14px; }
 .grip { display: inline-flex; color: var(--muted); cursor: grab; touch-action: none; padding: 0 2px; }
 .grip .icon { width: 16px; height: 16px; }
 .desc-indicator { display: inline-flex; color: var(--accent); flex: none; }
@@ -2428,6 +2438,7 @@ button.sum-line:hover { background: var(--surface-2); }
 .term-out { position: relative; height: min(62vh, 600px); overflow: auto; padding: 10px 12px; border-radius: 8px; background: var(--surface-2); color: var(--text); font: 0.8rem/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; outline: none; }
 .ide-main.has-file .term-out { height: min(34vh, 380px); }
 .term-out:focus { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
+.term-out.dropping { box-shadow: inset 0 0 0 2px var(--accent); }
 .term-line { min-height: 1.35em; overflow: hidden; }
 .term-line .b { font-weight: 700; }
 .term-line .d { opacity: 0.65; }

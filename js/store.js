@@ -91,6 +91,12 @@ export function createStore(dir, collections) {
       const handle = await fileHandle(path, false);
       return handle.getFile();
     },
+    async remove(path) {
+      const parts = path.split('/');
+      let folder = dir;
+      for (const part of parts.slice(0, -1)) folder = await folder.getDirectoryHandle(part);
+      await folder.removeEntry(parts[parts.length - 1]);
+    },
   };
 
   return {

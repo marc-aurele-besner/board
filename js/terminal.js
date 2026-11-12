@@ -66,6 +66,9 @@ export const closeSession = (base, session) => call(base, '/close', post({ sessi
 // Fails when git refuses (changes or untracked files in it) or claude still runs there.
 export const removeWorktree = async (base, { cwd, name, session }) => (await call(base, '/worktree/remove', post({ cwd, name, session }))).json();
 
+// Saves an image (a Blob of a PNG, JPEG, GIF or WebP) on this machine for claude to read: { path }.
+export const saveImage = async (base, blob) => (await call(base, '/image', { method: 'POST', headers: { 'content-type': blob.type }, body: blob })).json();
+
 // Keys for a running command, or its terminal's new size. Calls for one command are sent one after another,
 // so fast typing arrives in order.
 const queues = new Map();

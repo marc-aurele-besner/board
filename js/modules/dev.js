@@ -8,7 +8,8 @@
 // depend on this browser: another browser, or one whose site data was cleared, opens the same terminals.
 import { h, icon, notice, uid } from '../ui.js';
 import { toast } from '../toast.js';
-import { TERMINAL_RUNNER, runnerInfo, listSessions, saveSessionList, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput } from '../terminal.js';
+import { TERMINAL_RUNNER, runnerInfo, listSessions, saveSessionList, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput, saveImage } from '../terminal.js';
+import { imageFiles, dragsFiles } from '../images.js';
 import { createTerminal, styleOf, colorOf } from '../vt.js';
 import { readTheme, themedColors } from '../term-colors.js';
 import { explorer, editor, setRoot, hasOpenFiles, baseName } from './dev-files.js';
@@ -372,8 +373,37 @@ function onTerminalKey(store, s, e) {
 function onTerminalPaste(store, s, e) {
   if (!s.running || !s.pid) return;
   e.preventDefault();
+  const images = imageFiles(e.clipboardData);
+  if (images.length) return typeImages(store, s, images);
   const text = (e.clipboardData?.getData('text') ?? '').replace(/\r?\n/g, '\r');
   if (text) sendInput(runnerOf(store), s.pid, { data: s.term.paste ? `\x1b[200~${text}\x1b[201~` : text });
+}
+
+// Types the paths of images into the running program, as dragging a file onto a terminal does: claude attaches them.
+// The browser does not say where a file lives, so the runner saves a copy and answers its path.
+async function typeImages(store, s, images) {
+  const pid = s.pid;
+  let paths;
+  try {
+    paths = await Promise.all(images.map(async (blob) => (await saveImage(runnerOf(store), blob)).path));
+  } catch (err) {
+    return toast(err.message);
+  }
+  if (!s.running || s.pid !== pid) return;
+  const text = `${paths.join(' ')} `;
+  s.stick = true;
+  sendInput(runnerOf(store), pid, { data: s.term.paste ? `\x1b[200~${text}\x1b[201~` : text });
+  s.el?.out.focus({ preventScroll: true });
+}
+
+function onTerminalDrop(store, s, e) {
+  if (!dragsFiles(e)) return;
+  e.preventDefault();
+  s.el.out.classList.remove('dropping');
+  const images = imageFiles(e.dataTransfer);
+  if (!images.length) return toast('Only PNG, JPEG, GIF and WebP images can be dropped here');
+  if (!s.running || !s.pid) return toast('Start claude in this terminal first, then drop the image');
+  typeImages(store, s, images);
 }
 
 // Scrolling up to read stops following new output; scrolling back to the end follows it again. The direction
@@ -423,6 +453,13 @@ function elementsOf(store, s) {
     onwheel: (e) => onTerminalWheel(store, s, e),
     onkeydown: (e) => onTerminalKey(store, s, e),
     onpaste: (e) => onTerminalPaste(store, s, e),
+    ondragover: (e) => {
+      if (!dragsFiles(e)) return;
+      e.preventDefault();
+      out.classList.add('dropping');
+    },
+    ondragleave: (e) => !out.contains(e.relatedTarget) && out.classList.remove('dropping'),
+    ondrop: (e) => onTerminalDrop(store, s, e),
   }, history, screen);
   s.el = { out, history, screen, from: 0, top: 0 };
   s.observer = new ResizeObserver(() => fit(s));
