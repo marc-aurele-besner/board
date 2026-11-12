@@ -93,6 +93,7 @@ tools/jobs/monitoring.js  deadlines, budgets, site checks, status pages and the 
 tools/jobs/telegram.js  long-polls the bot and turns messages into tasks (a `loop` job: it starts again at once)
 tools/jobs/github.js, webstats.js, fx.js  GitHub counts (github.json), Bing data (webstats.json), exchange rates (fx.json)
 tools/jobs/dev-usage.js, worktrees.js  what claude sessions used; removing done tasks' worktrees through the command runner
+tools/jobs/defi.js    the DeFi jobs (positions, fee history, wallets, lending, hourly snapshots), run one at a time
 tools/jobs/cron.js    starts due Cron flows every minute, and one flow on Run now
 tools/jobs/google.js  renews Google access tokens; a tab that finds one expired asks it through POST /run/google
 tools/check-imports.js  loads every worker module under plain Node, to catch a missing import or a DOM call at load time
