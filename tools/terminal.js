@@ -175,6 +175,7 @@ function flush(s) {
 
 function record(s, event) {
   push(s, event);
+  for (const tap of s.taps ?? []) tap(event);
   const line = lineOf(event);
   if (!s.rewrite) s.pending += line;
   s.timer ||= setTimeout(() => flush(s), FLUSH_MS);
@@ -596,6 +597,78 @@ async function removeWorktree(req, res, cors) {
   }
   log.info(`removed worktree ${tree.worktree}`);
   reply({ removed: tree.worktree });
+}
+
+// Ends a claude that is done in its worktree (`claude --worktree <name>`): types /exit, then answers claude's
+// "Exiting worktree session" question. claude counts every commit as lost on removal, even a pushed one, so git is
+// asked here instead: Remove only when the worktree has no uncommitted file and every commit is on a remote, else
+// Keep, which ends claude and leaves the worktree and its branch. claude removes a clean worktree without asking.
+// Answers { ended, removed, path, kept?: why }.
+const ESCAPES = /\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-_]/g;
+const DIALOG_MS = 20000;
+const EXIT_MS = 60000;
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function worktreeAtStake(path) {
+  const changed = (await git(path, ['status', '--porcelain', ...NOT_WORKTREES])).trim();
+  if (changed) return `${changed.split('\n').length} uncommitted ${changed.includes('\n') ? 'files' : 'file'}`;
+  const unpushed = Number((await git(path, ['rev-list', '--count', 'HEAD', '--not', '--remotes'])).trim()) || 0;
+  return unpushed ? `${unpushed} ${unpushed === 1 ? 'commit' : 'commits'} on no remote` : '';
+}
+
+async function exitClaude(req, res, cors) {
+  const body = await jsonBody(req, res, cors);
+  if (!body) return;
+  const s = await sessionFrom(body, res, cors);
+  if (!s) return;
+  const job = s.run;
+  const name = worktreeOf(s.open?.command);
+  if (!job || s.closed) return res.writeHead(409, cors).end('Nothing runs in this terminal.');
+  if (!name || !s.open?.cwd) return res.writeHead(400, cors).end('This terminal does not run claude in a worktree.');
+  const path = join(s.open.cwd, '.claude', 'worktrees', name);
+  let atStake;
+  try {
+    atStake = await worktreeAtStake(path);
+  } catch (err) {
+    atStake = `git could not read it (${err.message})`;
+  }
+  // Watches the output for the question, ignoring the escapes and spaces claude draws it with.
+  let seen = '';
+  let asked;
+  const question = new Promise((r) => {
+    asked = r;
+  });
+  const tap = (e) => {
+    if (e.t === 'exit') return asked(false);
+    if (e.t !== 'out' && e.t !== 'err') return;
+    seen = (seen + e.d.replace(ESCAPES, '').replace(/\s+/g, '')).slice(-4000);
+    if (seen.includes('Exitingworktreesession')) asked(true);
+  };
+  (s.taps ??= new Set()).add(tap);
+  const ended = new Promise((r) => (s.run !== job ? r(true) : job.child.once('close', () => r(true))));
+  const write = (data) => s.run === job && job.child.stdin.write(data);
+  try {
+    // Typed, then sent: Enter on the command menu runs the command it shows, /exit.
+    write('/exit');
+    await pause(400);
+    write('\r');
+    const dialog = await Promise.race([question, ended.then(() => false), pause(DIALOG_MS).then(() => false)]);
+    if (dialog) {
+      await pause(300);
+      // Keep is first and chosen; Remove is the one below it.
+      if (!atStake) {
+        write('\x1b[B');
+        await pause(200);
+      }
+      write('\r');
+    }
+    const done = await Promise.race([ended, pause(EXIT_MS).then(() => false)]);
+    const removed = !(await stat(path).catch(() => null));
+    if (removed) log.info(`claude removed worktree ${path}`);
+    res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify({ ended: done, removed, path, ...(atStake && !removed ? { kept: atStake } : {}) }));
+  } finally {
+    s.taps.delete(tap);
+  }
 }
 
 // Keys typed in the page, sent to a running command's terminal.
@@ -1085,6 +1158,7 @@ createServer(async (req, res) => {
   if (req.method === 'POST' && path === '/sessions' && json) return saveList(req, res, cors);
   if (req.method === 'POST' && ['/stop', '/clear', '/close'].includes(path) && json) return control(req, res, cors, path.slice(1));
   if (req.method === 'POST' && path === '/worktree/remove' && json) return removeWorktree(req, res, cors);
+  if (req.method === 'POST' && path === '/claude/exit' && json) return exitClaude(req, res, cors);
   if (req.method === 'POST' && path === '/usage' && json) {
     const body = await jsonBody(req, res, cors);
     if (!body) return;
