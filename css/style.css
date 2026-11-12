@@ -2450,6 +2450,71 @@ button.sum-line:hover { background: var(--surface-2); }
 .term-recent { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
 .term-chip { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; min-height: 26px; padding: 2px 10px; }
 .term-runner input { flex: 1; min-width: 0; font-size: 16px; }
+/* Dev side panel switch (Files / Source control), and the tree's git colours */
+.ide-side-tabs { display: flex; gap: 2px; flex: none; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.ide-side-tab { flex: 1; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: none; border: none; min-height: 0; padding: 5px 6px; border-radius: 6px; color: var(--muted); font-size: 0.8rem; font-weight: 500; white-space: nowrap; }
+.ide-side-tab .icon { width: 14px; height: 14px; flex: none; }
+.ide-side-tab:hover { background: var(--surface-2); color: var(--text); }
+.ide-side-tab.active { background: var(--surface-2); color: var(--text); }
+.scm-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); font-size: 0.7rem; font-weight: 600; line-height: 18px; text-align: center; }
+.tree-item.git-mod, .scm-letter.git-mod { color: var(--warn); }
+.tree-item.git-new, .scm-letter.git-new { color: var(--income); }
+.tree-item.git-del, .scm-letter.git-del { color: var(--danger); }
+.tree-item.git-del .tree-name { text-decoration: line-through; }
+.tree-item.git-conflict, .scm-letter.git-conflict { color: var(--danger); }
+.tree-item.git-dir { color: color-mix(in srgb, var(--warn) 70%, var(--text)); }
+.tree-letter { margin-left: auto; padding-left: 6px; flex: none; font: 600 0.72rem ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tree-dot { margin-left: auto; flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.7; }
+
+/* Dev Source control */
+.scm { gap: 8px; }
+.scm-branch { display: flex; align-items: center; gap: 4px; flex: none; }
+.scm-branch-btn { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 6px; background: none; border: 1px solid var(--border); min-height: 0; padding: 4px 8px; border-radius: 6px; color: var(--text); font-size: 0.82rem; }
+.scm-branch-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scm-branch-btn .icon { width: 14px; height: 14px; flex: none; color: var(--muted); }
+.scm-branch-btn:hover { background: var(--surface-2); }
+.scm-branch .btn-small { min-height: 0; padding: 4px 7px; gap: 3px; font-size: 0.78rem; display: inline-flex; align-items: center; }
+.scm-branch .icon { width: 13px; height: 13px; }
+.scm-commit { display: flex; flex-direction: column; gap: 6px; flex: none; }
+.scm-message { width: 100%; resize: vertical; min-height: 2.6em; font-size: 16px; }
+.scm-commit .btn-small { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.scm-error { display: flex; align-items: flex-start; gap: 6px; padding: 6px 8px; border-radius: 6px; background: color-mix(in srgb, var(--danger) 9%, var(--surface)); color: var(--danger); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 9em; overflow: auto; flex: none; }
+.scm-error > span { flex: 1; min-width: 0; }
+.scm-list { flex: 1; }
+.scm-section + .scm-section { margin-top: 4px; }
+.scm-section-head .tree-name { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.scm-section-head .scm-count { margin-right: 4px; }
+.scm-row .tree-item { padding-left: 22px; }
+.scm-row .tree-item .tree-name { flex: 0 1 auto; min-width: 3ch; }
+.scm-list { overflow-x: hidden; }
+.scm-dir { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.75rem; }
+.scm-row .tree-item .scm-dir:last-child { margin-left: auto; padding-left: 6px; flex: none; }
+.scm-refs { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 5px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); font-size: 0.7rem; }
+.scm-letter { flex: none; width: 16px; text-align: center; font: 600 0.72rem ui-monospace, SFMono-Regular, Menlo, monospace; }
+.scm-row .tree-action { display: none; }
+.scm-row:hover .tree-action, .scm-row:focus-within .tree-action { display: inline-flex; opacity: 1; }
+.scm-row .tree-action:disabled { opacity: 0.4; }
+@media (hover: none) { .scm-row .tree-action { display: inline-flex; opacity: 1; } }
+.scm-empty { align-items: flex-start; }
+.scm-branches { display: flex; flex-direction: column; max-height: min(40vh, 320px); overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
+.scm-branches .fp-row.active { color: var(--accent); }
+
+/* Diffs in the Dev editor: added and removed lines, hunk headers, a commit's message */
+.code.diff .code-line .ln + .ln { padding-left: 0; }
+.diff-sign { display: inline-block; width: 1.5ch; user-select: none; color: var(--muted); }
+.diff-add { background: color-mix(in srgb, var(--income) 14%, transparent); }
+.diff-add .ln { background: color-mix(in srgb, var(--income) 14%, var(--surface-2)); }
+.diff-add .diff-sign { color: var(--income); }
+.diff-del { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.diff-del .ln { background: color-mix(in srgb, var(--danger) 12%, var(--surface-2)); }
+.diff-del .diff-sign { color: var(--danger); }
+.diff-hunk .lc, .diff-meta .lc { color: var(--muted); }
+.diff-hunk { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.diff-file .lc { padding-top: 10px; font-weight: 600; color: var(--text); }
+.diff-commit { padding: 12px 14px; border-bottom: 1px solid var(--border); font-family: var(--font); }
+.diff-commit p { margin: 0; }
+.diff-commit-message { white-space: pre-wrap; font-weight: 600; margin-bottom: 4px !important; }
+
 @media (max-width: 760px) {
   .ide { grid-template-columns: minmax(0, 1fr); }
   .ide-explorer { position: static; max-height: 260px; }

@@ -1,5 +1,6 @@
 // Dev: a small IDE for this machine, Cursor style. A workspace folder (the board, the home folder, or a project's
-// local folder) is shown as a file tree; files open read-only with syntax colours; terminals sit below.
+// local folder) is shown as a file tree; files open read-only with syntax colours; terminals sit below. The side
+// panel switches to Source Control, which shows and commits the folder's git changes.
 // Commands run in a real pseudo-terminal through the runner `bun start` starts, so interactive programs such as
 // the Claude CLI work: keys typed in the terminal go to the program, and vt.js draws what it prints.
 // The runner owns the sessions: a command keeps running through a reload, and the page attaches to each terminal
@@ -10,6 +11,7 @@ import { TERMINAL_RUNNER, runnerInfo, attachSession, runCommand, stopCommand, cl
 import { createTerminal, styleOf, colorOf } from '../vt.js';
 import { readTheme, themedColors } from '../term-colors.js';
 import { explorer, editor, setRoot, hasOpenFiles, baseName } from './dev-files.js';
+import { sourceControl, refreshGit, decorOf, changeCount } from './dev-git.js';
 import { pickChip } from '../inline.js';
 import { projectIcon } from './projects.js';
 import { linkWatcher, moveToReview } from '../task-links.js';
@@ -21,10 +23,20 @@ const RECENT_SHOWN = 8;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 // The open terminals (id, number, folder, the tasks handed to claude in it) and the one shown, so a reload attaches to them again.
 const SESSIONS_KEY = 'board:dev-sessions';
+// The side panel shown: 'files' or 'git'.
+const SIDE_KEY = 'board:dev-side';
 
 // View state: the workspace, the sessions, the one shown, and what the runner said about itself.
-const view = { workspace: 'board', sessions: [], active: '', wanted: 0, info: null, infoError: '', checking: false, count: 0, pending: null, queued: null, opening: null, restored: false };
+const view = { side: readSide(), workspace: 'board', sessions: [], active: '', wanted: 0, info: null, infoError: '', checking: false, count: 0, pending: null, queued: null, opening: null, restored: false };
 let currentStore = null;
+
+function readSide() {
+  try {
+    return localStorage.getItem(SIDE_KEY) === 'git' ? 'git' : 'files';
+  } catch {
+    return 'files';
+  }
+}
 
 export const runnerOf = (store) => store.get(COLLECTION).runner || TERMINAL_RUNNER;
 const maxSessions = () => view.info?.max ?? 12;
@@ -48,6 +60,7 @@ const filesCtx = (store) => ({
   base: () => runnerOf(store),
   ready: () => !!view.info,
   refresh: () => store.refresh(),
+  decor: decorOf,
   openTerminal: (path) => {
     const s = newSession(store, path);
     if (s) store.refresh();
@@ -187,6 +200,8 @@ function finish(store, s, e) {
   schedulePaint();
   if (s.replaying || !view.sessions.includes(s)) return;
   const command = s.command;
+  // A command may have changed the repository (a commit, a checkout, edited files).
+  refreshGit(filesCtx(store), rootPath(store, view.workspace), { force: true });
   // claude quit on its own: the work handed to it is done, so its tasks wait for review.
   if (s.exit.code === 0 && s.tasks.length) moveToReview(store, s.tasks);
   if (!location.hash.startsWith('#/dev')) toast(`${command.length > 40 ? `${command.slice(0, 40)}…` : command}: ${exitText(s.exit).toLowerCase()}`);
@@ -538,6 +553,27 @@ function workspacePicker(store) {
   return chip;
 }
 
+// Files or Source Control, as the activity bar of VS Code picks them. Source Control shows how many files changed.
+function sideSwitcher(store) {
+  const tab = (side, name, label, extra) => h('button', {
+    type: 'button',
+    role: 'tab',
+    class: view.side === side ? 'ide-side-tab active' : 'ide-side-tab',
+    'aria-selected': String(view.side === side),
+    onclick: () => {
+      view.side = side;
+      try {
+        localStorage.setItem(SIDE_KEY, side);
+      } catch {}
+      store.refresh();
+    },
+  }, icon(name), label, extra);
+  const count = changeCount();
+  return h('nav', { class: 'ide-side-tabs', role: 'tablist', 'aria-label': 'Side panel' },
+    tab('files', 'folder', 'Files'),
+    tab('git', 'git-branch', 'Source control', count ? h('span', { class: 'scm-count', title: `${count} changed ${count === 1 ? 'file' : 'files'}` }, count > 999 ? '999+' : count) : null));
+}
+
 function sessionTabs(store) {
   const full = view.sessions.length >= maxSessions();
   return h('nav', { class: 'term-tabs', role: 'tablist', 'aria-label': 'Terminals' },
@@ -700,12 +736,16 @@ function draw(root, store) {
   // The page is rebuilt around the terminal; it keeps the keys if it had them.
   const focused = document.activeElement === s.el?.out;
   const ctx = filesCtx(store);
+  // The tree's change colours and the panel's count come from git, read again when stale.
+  if (view.info) refreshGit(ctx, rootPath(store, view.workspace));
 
   root.replaceChildren(
     h('div', { class: 'stack-lg dev' },
       view.infoError ? runnerNotice(store) : null,
       h('div', { class: 'ide' },
-        explorer(ctx, workspacePicker(store)),
+        view.side === 'git'
+          ? sourceControl(ctx, workspacePicker(store), sideSwitcher(store), rootPath(store, view.workspace))
+          : explorer(ctx, workspacePicker(store), sideSwitcher(store)),
         h('div', { class: hasOpenFiles() ? 'ide-main has-file' : 'ide-main' },
           editor(ctx),
           terminal(store, s)))));
