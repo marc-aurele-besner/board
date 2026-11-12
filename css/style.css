@@ -2000,6 +2000,10 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .flow-node.selected { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
 .flow-node.ok { border-left: 3px solid var(--income); }
 .flow-node.bad { border-left: 3px solid var(--danger); }
+/* A step a loop repeats: dashed, so the loop's steps read as one group on the canvas. */
+.flow-node.in-loop { border-style: dashed; border-color: color-mix(in srgb, var(--expense) 55%, var(--border)); }
+.flow-node.in-loop.selected { border-color: var(--accent); }
+.flow-node-pipe.loop { color: var(--expense); }
 .flow-canvas.running .flow-node { animation: cronPulse 1.4s ease-in-out infinite; }
 .flow-node-icon { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; flex: none; color: var(--c, var(--accent)); background: color-mix(in srgb, var(--c, var(--accent)) 15%, var(--surface)); }
 .flow-node-icon .icon { width: 17px; height: 17px; }
@@ -2011,6 +2015,8 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .kind-stop { --c: var(--muted); }
 .kind-dev { --c: var(--text); }
 .kind-profile { --c: var(--ai); }
+.kind-format { --c: var(--info); }
+.kind-loop { --c: var(--expense); }
 .flow-node-text { display: flex; flex-direction: column; min-width: 0; }
 .flow-node-kind { font-weight: 600; font-size: 0.9rem; }
 .flow-node-sub { color: var(--muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
