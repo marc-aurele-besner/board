@@ -63,7 +63,7 @@ tools/start.js        one command for the board: starts serve.js and relays.js t
 tools/log.js          terminal lines prefixed with each runner's name
 tools/serve.js        local static server with no-cache headers; no dependencies
 tools/relays.js       local relays for Bing's and Resend's APIs (Inbox), which send no CORS header
-tools/terminal.js     the Dev section's runner: commands in a pseudo-terminal, typed keys, read-only file reads; localhost only
+tools/terminal.js     the Dev section's runner: terminal sessions that outlive the page (output kept on disk), typed keys, read-only file reads; localhost only
 ```
 
 ## Conventions

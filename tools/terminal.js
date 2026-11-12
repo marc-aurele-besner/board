@@ -1,12 +1,16 @@
 // Local command runner for the Dev section: `bun run terminal` (or `node tools/terminal.js`), or with the board
 // through `bun start`. It runs a command in the user's shell and streams its output back as it comes, and lists
-// folders and reads files for the Dev file explorer (read only: nothing here writes a file).
+// folders and reads files for the Dev file explorer (read only: it writes no file of yours).
+// The runner owns each terminal session: a command keeps running when the page reloads or closes, and the session's
+// output is kept (in memory and in TERMINAL_STATE, a folder in the system's temp folder by default) so the page
+// shows it again when it comes back, even after the runner restarted.
 // TERMINAL_PORT changes the port (8419 by default); TERMINAL_MAX the number of commands that may run at once (12).
 // It can run anything on this machine, so it listens on 127.0.0.1 only and answers only pages served from this
 // machine: the Origin check keeps other websites out, the Host check keeps out DNS rebinding.
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFile, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,9 +27,19 @@ const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const KILL_AFTER_MS = 2000;
 // The file reader shows text files up to this size.
 const READ_MAX = 1024 * 1024;
+// Each session keeps this much output; older output is dropped first.
+const LOG_MAX = 2 * 1024 * 1024;
+// Sessions the page has not come back to for this long are deleted from disk.
+const KEEP_MS = 30 * 24 * 3600 * 1000;
+// Output reaches the disk in batches, at most this often.
+const FLUSH_MS = 250;
+const STATE = resolve(process.env.TERMINAL_STATE || join(tmpdir(), 'board-terminal'));
+const SESSION_ID = /^[\w-]{1,64}$/;
 const log = logger('terminal');
-// Running commands by pid: the child and the folder it reports into.
+// Running commands by pid: the child, the folder it reports into, and its session.
 const running = new Map();
+// Terminal sessions by id: their events (start, out, err, cwd, exit), the pages attached, and the running command.
+const sessions = new Map();
 
 const expand = (path) => (path === '~' ? homedir() : path.startsWith('~/') ? homedir() + path.slice(1) : path);
 
@@ -77,6 +91,93 @@ async function readText(path) {
   return { path: full, size: info.size, text: bytes.toString('utf8') };
 }
 
+// Sessions. Every event of a session is kept and written to <id>.ndjson, so a page that attaches again gets the
+// whole terminal back: the events are replayed into its emulator, then live ones follow.
+const logFile = (id) => join(STATE, `${id}.ndjson`);
+const lineOf = (event) => `${JSON.stringify(event)}\n`;
+const sizeOf = (event) => (event.d?.length ?? 0) + 64;
+
+try {
+  mkdirSync(STATE, { recursive: true, mode: 0o700 });
+} catch (err) {
+  log.error(`Cannot keep terminal sessions in ${STATE}: ${err.message}`);
+}
+// Old sessions nobody came back to.
+readdir(STATE)
+  .then((names) => Promise.all(names.filter((n) => n.endsWith('.ndjson')).map(async (n) => {
+    const info = await stat(join(STATE, n)).catch(() => null);
+    if (info && Date.now() - info.mtimeMs > KEEP_MS) await rm(join(STATE, n), { force: true });
+  })))
+  .catch(() => {});
+
+// Adds an event to the session's log. Output arriving in pieces is merged into one event.
+function push(s, event) {
+  const last = s.events.at(-1);
+  if ((event.t === 'out' || event.t === 'err') && last?.t === event.t) last.d += event.d;
+  else s.events.push({ ...event });
+  s.size += sizeOf(event);
+  if (event.t === 'start') s.open = s.events.at(-1);
+  if (event.t === 'exit') s.open = null;
+  if (s.size <= LOG_MAX) return;
+  // Too long: the oldest output goes, down to three quarters, but the running command's start stays.
+  while (s.events.length > 1 && s.size > LOG_MAX * 0.75) s.size -= sizeOf(s.events.shift());
+  if (s.open && !s.events.includes(s.open)) {
+    s.events.unshift(s.open);
+    s.size += sizeOf(s.open);
+  }
+  s.rewrite = true;
+}
+
+// Writes are serialized per session: a batch of new lines, or the whole log after it was cut.
+function flush(s) {
+  s.timer = 0;
+  if (s.closed) return;
+  const rewrite = s.rewrite;
+  const text = rewrite ? s.events.map(lineOf).join('') : s.pending;
+  s.pending = '';
+  s.rewrite = false;
+  s.disk = s.disk
+    .then(() => (rewrite ? writeFile : appendFile)(logFile(s.id), text, { mode: 0o600 }))
+    .catch((err) => log.error(`Could not save terminal ${s.id}: ${err.message}`));
+}
+
+function record(s, event) {
+  push(s, event);
+  const line = lineOf(event);
+  if (!s.rewrite) s.pending += line;
+  s.timer ||= setTimeout(() => flush(s), FLUSH_MS);
+  for (const res of s.listeners) res.write(line);
+}
+
+// A session by id, read from disk when the runner has not seen it since it started.
+async function sessionOf(id) {
+  if (sessions.has(id)) return sessions.get(id);
+  const text = await readFile(logFile(id), 'utf8').catch(() => '');
+  if (sessions.has(id)) return sessions.get(id);
+  const s = { id, events: [], size: 0, open: null, listeners: new Set(), run: null, known: !!text, pending: '', rewrite: false, timer: 0, disk: Promise.resolve(), closed: false };
+  for (const line of text.split('\n')) {
+    try {
+      if (line) push(s, JSON.parse(line));
+    } catch {}
+  }
+  s.rewrite = false;
+  sessions.set(id, s);
+  // A command that was running when the runner stopped never said how it ended.
+  if (s.open) record(s, { t: 'exit', code: null, signal: null, lost: true });
+  return s;
+}
+
+// The page attaches to a session: everything so far, a `live` marker, then events as they come.
+async function attach(req, res, cors, id) {
+  const s = await sessionOf(id);
+  res.writeHead(200, { ...cors, 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' });
+  res.write(lineOf({ t: 'session', known: s.known || s.events.length > 0 }));
+  res.write(s.events.map(lineOf).join(''));
+  res.write(lineOf({ t: 'live' }));
+  s.listeners.add(res);
+  res.on('close', () => s.listeners.delete(res));
+}
+
 function readBody(req) {
   return new Promise((done, fail) => {
     let text = '';
@@ -97,15 +198,30 @@ function stop(child, signal) {
   } catch {}
 }
 
-async function run(req, res, cors) {
-  let body;
+async function jsonBody(req, res, cors) {
   try {
-    body = JSON.parse(await readBody(req));
+    return JSON.parse(await readBody(req));
   } catch {
-    return res.writeHead(400, cors).end('Send JSON: { "command": "...", "cwd": "..." }');
+    res.writeHead(400, cors).end('Send JSON.');
+    return null;
   }
+}
+
+async function sessionFrom(body, res, cors) {
+  const id = String(body.session ?? '');
+  if (SESSION_ID.test(id)) return sessionOf(id);
+  res.writeHead(400, cors).end('No terminal session.');
+  return null;
+}
+
+// Starts a command in a session. Its output goes to the session, which the page reads through /attach.
+async function run(req, res, cors) {
+  const body = await jsonBody(req, res, cors);
+  if (!body) return;
   const command = String(body.command ?? '').trim();
   if (!command) return res.writeHead(400, cors).end('No command.');
+  const s = await sessionFrom(body, res, cors);
+  if (!s) return;
   if (running.size >= MAX) return res.writeHead(429, cors).end(`${MAX} commands are already running. Stop one, or start the board with TERMINAL_MAX set higher.`);
   let cwd;
   try {
@@ -113,11 +229,15 @@ async function run(req, res, cors) {
   } catch (err) {
     return res.writeHead(400, cors).end(err.message);
   }
+  if (s.run) return res.writeHead(409, cors).end('A command is already running in this terminal.');
   const cols = size(body.cols, 100, 500);
   const rows = size(body.rows, 30, 200);
 
   // Each command runs in a fresh shell. It writes its terminal's name (for resizing) and, at the end, the folder
   // it ended in to a folder of its own, so the page keeps that folder: `cd` works.
+  // The session is taken before the first await below, so a second Run cannot start another command in it.
+  const job = { child: null, dir: '', session: s, stopped: false, killer: 0 };
+  s.run = job;
   const dir = WINDOWS ? '' : await mkdtemp(join(tmpdir(), 'board-run-'));
   const script = WINDOWS
     ? command
@@ -125,39 +245,63 @@ async function run(req, res, cors) {
   const [file, args] = WINDOWS ? [SHELL, ['/d', '/s', '/c', script]] : ptyArgs(script);
   const started = performance.now();
   const child = spawn(file, args, { cwd, detached: !WINDOWS, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...commandEnv(dir, body.theme), BOARD_SCRIPT: script } });
-  const run = { child, dir };
-  running.set(child.pid, run);
+  Object.assign(job, { child, dir });
+  running.set(child.pid, job);
   log.info(`started pid ${child.pid} in ${cwd} (${running.size} running)`);
-  res.writeHead(200, { ...cors, 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' });
-  const send = (event) => res.writableEnded || res.write(`${JSON.stringify(event)}\n`);
-  send({ t: 'start', pid: child.pid, cwd });
-  child.stdout.setEncoding('utf8').on('data', (d) => send({ t: 'out', d }));
-  child.stderr.setEncoding('utf8').on('data', (d) => send({ t: 'err', d }));
+  record(s, { t: 'start', pid: child.pid, cwd, command, at: Date.now() });
+  child.stdout.setEncoding('utf8').on('data', (d) => record(s, { t: 'out', d }));
+  child.stderr.setEncoding('utf8').on('data', (d) => record(s, { t: 'err', d }));
   child.stdin.on('error', () => {});
 
-  let killer = 0;
-  child.on('error', (err) => send({ t: 'err', d: `${err.message}\n` }));
+  child.on('error', (err) => record(s, { t: 'err', d: `${err.message}\n` }));
   // `cat` waits for more input; once the command is done it is told there is none.
   child.on('exit', () => child.stdin.end());
   child.on('close', async (code, signal) => {
-    clearTimeout(killer);
+    clearTimeout(job.killer);
     running.delete(child.pid);
     const ms = performance.now() - started;
     log.info(`pid ${child.pid} ended ${signal ?? `with ${code}`} after ${Math.round(ms)}ms`);
     if (dir) {
       const endCwd = (await readFile(join(dir, 'cwd'), 'utf8').catch(() => '')).trim();
-      if (endCwd) send({ t: 'cwd', d: endCwd });
+      if (endCwd) record(s, { t: 'cwd', d: endCwd });
       rm(dir, { recursive: true, force: true }).catch(() => {});
     }
-    send({ t: 'exit', code, signal, ms });
-    res.end();
+    if (s.run === job) s.run = null;
+    record(s, { t: 'exit', code, signal, ms, stopped: job.stopped });
   });
-  // The page stopped the command, closed the session, or was reloaded.
-  res.on('close', () => {
-    if (!running.has(child.pid)) return;
-    stop(child, 'SIGTERM');
-    killer = setTimeout(() => stop(child, 'SIGKILL'), KILL_AFTER_MS);
-  });
+  res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify({ pid: child.pid, cwd }));
+}
+
+// Stops a command and anything it started.
+function stopJob(job) {
+  if (!job?.child || job.stopped) return;
+  job.stopped = true;
+  stop(job.child, 'SIGTERM');
+  job.killer = setTimeout(() => stop(job.child, 'SIGKILL'), KILL_AFTER_MS);
+}
+
+// Stop ends the session's command; clear empties its kept output; close does both and forgets the session.
+async function control(req, res, cors, action) {
+  const body = await jsonBody(req, res, cors);
+  if (!body) return;
+  const s = await sessionFrom(body, res, cors);
+  if (!s) return;
+  if (action !== 'clear') stopJob(s.run);
+  if (action === 'clear') {
+    s.events = s.open ? [s.open] : [];
+    s.size = s.events.reduce((n, e) => n + sizeOf(e), 0);
+    s.rewrite = true;
+    s.pending = '';
+    s.timer ||= setTimeout(() => flush(s), FLUSH_MS);
+  }
+  if (action === 'close') {
+    s.closed = true;
+    clearTimeout(s.timer);
+    sessions.delete(s.id);
+    for (const listener of s.listeners) listener.end();
+    s.disk.then(() => rm(logFile(s.id), { force: true })).catch(() => {});
+  }
+  res.writeHead(204, cors).end();
 }
 
 // Keys typed in the page, sent to a running command's terminal.
@@ -199,6 +343,11 @@ createServer(async (req, res) => {
     res.end(JSON.stringify({ root: ROOT, home: homedir(), shell: SHELL, max: MAX, running: running.size }));
     return;
   }
+  if (req.method === 'GET' && path === '/attach') {
+    const id = new URL(req.url, 'http://terminal').searchParams.get('session') ?? '';
+    if (!SESSION_ID.test(id)) return res.writeHead(400, cors).end('No terminal session.');
+    return attach(req, res, cors, id);
+  }
   if (req.method === 'GET' && (path === '/files' || path === '/file')) {
     const target = new URL(req.url, 'http://terminal').searchParams.get('path') ?? '';
     try {
@@ -213,6 +362,7 @@ createServer(async (req, res) => {
   const json = /^application\/json\b/.test(req.headers['content-type'] ?? '');
   if (req.method === 'POST' && path === '/run' && json) return run(req, res, cors);
   if (req.method === 'POST' && path === '/input' && json) return input(req, res, cors);
+  if (req.method === 'POST' && ['/stop', '/clear', '/close'].includes(path) && json) return control(req, res, cors, path.slice(1));
   res.writeHead(404, cors).end('Not a terminal request.');
 })
   .on('error', (err) => {
@@ -221,10 +371,17 @@ createServer(async (req, res) => {
   })
   .listen(PORT, '127.0.0.1', () => log.info(`Terminal runner on http://127.0.0.1:${PORT} (up to ${MAX} commands at once)`));
 
-// Commands started from the board stop with it.
+// Commands started from the board stop with it. Output not yet on disk is written now, so a restart keeps it.
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     for (const { child } of running.values()) stop(child, 'SIGKILL');
+    for (const s of sessions.values()) {
+      if (!s.timer || s.closed) continue;
+      try {
+        if (s.rewrite) writeFileSync(logFile(s.id), s.events.map(lineOf).join(''), { mode: 0o600 });
+        else appendFileSync(logFile(s.id), s.pending, { mode: 0o600 });
+      } catch {}
+    }
     process.exit(0);
   });
 }

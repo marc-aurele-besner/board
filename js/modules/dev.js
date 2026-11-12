@@ -2,10 +2,11 @@
 // local folder) is shown as a file tree; files open read-only with syntax colours; terminals sit below.
 // Commands run in a real pseudo-terminal through the runner `bun start` starts, so interactive programs such as
 // the Claude CLI work: keys typed in the terminal go to the program, and vt.js draws what it prints.
-// Sessions live in this tab only: a reload closes the streams, and the runner stops what they were running.
+// The runner owns the sessions: a command keeps running through a reload, and the page attaches to each terminal
+// again (listed in localStorage), getting its whole output back.
 import { h, icon, notice, uid } from '../ui.js';
 import { toast } from '../toast.js';
-import { TERMINAL_RUNNER, runnerInfo, runCommand, sendInput } from '../terminal.js';
+import { TERMINAL_RUNNER, runnerInfo, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput } from '../terminal.js';
 import { createTerminal, styleOf, colorOf } from '../vt.js';
 import { readTheme, themedColors } from '../term-colors.js';
 import { explorer, editor, setRoot, hasOpenFiles, baseName } from './dev-files.js';
@@ -18,9 +19,11 @@ const DEFAULTS = { history: [], runner: '' };
 const HISTORY_MAX = 100;
 const RECENT_SHOWN = 8;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+// The open terminals (id, number, folder) and the one shown, so a reload attaches to them again.
+const SESSIONS_KEY = 'board:dev-sessions';
 
 // View state: the workspace, the sessions, the one shown, and what the runner said about itself.
-const view = { workspace: 'board', sessions: [], active: '', info: null, infoError: '', checking: false, count: 0, pending: null, queued: null };
+const view = { workspace: 'board', sessions: [], active: '', info: null, infoError: '', checking: false, count: 0, pending: null, queued: null, restored: false };
 let currentStore = null;
 
 export const runnerOf = (store) => store.get(COLLECTION).runner || TERMINAL_RUNNER;
@@ -58,26 +61,117 @@ function themeColor(which) {
   return m ? `rgb:${m[1]}${m[1]}/${m[2]}${m[2]}/${m[3]}${m[3]}` : '';
 }
 
+function saveSessions() {
+  try {
+    localStorage.setItem(SESSIONS_KEY, JSON.stringify({ active: view.active, sessions: view.sessions.map(({ id, n, cwd }) => ({ id, n, cwd })) }));
+  } catch {}
+}
+
+function makeSession({ id = uid(), n = ++view.count, cwd = '' }) {
+  const s = { id, n, cwd, running: false, attach: null, replaying: false, pid: 0, exit: null, command: '', browse: -1, stick: true, el: null };
+  s.term = createTerminal({
+    // Questions in replayed output were answered long ago; only a live program gets an answer.
+    reply: (data) => !s.replaying && s.running && s.pid && sendInput(runnerOf(currentStore), s.pid, { data }),
+    background: themeColor,
+  });
+  view.sessions.push(s);
+  return s;
+}
+
+// The terminals open before the reload, attached again once the runner answers.
+function restoreSessions() {
+  view.restored = true;
+  let saved = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(SESSIONS_KEY) ?? 'null');
+  } catch {}
+  for (const x of saved?.sessions ?? []) {
+    if (typeof x?.id === 'string' && !view.sessions.some((s) => s.id === x.id)) makeSession({ id: x.id, n: Number(x.n) || ++view.count, cwd: String(x.cwd ?? '') });
+  }
+  view.count = Math.max(view.count, ...view.sessions.map((s) => s.n));
+  if (view.sessions.some((s) => s.id === saved?.active)) view.active = saved.active;
+}
+
 function newSession(store, cwd = rootPath(store, view.workspace)) {
   if (view.sessions.length >= maxSessions()) {
     toast(`${maxSessions()} terminals are open. Close one first.`);
     return null;
   }
-  const s = { id: uid(), n: ++view.count, cwd, running: false, abort: null, pid: 0, exit: null, command: '', started: 0, browse: -1, stick: true, el: null };
-  s.term = createTerminal({
-    reply: (data) => s.running && s.pid && sendInput(runnerOf(store), s.pid, { data }),
-    background: themeColor,
-  });
-  view.sessions.push(s);
+  const s = makeSession({ cwd });
   view.active = s.id;
+  saveSessions();
+  if (view.info) attach(store, s);
   return s;
 }
 
 function closeSession(s) {
-  s.abort?.abort();
+  s.attach?.abort();
   s.observer?.disconnect();
+  closeOnRunner(runnerOf(currentStore), s.id).catch(() => {});
   view.sessions = view.sessions.filter((x) => x !== s);
   if (view.active === s.id) view.active = view.sessions.at(-1)?.id ?? '';
+  saveSessions();
+}
+
+// Reads the session's events: first everything so far (drawn without toasts or answers), then live ones.
+async function attach(store, s) {
+  if (s.attach) return;
+  const ctl = new AbortController();
+  s.attach = ctl;
+  try {
+    await attachSession(runnerOf(store), { session: s.id, signal: ctl.signal, onEvent: (e) => onSessionEvent(store, s, e) });
+  } catch {}
+  if (s.attach === ctl) s.attach = null;
+  if (ctl.signal.aborted || !view.sessions.includes(s)) return;
+  // The stream ended by itself: the runner stopped. What ran is marked; the page asks again in a moment.
+  s.replaying = false;
+  if (s.running) finish(store, s, { lost: true });
+  view.info = null;
+  setTimeout(() => checkRunner(store), 1500);
+}
+
+function onSessionEvent(store, s, e) {
+  if (e.t === 'session') {
+    s.replaying = true;
+    // The runner has the whole terminal: it is drawn again from the start. A runner that lost it (its state folder
+    // was removed) has nothing, so what is shown stays.
+    if (e.known) {
+      // Replayed at the size it is shown, so lines wrap as they did.
+      fit(s);
+      s.term.reset();
+      s.term.clear();
+      Object.assign(s, { running: false, pid: 0, exit: null, command: '' });
+    }
+  } else if (e.t === 'live') {
+    s.replaying = false;
+    store.refresh();
+  } else if (e.t === 'start') {
+    Object.assign(s, { running: true, pid: e.pid, cwd: e.cwd, command: e.command, exit: null });
+    s.term.note(`${e.cwd || 'board'} $ ${oneLine(e.command)}`, 't-cmd');
+    if (!s.replaying) {
+      saveSessions();
+      store.refresh();
+    }
+  } else if (e.t === 'out' || e.t === 'err') {
+    s.term.write(e.d);
+    if (!s.replaying) s.watch?.(e.d);
+  } else if (e.t === 'cwd') {
+    s.cwd = e.d;
+    if (!s.replaying) saveSessions();
+  } else if (e.t === 'exit') finish(store, s, e);
+  schedulePaint();
+}
+
+function finish(store, s, e) {
+  s.exit = e.stopped ? { stopped: true, ms: e.ms } : e.lost ? { lost: true } : { code: e.code, signal: e.signal, ms: e.ms };
+  Object.assign(s, { running: false, pid: 0 });
+  s.term.reset();
+  s.term.note(exitText(s.exit), s.exit.code === 0 ? 't-meta t-ok' : 't-meta');
+  schedulePaint();
+  if (s.replaying || !view.sessions.includes(s)) return;
+  const command = s.command;
+  if (!location.hash.startsWith('#/dev')) toast(`${command.length > 40 ? `${command.slice(0, 40)}…` : command}: ${exitText(s.exit).toLowerCase()}`);
+  store.refresh();
 }
 
 // Drawing. A terminal's elements are made once and moved into each new page, so its output, scroll and focus
@@ -251,7 +345,7 @@ const duration = (ms) => (ms < 1000 ? `${Math.round(ms)}ms` : ms < 60000 ? `${(m
 function exitText(exit) {
   if (!exit) return '';
   if (exit.stopped) return `Stopped after ${duration(exit.ms)}`;
-  if (exit.failed) return 'Could not run';
+  if (exit.lost) return 'Ended when the runner stopped';
   if (exit.signal) return `Ended by ${exit.signal} after ${duration(exit.ms)}`;
   return `Exit ${exit.code} · ${duration(exit.ms)}`;
 }
@@ -261,9 +355,10 @@ async function checkRunner(store) {
   try {
     view.info = await runnerInfo(runnerOf(store));
     view.infoError = '';
-    // Terminals opened before the runner answered learn their folder now.
+    // Terminals opened before the runner answered learn their folder now, and every terminal gets its output.
     for (const s of view.sessions) if (!s.cwd && !s.command) s.cwd = rootPath(store, view.workspace);
     setRoot(filesCtx(store), rootPath(store, view.workspace));
+    for (const s of view.sessions) attach(store, s);
   } catch (err) {
     view.info = null;
     view.infoError = err.message;
@@ -314,60 +409,28 @@ function remember(store, command) {
 function clearTerminal(s) {
   s.term.clear();
   schedulePaint();
+  clearSession(runnerOf(currentStore), s.id).catch(() => {});
 }
 
+// The runner starts the command; what it prints, and how it ends, arrive through the session's stream.
 async function run(store, s, command, { remember: keep = true } = {}) {
   if (command === 'clear') {
     clearTerminal(s);
     return store.refresh();
   }
   fit(s);
-  s.term.note(`${s.cwd || 'board'} $ ${oneLine(command)}`, 't-cmd');
-  const ctl = new AbortController();
-  Object.assign(s, { running: true, abort: ctl, pid: 0, exit: null, command, started: performance.now(), stick: true, browse: -1 });
+  Object.assign(s, { stick: true, browse: -1 });
   // A task's prompt is long and one-off; it would crowd the recent commands.
   if (keep) remember(store, command);
   // Keys now go to the program.
   requestAnimationFrame(() => s.el?.out.focus({ preventScroll: true }));
   try {
-    await runCommand(runnerOf(store), {
-      command,
-      cwd: s.cwd,
-      cols: s.term.cols,
-      rows: s.term.rows,
-      theme: currentTheme().dark ? 'dark' : 'light',
-      signal: ctl.signal,
-      onEvent: (e) => {
-        if (e.t === 'start') {
-          s.pid = e.pid;
-          s.cwd = e.cwd;
-        } else if (e.t === 'out' || e.t === 'err') {
-          s.term.write(e.d);
-          s.watch?.(e.d);
-        }
-        else if (e.t === 'cwd') s.cwd = e.d;
-        else if (e.t === 'exit') s.exit = { code: e.code, signal: e.signal, ms: e.ms };
-        schedulePaint();
-      },
-    });
-    s.exit ??= { stopped: true, ms: performance.now() - s.started };
+    await runCommand(runnerOf(store), { session: s.id, command, cwd: s.cwd, cols: s.term.cols, rows: s.term.rows, theme: currentTheme().dark ? 'dark' : 'light' });
   } catch (err) {
-    if (err.name === 'AbortError') s.exit = { stopped: true, ms: performance.now() - s.started };
-    else {
-      s.term.note(err.message, 't-err');
-      s.exit = { failed: true };
-      // The runner may have gone away; ask again so the page says so.
-      if (/reach the terminal runner/.test(err.message)) checkRunner(store);
-    }
-  } finally {
-    Object.assign(s, { running: false, abort: null, pid: 0 });
-    s.term.reset();
-    s.term.note(exitText(s.exit), s.exit?.code === 0 ? 't-meta t-ok' : 't-meta');
+    s.term.note(err.message, 't-err');
     schedulePaint();
-    if (view.sessions.includes(s)) {
-      if (!location.hash.startsWith('#/dev')) toast(`${command.length > 40 ? `${command.slice(0, 40)}…` : command}: ${exitText(s.exit).toLowerCase()}`);
-      store.refresh();
-    }
+    // The runner may have gone away; ask again so the page says so.
+    if (/reach the terminal runner/.test(err.message)) checkRunner(store);
   }
 }
 
@@ -409,6 +472,7 @@ function sessionTabs(store) {
           title: s.cwd,
           onclick: () => {
             view.active = s.id;
+            saveSessions();
             store.refresh();
           },
         }, s.running ? h('span', { class: 'term-dot', title: 'Running' }) : icon('terminal'), `${s.n} · ${s.cwd ? baseName(s.cwd) : 'board'}`),
@@ -484,7 +548,7 @@ function terminal(store, s) {
       class: 'term-form',
       onsubmit: (e) => {
         e.preventDefault();
-        if (s.running) return s.abort?.abort();
+        if (s.running) return stopCommand(runnerOf(store), s.id).catch((err) => toast(err.message));
         const command = input.value.trim();
         if (!command) return;
         input.value = '';
@@ -539,6 +603,7 @@ function draw(root, store) {
   // A render follows a theme switch, so the theme is read again.
   theme = null;
   currentStore = store;
+  if (!view.restored) restoreSessions();
   if (!view.info && !view.infoError && !view.checking) checkRunner(store);
   if (view.pending) {
     view.workspace = view.pending;
@@ -574,11 +639,6 @@ function draw(root, store) {
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
   theme = null;
   schedulePaint();
-});
-
-// A reload ends every stream, which stops the commands; ask first while any are running.
-window.addEventListener('beforeunload', (e) => {
-  if (view.sessions.some((s) => s.running)) e.preventDefault();
 });
 
 export default {
