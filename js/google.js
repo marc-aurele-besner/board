@@ -1,3 +1,4 @@
+// @ts-check
 // Google, read-only, straight from the browser. Every sign-in (Gmail and Calendar per account, Analytics and Search
 // Console together) is kept in google.json in the data folder, with a refresh token, so any browser profile that opens
 // the folder is connected; the runners renew each access token before it expires. Nothing is kept in the browser.
@@ -5,6 +6,12 @@
 import { h } from './ui.js';
 import { GOOGLE, GOOGLE_DEFAULTS, WEB, scopeOf, SERVICE_SCOPES, googleData, saveGoogleData, bindGoogleStore, useRenewer, tokenRequest, hasToken, tokenScopes, removeToken, accessToken, isConnected, googleFetch } from './google-core.js';
 import { runJob } from './runners.js';
+/** @import { Store, GoogleSignIn } from '../types/data' */
+/** @import { WebService } from './google-core.js' */
+/**
+ * A new sign-in, before it is saved.
+ * @typedef {Omit<GoogleSignIn, 'at' | 'removed'>} NewSignIn
+ */
 
 export { GOOGLE, GOOGLE_DEFAULTS, googleData, saveGoogleData, hasToken, tokenScopes, accessToken, isConnected, googleFetch };
 
@@ -12,18 +19,20 @@ const REVOKE = 'https://oauth2.googleapis.com/revoke';
 const AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
 const SIGN_IN_WAIT = 5 * 60 * 1000;
 
+/** @type {Store | null} */
 let store = null;
 const tokens = () => googleData().tokens;
 
 // Gives google.json's store to the Google modules. Runs once the data folder is open.
 // The runners renew every token (tools/jobs/google.js). A tab that finds one expired asks them, then reads the
 // renewed token from google.json; it never renews one itself, so the two never fight over a refresh token.
+/** @param {Store} next */
 export function useGoogleStore(next) {
   store = next;
   bindGoogleStore(next);
   useRenewer(async (key) => {
     await runJob('google', { key });
-    await store.sync();
+    await /** @type {Store} */ (store).sync();
     const token = tokens()[key];
     if (token?.removed || !token?.refresh) throw new Error('Google signed this account out. Connect it again.');
     if (!token.access || !(token.expiresAt > Date.now())) throw new Error('Google sign-in could not be renewed. Check Settings → Runners.');
@@ -42,14 +51,20 @@ export function useGoogleStore(next) {
 // The redirect address to register on the OAuth client in Google Cloud Console.
 export const redirectUri = () => `${location.origin}/oauth.html`;
 
+/** @param {ArrayBuffer | Uint8Array} bytes */
 const base64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const randomText = () => base64url(crypto.getRandomValues(new Uint8Array(32)));
 
+/** @type {{ reject: (err: Error) => void } | null} */
 let pending = null;
 
 // Opens Google's sign-in in a popup. Must run from a click, or the browser blocks it. Google answers on oauth.html,
 // which hands the code back over a BroadcastChannel: Google's pages cut the link between a popup and its opener.
 // Resolves to { refresh, access, expiresAt, scope }.
+/**
+ * @param {{ scopes: string[], address?: string }} options
+ * @returns {Promise<NewSignIn>}
+ */
 export async function signIn({ scopes, address = '' }) {
   const { clientId, clientSecret } = store?.get('settings').google ?? {};
   if (!clientId) throw new Error('Add your Google OAuth Client ID in Settings → Google Calendar first.');
@@ -74,6 +89,8 @@ export async function signIn({ scopes, address = '' }) {
   if (!popup) throw new Error('The browser blocked Google sign-in. Allow popups for the board and try again.');
 
   pending?.reject(new Error('Another Google sign-in was started.'));
+  // What oauth.html passes on from Google's redirect.
+  /** @type {{ state?: string, code?: string, error?: string }} */
   const answer = await new Promise((resolve, reject) => {
     const channel = new BroadcastChannel('board-oauth');
     const done = () => {
@@ -93,13 +110,17 @@ export async function signIn({ scopes, address = '' }) {
     };
   });
   if (answer.error) throw new Error(answer.error === 'access_denied' ? 'Google sign-in was cancelled.' : `Google sign-in error: ${answer.error}`);
-  const body = await tokenRequest({ grant_type: 'authorization_code', code: answer.code, code_verifier: verifier, redirect_uri: redirectUri() });
+  const body = await tokenRequest({ grant_type: 'authorization_code', code: /** @type {string} */ (answer.code), code_verifier: verifier, redirect_uri: redirectUri() });
   if (!body.refresh_token) throw new Error('Google sent no refresh token. Try connecting again.');
   return { refresh: body.refresh_token, access: body.access_token, expiresAt: Date.now() + Number(body.expires_in) * 1000, scope: body.scope ?? '' };
 }
 
+/**
+ * @param {string} key
+ * @param {NewSignIn} token
+ */
 export function saveToken(key, token) {
-  store.update(GOOGLE, (d) => {
+  /** @type {Store} */ (store).update(GOOGLE, (d) => {
     d.tokens[key] = { ...token, at: Date.now() };
   });
 }
@@ -107,6 +128,10 @@ export function saveToken(key, token) {
 // Removes a sign-in. Revoking at Google ends every sign-in of that account to this client (Gmail and Calendar
 // share it), so a Gmail or Calendar one is revoked only when the other service is not connected to the same account.
 // `revoke: false` keeps it alive at Google.
+/**
+ * @param {string} key
+ * @param {{ revoke?: boolean }} [options]
+ */
 export function forgetToken(key, { revoke = true } = {}) {
   const token = tokens()[key];
   if (!token?.refresh) return;
@@ -121,6 +146,10 @@ export function forgetToken(key, { revoke = true } = {}) {
 // --- Analytics and Search Console ---
 // One sign-in covers both. Connecting the second asks for both permissions again.
 
+/**
+ * @param {unknown} _clientId
+ * @param {WebService} service
+ */
 export async function connect(_clientId, service) {
   const wanted = new Set([...(hasToken(WEB) ? tokenScopes(WEB).filter((s) => SERVICE_SCOPES.includes(s)) : []), scopeOf(service)]);
   const token = await signIn({ scopes: [...wanted] });
@@ -138,10 +167,16 @@ export const disconnect = () => forgetToken(WEB, { revoke: false });
 export const PROFILE_SCOPE = 'https://www.googleapis.com/auth/userinfo.profile';
 
 // Reads the signed-in account's picture with a fresh token and keeps it. Without the profile scope, nothing happens.
+/**
+ * @param {string} address
+ * @param {string} accessValue
+ * @param {string | undefined} grantedScope
+ */
 export async function rememberPicture(address, accessValue, grantedScope) {
   if (!String(grantedScope ?? '').split(' ').includes(PROFILE_SCOPE)) return;
   try {
     const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: `Bearer ${accessValue}` } });
+    /** @type {{ picture?: string }} */
     const { picture = '' } = res.ok ? await res.json() : {};
     if (picture && store) store.update(GOOGLE, (d) => {
       d.pictures[address] = picture;
@@ -151,9 +186,11 @@ export async function rememberPicture(address, accessValue, grantedScope) {
   }
 }
 
+/** @param {string} address */
 export const pictureOf = (address) => googleData().pictures[address] ?? '';
 
 // A round avatar for a Google account: its picture, or its first letter when there is none or it fails to load.
+/** @param {string} address */
 export function accountAvatar(address, className = 'account-avatar') {
   const letter = () => h('span', { class: `${className} is-letter`, 'aria-hidden': 'true' }, (address[0] ?? '?').toUpperCase());
   const url = pictureOf(address);
