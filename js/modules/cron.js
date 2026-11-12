@@ -900,40 +900,64 @@ function previewOf(text, vars) {
   ];
 }
 
+// Folds opened or closed by hand, by tree and key path, so a re-render (a test's terminal reports every second)
+// does not open a fold again just after it was closed.
+/** @type {Map<string, boolean>} */
+const folds = new Map();
+
+/** @param {unknown} value */
+const copyable = (value) => (typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? String(value));
+/** @param {string} text @param {string} what */
+const copyText = (text, what) => navigator.clipboard.writeText(text).then(() => toast(`Copied ${what}`), () => toast('Could not copy'));
+/** @param {unknown} value @param {string} label */
+const copyButton = (value, label) => h('button', {
+  type: 'button', class: 'json-copy', title: `Copy ${label}`, 'aria-label': `Copy ${label}`,
+  onclick: (/** @type {Event} */ e) => {
+    e.preventDefault(); // inside a summary, a click would fold the node too
+    copyText(copyable(value), label);
+  },
+}, icon('copy'));
+
 // A JSON value as a folding tree. A key's click gives its variable path to `pick`; with no path it is not clickable.
+// `fold` names the node among the tree's folds; each value can be copied whole.
 /**
  * @param {unknown} value
  * @param {string | null} path
  * @param {((path: string) => void) | null} pick
  * @param {number} [depth]
+ * @param {string} [fold]
  * @returns {(label: string) => HTMLElement}
  */
-function jsonTree(value, path, pick, depth = 0) {
+function jsonTree(value, path, pick, depth = 0, fold = '') {
   /** @param {string} label */
   const keyButton = (label) => (path && pick
     ? h('button', { type: 'button', class: 'json-key', title: `{{${path}}}`, onmousedown: keepFocus, onclick: () => pick(path) }, label)
     : h('span', { class: 'json-key' }, label));
   return (label) => {
+    const at = `${fold}/${label}`;
     if (value !== null && typeof value === 'object') {
       const entries = Array.isArray(value) ? value.map((v, i) => [i, v]) : Object.entries(value);
-      return h('details', { class: 'json-node', open: depth < 2 },
-        h('summary', null, keyButton(label), h('span', { class: 'muted small' }, Array.isArray(value) ? ` [${entries.length}]` : ` {${entries.length}}`)),
-        h('ul', null, entries.map(([k, v]) => h('li', null, jsonTree(v, path ? pathTo(path, k) : null, pick, depth + 1)(String(k))))));
+      return h('details', {
+        class: 'json-node', open: folds.get(at) ?? depth < 2,
+        ontoggle: (/** @type {Event & { target: HTMLDetailsElement }} */ e) => folds.set(at, e.target.open),
+      },
+        h('summary', null, keyButton(label), h('span', { class: 'muted small' }, Array.isArray(value) ? ` [${entries.length}]` : ` {${entries.length}}`), copyButton(value, label)),
+        h('ul', null, entries.map(([k, v]) => h('li', null, jsonTree(v, path ? pathTo(path, k) : null, pick, depth + 1, at)(String(k))))));
     }
     const text = typeof value === 'string' ? JSON.stringify(value.length > 300 ? `${value.slice(0, 300)}…` : value) : String(value);
-    return h('div', { class: 'json-leaf' }, keyButton(label), h('span', { class: `json-value json-${value === null ? 'null' : typeof value}` }, text));
+    return h('div', { class: 'json-leaf' }, keyButton(label), h('span', { class: `json-value json-${value === null ? 'null' : typeof value}` }, text), copyButton(value, label));
   };
 }
 
 // The tree of everything a step can read, picking into the field last focused.
-/** @param {Vars} vars */
-function inputTree(vars) {
+/** @param {Vars} vars @param {string} fold */
+function inputTree(vars, fold) {
   const tree = varsTree(vars);
   /** @param {string} path */
   const pick = (path) => {
     if (!view.field || !insertVar(view.field, path)) toast('Click in a field first, then on the key to add.');
   };
-  return h('div', { class: 'json-tree' }, Object.entries(tree).map(([k, v]) => jsonTree(v, k, pick)(k)));
+  return h('div', { class: 'json-tree' }, Object.entries(tree).map(([k, v]) => jsonTree(v, k, pick, 0, fold)(k)));
 }
 
 /**
@@ -1587,7 +1611,7 @@ function testPanel(store, flow, step, index) {
   const next = flow.steps[index + 1];
   const outTree = result
     ? h('div', { class: 'json-tree' }, result.ok
-      ? jsonTree(result.data, `step${index + 1}`, copy)(`step${index + 1}`)
+      ? jsonTree(result.data, `step${index + 1}`, copy, 0, `${flow.id}/${step.id}/out`)(`step${index + 1}`)
       : h('pre', { class: 'error' }, result.output))
     : h('p', { class: 'muted small' }, 'Test the step to see what it gives.');
   return h('section', { class: 'cron-test stack' },
@@ -1617,10 +1641,16 @@ function testPanel(store, flow, step, index) {
       : null,
     h('div', { class: 'cron-test-grid' },
       h('div', { class: 'cron-col' },
-        h('span', { class: 'muted small' }, 'Input · click a key to add it at the cursor'),
-        inputTree(vars)),
+        h('div', { class: 'row between' },
+          h('span', { class: 'muted small' }, 'Input · click a key to add it at the cursor'),
+          h('button', { type: 'button', class: 'btn-link small', onclick: () => copyText(JSON.stringify(varsTree(vars), null, 2), 'the input') }, icon('copy'), 'Copy')),
+        inputTree(vars, `${flow.id}/${step.id}/in`)),
       h('div', { class: 'cron-col' },
-        h('span', { class: 'muted small' }, 'Output · click a key to copy it for a later step'),
+        h('div', { class: 'row between' },
+          h('span', { class: 'muted small' }, 'Output · click a key to copy it for a later step'),
+          result
+            ? h('button', { type: 'button', class: 'btn-link small', onclick: () => copyText(result.ok ? copyable(result.data) : result.output, 'the output') }, icon('copy'), 'Copy')
+            : null),
         outTree)));
 }
 

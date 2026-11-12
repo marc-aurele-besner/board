@@ -25,6 +25,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logger } from './log.js';
+import { createTerminal } from '../js/vt.js';
 import { sessionTranscript, worktreeActivity, worktreeUsage } from './usage.js';
 
 const PORT = Number(process.env.TERMINAL_PORT) || 8419;
@@ -982,17 +983,33 @@ async function searchFiles(params) {
 }
 
 // What a terminal left behind, for a Cron step that runs after a Run in Dev step: the end of its output (escape
-// sequences and all; the page reads links from it), claude's last answer and the files it wrote (from its
-// transcript), and, in the folder it worked in, the branch, the last commit, and the commits and files that differ
-// from the default branch (uncommitted ones included).
+// sequences and all; the page reads links from it), the same output as the screen showed it, claude's last answer
+// and the files it wrote (from its transcript), and, in the folder it worked in, the branch, the last commit, and the
+// commits and files that differ from the default branch (uncommitted ones included).
 const OUTCOME_OUTPUT = 20000;
+const OUTCOME_SCREEN = 20000;
 const OUTCOME_FILES = 300;
 const OUTCOME_COMMITS = 30;
-const OUTCOME_REPLY = 30000;
+// The whole answer: a long JSON answer cut at its start can no longer be read.
+const OUTCOME_REPLY = 2_000_000;
+
+// The output as the terminal drew it, in plain text. A program that redraws in place, as claude does, leaves its
+// last drawing rather than every frame run together.
+/** @param {SessionEvent[]} events */
+function screenText(events) {
+  const term = createTerminal();
+  for (const e of events) {
+    if (e.cols && e.rows) term.resize(e.cols, e.rows);
+    else if ((e.t === 'out' || e.t === 'err') && e.d) term.write(e.d);
+  }
+  const lines = [...term.history, ...term.screen].map((l) => l.cells.map((c) => c?.c ?? ' ').join('').trimEnd());
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim().slice(-OUTCOME_SCREEN);
+}
 /** @param {URLSearchParams} params */
 async function sessionOutcome(params) {
   const id = params.get('session') ?? '';
   let output = '';
+  let screen = '';
   /** @type {{ reply?: string, written?: string[] }} */
   let claude = {};
   if (SESSION_ID.test(id) && (sessions.has(id) || (await stat(logFile(id)).catch(() => null)))) {
@@ -1009,9 +1026,10 @@ async function sessionOutcome(params) {
       size += e.d.length;
     }
     output = chunks.reverse().join('').slice(-OUTCOME_OUTPUT);
+    screen = screenText(s.events);
   }
   const root = await repoOf(params.get('path') ?? '').catch(() => null);
-  if (!root) return { output, ...claude, repo: false };
+  if (!root) return { output, screen, ...claude, repo: false };
   const status = parseStatus(await git(root, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', ...NOT_WORKTREES]));
   const head = (await git(root, ['log', '-1', '--format=%H%x1f%h%x1f%s'], { ok: [0, 128] }).catch(() => '')).trim().split('\x1f');
   // The default branch as the remote names it, else a local main or master.
@@ -1048,6 +1066,7 @@ async function sessionOutcome(params) {
   files = files.slice(0, OUTCOME_FILES);
   return {
     output,
+    screen,
     ...claude,
     repo: true,
     root,
