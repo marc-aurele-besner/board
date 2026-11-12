@@ -1225,7 +1225,7 @@ async function runDev(store, flow, step, input, vars, ctx) {
   const on = `Dev terminal ${n}, in ${where}${task ? `, on the task “${task.text}”` : ''}`;
   // session and cwd let the editor show the terminal's output, which the runner keeps, and open it in Dev.
   ctx.data = { terminal: n, session: id, cwd, folder: where, worktree: worktree ? workPath : '', ...(claude ? { prompt } : { command }) };
-  ctx.started?.({ session: id, cwd, terminal: n, ...(task ? { taskId: task.id } : {}) });
+  ctx.started?.({ session: id, cwd, terminal: n, ...(worktree ? { worktree: worktree.name } : {}), ...(task ? { taskId: task.id } : {}) });
   if (!waits) {
     ctx.note = `${ctx.dry ? 'Test: started' : 'Started'} in ${on}.`;
     // Nothing waits for it, but claude is still ended once it is done, in the background.
@@ -1465,6 +1465,8 @@ function stepRecord(step, result) {
   if (step.type === 'task' && d?.id) out.taskId = d.id;
   if (step.type === 'dev' && d?.session) {
     Object.assign(out, { session: d.session, cwd: d.cwd, terminal: d.terminal });
+    // By name: Dev lists worktrees by their real path, which a project folder saved with ~ does not match.
+    if (d.worktree) out.worktree = d.worktree.split('/').pop();
     if (d.branch) out.branch = d.branch;
     if (d.commit) out.commit = d.commitShort || d.commit.slice(0, 7);
     if (d.pr) out.pr = d.pr;
@@ -1545,6 +1547,15 @@ export async function runFlow(store, flowId, { manual = false, dry = false } = {
   }
   return run;
 }
+
+// The latest run that started a Dev terminal (`session`) or made a worktree (its `worktree` name), else the run that
+// made a task (`runId`, the task's cronRun). Dev shows a button to it on the terminal and the worktree.
+export function cronRunOf(store, { session = '', worktree = '', runId = '' }) {
+  const runs = store.get(COLLECTION)?.runs ?? [];
+  const ran = (x) => x && ((session && x.session === session) || (worktree && x.worktree === worktree));
+  return runs.find((r) => [...(r.steps ?? []), r.current].some(ran)) ?? (runId ? runs.find((r) => r.id === runId) : null) ?? null;
+}
+export const cronRunHref = (run) => `#/cron?run=${encodeURIComponent(run.id)}`;
 
 // How a Dev step starts its terminal. The runners start it on the command runner and add it to its list of open
 // terminals; the board's Cron page (a step tested in a terminal) opens it in Dev at once (modules/dev.js).
