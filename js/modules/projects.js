@@ -1144,7 +1144,8 @@ function projectView(store, p, items, categories) {
           allowEmpty: true,
           className: 'pp-lines',
           onSave: (/** @type {string} */ repos) => updateProject(store, p.id, { repos }),
-        })),
+        }),
+        p.github.repos.map((r) => githubLink(r))),
       h('section', { class: 'pp-block' },
         h('h3', null, 'npm organization'),
         editText({
