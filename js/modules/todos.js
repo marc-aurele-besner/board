@@ -307,7 +307,7 @@ function createTodoCategory(store, name, projectId) {
   const existing = todoCategories(store).find((c) => sameLower(c.name, name));
   if (!existing) {
     store.update(COLLECTION, (d) =>
-      d.categories.push({ id: uid(), name, ...(projectId ? parseScope(`project:${projectId}`) : parseScope('all')) }));
+      d.categories.push({ id: uid(), name, scope: projectId ? 'project' : 'all', projectId: projectId ?? null, projectCategoryIds: [] }));
   }
   return name;
 }
