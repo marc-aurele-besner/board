@@ -9,7 +9,7 @@ const COLLECTION = 'usage';
 const DAY = 86400000;
 // Records read in one call to the runner, the most recent first.
 const BATCH = 40;
-const FIELDS = ['sessions', 'models', 'cost', 'duration', 'apiDuration', 'linesAdded', 'linesRemoved', 'efforts', 'replies', 'start', 'end'];
+const FIELDS = ['sessions', 'billing', 'models', 'cost', 'extraCost', 'duration', 'apiDuration', 'linesAdded', 'linesRemoved', 'efforts', 'replies', 'start', 'end'];
 
 const runnerOf = (store) => store.get('dev')?.runner || TERMINAL_RUNNER;
 export const devUsage = (store) => store.get(COLLECTION).dev ?? {};
@@ -59,19 +59,24 @@ let busy = false;
 export async function refreshDevUsage(store) {
   if (busy) return;
   rememberWorktrees(store, heldWorktrees(store));
-  const records = Object.values(devUsage(store)).filter((r) => r.cwd && live(store, r));
+  // Records saved before the cost was split into included and extra are read once more for the split.
+  const records = Object.values(devUsage(store)).filter((r) => r.cwd && (live(store, r) || r.billing === undefined));
   if (!records.length) return;
   records.sort((a, b) => (b.end ?? 0) - (a.end ?? 0));
   busy = true;
   try {
-    const found = await worktreeUsage(runnerOf(store), records.slice(0, BATCH).map(({ name, cwd }) => ({ name, cwd })));
+    const asked = records.slice(0, BATCH);
+    const found = await worktreeUsage(runnerOf(store), asked.map(({ name, cwd }) => ({ name, cwd })));
     const changed = Object.entries(found).filter(([name, u]) => FIELDS.some((k) => JSON.stringify(u[k]) !== JSON.stringify(devUsage(store)[name]?.[k])));
-    if (!changed.length) return;
+    // Transcripts Claude has since deleted can't be split: marked, so they are not asked for again.
+    const gone = asked.filter((r) => r.billing === undefined && !found[r.name] && !live(store, r)).map((r) => r.name);
+    if (!changed.length && !gone.length) return;
     store.update(COLLECTION, (d) => {
       for (const [name, u] of changed) {
         if (!d.dev?.[name]) continue;
         for (const k of FIELDS) d.dev[name][k] = u[k];
       }
+      for (const name of gone) if (d.dev?.[name]) d.dev[name].billing = null;
     });
   } catch {
     // The runner is not running: the next round asks again.
@@ -84,21 +89,32 @@ export async function refreshDevUsage(store) {
 
 export const tokensOf = (m) => m.input + m.output + m.cacheRead + m.cacheWrite;
 
-// Records added up: { records, sessions, cost (null when no session reported one yet), costPartial, tokens, models
+// Records added up: { records, sessions, cost (null when no session reported one yet), costPartial, extraCost (the
+// part billed beyond the Claude plan: extra usage, an API key, Bedrock or Vertex), included (cost - extraCost),
+// billing ('plan', 'api', or '' when unknown or mixed), tokens, models
 // (by id, with provider), providers, effort (the one used most), duration (ms of work), linesAdded, linesRemoved,
 // start, end }.
 export function sumUsage(records) {
-  const out = { records: 0, sessions: 0, cost: null, costPartial: false, tokens: 0, models: {}, providers: [], efforts: {}, effort: '', duration: 0, linesAdded: 0, linesRemoved: 0, start: null, end: null };
+  const out = { records: 0, sessions: 0, cost: null, costPartial: false, extraCost: null, included: null, billing: '', tokens: 0, models: {}, providers: [], efforts: {}, effort: '', duration: 0, linesAdded: 0, linesRemoved: 0, start: null, end: null };
+  const billings = new Set();
   for (const r of records) {
     if (!hasUsage(r)) continue;
     out.records++;
     out.sessions += r.sessions;
+    billings.add(r.billing ?? '');
     if (r.cost === null || r.cost === undefined) out.costPartial = true;
-    else out.cost = (out.cost ?? 0) + r.cost;
+    else {
+      out.cost = (out.cost ?? 0) + r.cost;
+      // A record saved before the split counts as included.
+      out.extraCost = (out.extraCost ?? 0) + (r.extraCost ?? 0);
+    }
     for (const [id, m] of Object.entries(r.models ?? {})) {
-      const t = (out.models[id] ??= { provider: m.provider, input: 0, output: 0, thinking: 0, cacheRead: 0, cacheWrite: 0, cost: null });
+      const t = (out.models[id] ??= { provider: m.provider, input: 0, output: 0, thinking: 0, cacheRead: 0, cacheWrite: 0, cost: null, extraCost: null });
       for (const k of ['input', 'output', 'thinking', 'cacheRead', 'cacheWrite']) t[k] += m[k] ?? 0;
-      if (m.cost !== null && m.cost !== undefined) t.cost = (t.cost ?? 0) + m.cost;
+      if (m.cost !== null && m.cost !== undefined) {
+        t.cost = (t.cost ?? 0) + m.cost;
+        t.extraCost = (t.extraCost ?? 0) + (m.extraCost ?? 0);
+      }
       out.tokens += tokensOf(m);
     }
     for (const [e, n] of Object.entries(r.efforts ?? {})) out.efforts[e] = (out.efforts[e] ?? 0) + n;
@@ -109,6 +125,8 @@ export function sumUsage(records) {
     if (r.start) out.start = out.start === null ? r.start : Math.min(out.start, r.start);
     if (r.end) out.end = out.end === null ? r.end : Math.max(out.end, r.end);
   }
+  if (out.cost !== null) out.included = Math.max(0, out.cost - out.extraCost);
+  out.billing = billings.size === 1 ? [...billings][0] : '';
   out.providers = [...new Set(Object.values(out.models).map((m) => m.provider))];
   out.effort = Object.entries(out.efforts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
   return out;
@@ -142,7 +160,7 @@ export function usageLine(sum) {
     models.slice(0, 2).join(' + ') + (models.length > 2 ? ` +${models.length - 2}` : ''),
     sum.effort ? `${sum.effort} effort` : '',
     `${fmtTokens(sum.tokens)} tokens`,
-    sum.cost !== null ? `${sum.costPartial ? '≥ ' : ''}${fmtCost(sum.cost)}` : '',
+    sum.cost !== null ? `${sum.costPartial ? '≥ ' : ''}${fmtCost(sum.cost)}${sum.extraCost >= 0.005 ? ` (${fmtCost(sum.extraCost)} extra)` : ''}` : '',
     sum.duration ? fmtDuration(sum.duration) : '',
   ].filter(Boolean).join(' · ');
 }
@@ -153,6 +171,7 @@ export function usageTitle(sum) {
     const m = sum.models[id];
     return `${modelName(id)} (${m.provider}): ${fmtTokens(m.input + m.cacheRead + m.cacheWrite)} in (${fmtTokens(m.cacheRead)} cached), ${fmtTokens(m.output)} out${m.cost !== null ? `, ${fmtCost(m.cost)}` : ''}`;
   });
+  if (sum.cost !== null) lines.push(`Included in the Claude plan: ${fmtCost(sum.included)} · Extra, billed: ${fmtCost(sum.extraCost)}`);
   if (sum.costPartial) lines.push('Cost is known once claude quits; tokens are counted as it works.');
   if (sum.linesAdded || sum.linesRemoved) lines.push(`Lines: +${sum.linesAdded} −${sum.linesRemoved}`);
   if (sum.sessions > 1) lines.push(`${sum.sessions} sessions`);

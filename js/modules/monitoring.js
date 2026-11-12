@@ -287,12 +287,20 @@ function devSessions(store, w) {
   const records = usageRecords(store).filter((r) => inWindow(r.end ?? null, w));
   const tasks = store.get('todos').items;
   const sum = sumUsage(records);
-  const costs = w.items.map(() => 0);
+  const included = w.items.map(() => 0);
+  const extra = w.items.map(() => 0);
   for (const r of records) {
     const b = bucketOf(r.end, w);
-    if (b >= 0 && r.cost) costs[b] += r.cost;
+    if (b < 0 || !r.cost) continue;
+    const x = Math.min(r.cost, r.extraCost ?? 0);
+    extra[b] += x;
+    included[b] += r.cost - x;
   }
-  const series = [{ name: 'Cost (USD)', color: 'var(--accent)', values: costs.map((v) => Number(v.toFixed(4))) }];
+  const round = (v) => Number(v.toFixed(4));
+  const series = [
+    { name: 'Included in plan', color: 'var(--accent)', values: included.map(round) },
+    { name: 'Extra, billed', color: 'var(--warn)', values: extra.map(round) },
+  ];
   const models = modelsByUse(sum).map((id) => ({ id, ...sum.models[id], tokens: tokensOf(sum.models[id]) }));
   const rows = records.map((r) => {
     const one = sumUsage([r]);
@@ -302,11 +310,12 @@ function devSessions(store, w) {
   const costCell = (v, partial) => (v === null ? '—' : `${partial ? '≥ ' : ''}${usdPrecise(v)}`);
   return h('section', { class: 'card stack' },
     h('h3', null, 'Dev sessions'),
-    h('p', { class: 'muted small' }, 'What the claude sessions started from tasks used, read from Claude Code\'s transcripts while the board and its runner are open. A session\'s cost is known once claude quits.'),
+    h('p', { class: 'muted small' }, 'What the claude sessions started from tasks used, read from Claude Code\'s transcripts while the board and its runner are open. Costs are at API prices, as Claude Code counts them, and known once claude quits. Included is what the Claude plan covers; Extra is billed beyond it: replies after the plan\'s limit switched to extra usage, sessions without a plan login, and Bedrock or Vertex models.'),
     records.length
       ? [
           h('div', { class: 'summary' },
-            stat('Cost', costCell(sum.cost, sum.costPartial), sum.costPartial ? 'some sessions still running' : 'USD, as Claude Code counts it'),
+            stat('Included', costCell(sum.included, sum.costPartial), sum.billing === 'api' ? 'no Claude plan: every token is billed' : 'covered by the Claude plan'),
+            stat('Extra', costCell(sum.extraCost), sum.costPartial ? 'some sessions still running' : 'billed beyond the plan'),
             stat('Sessions', String(sum.sessions), `for ${rows.length} task worktree${rows.length === 1 ? '' : 's'}`),
             stat('Tokens', fmtTokens(sum.tokens), 'input, cache and output'),
             stat('Time', fmtDuration(sum.duration), sum.linesAdded || sum.linesRemoved ? `+${sum.linesAdded} −${sum.linesRemoved} lines` : 'worked')),
@@ -318,6 +327,7 @@ function devSessions(store, w) {
             { label: 'Cached', num: true, value: (m) => m.cacheRead, format: fmtTokens },
             { label: 'Output', num: true, value: (m) => m.output, format: fmtTokens },
             { label: 'Cost', num: true, value: (m) => m.cost, format: (v) => costCell(v) },
+            { label: 'Extra', num: true, value: (m) => m.extraCost, format: (v) => costCell(v) },
           ], models),
           sortTable('dev-tasks', [
             { label: 'Task', clip: true, value: (r) => r.label, format: (v, r) => h('span', { title: r.name }, v) },
@@ -325,6 +335,7 @@ function devSessions(store, w) {
             { label: 'Effort', value: (r) => r.one.effort || '—' },
             { label: 'Tokens', num: true, value: (r) => r.one.tokens, format: fmtTokens },
             { label: 'Cost', num: true, value: (r) => r.one.cost, format: (v, r) => costCell(v, r.one.costPartial) },
+            { label: 'Extra', num: true, value: (r) => r.one.extraCost, format: (v) => costCell(v) },
             { label: 'Time', num: true, value: (r) => r.one.duration, format: fmtDuration },
             { label: 'Last reply', num: true, value: (r) => r.end, format: (v) => new Date(v).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) },
           ], rows.sort((a, b) => b.end - a.end)),
