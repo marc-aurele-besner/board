@@ -584,7 +584,12 @@ export function scheduleLabel(s) {
     const days = monthDaysOf(s);
     const months = monthsOf(s);
     const on = `on day${days.length > 1 ? 's' : ''} ${listLabel(days.map(String))}`;
-    return months.length === 12 ? `Monthly ${on} ${at}` : `${months.map((m) => SHORT_MONTHS[m]).join(', ')} ${on} ${at}`;
+    if (months.length === 12) return `Monthly ${on} ${at}`;
+    // Most of the year reads shorter as the months it skips.
+    const skipped = SHORT_MONTHS.filter((_, i) => !months.includes(i));
+    return months.length > 6
+      ? `Monthly except ${listLabel(skipped)}, ${on} ${at}`
+      : `${months.map((m) => SHORT_MONTHS[m]).join(', ')} ${on} ${at}`;
   }
   return `Daily ${at}`;
 }
