@@ -58,6 +58,7 @@ js/gmail.js           the Inbox's Gmail reads: one sign-in per account, its emai
 js/gcal.js            Calendar's Google reads: one sign-in per account, its calendar list; events read by the runners into calendar.json
 js/runner-jobs.js     the jobs the runners do, with their labels and default intervals (shared by the worker and Settings)
 js/runners.js         the board's side of the runners: their heartbeat in runners.json, Run now, their data folder's path
+js/modules/monitoring-runners.js  Monitoring → Board runners: the static server, command runner and worker, and every job's last outcome
 js/modules/settings-runners.js  Settings → Runners: the worker's status and folder, and each job's switch, interval and Run now
 js/task-links.js      a task's GitHub issues and PRs; finds the links a Dev session prints and adds them to its tasks
 js/images.js          which pasted or dropped files are images claude reads
