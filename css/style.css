@@ -1011,7 +1011,7 @@ button.danger { color: var(--danger); }
 .kanban-card.selected { box-shadow: inset 0 0 0 2px var(--accent); }
 .kanban-title { gap: 8px; align-items: flex-start; flex-wrap: nowrap; }
 .kanban-title .todo-select { margin-top: 3px; flex: none; }
-.batch-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 10px; margin-bottom: 10px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--surface); }
+.batch-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 10px; margin-bottom: 12px; min-height: 41px; box-sizing: border-box; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--surface); }
 .batch-bar .pick-btn .icon { width: 13px; height: 13px; color: var(--muted); }
 .batch-bar .btn-small { display: inline-flex; align-items: center; gap: 4px; }
 .batch-bar .btn-small.danger { color: var(--danger); }
