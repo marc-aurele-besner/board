@@ -28,7 +28,9 @@ async function load(ctx, path) {
   state.folders.set(path, { ...folder, loading: true });
   try {
     const { path: full, entries } = await listFolder(ctx.base(), path);
-    state.folders.set(path, { full, entries: entries.filter((e) => !HIDDEN.has(e.name)) });
+    // claude's worktrees (.claude/worktrees) are whole other checkouts of the repository, not its files.
+    const worktrees = baseName(full) === '.claude';
+    state.folders.set(path, { full, entries: entries.filter((e) => !HIDDEN.has(e.name) && !(worktrees && e.dir && e.name === 'worktrees')) });
   } catch (err) {
     state.folders.set(path, { error: err.message });
   }
@@ -57,20 +59,22 @@ function reloadAll(ctx) {
   for (const file of state.tabs) openFile(ctx, file.path, { reload: true });
 }
 
-export const openFile = (ctx, path, { reload = false } = {}) => openTab(ctx, { path, name: baseName(path) }, { reload });
+// `line` scrolls to that line and marks it (a search match).
+export const openFile = (ctx, path, { reload = false, line = 0 } = {}) => openTab(ctx, { path, name: baseName(path) }, { reload, line });
 
 // A diff in a tab. `key` names the tab (opening it again reads it again); `load` answers { diff, commit? }; `file`
 // is the changed file's full path, for the button that opens it.
 export const openDiff = (ctx, { key, name, title, file = '', load }) => openTab(ctx, { path: key, name, title, file, load }, { reload: true });
 
-async function openTab(ctx, tab, { reload }) {
+async function openTab(ctx, tab, { reload, line = 0 }) {
   let file = state.tabs.find((f) => f.path === tab.path);
+  if (file && line) file.goto = line;
   if (file && !reload) {
     state.active = tab.path;
     return ctx.refresh();
   }
   if (!file) {
-    file = { ...tab, loading: true, scroll: 0 };
+    file = { ...tab, loading: true, scroll: 0, goto: line };
     state.tabs.push(file);
   }
   state.active = file.path;
@@ -128,14 +132,22 @@ function treeRows(ctx, path, depth) {
   });
 }
 
-// `picker` chooses the workspace; it sits above the tree, under `switcher`, which picks the side panel.
+// A side panel's title, Cursor style (small capitals), with its actions as icons on the right.
+export const panelHead = (title, ...actions) => h('div', { class: 'ide-panel-head' }, h('h2', { class: 'ide-panel-title' }, title), h('div', { class: 'ide-panel-actions' }, actions));
+export const panelAction = (name, label, onclick, disabled = false) => h('button', { type: 'button', class: 'ide-panel-action', title: label, 'aria-label': label, disabled, onclick }, icon(name));
+
+// `switcher` picks the side panel; `picker` chooses the workspace and sits under the panel's title.
 export function explorer(ctx, picker, switcher) {
   const root = state.folders.get(state.root);
   return h('aside', { class: 'card ide-explorer', 'aria-label': 'Files' },
     switcher,
-    h('div', { class: 'ide-explorer-head' },
-      picker,
-      h('button', { type: 'button', class: 'icon-btn', title: 'Read the folders and open files again', 'aria-label': 'Refresh files', disabled: !ctx.ready(), onclick: () => reloadAll(ctx) }, icon('refresh'))),
+    panelHead('Explorer',
+      panelAction('refresh', 'Read the folders and open files again', () => reloadAll(ctx), !ctx.ready()),
+      panelAction('collapse-all', 'Collapse folders', () => {
+        state.expanded.clear();
+        ctx.refresh();
+      }, !state.expanded.size)),
+    h('div', { class: 'ide-explorer-head' }, picker),
     root?.full ? h('div', { class: 'tree-root muted small', title: root.full }, baseName(root.full).toUpperCase()) : null,
     h('div', { class: 'tree', role: 'tree' }, ctx.ready() ? treeRows(ctx, state.root, 0) : h('p', { class: 'muted small' }, 'Files show once the runner answers.')));
 }
@@ -215,7 +227,17 @@ function fileBody(file) {
   if (file.binary) return h('p', { class: 'muted small ide-msg' }, `A binary file (${sizeText(file.size)}). The reader shows text files.`);
   if (file.tooLarge) return h('p', { class: 'muted small ide-msg' }, `${sizeText(file.size)} is over the 1 MB the reader shows.`);
   const el = codeView(file);
-  requestAnimationFrame(() => (el.scrollTop = file.scroll));
+  requestAnimationFrame(() => {
+    const row = file.goto && el.querySelector('.code')?.children[file.goto - 1];
+    file.goto = 0;
+    if (row) {
+      el.querySelector('.code-line.hit')?.classList.remove('hit');
+      row.classList.add('hit');
+      // A table row's offsetTop is not measured from the view, so the two boxes are compared.
+      file.scroll = Math.max(0, el.scrollTop + row.getBoundingClientRect().top - el.getBoundingClientRect().top - el.clientHeight / 3);
+    }
+    el.scrollTop = file.scroll;
+  });
   return el;
 }
 

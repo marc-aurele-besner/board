@@ -2471,6 +2471,35 @@ button.sum-line:hover { background: var(--surface-2); }
 .ide-side-badge { position: absolute; top: 0; right: -2px; min-width: 15px; padding: 0 3px; border-radius: 8px; background: var(--accent); color: var(--accent-text); font-size: 0.6rem; font-weight: 700; line-height: 15px; text-align: center; pointer-events: none; }
 .ide-side-tab:hover { background: var(--surface-2); color: var(--text); }
 .ide-side-tab.active { background: var(--surface-2); color: var(--text); }
+/* A side panel's title with its actions on the right, as in Cursor */
+.ide-panel-head { display: flex; align-items: center; gap: 4px; flex: none; padding: 2px 0 0 4px; }
+.ide-panel-title { flex: 1; min-width: 0; margin: 0; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ide-panel-actions { display: flex; gap: 2px; flex: none; }
+.ide-panel-action { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; background: none; border: none; min-height: 0; padding: 0; border-radius: 6px; color: var(--muted); }
+.ide-panel-action .icon { width: 15px; height: 15px; }
+.ide-panel-action:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.ide-panel-action:disabled { opacity: 0.4; cursor: default; }
+/* Dev Search */
+.search-field { display: flex; flex-direction: row; align-items: center; gap: 2px; flex: none; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); padding: 0 3px 0 0; }
+.search-field:focus-within { border-color: var(--accent); }
+.search-field input { flex: 1; min-width: 0; width: auto; border: none; background: none; box-shadow: none; outline: none; padding: 5px 8px; min-height: 0; font-size: 0.85rem; color: var(--text); }
+.search-toggles { display: flex; gap: 1px; flex: none; }
+.search-toggle { background: none; border: 1px solid transparent; min-height: 0; padding: 1px 4px; border-radius: 4px; color: var(--muted); font: 600 0.72rem ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.4; }
+.search-toggle:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.search-toggle.on { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.search-word { text-decoration: underline; text-underline-offset: 2px; }
+.search-more { display: flex; justify-content: flex-end; flex: none; margin-top: -4px; }
+.search-details { flex: none; gap: 4px; }
+.search-label { padding-left: 2px; }
+.search-results { display: flex; flex-direction: column; gap: 4px; min-height: 0; flex: 1; }
+.search-note { margin: 0; padding: 2px 4px; overflow-wrap: anywhere; }
+.search-tree { flex: 1; }
+.search-dir { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.75rem; }
+.search-tree .scm-count { margin-left: auto; }
+.search-line { padding-left: 28px; }
+.search-text { overflow: hidden; text-overflow: ellipsis; white-space: pre; font-size: 0.8rem; }
+.search-hit { background: color-mix(in srgb, var(--warn) 32%, transparent); color: inherit; border-radius: 2px; }
+.code-line.hit, .code-line.hit .ln { background: color-mix(in srgb, var(--warn) 18%, var(--surface-2)); }
 .scm-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); font-size: 0.7rem; font-weight: 600; line-height: 18px; text-align: center; }
 .tree-item.git-mod, .scm-letter.git-mod { color: var(--warn); }
 .tree-item.git-new, .scm-letter.git-new { color: var(--income); }
