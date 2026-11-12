@@ -33,24 +33,86 @@ export const listFolder = async (base, path) => (await call(base, `/files?path=$
 // One file: { path, size, text }, or { binary } / { tooLarge } instead of text.
 export const readFile = async (base, path) => (await call(base, `/file?path=${encodeURIComponent(path)}`)).json();
 
-// Attaches to a terminal session and calls onEvent for each line the runner streams: `session` (known: whether
-// the runner had it), the events so far (start, out, err, size, cwd, exit), `live`, then new events as they come.
-// The stream ends when `signal` is aborted, the session is closed, or the runner stops.
-export async function attachSession(base, { session, signal, onEvent }) {
-  const res = await call(base, `/attach?session=${encodeURIComponent(session)}`, { signal });
+// Every terminal of the page is read through one stream from the runner: a browser opens only six connections to
+// a host, and a stream per terminal used them up, so a third or fourth terminal's command never reached the runner.
+// The page attaches and detaches sessions on its stream; each event names its session as `s`.
+const hubs = new Map();
+
+function hubOf(base) {
+  let hub = hubs.get(base);
+  if (hub) return hub;
+  const ctl = new AbortController();
+  hub = { client: crypto.randomUUID(), ctl, subs: new Map(), queue: Promise.resolve() };
+  hubs.set(base, hub);
+  hub.ready = call(base, `/stream?client=${hub.client}`, { signal: ctl.signal });
+  const current = hub;
+  hub.ready.then((res) => readStream(current, res)).catch(() => {}).finally(() => endStream(base, current));
+  return hub;
+}
+
+async function readStream(hub, res) {
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = '';
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
     buffer += value;
-    let end;
-    while ((end = buffer.indexOf('\n')) >= 0) {
-      const line = buffer.slice(0, end);
-      buffer = buffer.slice(end + 1);
-      if (line) onEvent(JSON.parse(line));
+    let nl;
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, nl);
+      buffer = buffer.slice(nl + 1);
+      if (!line) continue;
+      const { s: id, ...event } = JSON.parse(line);
+      const sub = hub.subs.get(id);
+      if (!sub) continue;
+      // Events from before this attach (a detach the runner had not read yet) are skipped until its replay starts.
+      if (event.t === 'session') sub.started = true;
+      if (event.t === 'closed') sub.done();
+      else if (sub.started) sub.onEvent(event);
     }
   }
+}
+
+// The stream ended (the runner stopped, or no terminal is attached any more): every attach ends with it.
+function endStream(base, hub) {
+  if (hubs.get(base) === hub) hubs.delete(base);
+  hub.ctl.abort();
+  for (const sub of [...hub.subs.values()]) sub.done();
+}
+
+// Attach and detach calls of one stream are sent one after another, so a quick detach then attach keep their order.
+function control(base, hub, path, session) {
+  hub.queue = hub.queue
+    .then(() => hub.ready)
+    .then(() => call(base, path, post({ client: hub.client, session })))
+    .catch(() => {});
+  return hub.queue;
+}
+
+// Attaches to a terminal session and calls onEvent for each of its events: `session` (known: whether the runner had
+// it), the events so far (start, out, err, size, cwd, exit), `live`, then new events as they come. Resolves when
+// `signal` is aborted, the session is closed, or the runner stops.
+export function attachSession(base, { session, signal, onEvent }) {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const hub = hubOf(base);
+    const sub = { onEvent, started: false };
+    const onAbort = () => {
+      if (hub.subs.get(session) !== sub) return resolve();
+      sub.done();
+      if (hub.subs.size) control(base, hub, '/detach', session);
+      else endStream(base, hub);
+    };
+    sub.done = () => {
+      if (hub.subs.get(session) === sub) hub.subs.delete(session);
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    };
+    signal?.addEventListener('abort', onAbort);
+    hub.subs.get(session)?.done();
+    hub.subs.set(session, sub);
+    control(base, hub, '/attach', session);
+  });
 }
 
 // Runs one command in a session's terminal of `cols` × `rows`, telling it the theme ('light' or 'dark'). Its output
