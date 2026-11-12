@@ -41,12 +41,10 @@ function taskLinks(store) {
 
 // The links worth reading: every link of an open task, and those of done tasks that were still open at the last read
 // (a task is often marked done before its PR is merged).
-/** @param {DataStore} store @returns {LinkRef[]} */
-export function trackedLinks(store) {
+/** @param {DataStore} store */
+function tracked(store) {
   const saved = savedLinks(store);
-  return [...taskLinks(store)]
-    .filter(([key, l]) => !l.done || !saved[key]?.state || saved[key].state === OPEN)
-    .map(([, l]) => ({ repo: l.repo, number: l.number }));
+  return [...taskLinks(store)].filter(([key, l]) => !l.done || !saved[key]?.state || saved[key].state === OPEN);
 }
 
 /** @param {LinkState | undefined} entry @param {number} at */
@@ -56,14 +54,16 @@ function due(entry, at) {
   return at - entry.at >= wait;
 }
 
-// The links due a read, the longest unread first.
+// The links due a read, the longest unread first and, among those never read, open tasks' before done ones' (the first
+// reads would otherwise go to old done tasks while the tasks in review stay uncoloured).
 /** @param {DataStore} store @param {number} [at] */
 export function dueLinks(store, at = Date.now()) {
   const saved = savedLinks(store);
-  return trackedLinks(store)
-    .filter((l) => due(saved[previewKey(l.repo, l.number)], at))
-    .sort((a, b) => (saved[previewKey(a.repo, a.number)]?.at ?? 0) - (saved[previewKey(b.repo, b.number)]?.at ?? 0))
-    .slice(0, PER_RUN);
+  return tracked(store)
+    .filter(([key]) => due(saved[key], at))
+    .sort(([ka, a], [kb, b]) => (saved[ka]?.at ?? 0) - (saved[kb]?.at ?? 0) || Number(a.done) - Number(b.done))
+    .slice(0, PER_RUN)
+    .map(([, l]) => ({ repo: l.repo, number: l.number }));
 }
 
 // GitHub's answer as one word: 'open', 'merged' or 'closed' for a PR; 'open', 'completed' or 'not_planned' for an issue.
@@ -101,29 +101,28 @@ export async function readLinkStates(target, links, at = Date.now()) {
 
 /** @type {Set<string>} */
 const asked = new Set();
+/** @type {LinkRef[]} */
+let waiting = [];
 
-// A link's last known state ('' before its first read). A link never read is asked of the runners once.
+// A link's last known state ('' before its first read). A link shown but never read is asked of the runners once.
 /** @param {Store} store @param {LinkRef} link */
 export function linkState(store, link) {
   const key = previewKey(link.repo, link.number);
   const entry = savedLinks(store)[key];
   if (!entry && !asked.has(key)) {
     asked.add(key);
-    queueMicrotask(() => askMissing(store));
+    waiting.push({ repo: link.repo, number: link.number });
+    if (waiting.length === 1) queueMicrotask(() => askMissing(store));
   }
   return entry?.state ?? '';
 }
 
-// Every link asked in one render goes to the runners in one request.
-let pending = false;
+// The links shown unread in one render go to the runners in one request (the job reads up to 30 a request).
 /** @param {Store} store */
 function askMissing(store) {
-  if (pending) return;
-  pending = true;
-  queueMicrotask(() => {
-    pending = false;
-    const saved = savedLinks(store);
-    const links = trackedLinks(store).filter((l) => !saved[previewKey(l.repo, l.number)]);
-    if (links.length) runJob('link-states', { links }).then(() => store.sync()).catch(() => {});
-  });
+  const links = waiting;
+  waiting = [];
+  for (let i = 0; i < links.length; i += PER_RUN) {
+    runJob('link-states', { links: links.slice(i, i + PER_RUN) }).then(() => store.sync()).catch(() => {});
+  }
 }
