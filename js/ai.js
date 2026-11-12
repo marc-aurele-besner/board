@@ -1,26 +1,43 @@
+// @ts-check
 // One place that talks to OpenRouter. Each feature names its task; the model comes from Settings.
 import { modelForTask } from './models.js';
 import { globalPrompt } from './prompts.js';
 import { uid, now } from './ui.js';
 
+/** @import { DataStore, AiMessage, AiCallMeta, OpenRouterUsage } from '../types/data' */
+/**
+ * The fields of OpenRouter's reply read here.
+ * @typedef {{ id?: string, provider?: string, model?: string, usage?: OpenRouterUsage,
+ *   choices?: { finish_reason?: string, native_finish_reason?: string, message?: { content?: string } }[] }} OpenRouterReply
+ */
+
 // Full input and output are kept for this many recent calls; older entries keep only their numbers, so usage.json stays small.
 export const LOG_LIMIT = 300;
 
 // Images and PDFs travel as data URLs. The log keeps their type and size, not the bytes.
+/**
+ * @template T
+ * @param {T} value
+ * @returns {T}
+ */
 function stripData(value) {
   if (typeof value === 'string') {
     if (value.startsWith('data:') && value.length > 200) {
-      return `[${value.slice(5, value.indexOf(';')) || 'data'}, ${Math.round((value.length * 3) / 4 / 1024)} KB, not kept]`;
+      return /** @type {T} */ (`[${value.slice(5, value.indexOf(';')) || 'data'}, ${Math.round((value.length * 3) / 4 / 1024)} KB, not kept]`);
     }
     return value;
   }
-  if (Array.isArray(value)) return value.map(stripData);
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, stripData(v)]));
+  if (Array.isArray(value)) return /** @type {T} */ (value.map(stripData));
+  if (value && typeof value === 'object') return /** @type {T} */ (Object.fromEntries(Object.entries(value).map(([k, v]) => [k, stripData(v)])));
   return value;
 }
 
 // Every call is logged for the Monitoring tab: task, model, tokens, cost if OpenRouter reports it,
 // and the full exchange (messages sent, reply, response details), failed calls included.
+/**
+ * @param {DataStore} store
+ * @param {{ id: string, task: string, model: string, usage?: OpenRouterUsage, input: AiMessage[], output?: string, meta: AiCallMeta, error?: string }} call
+ */
 function recordCall(store, { id, task, model, usage, input, output, meta, error }) {
   store.update('usage', (d) => {
     d.entries.push({
@@ -31,7 +48,7 @@ function recordCall(store, { id, task, model, usage, input, output, meta, error 
       promptTokens: Number(usage?.prompt_tokens) || 0,
       completionTokens: Number(usage?.completion_tokens) || 0,
       // A failed call without a reported cost cost nothing; a reply with no text may still have been billed.
-      cost: Number.isFinite(Number(usage?.cost)) && usage?.cost !== null ? Number(usage.cost) : error ? 0 : null,
+      cost: Number.isFinite(Number(usage?.cost)) && usage?.cost !== null ? Number(/** @type {OpenRouterUsage} */ (usage).cost) : error ? 0 : null,
       input: stripData(input),
       output: output ?? '',
       meta,
@@ -53,6 +70,7 @@ function recordCall(store, { id, task, model, usage, input, output, meta, error 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
 // Adds the Settings → Prompts text meant for every call ahead of the feature's own instructions.
+/** @param {DataStore} store @param {AiMessage[]} messages @returns {AiMessage[]} */
 function withGlobal(store, messages) {
   const text = globalPrompt(store);
   if (!text) return messages;
@@ -62,6 +80,13 @@ function withGlobal(store, messages) {
 // messages: [{ role, content }]. content can be text or an array with text and image_url parts.
 // `model` overrides the task's model for one call (a Cron step can pick its own). `usageId` names the usage.json
 // entry, so a feature can point back to the call that made its result.
+/**
+ * @param {DataStore} store
+ * @param {string} taskId
+ * @param {AiMessage[]} messages
+ * @param {{ model?: string, usageId?: string }} [options]
+ * @returns {Promise<string>}
+ */
 export async function ask(store, taskId, messages, { model: override = '', usageId = '' } = {}) {
   const key = store.get('settings').openrouter?.key ?? '';
   if (!key) throw new Error('Add an OpenRouter key in Settings first.');
@@ -70,13 +95,16 @@ export async function ask(store, taskId, messages, { model: override = '', usage
 
   const input = withGlobal(store, messages);
   const started = performance.now();
+  /** @type {AiCallMeta} */
   const meta = { overridden: Boolean(override) };
+  /** @type {(error: string, usage?: OpenRouterUsage) => never} */
   const fail = (error, usage) => {
     meta.ms = Math.round(performance.now() - started);
     recordCall(store, { id: usageId, task: taskId, model, usage, input, output: '', meta, error });
     throw new Error(error);
   };
 
+  /** @type {Response} */
   let res;
   try {
     res = await fetch(ENDPOINT, {
@@ -86,11 +114,11 @@ export async function ask(store, taskId, messages, { model: override = '', usage
       body: JSON.stringify({ model, messages: input, usage: { include: true } }),
     });
   } catch (err) {
-    fail(`Could not reach OpenRouter. ${err.message}`);
+    fail(`Could not reach OpenRouter. ${/** @type {Error} */ (err).message}`);
   }
   meta.status = res.status;
   if (!res.ok) fail(`OpenRouter error ${res.status}. ${(await res.text()).slice(0, 160)}`);
-  const data = await res.json();
+  const data = /** @type {OpenRouterReply} */ (await res.json());
   const choice = data.choices?.[0];
   Object.assign(meta, {
     ms: Math.round(performance.now() - started),
@@ -107,6 +135,7 @@ export async function ask(store, taskId, messages, { model: override = '', usage
 }
 
 // Pulls the first JSON object or array out of a reply, even when it is wrapped in prose or a code fence.
+/** @param {string} text */
 export function parseJson(text) {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   const body = fenced ? fenced[1] : text;
