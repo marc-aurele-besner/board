@@ -6,7 +6,7 @@
 // The browser knows its data folder only as a handle, never as a path, so the path is set once:
 // BOARD_DATA=<folder> wins; otherwise ~/.config/board/worker.json { "dataFolder": "~/…" }, which Settings → Runners writes.
 // WORKER_PORT changes the port of its localhost API (8420 by default).
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { logger } from './log.js';
@@ -57,6 +57,44 @@ function open() {
   scheduler.use(createNodeStore(dir, { log }));
 }
 
+function noOverride() {
+  if (!process.env.BOARD_DATA) return;
+  const err = new Error('BOARD_DATA is set where the board was started, so it decides the folder.');
+  err.status = 409;
+  throw err;
+}
+
+function setFolder(path) {
+  mkdirSync(join(homedir(), '.config', 'board'), { recursive: true });
+  writeFileSync(CONFIG, `${JSON.stringify({ ...readConfig(), dataFolder: path }, null, 2)}\n`);
+  open();
+  return { ok: true, folder };
+}
+
+const subfolders = (dir) => {
+  try {
+    return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => join(dir, e.name));
+  } catch {
+    return [];
+  }
+};
+
+// Folders named `name` whose settings.json holds `folderId`: in the home folder, Desktop, Documents, Downloads and
+// iCloud Drive, and one level below those.
+function findFolder(name, folderId) {
+  if (!name || !folderId || name.includes('/') || name.startsWith('.')) return [];
+  const home = homedir();
+  const roots = [home, ...['Desktop', 'Documents', 'Downloads', 'Library/Mobile Documents/com~apple~CloudDocs'].map((d) => join(home, d))];
+  const places = [...new Set([...roots, ...roots.slice(1).flatMap(subfolders)])];
+  return places.map((dir) => join(dir, name)).filter((dir) => {
+    try {
+      return JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8')).folderId === folderId;
+    } catch {
+      return false;
+    }
+  });
+}
+
 // Routes a job adds, such as reading one Resend email's body: (body, rest, store).
 const jobRoutes = Object.fromEntries(jobs.flatMap((job) => Object.entries(job.routes ?? {})).map(([key, fn]) => [key, (body, rest) => {
   const store = scheduler.store();
@@ -72,21 +110,21 @@ serve({
     'GET /status': () => ({ ...scheduler.status(), folder: { path: folder.path, from: folder.from, error: folder.error } }),
     'POST /run/*': (body, id) => scheduler.run(id, { params: body ?? {} }),
     'POST /config': (body) => {
-      if (process.env.BOARD_DATA) {
-        const err = new Error('BOARD_DATA is set where the board was started, so it decides the folder.');
-        err.status = 409;
-        throw err;
-      }
+      noOverride();
       const path = tilde(String(body.dataFolder ?? '').trim());
       if (path && !existsSync(expand(path))) {
         const err = new Error(`There is no folder at ${path}.`);
         err.status = 400;
         throw err;
       }
-      mkdirSync(join(homedir(), '.config', 'board'), { recursive: true });
-      writeFileSync(CONFIG, `${JSON.stringify({ ...readConfig(), dataFolder: path }, null, 2)}\n`);
-      open();
-      return { ok: true, folder };
+      return setFolder(path);
+    },
+    // The tab knows its folder only by name and by the folderId in its settings.json: look for it where people keep
+    // folders, and use it when exactly one matches.
+    'POST /config/find': (body) => {
+      noOverride();
+      const found = findFolder(String(body.name ?? ''), String(body.folderId ?? ''));
+      return found.length === 1 ? setFolder(tilde(found[0])) : { ok: false, found: found.map(tilde), folder };
     },
   },
 });
