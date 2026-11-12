@@ -1063,6 +1063,7 @@ button.danger { color: var(--danger); }
 .todo-list > li { display: block; padding: 0; border-bottom: 1px solid var(--border); }
 .todo-row { padding: 7px 4px; border-radius: 6px; }
 .todo-row:hover { background: var(--surface-2); }
+.todo-row.expandable { cursor: pointer; }
 .todo-title-cell { min-width: 0; }
 .todo-meta { display: contents; }
 .todo-actions { display: flex; align-items: center; gap: 2px; justify-content: flex-end; }

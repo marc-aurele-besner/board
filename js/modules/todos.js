@@ -967,7 +967,12 @@ function todoRow(store, item, ctx) {
       view.dragId = null;
     },
   },
-    h('div', { class: 'todo-row' },
+    h('div', {
+      class: hasDescription || imagesOf(item).length ? 'todo-row expandable' : 'todo-row',
+      onclick: (/** @type {MouseEvent} */ e) => {
+        if (hasDescription || imagesOf(item).length) toggleFromRow(store, item.id, e);
+      },
+    },
       h('span', {
         class: 'grip',
         title: reorderEnabled() ? 'Drag to reorder' : 'Clear the sort to reorder',
@@ -1070,6 +1075,17 @@ function todoRow(store, item, ctx) {
           imageStrip(store, item),
           usageNote(store, item))
       : null);
+}
+
+// A click on a row's empty space, or its plain text, opens or closes its description and images.
+// Clicks on a control, a chip, a menu or the title's editor keep their own meaning, and so does selecting text.
+const ROW_CONTROLS = 'a, button, input, select, textarea, label, summary, [role="button"], [role="menu"], [role="listbox"], [role="option"], [contenteditable], .grip, .popover';
+/** @param {Store} store @param {string} id @param {MouseEvent} e */
+function toggleFromRow(store, id, e) {
+  const target = /** @type {Element} */ (e.target);
+  if (!target.isConnected || target.closest(ROW_CONTROLS)) return;
+  if (String(window.getSelection() ?? '')) return;
+  toggleExpanded(store, id);
 }
 
 // What the task's claude sessions used, read from their transcripts (dev-usage.js); shown with its details.
