@@ -40,10 +40,20 @@ export interface PrPreviews {
   first: number;
 }
 
+// Whether an issue or PR linked to a task is open (js/link-states.js).
+export interface LinkState {
+  // 'open', 'merged' or 'closed' for a PR; 'open', 'completed' or 'not_planned' for an issue; '' before a good read.
+  state: string;
+  error: string | null;
+  at: number;
+}
+
 export interface GithubData {
   // By "owner/repo".
   repos: Record<string, RepoStats>;
   // By "owner/repo#number", the repo in lower case.
   previews?: Record<string, PrPreviews>;
+  // By "owner/repo#number", the repo in lower case.
+  links?: Record<string, LinkState>;
   schemaVersion?: number;
 }

@@ -291,6 +291,16 @@ export async function getIssue(repo, number) {
   return { repo, number: issue.number, url: issue.html_url, title: issue.title };
 }
 
+// Whether an issue or a PR is open, merged or closed: the fields of GitHub's answer that tell.
+/** @typedef {{ state?: string, state_reason?: string | null, pull_request?: { merged_at?: string | null } }} IssueState */
+/** @param {string} repo @param {number | string} number @returns {Promise<IssueState>} */
+export async function issueState(repo, number) {
+  const res = await fetch(`${API}/repos/${repo}/issues/${number}`, { headers: headers(repo) });
+  if (!res.ok) throw new Error(explain(res.status));
+  const { state, state_reason, pull_request } = await res.json();
+  return { state, state_reason, pull_request };
+}
+
 // The comments of an issue or a PR's conversation: the first 100, and the last 100 when there are more pages.
 /** A comment as GitHub returns it; only the fields read. @typedef {{ body?: string | null, updated_at?: string, user?: { login?: string } | null }} IssueComment */
 /** @param {string} repo @param {number | string} number @returns {Promise<IssueComment[]>} */
