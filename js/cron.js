@@ -13,6 +13,7 @@ import { sessionStatus, sessionOutcome, exitClaude } from './terminal.js';
 import { forgetWorktree } from './task-worktrees.js';
 import { findGithubLinks, plainOutput, addTaskLinks, prsOf } from './task-links.js';
 import { buildProfile, profileOf, hasProfileSources } from './profile.js';
+import { findJson } from './json-extract.js';
 /** @import { DataStore, Store, CronStep, CronSource, CronFlow, CronSchedule, CronTemplate, CronRun, CronRunStep, CronRunCurrent, CronTest, CronPr, CronFormatField, Project, Task, DevPreset, SiteLogEntry, TaskLink, IconName } from '../types/data' */
 // The variables a step's templates read; $data holds what a name reads into with a path.
 /** @typedef {{ [name: string]: unknown, $data?: Record<string, unknown> }} Vars */
@@ -55,6 +56,7 @@ export const STEP_TYPES = [
   ['ai', 'AI generate', 'cpu', 'Sends a prompt to a model through OpenRouter.'],
   ['stop', 'Stop if', 'filter', 'Ends the run early, for example when there is nothing to report. In a loop, skips the item.'],
   ['format', 'Format', 'align-left', 'Reshapes the input into cleaner text, a list with one line per item, or named JSON fields.'],
+  ['parse', 'Parse JSON', 'code', 'Finds the JSON in a text, such as a model’s or claude’s answer, even with prose around it or cut off, and passes it on as data.'],
   ['loop', 'Loop over items', 'repeat', 'Runs the next steps once for each item of a list, then passes on what they gave for all of them.'],
   ['task', 'Create task', 'check-square', 'Adds a task with the output as its description.'],
   ['notify', 'Notify', 'bell', 'Posts the output under the bell (and Telegram if enabled).'],
@@ -303,6 +305,7 @@ export function makeStep(type) {
   if (type === 'stop') return { ...base, when: 'nothing', text: '' };
   if (type === 'profile') return { ...base, projectId: '', onEdited: 'merge' };
   if (type === 'format') return { ...base, mode: 'text', text: '{{input}}', items: '{{input}}', itemText: '- {{item}}', separator: 'line', fields: [makeField()] };
+  if (type === 'parse') return { ...base, text: '{{input}}', mode: 'largest' };
   if (type === 'loop') return { ...base, items: '{{input}}', span: 1, max: LOOP_MAX };
   if (type === 'dev') return { ...base, mode: 'claude', preset: '', devCommand: '', projectId: '', prompt: '{{input}}', command: '', waitMinutes: DEV_WAIT_MINUTES };
   return { ...base, text: '{{flow}}: {{input}}' };
@@ -1475,6 +1478,42 @@ function formatStep(step, vars, ctx) {
   return fill(step.text ?? '{{input}}', vars).trim();
 }
 
+// --- Parse JSON ---
+// A Parse JSON step reads JSON out of a text that is not only JSON: a model's answer with prose or a code fence
+// around it, a Dev terminal's output, or a copy cut off at either end (see js/json-extract.js).
+
+export const PARSE_MODES = [
+  ['largest', 'The largest one'],
+  ['last', 'The last one'],
+  ['first', 'The first one'],
+  ['all', 'All of them, as a list'],
+];
+
+/**
+ * @param {CronStep} step
+ * @param {Vars} vars
+ * @param {RunCtx} ctx
+ */
+function parseStep(step, vars, ctx) {
+  const t = String(step.text ?? '').trim() || '{{input}}';
+  const source = valueOf(t, vars);
+  if (source === undefined) throw new Error(`${t} has no value here.`);
+  // An earlier step's output that was JSON already is passed on as it is.
+  /** @type {import('./json-extract.js').Found[]} */
+  const found = source != null && typeof source === 'object' ? [{ value: source, size: 0 }] : findJson(asText(source));
+  if (!found.length) throw new Error('No JSON found in the text.');
+  const mode = step.mode || 'largest';
+  const one = mode === 'first' ? found[0] : mode === 'last' ? found[found.length - 1] : found.reduce((a, b) => (b.size > a.size ? b : a));
+  const value = mode === 'all' ? found.map((f) => f.value) : one.value;
+  const what = Array.isArray(value) ? `a list of ${value.length} item${value.length === 1 ? '' : 's'}` : 'an object';
+  const notes = [`Found ${what}.`];
+  if (found.length > 1 && mode !== 'all') notes.push(`Kept the ${mode} of ${found.length} JSON values.`);
+  if ((mode === 'all' ? found : [one]).some((f) => f.cut)) notes.push('The text was cut off; only its whole parts were kept.');
+  ctx.data = value;
+  ctx.note = notes.join(' ');
+  return JSON.stringify(value, null, 2);
+}
+
 /** @param {CronStep} step */
 export const loopMax = (step) => Math.min(LOOP_LIMIT, Math.max(1, Math.round(Number(step.max) || LOOP_MAX)));
 
@@ -2043,6 +2082,7 @@ async function runStep(store, flow, step, input, ctx) {
     return input;
   }
   if (step.type === 'format') return formatStep(step, vars, ctx);
+  if (step.type === 'parse') return parseStep(step, vars, ctx);
   if (step.type === 'loop') {
     const all = itemsOf(step.items, vars);
     const items = all.slice(0, loopMax(step));

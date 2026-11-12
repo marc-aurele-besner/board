@@ -23,7 +23,8 @@
         { "id": "step-7", "type": "gather", "source": "history", "url": "", "count": 5, "follow": 3, "flowId": "", "text": "" },
         { "id": "step-9", "type": "loop", "items": "{{step2.items}}", "span": 2, "max": 20 },
         { "id": "step-10", "type": "format", "mode": "fields", "text": "{{input}}", "items": "{{input}}", "itemText": "- {{item}}", "separator": "line", "fields": [{ "id": "field-1", "name": "title", "value": "{{item.title}}" }] },
-        { "id": "step-11", "type": "format", "mode": "list", "items": "{{input}}", "itemText": "- {{item.title}}", "separator": "line" }
+        { "id": "step-11", "type": "format", "mode": "list", "items": "{{input}}", "itemText": "- {{item.title}}", "separator": "line" },
+        { "id": "step-12", "type": "parse", "text": "{{step6.answer}}", "mode": "largest" }
       ],
       "lastRun": "2026-01-14T08:00:00.000Z",
       "created": "2026-01-01T09:00:00.000Z",

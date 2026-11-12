@@ -46,8 +46,8 @@ export interface CronFormatField {
   value: string;
 }
 
-// A step (makeStep()). type: 'gather', 'ai', 'stop', 'format', 'loop', 'task', 'notify', 'profile' or 'dev'; each
-// type uses some fields.
+// A step (makeStep()). type: 'gather', 'ai', 'stop', 'format', 'parse', 'loop', 'task', 'notify', 'profile' or
+// 'dev'; each type uses some fields.
 export interface CronStep {
   id: string;
   type: string;
@@ -73,13 +73,14 @@ export interface CronStep {
   // task, profile, dev, old gather; '' follows the flow's project.
   projectId?: string;
   // stop ('nothing', 'empty', 'contains', 'lacks'); `text` is what contains/lacks look for. notify and old gather use
-  // `text` too.
+  // `text` too, and parse reads the JSON out of it.
   when?: string;
   text?: string;
   // profile: 'merge', 'replace' or 'keep'. Older steps have keepEdited instead.
   onEdited?: string;
   keepEdited?: boolean;
-  // dev: 'claude', 'preset', 'custom' or 'command'. format: 'text' (uses `text`), 'list' or 'fields'.
+  // dev: 'claude', 'preset', 'custom' or 'command'. format: 'text' (uses `text`), 'list' or 'fields'. parse: which
+  // JSON value of several it keeps, 'largest', 'last', 'first' or 'all'.
   mode?: string;
   // format 'list' and loop: the list to read, as a variable ('{{input}}', '{{step2.items}}').
   items?: string;
