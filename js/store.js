@@ -1,23 +1,42 @@
+// @ts-check
 // In-memory state for every collection, with debounced, serialized saves to disk.
 // Another tab or browser may have the same folder open, so each save first merges what that one saved, and sync()
 // brings its changes in between saves.
+/** @import { Collections, CollectionName } from '../types/data' */
 import { readSnapshot, writeJSON } from './storage.js';
 import { merge } from './merge.js';
 
 const SAVE_DELAY_MS = 300;
 const RETRY_DELAY_MS = 3000;
 
+/** @typedef {'saved' | 'saving' | 'error'} SaveStatus */
+
+/**
+ * @param {FileSystemDirectoryHandle} dir
+ * @param {Partial<Record<CollectionName, object>>} collections each collection's defaults
+ */
 export function createStore(dir, collections) {
-  const data = {};
+  // Filled by load() for every collection in `collections`.
+  const data = /** @type {Collections} */ ({});
+  // The same object, indexed by a name only known at run time.
+  const byName = /** @type {Record<string, object>} */ (/** @type {unknown} */ (data));
+  /** @type {Set<CollectionName>} */
   const dirty = new Set();
+  /** @type {Set<(info: { user: boolean }) => void>} */
   const dataListeners = new Set();
+  /** @type {Set<(status: SaveStatus) => void>} */
   const statusListeners = new Set();
+  /** @type {SaveStatus} */
   let status = 'saved';
-  let timer = null;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  /** @type {Promise<void>} */
   let chain = Promise.resolve();
   // What this tab last read from or wrote to each file: { text, stamp }. It is the base of the merge.
+  /** @type {Record<string, { text: string, stamp: string | null } | null>} */
   const synced = {};
 
+  /** @param {SaveStatus} next */
   const setStatus = (next) => {
     status = next;
     statusListeners.forEach((fn) => fn(next));
@@ -41,7 +60,7 @@ export function createStore(dir, collections) {
 
   async function writeDirty() {
     clearTimeout(timer);
-    timer = null;
+    timer = undefined;
     if (!dirty.size) return;
     const names = [...dirty];
     dirty.clear();
@@ -68,6 +87,7 @@ export function createStore(dir, collections) {
     return chain;
   }
 
+  /** @param {CollectionName} name */
   function schedule(name) {
     dirty.add(name);
     clearTimeout(timer);
@@ -80,13 +100,14 @@ export function createStore(dir, collections) {
       const text = snap ? await snap.file.text() : '';
       const loaded = text.trim() ? JSON.parse(text) : structuredClone(defaults);
       for (const [key, value] of Object.entries(defaults)) loaded[key] ??= structuredClone(value);
-      data[name] = loaded;
+      byName[name] = loaded;
       synced[name] = snap ? { text, stamp: snap.stamp } : null;
     }
   }
 
   // Merges into memory what another tab saved to this collection's file since this tab last read or wrote it.
   // Returns whether memory changed.
+  /** @param {string} name */
   async function pull(name) {
     const snap = await readSnapshot(dir, name);
     if (!snap) return false;
@@ -99,10 +120,10 @@ export function createStore(dir, collections) {
     }
     if (!text.trim()) return false;
     const theirs = JSON.parse(text);
-    const before = JSON.stringify(data[name]);
-    merge(known?.text ? JSON.parse(known.text) : {}, data[name], theirs);
+    const before = JSON.stringify(byName[name]);
+    merge(known?.text ? JSON.parse(known.text) : {}, byName[name], theirs);
     synced[name] = { text, stamp: snap.stamp };
-    return JSON.stringify(data[name]) !== before;
+    return JSON.stringify(byName[name]) !== before;
   }
 
   // Reads every collection's file and merges what changed on disk. Queued behind saves, so the two never overlap.
@@ -122,6 +143,7 @@ export function createStore(dir, collections) {
   }
 
   // Files kept beside the JSON files, such as the originals of bills. Paths are relative to the data folder ("bills/x.pdf").
+  /** @param {string} path @param {boolean} create */
   async function fileHandle(path, create) {
     const parts = path.split('/');
     let folder = dir;
@@ -129,6 +151,7 @@ export function createStore(dir, collections) {
     return folder.getFileHandle(parts[parts.length - 1], { create });
   }
   const files = {
+    /** @param {string} path @param {Blob} blob */
     async write(path, blob) {
       const handle = await fileHandle(path, true);
       const writable = await handle.createWritable();
@@ -136,10 +159,12 @@ export function createStore(dir, collections) {
       await writable.close();
       return path;
     },
+    /** @param {string} path */
     async read(path) {
       const handle = await fileHandle(path, false);
       return handle.getFile();
     },
+    /** @param {string} path */
     async remove(path) {
       const parts = path.split('/');
       let folder = dir;
@@ -151,24 +176,29 @@ export function createStore(dir, collections) {
   return {
     files,
     load,
+    /** @template {CollectionName} K @param {K} name @returns {Collections[K]} */
     get: (name) => data[name],
     // Mutate a collection in place, then save and re-render.
+    /** @template {CollectionName} K @param {K} name @param {(data: Collections[K]) => void} mutate */
     update(name, mutate) {
       mutate(data[name]);
       schedule(name);
       notify();
     },
     // Save without re-rendering, for caches and renewed tokens that change nothing on screen.
+    /** @template {CollectionName} K @param {K} name @param {(data: Collections[K]) => void} mutate */
     save(name, mutate) {
       mutate(data[name]);
       schedule(name);
     },
     // Re-render without saving (for view-state changes such as filters and tabs).
     refresh: notify,
+    /** @param {(info: { user: boolean }) => void} fn */
     subscribe(fn) {
       dataListeners.add(fn);
       return () => dataListeners.delete(fn);
     },
+    /** @param {(status: SaveStatus) => void} fn */
     onStatus(fn) {
       statusListeners.add(fn);
       return () => statusListeners.delete(fn);
