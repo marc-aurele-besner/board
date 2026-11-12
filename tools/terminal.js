@@ -117,6 +117,7 @@ function push(s, event) {
   else s.events.push({ ...event });
   s.size += sizeOf(event);
   if (event.t === 'start') s.open = s.events.at(-1);
+  if (event.t === 'out' || event.t === 'err' || event.t === 'start') s.lastOut = Date.now();
   if (event.t === 'exit') s.open = null;
   if (s.size <= LOG_MAX) return;
   // Too long: the oldest output goes, down to three quarters, but the running command's start stays.
@@ -165,6 +166,21 @@ async function sessionOf(id) {
   // A command that was running when the runner stopped never said how it ended.
   if (s.open) record(s, { t: 'exit', code: null, signal: null, lost: true });
   return s;
+}
+
+// What a session is doing, for a task's Dev button: running (and how long it has been quiet, as a program waiting
+// for its user prints nothing), ended (with its exit code), or idle. A session that is gone is left out.
+const QUIET_MS = 8000;
+async function statusOf(id) {
+  if (!sessions.has(id) && !(await stat(logFile(id)).catch(() => null))) return null;
+  const s = await sessionOf(id);
+  if (s.closed) return null;
+  if (s.run) return { state: Date.now() - (s.lastOut ?? 0) < QUIET_MS ? 'working' : 'waiting', cwd: s.open?.cwd ?? '' };
+  const exit = s.events.findLast((e) => e.t === 'exit');
+  const where = s.events.findLast((e) => e.t === 'cwd' || e.t === 'start');
+  const cwd = (where?.t === 'cwd' ? where.d : where?.cwd) ?? '';
+  if (!exit) return { state: 'idle', cwd };
+  return { state: exit.stopped ? 'stopped' : exit.code === 0 ? 'done' : 'failed', code: exit.code, cwd };
 }
 
 // The page attaches to a session: everything so far, a `live` marker, then events as they come.
@@ -347,6 +363,16 @@ createServer(async (req, res) => {
     const id = new URL(req.url, 'http://terminal').searchParams.get('session') ?? '';
     if (!SESSION_ID.test(id)) return res.writeHead(400, cors).end('No terminal session.');
     return attach(req, res, cors, id);
+  }
+  if (req.method === 'GET' && path === '/status') {
+    const ids = (new URL(req.url, 'http://terminal').searchParams.get('sessions') ?? '').split(',').filter((id) => SESSION_ID.test(id)).slice(0, 200);
+    const out = {};
+    for (const id of ids) {
+      const status = await statusOf(id);
+      if (status) out[id] = status;
+    }
+    res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(out));
+    return;
   }
   if (req.method === 'GET' && (path === '/files' || path === '/file')) {
     const target = new URL(req.url, 'http://terminal').searchParams.get('path') ?? '';

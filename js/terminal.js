@@ -18,6 +18,10 @@ const post = (body, signal) => ({ method: 'POST', headers: { 'content-type': 'ap
 // The board's folder, the home folder, the shell, and how many commands may run at once.
 export const runnerInfo = async (base) => (await call(base, '/info')).json();
 
+// What sessions are doing, by id: { state, code?, cwd }, state being working, waiting (running but quiet: the
+// program waits for its user), done, failed, stopped or idle. Sessions the runner no longer has are left out.
+export const sessionStatus = async (base, ids) => (ids.length ? (await call(base, `/status?sessions=${ids.map(encodeURIComponent).join(',')}`)).json() : {});
+
 // A folder's entries ({ name, dir }), folders first.
 export const listFolder = async (base, path) => (await call(base, `/files?path=${encodeURIComponent(path)}`)).json();
 
