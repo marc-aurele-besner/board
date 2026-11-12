@@ -1,7 +1,7 @@
 // Shell: folder connection, hash router, and top navigation.
 import { fsSupported, pickFolder, loadHandle, hasPermission } from './storage.js';
 import { createStore } from './store.js';
-import { h, icon } from './ui.js';
+import { h, icon, uid } from './ui.js';
 import { configure } from './github.js';
 import { ensureTasks, applyAppearance } from './modules/settings.js';
 import { modules } from './modules/index.js';
@@ -9,6 +9,7 @@ import { migrateLegacyProjects, migrateProjectShape } from './modules/projects.j
 import { bell, COLLECTION as NOTIFICATIONS, DEFAULTS as NOTIFICATION_DEFAULTS } from './notifications.js';
 import { openPalette } from './palette.js';
 import { startBackground } from './background.js';
+import { watchRunners, runnersOnline, runnersKnown } from './runners.js';
 import { GOOGLE, GOOGLE_DEFAULTS, useGoogleStore } from './google.js';
 import { JUMPS, openShortcuts } from './shortcuts.js';
 import { sampleFolder } from './sample.js';
@@ -99,6 +100,8 @@ function render({ user = true } = {}) {
       h('div', { class: 'topbar-end' },
         h('button', { type: 'button', class: 'search-btn', title: 'Search or jump', onclick: () => openPalette(store, modules) },
           icon('search'), h('span', { class: 'grow' }, 'Search or jump…'), h('kbd', null, isMac ? '⌘K' : 'Ctrl K')),
+        h('a', { id: 'runners-offline', class: 'pill tone-high runner-offline', href: '#/settings?section=runners', title: 'The runners are not running, so mail, calendars, wallets and site checks are not refreshed. Start the board with bun start.', hidden: runnersBadgeHidden() },
+          icon('alert'), 'Runners offline'),
         h('span', { id: 'save-status', class: `status ${store.status}` }, statusText(store.status)),
         bell(store),
         // Settings lives here as an icon, not in the section tabs.
@@ -159,6 +162,15 @@ function settle() {
   render({ user: false });
 }
 
+// With sample data there are no runners to miss.
+const runnersBadgeHidden = () => sample || !runnersKnown() || runnersOnline();
+
+function onRunners() {
+  const badge = document.getElementById('runners-offline');
+  if (badge) badge.hidden = runnersBadgeHidden();
+  if (currentModule().id === 'settings') store.refresh();
+}
+
 function updateStatus(status) {
   const el = document.getElementById('save-status');
   if (!el) return;
@@ -217,7 +229,12 @@ async function open(handle) {
   connectError = '';
   currentModule().restore?.(readRoute().params);
   render();
-  if (!sample) startBackground(store);
+  if (!sample) {
+    // The runners report the folderId they read, so Settings can tell when they write to another folder.
+    if (!store.get('settings').folderId) store.update('settings', (d) => { d.folderId = uid(); });
+    startBackground(store);
+    watchRunners(store, onRunners);
+  }
   // Another tab or browser may save to the same folder: bring its changes in while this one is in view.
   setInterval(() => document.hidden || store.sync(), SYNC_MS);
 }
