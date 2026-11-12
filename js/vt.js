@@ -55,6 +55,8 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
     cursor: true,
     appCursor: false,
     paste: false,
+    mouse: false, // the program asked for mouse reports (1000, 1002, 1003); wheel turns go to it
+    mouseSgr: false, // reports as CSI < b;x;y M (1006) rather than the old byte form
     state: 'text',
     seq: '',
   };
@@ -180,6 +182,8 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
           if (p === '1') t.appCursor = on;
           else if (p === '25') t.cursor = on;
           else if (p === '2004') t.paste = on;
+          else if (p === '1000' || p === '1002' || p === '1003') t.mouse = on;
+          else if (p === '1006') t.mouseSgr = on;
           else if (p === '1049' || p === '47' || p === '1047') setAlt(on);
         }
       }
@@ -338,7 +342,7 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
   // After a program ends, whatever modes it left on are put back, as a shell would.
   function reset() {
     setAlt(false);
-    Object.assign(t, { top: 0, bottom: t.rows - 1, style: {}, key: '', cursor: true, appCursor: false, paste: false, state: 'text' });
+    Object.assign(t, { top: 0, bottom: t.rows - 1, style: {}, key: '', cursor: true, appCursor: false, paste: false, mouse: false, mouseSgr: false, state: 'text' });
   }
 
   function clear() {
