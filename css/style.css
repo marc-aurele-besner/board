@@ -930,8 +930,10 @@ button.danger { color: var(--danger); }
 .tab { display: inline-flex; align-items: center; gap: 6px; }
 
 /* Todos */
-.quick { display: flex; gap: 8px; margin-bottom: 12px; }
+.quick { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .quick input { flex: 1; }
+.quick-images { flex-basis: 100%; }
+.quick-images[hidden] { display: none; }
 .nav-item {
   display: flex;
   align-items: center;
@@ -1158,7 +1160,7 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
   .recipe-list { max-height: none; }
   .topbar-end { margin-left: 0; width: 100%; justify-content: space-between; }
   .quick { flex-wrap: wrap; }
-  .quick button { width: 100%; }
+  .quick > button { width: 100%; }
 }
 
 /* Appearance: label colours */
