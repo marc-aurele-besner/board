@@ -109,7 +109,8 @@ const compare = (a, b) => {
 
 // A table whose headers sort it. Columns: { label, num, value(row), format(value, row), clip }.
 // A click re-sorts only the body, so the page keeps its scroll and nothing reloads.
-export function sortTable(key, columns, rows) {
+// `rowClass(row)` gives a row its class, such as a session still running.
+export function sortTable(key, columns, rows, rowClass = null) {
   const tbody = h('tbody');
   const ths = columns.map((c, i) => h('th', { class: c.num ? 'num' : null },
     h('button', { type: 'button', class: 'mon-sort', onclick: () => pick(i) }, c.label, h('span', { class: 'sort-mark' }))));
@@ -127,7 +128,7 @@ export function sortTable(key, columns, rows) {
       else th.removeAttribute('aria-sort');
       th.querySelector('.sort-mark').replaceChildren(icon(on && s.dir > 0 ? 'chevron-up' : 'chevron-down'));
     });
-    tbody.replaceChildren(...list.map((r) => h('tr', null, columns.map((c) => {
+    tbody.replaceChildren(...list.map((r) => h('tr', { class: rowClass?.(r) || null }, columns.map((c) => {
       const v = c.value(r);
       return h('td', { class: c.num ? 'num' : c.clip ? 'cell-clip' : null }, c.format ? c.format(v, r) : String(v ?? '—'));
     }))));
