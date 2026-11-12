@@ -229,7 +229,9 @@ let chordAt = 0; // when "g" was pressed, waiting for the letter of a section
 // over the page: "/" and "n" open the palette, "?" lists the shortcuts, and "g" then a letter jumps to a section.
 function onShortcut(e) {
   if (!store) return;
-  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
+  // Dev's terminal output takes keys too: they go to the running program, or to the command line under it.
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable
+    || Boolean(e.target.closest?.('.term-out'));
   const combo = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k';
   if (combo || (e.key === '/' && !typing)) {
     e.preventDefault();
