@@ -16,20 +16,25 @@ export const runnersKnown = () => beat !== undefined;
 export const runnersOnline = () => Boolean(beat?.worker?.beatAt && Date.now() - Date.parse(beat.worker.beatAt) < OFFLINE_MS);
 export const jobState = (id) => beat?.jobs?.[id] ?? null;
 
-// The parts of the heartbeat that show on screen: a fresh beat alone changes nothing.
-const shown = () => JSON.stringify([runnersOnline(), beat?.worker?.folderId, beat?.worker?.startedAt, beat?.jobs]);
+// The parts of the heartbeat that sections show: online or not, and each job's outcome. Run times change every
+// few seconds (Telegram listens all the time), so only Settings → Runners redraws for those.
+const shown = () => JSON.stringify([runnersOnline(), beat?.worker?.folderId, beat?.worker?.startedAt,
+  Object.entries(beat?.jobs ?? {}).map(([id, j]) => [id, j.ok, j.error, j.waiting, j.errors, j.on])]);
 
 async function read(store) {
   const before = shown();
+  const text = JSON.stringify(beat);
   try {
     beat = JSON.parse(await (await store.files.read('runners.json')).text());
   } catch {
     beat = null;
   }
-  if (shown() !== before) listeners.forEach((fn) => fn());
+  const outcome = shown() !== before;
+  if (outcome || JSON.stringify(beat) !== text) listeners.forEach((fn) => fn({ outcome }));
 }
 
-// Reads runners.json now and then every few seconds while the tab is in view. `onChange` runs when what shows changed.
+// Reads runners.json now and then every few seconds while the tab is in view. `onChange({ outcome })` runs when it
+// changed; `outcome` is true when a job's outcome or the runners' state did, not only run times.
 export function watchRunners(store, onChange) {
   listeners.add(onChange);
   if (watching) return;
