@@ -51,12 +51,14 @@ function deleteFlow(store, flow) {
   store.update(COLLECTION, (d) => {
     d.flows = d.flows.filter((f) => f.id !== flow.id);
     d.runs = d.runs.filter((r) => r.flowId !== flow.id);
+    delete d.tests?.[flow.id];
   });
   view.flow = '';
   toast(`Deleted “${flow.name}”`, {
     undo: () => store.update(COLLECTION, (d) => {
       d.flows = before.flows;
       d.runs = before.runs;
+      d.tests = before.tests;
     }),
   });
 }
@@ -296,7 +298,7 @@ function insertStep(store, flow, index) {
             remapStepRefs(f.steps, (n) => (n > index ? n + 1 : n));
             f.steps.splice(index, 0, step);
           });
-          clearTests(flow.id);
+          clearTests(store, flow.id);
           view.node = step.id;
           store.refresh();
         },
@@ -312,7 +314,7 @@ const link = (store, flow, index) =>
 
 function canvas(store, flow) {
   const last = lastRunOf(store, flow.id);
-  const tested = testsOf(flow.id);
+  const tested = testsOf(store, flow.id);
   const statusOfStep = (id) => {
     const s = tested.get(id) ?? last?.steps.find((x) => x.stepId === id);
     return s ? (s.ok ? 'ok' : 'bad') : '';
@@ -708,7 +710,7 @@ function moveStep(store, flow, id, by) {
     [f.steps[i], f.steps[j]] = [f.steps[j], f.steps[i]];
   });
   // The tested data names steps by their old numbers.
-  clearTests(flow.id);
+  clearTests(store, flow.id);
 }
 
 // A test that fails on an earlier step leaves this one without data, so it says where it stopped.
@@ -720,7 +722,7 @@ function runTest(store, flow, stepId) {
 
 // What a step could read before it was tested: earlier test data, else the last run's outputs.
 function knownVars(store, flow, index) {
-  const tested = testsOf(flow.id);
+  const tested = testsOf(store, flow.id);
   const last = lastRunOf(store, flow.id);
   const vars = { input: '', date: todayISO(), flow: flow.name, $data: {} };
   flow.steps.slice(0, index).forEach((s, i) => {
@@ -739,7 +741,7 @@ function knownVars(store, flow, index) {
 // The step's test, as n8n shows a node: what it read and what it gave, as JSON. A key in the input goes into the
 // field last focused; a key in the output copies its variable, for the steps after this one.
 function testPanel(store, flow, step, index) {
-  const result = testsOf(flow.id).get(step.id);
+  const result = testsOf(store, flow.id).get(step.id);
   const vars = result?.vars ?? knownVars(store, flow, index);
   const copy = (path) => navigator.clipboard.writeText(`{{${path}}}`).then(() => toast(`Copied {{${path}}}`), () => toast('Could not copy'));
   const next = flow.steps[index + 1];
@@ -764,8 +766,8 @@ function testPanel(store, flow, step, index) {
               },
             }, 'Test the next step')
           : null,
-        testsOf(flow.id).size
-          ? h('button', { type: 'button', class: 'btn-link small', onclick: () => { clearTests(flow.id); store.refresh(); } }, 'Clear test data')
+        testsOf(store, flow.id).size
+          ? h('button', { type: 'button', class: 'btn-link small', onclick: () => { clearTests(store, flow.id); store.refresh(); } }, 'Clear test data')
           : null)),
     result?.note ? h('p', { class: 'muted small' }, result.note) : null,
     h('div', { class: 'cron-test-grid' },
@@ -810,7 +812,7 @@ function inspector(store, flow) {
               f.steps = f.steps.filter((s) => s.id !== step.id);
               remapStepRefs(f.steps, (n) => (n === index + 1 ? null : n > index + 1 ? n - 1 : n));
             });
-            clearTests(flow.id);
+            clearTests(store, flow.id);
             view.node = 'trigger';
             store.refresh();
           },
