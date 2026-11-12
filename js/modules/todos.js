@@ -6,7 +6,7 @@ import { createProject, projectIcon, labelsOf, projectTree, moveProject, labelCo
 import { editText, pickChip, pickButton, pickMulti, pill } from '../inline.js';
 import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
 import { openDialog } from '../modal.js';
-import { issuesOf, prsOf } from '../task-links.js';
+import { issuesOf, prsOf, moveToReview } from '../task-links.js';
 import { startClaudeSession, openSession, runnerOf } from './dev.js';
 import { sessionStatus } from '../terminal.js';
 import { ask, parseJson } from '../ai.js';
@@ -497,9 +497,11 @@ function devTasks(store, items) {
   updateItems(store, ids, { devSession: session });
 }
 
-// What each task's terminal is doing, asked of the runner every few seconds while Tasks is shown.
+// What each task's terminal is doing, asked of the runner every few seconds once Tasks has been shown.
 // A task whose terminal the runner no longer has (closed, or forgotten after a month) has no entry.
+// claude ends its turn by waiting for its user (or by quitting): the tasks it was handed then wait for review.
 const DEV_POLL_MS = 4000;
+const DEV_FINISHED = ['waiting', 'done'];
 const devWatch = { status: {}, timer: 0 };
 const DEV_STATES = {
   working: 'claude is working',
@@ -514,16 +516,20 @@ function watchDevSessions(store) {
   if (devWatch.timer || !store.get(COLLECTION).items.some((t) => t.devSession)) return;
   const poll = async () => {
     devWatch.timer = 0;
-    if (!location.hash.startsWith('#/todos')) return;
-    const ids = [...new Set(store.get(COLLECTION).items.map((t) => t.devSession).filter(Boolean))];
-    let status = {};
+    const items = store.get(COLLECTION).items;
+    const ids = [...new Set(items.map((t) => t.devSession).filter(Boolean))];
+    let status;
     try {
       status = await sessionStatus(runnerOf(store), ids);
     } catch {}
     devWatch.timer ||= setTimeout(poll, DEV_POLL_MS);
-    if (JSON.stringify(status) === JSON.stringify(devWatch.status)) return;
+    // An unreachable runner says nothing about the sessions, so nothing moves.
+    if (!status || JSON.stringify(status) === JSON.stringify(devWatch.status)) return;
+    // Only on the change into a finished state, so a task put back in progress while claude waits stays there.
+    const finished = ids.filter((id) => DEV_FINISHED.includes(status[id]?.state) && !DEV_FINISHED.includes(devWatch.status[id]?.state));
     devWatch.status = status;
-    store.refresh();
+    if (finished.length) moveToReview(store, items.filter((t) => finished.includes(t.devSession)).map((t) => t.id));
+    if (location.hash.startsWith('#/todos')) store.refresh();
   };
   devWatch.timer = setTimeout(poll, 0);
 }
