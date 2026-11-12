@@ -207,8 +207,9 @@ export function sendInput(base, pid, body) {
 export const gitStatus = async (base, path) => (await call(base, `/git?path=${encodeURIComponent(path)}`)).json();
 
 // A file's changes as a unified diff ({ diff }), staged or not; or a commit's, with { commit } describing it.
-/** @type {(base: string, params: Record<string, string>) => Promise<GitDiff>} */
-export const gitDiff = async (base, params) => (await call(base, `/git/diff?${new URLSearchParams(params)}`)).json();
+// Numbers in `params` (staged: 1) are sent as text.
+/** @type {(base: string, params: Record<string, string | number>) => Promise<GitDiff>} */
+export const gitDiff = async (base, params) => (await call(base, `/git/diff?${new URLSearchParams(/** @type {Record<string, string>} */ (params))}`)).json();
 
 // Changes the repository: stage, unstage, discard, commit, fetch, pull, push, checkout, branch or init.
 /** @type {(base: string, path: string, action: string, body?: object) => Promise<{ ok: boolean }>} */
