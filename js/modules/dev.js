@@ -19,7 +19,9 @@ import { projectIcon } from './projects.js';
 import { linkWatcher, moveToReview } from '../task-links.js';
 
 const COLLECTION = 'dev';
-const DEFAULTS = { history: [], runner: '' };
+// presets: commands named in Settings → Dev environment ({ id, name, command }), which projects pick instead of
+// typing the same command each time.
+const DEFAULTS = { history: [], runner: '', presets: [] };
 const HISTORY_MAX = 100;
 const RECENT_SHOWN = 8;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -41,6 +43,7 @@ function readSide() {
 }
 
 export const runnerOf = (store) => store.get(COLLECTION).runner || TERMINAL_RUNNER;
+export const devPresets = (store) => store.get(COLLECTION).presets ?? [];
 const maxSessions = () => view.info?.max ?? 12;
 const activeSession = () => view.sessions.find((s) => s.id === view.active) ?? view.sessions[0];
 const projectsWithFolder = (store) => store.get('projects').projects.filter((p) => p.localPath);
@@ -535,6 +538,13 @@ const shellQuote = (text) => `'${text.replace(/'/g, `'\\''`)}'`;
 // The command a task is handed to; a project can set its own in its Dev command field.
 export const DEFAULT_DEV_COMMAND = 'claude --dangerously-skip-permissions --worktree';
 
+// The command a project's tasks are handed to: its preset's, else its own Dev command, else the default.
+// A preset that was removed is skipped, so the project falls back to its own command.
+export function devCommandOf(store, project) {
+  const preset = project?.devPreset ? devPresets(store).find((x) => x.id === project.devPreset) : null;
+  return preset?.command?.trim() || project?.devCommand?.trim() || DEFAULT_DEV_COMMAND;
+}
+
 // A worktree flag with no name: claude would pick a random one, which the tasks could not find again.
 const BARE_WORKTREE = /(^|\s)(--worktree|-w)(?=\s+-|\s*$)/;
 
@@ -563,7 +573,7 @@ export function startClaudeSession({ store, prompt, projectId = '', taskIds = []
 // used when the project has none.
 function claudeCommand(store, projectId, title, id, fallbackCwd) {
   const project = store.get('projects').projects.find((p) => p.id === projectId);
-  let command = project?.devCommand?.trim() || DEFAULT_DEV_COMMAND;
+  let command = devCommandOf(store, project);
   let worktree = null;
   if (BARE_WORKTREE.test(command)) {
     worktree = { name: worktreeName(title, id), cwd: project?.localPath || fallbackCwd };

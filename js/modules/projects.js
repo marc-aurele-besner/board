@@ -146,6 +146,8 @@ export function makeProject(existingCount, fields = {}) {
     localPath: '',
     // What Dev runs when a task is handed to it; empty uses DEFAULT_DEV_COMMAND.
     devCommand: '',
+    // A command preset from Settings → Dev environment; when set, it runs instead of devCommand.
+    devPreset: '',
     labels: [],
     parentId: null,
     github: { org: '', repos: [] },
@@ -215,6 +217,14 @@ function githubLine(p) {
 
 // --- Actions ---
 
+export const LOCAL_PATH_ERROR = 'The local folder must be a full path, such as ~/code/my-app or /Users/me/code/my-app.';
+
+// A project's local folder without its trailing slash; null when it is not a full path. Empty clears it.
+export function cleanLocalPath(text) {
+  const localPath = String(text ?? '').trim().replace(/(.)[\\/]+$/, '$1');
+  return localPath && !/^(~|\/|[A-Za-z]:[\\/])/.test(localPath) ? null : localPath;
+}
+
 // Shows a problem with one field on the project page. The field keeps its old value until it is fixed.
 function flashError(store, message) {
   view.error = message;
@@ -256,8 +266,8 @@ function updateProject(store, id, patch) {
     patch = { ...rest, github: { org: owner, repos } };
   }
   if (patch.localPath !== undefined) {
-    const localPath = patch.localPath.trim().replace(/(.)[\\/]+$/, '$1');
-    if (localPath && !/^(~|\/|[A-Za-z]:[\\/])/.test(localPath)) return flashError(store, 'The local folder must be a full path, such as ~/code/my-app or /Users/me/code/my-app.');
+    const localPath = cleanLocalPath(patch.localPath);
+    if (localPath === null) return flashError(store, LOCAL_PATH_ERROR);
     patch = { ...patch, localPath };
   }
   if (patch.iconUrl !== undefined) {
