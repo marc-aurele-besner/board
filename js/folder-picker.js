@@ -16,7 +16,7 @@ const parentOf = (path) => {
 };
 
 // Opens at `start` (a saved path), else ~/Documents, else the home folder. Calls onPick with the chosen path.
-export function pickFolder({ base, start, onPick }) {
+export function pickFolder({ base, start, onPick, title = 'Choose the local folder' }) {
   const state = { path: '', home: '', entries: [], q: '', hidden: false, loading: true, error: '' };
   const crumbs = h('div', { class: 'fp-crumbs' });
   const search = h('input', { type: 'search', placeholder: 'Filter folders', 'aria-label': 'Filter folders', autocomplete: 'off', spellcheck: false });
@@ -26,7 +26,7 @@ export function pickFolder({ base, start, onPick }) {
   const useBtn = h('button', { type: 'button', class: 'primary', disabled: true, onclick: () => choose(state.path) }, 'Use this folder');
 
   const dialog = openDialog({
-    title: 'Choose the local folder',
+    title,
     body: h('div', { class: 'fp' },
       crumbs,
       h('div', { class: 'fp-toolbar' },

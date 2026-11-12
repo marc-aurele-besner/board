@@ -3,7 +3,9 @@
 import { h, icon, refreshIcon, empty } from '../ui.js';
 import { toast } from '../toast.js';
 import { JOBS, jobConfig } from '../runner-jobs.js';
-import { heartbeat, runnersOnline, jobState, runJob, workerStatus, setWorkerFolder, readRunnersNow } from '../runners.js';
+import { heartbeat, runnersOnline, jobState, runJob, workerStatus, setWorkerFolder, findWorkerFolder, readRunnersNow } from '../runners.js';
+import { pickFolder } from '../folder-picker.js';
+import { runnerOf } from '../dev-core.js';
 
 const STATUS_TTL_MS = 5000;
 // The worker's live status (GET /status), fetched when the card shows. running: job ids waiting on Run now.
@@ -58,7 +60,7 @@ async function runNow(store, job) {
 }
 
 async function saveFolder(store, e) {
-  e.preventDefault();
+  e?.preventDefault();
   view.saving = true;
   store.refresh();
   try {
@@ -69,8 +71,44 @@ async function saveFolder(store, e) {
   } finally {
     view.saving = false;
     view.statusAt = 0;
+    setTimeout(() => readRunnersNow(store), 2000);
     store.refresh();
   }
+}
+
+async function findFolder(store) {
+  view.saving = true;
+  store.refresh();
+  try {
+    const answer = await findWorkerFolder(store);
+    if (answer.ok) {
+      view.folder = answer.folder.path;
+      toast(`The runners now use ${answer.folder.path}.`);
+    } else {
+      toast(answer.found?.length
+        ? `More than one folder matches: ${answer.found.join(', ')}. Pick one with Browse.`
+        : `No folder named “${store.folderName}” was found in your home, Desktop, Documents, Downloads or iCloud Drive. Pick it with Browse.`);
+    }
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    view.saving = false;
+    view.statusAt = 0;
+    setTimeout(() => readRunnersNow(store), 2000);
+    store.refresh();
+  }
+}
+
+function browse(store) {
+  pickFolder({
+    base: runnerOf(store),
+    start: view.folder || '',
+    title: 'Choose the data folder',
+    onPick: (path) => {
+      view.folder = path;
+      saveFolder(store);
+    },
+  });
 }
 
 function outcome(state, on) {
@@ -118,18 +156,25 @@ export function runnersCard(store) {
   const status = view.status;
   const ours = store.get('settings').folderId ?? '';
   // The worker read a folderId from its folder; another one means it fetches into a folder this tab does not show.
+  // The worker answers but has no folder, so it cannot write its heartbeat: it is running, not offline.
+  const noFolder = Boolean(!online && status && (!status.folder?.path || status.folder?.error));
   const otherFolder = status && status.worker?.folderId !== undefined && status.folder?.path && ours && status.worker.folderId !== ours;
   return h('section', { class: 'card panel' },
     head('Runners',
       'A worker on this computer does the background work: it reads mail, calendars and wallets, checks sites, reads Telegram and runs Cron flows on a schedule, and saves what it finds in the data folder. It runs inside bun start, whether or not a board tab is open.',
-      online ? badge('Online', 'done') : badge('Offline', 'high')),
+      online ? badge('Online', 'done') : noFolder ? badge('No folder', 'todo') : status ? badge('Starting', 'todo') : badge('Offline', 'high')),
     h('div', { class: 'card-inset stack' },
-      online
+      noFolder
+        ? h('p', { class: 'small' }, `The runners are running (process ${status.worker?.pid}) but do not know where “${store.folderName}” is on disk. Find it, or give its path below.`)
+        : online
         ? h('p', { class: 'small' }, `Running since ${exact(worker.startedAt)} (process ${worker.pid}). Last heartbeat ${when(worker.beatAt)}.`)
         : h('p', { class: 'small' }, worker?.beatAt
             ? `No heartbeat since ${exact(worker.beatAt)}. Start the board with bun start (or bun dev) to run them again. Sections show the last data they saved.`
             : 'The runners have not written to this folder yet. Start the board with bun start, then set the folder path below.'),
       status === null && !online ? h('p', { class: 'muted small' }, 'The runners do not answer on this computer.') : null,
+      noFolder && status.folder?.from !== 'BOARD_DATA'
+        ? h('div', null, h('button', { type: 'button', class: 'btn-small', disabled: view.saving, onclick: () => findFolder(store) }, icon('search'), 'Find this folder'))
+        : null,
       otherFolder
         ? h('p', { class: 'small error' }, icon('alert'), ' The runners use another data folder than this tab. Check the path below: it must be the folder this tab has open.')
         : null),
@@ -140,7 +185,12 @@ export function runnersCard(store) {
           type: 'text', placeholder: '~/Documents/board-data', value: view.folder ?? '', 'aria-label': 'Folder path for runners',
           disabled: !status || status.folder?.from === 'BOARD_DATA',
           oninput: (e) => { view.folder = e.target.value; },
-        })),
+        }),
+        h('button', {
+          type: 'button', class: 'input-addon', title: 'Find the folder on this machine',
+          disabled: !status || view.saving || status.folder?.from === 'BOARD_DATA',
+          onclick: () => browse(store),
+        }, icon('folder'), 'Browse')),
       h('div', { class: 'svc-actions' },
         h('button', { class: 'primary', type: 'submit', disabled: !status || view.saving || status.folder?.from === 'BOARD_DATA' }, view.saving ? 'Saving…' : 'Save')),
       h('p', { class: 'muted small' },
