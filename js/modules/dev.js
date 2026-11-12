@@ -77,6 +77,12 @@ const filesCtx = (store) => ({
     const s = newSession(store, path);
     if (s) store.refresh();
   },
+  showTerminal: (id) => {
+    if (!view.sessions.some((s) => s.id === id)) return;
+    view.active = id;
+    saveSessions();
+    store.refresh();
+  },
 });
 
 // The terminal answers questions programs ask (cursor position, colours) as the theme shows it.
