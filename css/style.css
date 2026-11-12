@@ -2464,6 +2464,8 @@ button.sum-line:hover { background: var(--surface-2); }
 .term-new { background: none; border: none; min-height: 0; padding: 4px 6px; border-radius: 6px; color: var(--muted); }
 .term-new:hover { background: var(--surface-2); color: var(--text); }
 .term-new .icon { width: 14px; height: 14px; }
+.term-usage { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.term-usage .icon { width: 14px; height: 14px; flex: none; }
 .term-cwd { flex: 1; min-width: 8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 0.78rem ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); text-align: right; }
 .term-actions { flex: none; gap: 2px; }
 .term-out { position: relative; height: min(62vh, 600px); overflow: auto; padding: 10px 12px; border-radius: 8px; background: var(--surface-2); color: var(--text); font: 0.8rem/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; outline: none; }

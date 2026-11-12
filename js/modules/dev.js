@@ -19,6 +19,7 @@ import { searchPanel } from './dev-search.js';
 import { pickChip } from '../inline.js';
 import { projectIcon } from './projects.js';
 import { linkWatcher, moveToReview } from '../task-links.js';
+import { recordOfSession, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 
 const COLLECTION = 'dev';
 // presets: commands named in Settings → Dev environment ({ id, name, command }), which projects pick instead of
@@ -541,6 +542,14 @@ const shellQuote = (text) => `'${text.replace(/'/g, `'\\''`)}'`;
 // The command a task is handed to; a project can set its own in its Dev command field.
 export const DEFAULT_DEV_COMMAND = 'claude --dangerously-skip-permissions --worktree';
 
+// What claude used in a task's terminal so far, read from its transcript (dev-usage.js).
+function sessionUsage(store, s) {
+  const record = recordOfSession(store, s.id);
+  if (!record) return null;
+  const sum = sumUsage([record]);
+  return h('span', { class: 'muted small term-usage', title: usageTitle(sum) }, icon('cpu'), usageLine(sum));
+}
+
 // The command a project's tasks are handed to: its preset's, else its own Dev command, else the default.
 // A preset that was removed is skipped, so the project falls back to its own command.
 export function devCommandOf(store, project) {
@@ -842,6 +851,7 @@ function terminal(store, s) {
       backButton(),
       sessionTabs(store),
       h('code', { class: 'term-cwd', title: s.cwd }, s.cwd || '…'),
+      sessionUsage(store, s),
       h('div', { class: 'row term-actions' },
         h('button', {
           type: 'button',
