@@ -268,7 +268,7 @@ async function usageOf({ name, cwd }) {
 }
 
 // [{ name, cwd }] → { [name]: usage }; worktrees with no transcript are left out.
-/** @param {{ name: string, cwd: string }[]} list @returns {Promise<Record<string, WorktreeUsage>>} */
+/** @param {unknown} list [{ name, cwd }], checked here: it comes from a request @returns {Promise<Record<string, WorktreeUsage>>} */
 export async function worktreeUsage(list) {
   /** @type {Record<string, WorktreeUsage>} */
   const out = {};
@@ -316,7 +316,7 @@ async function activityOf({ name, cwd }) {
 }
 
 // [{ name, cwd }] → { [name]: { busy, agents } }; worktrees with no transcript are left out.
-/** @param {{ name: string, cwd: string }[]} list */
+/** @param {unknown} list [{ name, cwd }], checked here */
 export async function worktreeActivity(list) {
   /** @type {Record<string, { busy: boolean, agents: number }>} */
   const out = {};
