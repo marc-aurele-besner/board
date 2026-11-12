@@ -16,6 +16,7 @@ export const KINDS = [
   ['status', 'Provider outages and recoveries', 'activity'],
   ['telegram', 'Telegram messages', 'send'],
   ['pools', 'Liquidity Pools out of range', 'droplet'],
+  ['lending', 'Aave health factor low', 'landmark'],
   ['budget', 'Budgets gone over', 'wallet'],
   ['cron', 'Cron flows', 'repeat'],
 ];
