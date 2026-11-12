@@ -22,6 +22,7 @@ export const DEFAULTS = {
   usage: { entries: [] },
   calendar: { calendars: {} },
   github: { repos: {} },
+  npm: { orgs: {}, packages: {} },
   webstats: { bing: {} },
   fx: { days: {} },
   cron: { flows: [], runs: [], templates: [], tests: {} },

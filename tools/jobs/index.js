@@ -7,6 +7,7 @@ import calendar from './calendar.js';
 import monitoring from './monitoring.js';
 import telegram from './telegram.js';
 import github from './github.js';
+import npm from './npm.js';
 import webstats from './webstats.js';
 import fx from './fx.js';
 import devUsage from './dev-usage.js';
@@ -14,4 +15,4 @@ import worktrees from './worktrees.js';
 import cron from './cron.js';
 import defi from './defi.js';
 
-export const jobs = [google, gmail, resend, calendar, monitoring, telegram, github, webstats, fx, devUsage, worktrees, cron, ...defi];
+export const jobs = [google, gmail, resend, calendar, monitoring, telegram, github, npm, webstats, fx, devUsage, worktrees, cron, ...defi];

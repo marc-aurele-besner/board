@@ -12,6 +12,7 @@ import { watchRunners, runnersOnline, runnersKnown } from './runners.js';
 import { GOOGLE, GOOGLE_DEFAULTS, useGoogleStore } from './google.js';
 import { CALENDAR, CALENDAR_DEFAULTS } from './gcal.js';
 import { GITHUB, GITHUB_DEFAULTS, useGithubStore } from './github.js';
+import { NPM, NPM_DEFAULTS, useNpmStore } from './npm.js';
 import { WEBSTATS, WEBSTATS_DEFAULTS } from './webstats.js';
 import { FX, FX_DEFAULTS, useFxStore } from './fx.js';
 import { JUMPS, openShortcuts } from './shortcuts.js';
@@ -56,8 +57,9 @@ const collectionDefaults = () => ({
   [GOOGLE]: GOOGLE_DEFAULTS,
   // The events the runners read, shared by Calendar, Home and Cron.
   [CALENDAR]: CALENDAR_DEFAULTS,
-  // What the runners read for Projects (GitHub), Monitoring (Bing) and Money (exchange rates).
+  // What the runners read for Projects (GitHub, npm), Monitoring (Bing) and Money (exchange rates).
   [GITHUB]: GITHUB_DEFAULTS,
+  [NPM]: NPM_DEFAULTS,
   [WEBSTATS]: WEBSTATS_DEFAULTS,
   [FX]: FX_DEFAULTS,
 });
@@ -232,6 +234,7 @@ async function open(handle) {
   store = next;
   useGoogleStore(store);
   useGithubStore(store);
+  useNpmStore(store);
   useFxStore(store);
   configure(store.get('settings').github);
   migrateLegacyProjects(store);
