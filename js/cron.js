@@ -14,7 +14,7 @@ import { sessionStatus, sessionOutcome, exitClaude } from './terminal.js';
 import { forgetWorktree } from './task-worktrees.js';
 import { findGithubLinks, plainOutput, addTaskLinks, prsOf } from './task-links.js';
 import { buildProfile, profileOf, hasProfileSources } from './profile.js';
-/** @import { DataStore, Store, CronStep, CronSource, CronFlow, CronSchedule, CronTemplate, CronRun, CronRunStep, CronRunCurrent, CronTest, CronPr, Project, Task, DevPreset, SiteLogEntry, TaskLink } from '../types/data' */
+/** @import { DataStore, Store, CronStep, CronSource, CronFlow, CronSchedule, CronTemplate, CronRun, CronRunStep, CronRunCurrent, CronTest, CronPr, Project, Task, DevPreset, SiteLogEntry, TaskLink, IconName } from '../types/data' */
 // The variables a step's templates read; $data holds what a name reads into with a path.
 /** @typedef {{ [name: string]: unknown, $data?: Record<string, unknown> }} Vars */
 // A step's result: what a test saves, with the variables the step saw.
@@ -47,6 +47,7 @@ const MAX_RUNS = 60;
 const MINUTE = 60000;
 
 // [type, label, icon, short description]
+/** @type {[string, string, IconName, string][]} */
 export const STEP_TYPES = [
   ['gather', 'Gather data', 'list', 'Reads tasks, projects, money, calendar, web pages and more; several sources at once.'],
   ['ai', 'AI generate', 'cpu', 'Sends a prompt to a model through OpenRouter.'],
@@ -112,7 +113,7 @@ export const PROFILE_EDITED = [
 
 // Steps saved before the choice had keepEdited, which stopped the run; they now update the profile and keep the edits.
 /** @param {CronStep} step */
-export const profileEditedMode = (step) => (PROFILE_EDITED.some(([k]) => k === step.onEdited) ? step.onEdited : step.keepEdited === false ? 'replace' : 'merge');
+export const profileEditedMode = (step) => (PROFILE_EDITED.some(([k]) => k === step.onEdited) ? /** @type {string} */ (step.onEdited) : step.keepEdited === false ? 'replace' : 'merge');
 
 export const STOP_WHEN = [
   ['nothing', 'The data step found nothing'],
@@ -145,6 +146,7 @@ const NOTHING = {
 };
 
 // [key, label, icon]
+/** @type {[string, string, IconName][]} */
 export const SOURCES = [
   ['open', 'Open tasks', 'check-square'],
   ['due', 'Tasks due within 7 days', 'check-square'],

@@ -1,3 +1,4 @@
+// @ts-check
 // Cron: recurring flows that gather board data, ask an AI model, and turn the answer into a task, a notification or work for claude in Dev.
 // The editor draws a flow as a chain of nodes, like a workflow canvas; the inspector below edits the selected node.
 import { h, icon, empty, notice, now, uid, todayISO, statusOf } from '../ui.js';
@@ -20,6 +21,16 @@ import { previewChips } from '../previews.js';
 import { attachSession, sessionStatus } from '../terminal.js';
 import { createTerminal } from '../vt.js';
 import { hasProfileSources } from '../profile.js';
+/** @import { Store, CronFlow, CronStep, CronSource, CronSchedule, CronTemplate, CronRun, CronRunStep, CronPr, Project, Task, IconName } from '../../types/data' */
+/** @import { Child } from '../../types/ui' */
+/** @import { Vars } from '../cron.js' */
+/** @import { Exit } from './dev.js' */
+// The input, textarea or select a change handler is on; all three have value.
+/** @typedef {Event & { target: HTMLInputElement }} FieldEvent */
+// A drag on a node, the palette or a +: the browser always gives it data and the element it is on.
+/** @typedef {DragEvent & { dataTransfer: DataTransfer, currentTarget: HTMLElement }} NodeDrag */
+// What a Dev step's test data holds of its terminal.
+/** @typedef {{ session?: string, cwd?: string }} DevTestData */
 
 // View state: the tab, the open flow, the selected node ('trigger' or a step id), the Runs tab's filter and the
 // flow list's project filter ('' for all, NO_PROJECT for flows without one).
@@ -27,21 +38,46 @@ import { hasProfileSources } from '../profile.js';
 // preview: the {{…}} text fields showing their Preview tab instead of the text.
 // terms: the terminals unfolded under runs (seenTerms: those drawn once, so one folded by hand stays folded).
 // openRuns: the runs unfolded; focusRun: the run a link opened (#/cron?tab=runs&run=…), scrolled to once.
+/**
+ * @type {{ tab: string, flow: string, node: string, runs: string, project: string, field: string,
+ *   cursor: { key: string, start: number, end: number } | null, preview: Set<string>, terms: Set<string>,
+ *   seenTerms: Set<string>, openRuns: Set<string>, focusRun: string, scrollTo: string }}
+ */
 const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', project: '', field: '', cursor: null, preview: new Set(), terms: new Set(), seenTerms: new Set(), openRuns: new Set(), focusRun: '', scrollTo: '' };
 const NO_PROJECT = 'none';
 const TABS = [['flows', 'Flows'], ['runs', 'Runs'], ['templates', 'Templates']];
+/** @type {Record<string, string>} */
 const SUBTITLES = {
   flows: 'Recurring flows that gather data from the board, ask an AI model, and turn the answer into a task, a notification or work for claude in Dev.',
   runs: 'What every flow did, step by step.',
   templates: 'Starting points, and the flows you saved as templates. A template becomes a paused flow you can adjust before switching it on.',
 };
 
+/**
+ * @param {string} type
+ * @returns {[string, string, IconName, string]}
+ */
 const typeOf = (type) => STEP_TYPES.find(([t]) => t === type) ?? [type, type, 'info', ''];
+/** @param {string | undefined} at */
 const timeOf = (at) => (at ? new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never');
+/** @param {Store} store */
 const projectsOf = (store) => projectTree(store.get('projects').projects).map(({ project }) => project);
+/**
+ * @param {Store} store
+ * @param {string} id
+ */
 const projectName = (store, id) => (id ? store.get('projects').projects.find((p) => p.id === id)?.name ?? 'Removed project' : '');
+/**
+ * @param {Store} store
+ * @param {string} flowId
+ */
 const lastRunOf = (store, flowId) => store.get(COLLECTION).runs.find((r) => r.flowId === flowId) ?? null;
 
+/**
+ * @param {Store} store
+ * @param {string} id
+ * @param {(f: CronFlow) => void} mutate
+ */
 function updateFlow(store, id, mutate) {
   store.update(COLLECTION, (d) => {
     const f = d.flows.find((x) => x.id === id);
@@ -49,6 +85,10 @@ function updateFlow(store, id, mutate) {
   });
 }
 
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ */
 function addFlow(store, flow) {
   store.update(COLLECTION, (d) => d.flows.push(flow));
   view.flow = flow.id;
@@ -56,6 +96,10 @@ function addFlow(store, flow) {
   store.refresh();
 }
 
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ */
 function deleteFlow(store, flow) {
   const before = structuredClone(store.get(COLLECTION));
   store.update(COLLECTION, (d) => {
@@ -74,6 +118,10 @@ function deleteFlow(store, flow) {
 }
 
 // A copy starts paused, so it does not run beside the original until it is switched on.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ */
 function duplicateFlow(store, flow) {
   const copy = structuredClone(flow);
   addFlow(store, {
@@ -90,6 +138,11 @@ function duplicateFlow(store, flow) {
 }
 
 // Steps that named the new project themselves now just follow the flow.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {string} projectId
+ */
 function setFlowProject(store, flow, projectId) {
   const was = flowProjectId(flow);
   // A filtered list follows the flow, so it stays open.
@@ -103,6 +156,11 @@ function setFlowProject(store, flow, projectId) {
   });
 }
 
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {boolean} enabled
+ */
 function setEnabled(store, flow, enabled) {
   updateFlow(store, flow.id, (f) => {
     f.enabled = enabled;
@@ -111,11 +169,17 @@ function setEnabled(store, flow, enabled) {
 }
 
 // A test run of a step here opens its Dev terminal on this page.
-useDevStarter(startDevSession);
+// It takes the tab's store, which is what cron.js passes it on this page.
+useDevStarter(/** @type {Parameters<typeof useDevStarter>[0]} */ (startDevSession));
 
 // Run now asks the runners (tools/jobs/cron.js), so the run is the same as a scheduled one and goes on when this tab
 // closes; it shows in Runs as it goes, through cron.json. A test run (dry) runs here, like Test step, so its
 // terminals and data show at once.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {{ dry?: boolean }} [options]
+ */
 function startRun(store, flow, { dry = false } = {}) {
   if (isRunning(flow.id)) return;
   if (!dry) {
@@ -139,6 +203,10 @@ function startRun(store, flow, { dry = false } = {}) {
 // --- Flow list ---
 
 // Narrows the list to one project's flows. Only projects some flow uses are offered.
+/**
+ * @param {Store} store
+ * @param {CronFlow[]} flows
+ */
 function projectFilter(store, flows) {
   const used = new Set(flows.map(flowProjectId));
   if (used.size < 2 && !view.project) return null;
@@ -160,8 +228,14 @@ function projectFilter(store, flows) {
   });
 }
 
+/** @param {CronFlow} f */
 const inFilter = (f) => !view.project || (flowProjectId(f) || NO_PROJECT) === view.project;
 
+/**
+ * @param {Store} store
+ * @param {CronFlow[]} all
+ * @param {CronFlow[]} flows
+ */
 function flowList(store, all, flows) {
   return h('aside', { class: 'card cron-list' },
     h('div', { class: 'row between' },
@@ -193,7 +267,7 @@ function flowList(store, all, flows) {
               checked: f.enabled,
               title: f.enabled ? 'On schedule. Uncheck to pause.' : 'Paused. Check to run on schedule.',
               'aria-label': `Run “${f.name}” on schedule`,
-              onchange: (e) => setEnabled(store, f, e.target.checked),
+              onchange: (/** @type {FieldEvent} */ e) => setEnabled(store, f, e.target.checked),
             }),
             h('button', {
               type: 'button',
@@ -208,6 +282,7 @@ function flowList(store, all, flows) {
 }
 
 // A new flow starts empty, on its schedule node, with every node there is in the palette above its canvas.
+/** @param {Store} store */
 function openNewFlow(store) {
   view.tab = 'flows';
   const flow = makeFlow();
@@ -216,6 +291,7 @@ function openNewFlow(store) {
   addFlow(store, flow);
 }
 
+/** @param {Store} store */
 const openTemplates = (store) => {
   view.tab = 'templates';
   store.refresh();
@@ -224,12 +300,16 @@ const openTemplates = (store) => {
 // --- Templates tab ---
 
 // Saves the flow as a template of the Templates tab, under a name and a short description.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ */
 function saveAsTemplate(store, flow) {
   const dialog = openDialog({
     title: 'Save as template',
     body: h('form', {
       class: 'stack',
-      onsubmit: (e) => {
+      onsubmit: (/** @type {SubmitEvent & { currentTarget: HTMLFormElement }} */ e) => {
         e.preventDefault();
         const data = new FormData(e.currentTarget);
         const name = String(data.get('name') ?? '').trim() || flow.name;
@@ -249,6 +329,10 @@ function saveAsTemplate(store, flow) {
   });
 }
 
+/**
+ * @param {Store} store
+ * @param {CronTemplate} t
+ */
 function removeTemplate(store, t) {
   const before = structuredClone(store.get(COLLECTION).templates ?? []);
   store.update(COLLECTION, (d) => {
@@ -257,6 +341,12 @@ function removeTemplate(store, t) {
   toast(`Removed the template “${t.name}”`, { undo: () => store.update(COLLECTION, (d) => { d.templates = before; }) });
 }
 
+// A built-in template has no id or project; the blank one starts a flow with one AI step.
+/**
+ * @param {Store} store
+ * @param {{ name: string, about: string, schedule: CronSchedule, steps: Array<Omit<CronStep, 'id'>>, projectId?: string, blank?: boolean }} template
+ * @param {{ remove?: (() => void) | null }} [options]
+ */
 function templateCard(store, { name, about, schedule, steps, projectId = '', blank = false }, { remove = null } = {}) {
   const project = projectId ? store.get('projects').projects.find((p) => p.id === projectId) : null;
   return h('article', { class: 'card stack cron-template-card' },
@@ -286,6 +376,7 @@ function templateCard(store, { name, about, schedule, steps, projectId = '', bla
     }, icon('plus'), blank ? 'Start blank' : 'Use template')));
 }
 
+/** @param {Store} store */
 function templatesTab(store) {
   const blank = { name: 'Blank flow', about: 'One AI step to start with. Add data, conditions and outputs around it.', schedule: makeFlow().schedule, steps: [{ type: 'ai' }], blank: true };
   const builtIn = h('div', { class: 'cron-template-grid' }, [...TEMPLATES, blank].map((t) => templateCard(store, t)));
@@ -303,12 +394,18 @@ function templatesTab(store) {
 // --- Runs tab ---
 
 const RUN_FILTERS = [['all', 'All'], ['running', 'Running'], ['error', 'Failed'], ['stopped', 'Stopped'], ['dry', 'Tests']];
+/**
+ * @param {CronRun} r
+ * @param {string} key
+ */
 const runMatches = (r, key) => (key === 'all' ? true : key === 'dry' ? r.dry : key === 'error' ? ['error', 'lost'].includes(runState(r)) : runState(r) === key);
 
+/** @param {Store} store */
 function runsTab(store) {
   const { flows, runs } = store.get(COLLECTION);
   const shown = runs.filter((r) => runMatches(r, view.runs));
   watchTerminals(store, sessionsOf(shown));
+  /** @param {string} key */
   const count = (key) => runs.filter((r) => runMatches(r, key)).length;
   return h('section', { class: 'card stack' },
     h('div', { class: 'row between' },
@@ -333,6 +430,11 @@ function runsTab(store) {
 
 // --- Canvas ---
 
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ */
 function stepSummary(store, flow, step) {
   if (step.type === 'gather') {
     const sources = sourcesOf(step);
@@ -347,7 +449,7 @@ function stepSummary(store, flow, step) {
   if (step.type === 'stop') return stopLabel(step);
   if (step.type === 'profile') {
     const id = withFlowProject(flow, step).projectId;
-    const edited = { merge: ' · keeps hand edits', replace: ' · replaces hand edits', keep: ' · skips an edited profile' }[profileEditedMode(step)];
+    const edited = /** @type {Record<string, string>} */ ({ merge: ' · keeps hand edits', replace: ' · replaces hand edits', keep: ' · skips an edited profile' })[profileEditedMode(step)];
     return id ? `${projectName(store, id)}${edited}` : 'Choose a project';
   }
   if (step.type === 'dev') {
@@ -360,13 +462,18 @@ function stepSummary(store, flow, step) {
 }
 
 // A step's node can be dragged onto a + to move it there; the schedule node stays first.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {{ id: string, iconName: IconName, kind: string, title: string, sub: string, status?: string, pipe?: string }} node
+ */
 function node(store, flow, { id, iconName, kind, title, sub, status, pipe = '' }) {
   const step = id !== 'trigger';
   return h('button', {
     type: 'button',
     class: `flow-node${view.node === id ? ' selected' : ''}${status ? ` ${status}` : ''}`,
     draggable: step ? 'true' : null,
-    ondragstart: step ? (e) => startDrag(e, `move:${id}`) : null,
+    ondragstart: step ? (/** @type {NodeDrag} */ e) => startDrag(e, `move:${id}`) : null,
     ondragend: step ? endDrag : null,
     onclick: () => {
       view.node = id;
@@ -383,17 +490,33 @@ function node(store, flow, { id, iconName, kind, title, sub, status, pipe = '' }
 // --- Building a flow: adding, moving and piping nodes ---
 
 const DRAG_TYPE = 'application/x-cron-node';
+/**
+ * @param {NodeDrag} e
+ * @param {string} what
+ */
 const startDrag = (e, what) => {
   e.dataTransfer.setData(DRAG_TYPE, what);
   e.dataTransfer.effectAllowed = 'copyMove';
   e.currentTarget.closest('.cron-editor')?.classList.add('dragging');
 };
+/** @param {NodeDrag} e */
 const endDrag = (e) => e.currentTarget.closest('.cron-editor')?.classList.remove('dragging');
 
 // Tests are kept by step id and their variables are rebuilt from the steps before, so an edit only drops the tests
 // of the steps from `index` on, whose input may now differ. The steps before keep their data.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {number} index
+ */
 const clearTestsFrom = (store, flow, index) => clearTests(store, flow.id, flow.steps.slice(Math.max(0, index)).map((s) => s.id));
 
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {number} index
+ * @param {string} type
+ */
 function addStepAt(store, flow, index, type) {
   const step = makeStep(type);
   clearTestsFrom(store, flow, index);
@@ -403,6 +526,12 @@ function addStepAt(store, flow, index, type) {
 }
 
 // Moves a step so that it lands at `index` of the list as it is now (the position of a + on the canvas).
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {string} id
+ * @param {number} index
+ */
 function moveStepTo(store, flow, id, index) {
   const i = flow.steps.findIndex((s) => s.id === id);
   const at = index > i ? index - 1 : index;
@@ -417,6 +546,10 @@ function moveStepTo(store, flow, id, index) {
 }
 
 // Every node there is, always in view: a click adds one after the selected node, a drag puts it on any +.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ */
 function nodePalette(store, flow) {
   const selected = flow.steps.findIndex((s) => s.id === view.node);
   return h('div', { class: 'flow-palette' },
@@ -428,13 +561,19 @@ function nodePalette(store, flow) {
         role: 'listitem',
         draggable: 'true',
         title: about,
-        ondragstart: (e) => startDrag(e, `new:${type}`),
+        ondragstart: (/** @type {NodeDrag} */ e) => startDrag(e, `new:${type}`),
         ondragend: endDrag,
         onclick: () => addStepAt(store, flow, selected + 1, type),
       }, h('span', { class: `flow-node-icon kind-${type}` }, icon(iconName)), label))));
 }
 
 // What a step reads as {{input}}: the step before it, any earlier step, or nothing.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {number} index
+ */
 function inputPick(store, flow, step, index) {
   if (index === 0) return null;
   const options = [
@@ -454,6 +593,10 @@ function inputPick(store, flow, step, index) {
 }
 
 // The badge on a node whose input is not the step just before it.
+/**
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ */
 function pipeLabel(flow, step) {
   if (!step.from) return '';
   if (step.from === INPUT_NONE) return 'No input';
@@ -461,6 +604,11 @@ function pipeLabel(flow, step) {
   return n < 0 ? '' : `Input from ${n + 1}`;
 }
 
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {number} index
+ */
 function insertStep(store, flow, index) {
   const dialog = openDialog({
     title: 'Add a step',
@@ -479,16 +627,21 @@ function insertStep(store, flow, index) {
 }
 
 // A + takes a node dropped on it: a new one from the palette, or a step moved from elsewhere on the canvas.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {number} index
+ */
 const link = (store, flow, index) =>
   h('div', {
     class: 'flow-link',
-    ondragover: (e) => {
+    ondragover: (/** @type {NodeDrag} */ e) => {
       if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
       e.preventDefault();
       e.currentTarget.classList.add('drop');
     },
-    ondragleave: (e) => e.currentTarget.classList.remove('drop'),
-    ondrop: (e) => {
+    ondragleave: (/** @type {NodeDrag} */ e) => e.currentTarget.classList.remove('drop'),
+    ondrop: (/** @type {NodeDrag} */ e) => {
       const what = e.dataTransfer.getData(DRAG_TYPE);
       if (!what) return;
       e.preventDefault();
@@ -500,13 +653,19 @@ const link = (store, flow, index) =>
   },
     h('button', { type: 'button', class: 'flow-add', title: 'Add a step here', 'aria-label': 'Add a step here', onclick: () => insertStep(store, flow, index) }, icon('plus')));
 
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ */
 function canvas(store, flow) {
   const last = lastRunOf(store, flow.id);
   const tested = testsOf(store, flow.id);
+  /** @param {string} id */
   const statusOfStep = (id) => {
     const s = tested.get(id) ?? last?.steps.find((x) => x.stepId === id);
     return s ? (s.ok ? 'ok' : 'bad') : '';
   };
+  /** @type {HTMLElement[]} */
   const parts = [node(store, flow, { id: 'trigger', iconName: 'clock', kind: 'trigger', title: 'Schedule', sub: scheduleLabel(flow.schedule) })];
   flow.steps.forEach((s, i) => {
     const [, label, iconName] = typeOf(s.type);
@@ -528,6 +687,11 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 // Joins each node and link to the next one, centre to centre (the nodes and buttons cover their part). On one row that is a straight line; when the next
 // one wraps to a new row, the line goes out, down into the gap between the rows, back across
 // and into it, so a wrapped step still reads as the one after.
+/**
+ * @param {HTMLElement} canvas
+ * @param {SVGElement} svg
+ * @param {HTMLElement[]} parts
+ */
 function drawWires(canvas, svg, parts) {
   const base = canvas.getBoundingClientRect();
   if (!base.width) return;
@@ -535,7 +699,12 @@ function drawWires(canvas, svg, parts) {
     const r = p.getBoundingClientRect();
     return { left: r.left - base.left, right: r.right - base.left, top: r.top - base.top, bottom: r.bottom - base.top, mid: r.top - base.top + r.height / 2, cx: r.left - base.left + r.width / 2 };
   });
+  /**
+   * @param {{ top: number, bottom: number }} a
+   * @param {{ top: number, bottom: number }} b
+   */
   const sameRow = (a, b) => a.top < b.bottom && b.top < a.bottom;
+  /** @type {string[]} */
   const d = [];
   for (let i = 0; i < boxes.length - 1; i++) {
     const a = boxes[i];
@@ -554,6 +723,11 @@ function drawWires(canvas, svg, parts) {
 
 // --- Inspector ---
 
+/**
+ * @param {string} label
+ * @param {Child} control
+ * @param {string | null} [hint]
+ */
 const field = (label, control, hint) => h('label', null, label, control, hint ? h('span', { class: 'muted small' }, hint) : null);
 
 // --- Variables in fields ---
@@ -561,21 +735,28 @@ const field = (label, control, hint) => h('label', null, label, control, hint ? 
 // Saving goes through the field's change handler; the re-render keeps its focus and cursor (keep-fields).
 
 // Puts `{{name}}` in the field at its cursor (or its end, when it never had focus) and saves it.
+/**
+ * @param {string} key
+ * @param {string} name
+ */
 function insertVar(key, name) {
-  const el = document.querySelector(`[data-var-field="${CSS.escape(key)}"]`);
+  // A field varField() made.
+  const el = /** @type {HTMLInputElement | HTMLTextAreaElement | null} */ (document.querySelector(`[data-var-field="${CSS.escape(key)}"]`));
   if (!el) return false;
   // A field on its Preview tab goes back to Edit, so the variable is seen going in.
-  if (el.hidden) el.closest('.cron-col')?.querySelector('[data-tab="edit"]')?.click();
+  if (el.hidden) /** @type {HTMLButtonElement | null | undefined} */ (el.closest('.cron-col')?.querySelector('[data-tab="edit"]'))?.click();
   const token = `{{${name}}}`;
   const at = view.cursor?.key === key ? view.cursor : { start: el.value.length, end: el.value.length };
   el.focus();
   el.setRangeText(token, Math.min(at.start, el.value.length), Math.min(at.end, el.value.length), 'end');
-  view.cursor = { key, start: el.selectionEnd, end: el.selectionEnd };
+  // setRangeText leaves a selection, so it has an end.
+  view.cursor = { key, start: /** @type {number} */ (el.selectionEnd), end: /** @type {number} */ (el.selectionEnd) };
   el.dispatchEvent(new Event('change'));
   return true;
 }
 
 // Chips and tree keys keep the field's focus: a click that blurred it would save and re-render first, losing the click.
+/** @param {Event} e */
 const keepFocus = (e) => e.preventDefault();
 
 // The project's parts a field offers as chips; the test input lists the rest ({{project.domain}}, {{project.repos}}…).
@@ -596,6 +777,13 @@ const DEV_PARTS = [
 ];
 
 // The variables a step can use: the usual ones, the project's when it has one, then every earlier step by number.
+/**
+ * @param {CronFlow} flow
+ * @param {number} index
+ * @param {string[][]} [extra]
+ * @param {string} [projectId]
+ * @returns {string[][]}
+ */
 function varNames(flow, index, extra = [], projectId = withFlowProject(flow, flow.steps[index] ?? {}).projectId) {
   return [
     ['input', 'The previous step’s output'],
@@ -614,6 +802,14 @@ function varNames(flow, index, extra = [], projectId = withFlowProject(flow, flo
 // A field that takes variables, with its variables under it as chips. A text area given `vars` (a function, so
 // the values are only worked out when asked) gets Edit and Preview tabs: Preview shows the text with each {{…}}
 // filled from the test data or the last run.
+/**
+ * @param {string} label
+ * @param {HTMLInputElement | HTMLTextAreaElement} control
+ * @param {string} key
+ * @param {string[][]} names
+ * @param {string | null} [hint]
+ * @param {() => Vars} [vars]
+ */
 function varField(label, control, key, names, hint, vars) {
   control.dataset.varField = key;
   const remember = () => {
@@ -632,6 +828,7 @@ function varField(label, control, key, names, hint, vars) {
   const tabs = [['edit', 'Edit'], ['preview', 'Preview']].map(([tab, text]) =>
     h('button', { type: 'button', role: 'tab', class: 'sub-tab', 'data-tab': tab, onclick: () => show(tab === 'preview') }, text));
   // Switched in place: a re-render would save the field first and lose its cursor.
+  /** @param {boolean} on */
   const sync = (on) => {
     control.hidden = on;
     box.hidden = !on;
@@ -640,8 +837,10 @@ function varField(label, control, key, names, hint, vars) {
       b.classList.toggle('active', active);
       b.setAttribute('aria-selected', String(active));
     });
-    if (on) box.replaceChildren(...previewOf(control.value, vars()));
+    // Only text areas with vars get here.
+    if (on) box.replaceChildren(...previewOf(control.value, /** @type {() => Vars} */ (vars)()));
   };
+  /** @param {boolean} on */
   const show = (on) => {
     if (on) view.preview.add(key);
     else view.preview.delete(key);
@@ -660,6 +859,10 @@ function varField(label, control, key, names, hint, vars) {
 }
 
 // The text as a step would send it: filled variables marked, the ones with no value yet left as written.
+/**
+ * @param {string} text
+ * @param {Vars} vars
+ */
 function previewOf(text, vars) {
   const parts = fillParts(text, vars);
   const missing = [...new Set(parts.filter((p) => p.missing).map((p) => p.name))];
@@ -676,7 +879,15 @@ function previewOf(text, vars) {
 }
 
 // A JSON value as a folding tree. A key's click gives its variable path to `pick`; with no path it is not clickable.
+/**
+ * @param {unknown} value
+ * @param {string | null} path
+ * @param {((path: string) => void) | null} pick
+ * @param {number} [depth]
+ * @returns {(label: string) => HTMLElement}
+ */
 function jsonTree(value, path, pick, depth = 0) {
+  /** @param {string} label */
   const keyButton = (label) => (path && pick
     ? h('button', { type: 'button', class: 'json-key', title: `{{${path}}}`, onmousedown: keepFocus, onclick: () => pick(path) }, label)
     : h('span', { class: 'json-key' }, label));
@@ -693,21 +904,39 @@ function jsonTree(value, path, pick, depth = 0) {
 }
 
 // The tree of everything a step can read, picking into the field last focused.
+/** @param {Vars} vars */
 function inputTree(vars) {
   const tree = varsTree(vars);
+  /** @param {string} path */
   const pick = (path) => {
     if (!view.field || !insertVar(view.field, path)) toast('Click in a field first, then on the key to add.');
   };
   return h('div', { class: 'json-tree' }, Object.entries(tree).map(([k, v]) => jsonTree(v, k, pick)(k)));
 }
 
+/**
+ * @param {string | number | null | undefined} value
+ * @param {string[][]} options
+ * @param {(value: string) => void} onchange
+ * @param {object} [attrs]
+ */
 function select(value, options, onchange, attrs = {}) {
-  return h('select', { ...attrs, value: String(value ?? ''), onchange: (e) => onchange(e.target.value) },
+  return h('select', { ...attrs, value: String(value ?? ''), onchange: (/** @type {FieldEvent} */ e) => onchange(e.target.value) },
     options.map(([v, l]) => h('option', { value: String(v) }, l)));
 }
 
 // A searchable project list with each project's icon, since a board with many projects makes a plain dropdown long.
 // `none` labels the empty choice; `list` narrows the projects and `name` changes how one reads.
+/**
+ * @typedef {{ list?: Project[], name?: (p: Project) => string }} ProjectPickOptions
+ */
+/**
+ * @param {Store} store
+ * @param {string | undefined} value
+ * @param {string} none
+ * @param {(id: string) => void} onPick
+ * @param {ProjectPickOptions} [options]
+ */
 function projectPick(store, value, none, onPick, { list = projectsOf(store), name = (p) => p.name } = {}) {
   return pickChip({
     value: value || null,
@@ -720,28 +949,57 @@ function projectPick(store, value, none, onPick, { list = projectsOf(store), nam
 }
 
 // A step's own project: empty follows the flow's, so most steps never need one.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {string | undefined} value
+ * @param {(id: string) => void} onPick
+ * @param {ProjectPickOptions & { none?: string }} [options]
+ */
 function stepProjectPick(store, flow, value, onPick, { none = 'None', ...opts } = {}) {
   const fp = flowProjectId(flow);
   return projectPick(store, value === fp ? '' : value, fp ? `Flow’s project (${projectName(store, fp)})` : none, onPick, opts);
 }
 
+/**
+ * @param {string} label
+ * @param {boolean} on
+ * @param {() => void} onclick
+ * @param {string} title
+ */
 const chip = (label, on, onclick, title) =>
   h('button', { type: 'button', class: on ? 'cron-day on' : 'cron-day', 'aria-pressed': String(on), title, onclick }, label);
+/**
+ * @template T
+ * @param {T[]} list
+ * @param {T} v
+ */
 const toggled = (list, v) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
+/**
+ * @param {string} label
+ * @param {() => void} onclick
+ */
 const shortcut = (label, onclick) => h('button', { type: 'button', class: 'btn-link small', onclick }, label);
 
 // A time an hour after the last one that is not taken yet, for "Add a time".
+// timesOf() always gives one time at least.
+/** @param {string[]} times */
 function freeTime(times) {
-  const [hh, mm] = times.at(-1).split(':').map(Number);
+  const [hh, mm] = /** @type {string} */ (times.at(-1)).split(':').map(Number);
   for (let i = 1; i < 24; i++) {
     const t = `${String((hh + i) % 24).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
     if (!times.includes(t)) return t;
   }
-  return times.at(-1);
+  return /** @type {string} */ (times.at(-1));
 }
 
+/**
+ * @param {CronSchedule} s
+ * @param {(patch: Partial<CronSchedule>) => void} set
+ */
 function timesField(s, set) {
   const times = timesOf(s);
+  /** @param {string[]} list */
   const save = (list) => {
     const next = [...new Set(list.filter(validTime))].sort();
     if (next.length) set({ times: next, time: next[0] });
@@ -749,7 +1007,7 @@ function timesField(s, set) {
   return h('div', { class: 'cron-days', role: 'group', 'aria-label': 'Times' },
     h('span', { class: 'muted small' }, 'At'),
     times.map((t, i) => h('span', { class: 'cron-time' },
-      h('input', { type: 'time', value: t, 'aria-label': `Time ${i + 1}`, onchange: (e) => save(times.map((x, j) => (j === i ? e.target.value : x))) }),
+      h('input', { type: 'time', value: t, 'aria-label': `Time ${i + 1}`, onchange: (/** @type {FieldEvent} */ e) => save(times.map((x, j) => (j === i ? e.target.value : x))) }),
       times.length > 1
         ? h('button', { type: 'button', class: 'icon-btn', title: 'Remove this time', 'aria-label': `Remove ${t}`, onclick: () => save(times.filter((_, j) => j !== i)) }, icon('x'))
         : null)),
@@ -757,6 +1015,7 @@ function timesField(s, set) {
 }
 
 // Live check of the expression while typing; the flow saves it on change, so typing never re-renders the form.
+/** @param {string} expr */
 function cronHint(expr) {
   const err = cronError(expr);
   if (err) return h('span', { class: 'cron-error' }, err);
@@ -765,17 +1024,25 @@ function cronHint(expr) {
   return h('span', null, `Next: ${next.map((d) => timeOf(d.toISOString())).join(' · ')}`);
 }
 
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ */
 function triggerForm(store, flow) {
   const s = flow.schedule;
+  /** @param {Partial<CronSchedule>} patch */
   const set = (patch) => updateFlow(store, flow.id, (f) => Object.assign(f.schedule, patch));
   // Flows saved as "weekly" (one day) edit as chosen days.
   const every = s.every === 'weekly' ? 'days' : s.every;
+  /** @param {string} next */
   const repeat = (next) => {
     if (next === 'custom' && !String(s.cron ?? '').trim()) set({ every: next, cron: cronOf(s) });
-    else if (next === 'days' && s.every === 'weekly') set({ every: next, days: daysOf(s) });
+    else if (next === 'days' && s.every === 'weekly') set({ every: next, days: /** @type {number[]} */ (daysOf(s)) });
     else set({ every: next });
   };
-  const days = daysOf({ ...s, every: s.every === 'weekly' ? 'weekly' : 'days' });
+  // Never null for 'weekly' or 'days'.
+  const days = /** @type {number[]} */ (daysOf({ ...s, every: s.every === 'weekly' ? 'weekly' : 'days' }));
+  /** @param {number[]} list */
   const setDays = (list) => list.length && set({ every: 'days', days: list });
   const monthDays = monthDaysOf(s);
   const months = (s.months ?? []).length ? monthsOf(s) : [];
@@ -784,13 +1051,13 @@ function triggerForm(store, flow) {
     h('div', { class: 'row cron-fields' },
       field('Repeat', select(every, REPEATS, repeat)),
       every === 'interval'
-        ? field('Minutes between runs', h('input', { type: 'number', min: 5, step: 5, value: String(s.minutes ?? 60), onchange: (e) => set({ minutes: Math.max(5, Number(e.target.value) || 60) }) }))
+        ? field('Minutes between runs', h('input', { type: 'number', min: 5, step: 5, value: String(s.minutes ?? 60), onchange: (/** @type {FieldEvent} */ e) => set({ minutes: Math.max(5, Number(e.target.value) || 60) }) }))
         : null,
       every === 'custom'
         ? field('Cron expression', h('input', {
             class: 'mono-text', value: s.cron ?? '', autocomplete: 'off', spellcheck: 'false', placeholder: '0 9 * * 1-5',
-            oninput: (e) => hint.replaceChildren(cronHint(e.target.value)),
-            onchange: (e) => set({ cron: e.target.value.trim().replace(/\s+/g, ' ') }),
+            oninput: (/** @type {FieldEvent} */ e) => hint.replaceChildren(cronHint(e.target.value)),
+            onchange: (/** @type {FieldEvent} */ e) => set({ cron: e.target.value.trim().replace(/\s+/g, ' ') }),
           }))
         : null),
     every === 'days'
@@ -818,8 +1085,8 @@ function triggerForm(store, flow) {
     every !== 'interval' && every !== 'custom' ? timesField(s, set) : null,
     every === 'interval'
       ? h('div', { class: 'row cron-fields' },
-          field('Active from', h('input', { type: 'time', value: s.from ?? '', onchange: (e) => set({ from: e.target.value }) })),
-          field('Until', h('input', { type: 'time', value: s.to ?? '', onchange: (e) => set({ to: e.target.value }) }), 'Leave both empty to run around the clock.'))
+          field('Active from', h('input', { type: 'time', value: s.from ?? '', onchange: (/** @type {FieldEvent} */ e) => set({ from: e.target.value }) })),
+          field('Until', h('input', { type: 'time', value: s.to ?? '', onchange: (/** @type {FieldEvent} */ e) => set({ to: e.target.value }) }), 'Leave both empty to run around the clock.'))
       : null,
     every === 'custom'
       ? h('p', { class: 'muted small' },
@@ -832,6 +1099,7 @@ function triggerForm(store, flow) {
       'Flows run in the runners, whether or not the board is open, while bun start runs. A run missed while they were stopped (or the Mac slept) happens once when they start again.'));
 }
 
+/** @type {Record<string, string | null>} */
 const SOURCE_ABOUT = {
   page: 'Read through the r.jina.ai page reader when the flow runs, as text with its headings and links, without images. Long pages are cut at about 12,000 characters, linked pages at about 4,000 each.',
   history: 'The final output of this flow’s last successful runs (not test runs), so the AI can avoid repeating itself.',
@@ -840,6 +1108,10 @@ const SOURCE_ABOUT = {
 };
 
 // The searchable list of sources, each with its icon.
+/**
+ * @param {string} value
+ * @param {(source: string) => void} onPick
+ */
 const sourcePick = (value, onPick) => pickChip({
   value,
   options: SOURCES.map(([v, label, name]) => ({ value: v, label, plainIcon: () => icon(name) })),
@@ -848,7 +1120,14 @@ const sourcePick = (value, onPick) => pickChip({
 });
 
 // One source of a data step: what it reads, its settings, and the label that heads its data.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {CronSource} own
+ * @param {{ setSource: (id: string, patch: Partial<CronSource>) => void, remove: (() => void) | null }} actions
+ */
 function sourceCard(store, flow, own, { setSource, remove }) {
+  /** @param {Partial<CronSource>} patch */
   const set = (patch) => setSource(own.id, patch);
   const src = withFlowProject(flow, own);
   const about = src.source in SOURCE_ABOUT ? SOURCE_ABOUT[src.source] : 'Read from your board when the flow runs, as plain text for the next step.';
@@ -859,7 +1138,7 @@ function sourceCard(store, flow, own, { setSource, remove }) {
       src.source === 'project' ? field('Project', stepProjectPick(store, flow, own.projectId, (projectId) => set({ projectId }), { none: 'Choose…' })) : null,
       src.source === 'page' ? field('Project', stepProjectPick(store, flow, own.projectId, (projectId) => set({ projectId }), { none: 'None: use the link below' })) : null,
       src.source === 'history'
-        ? field('How many runs', h('input', { type: 'number', min: 1, max: 20, value: String(src.count ?? 5), onchange: (e) => set({ count: Math.min(20, Math.max(1, Number(e.target.value) || 5)) }) }))
+        ? field('How many runs', h('input', { type: 'number', min: 1, max: 20, value: String(src.count ?? 5), onchange: (/** @type {FieldEvent} */ e) => set({ count: Math.min(20, Math.max(1, Number(e.target.value) || 5)) }) }))
         : null,
       src.source === 'flow'
         ? field('Flow', pickChip({
@@ -873,35 +1152,45 @@ function sourceCard(store, flow, own, { setSource, remove }) {
       remove ? h('button', { type: 'button', class: 'icon-btn', title: 'Remove source', 'aria-label': 'Remove source', onclick: remove }, icon('trash')) : null),
     src.source === 'page'
       ? varField(src.projectId ? 'Path or link (optional)' : 'Link',
-          h('input', { value: src.url ?? '', autocomplete: 'off', placeholder: src.projectId ? '/blog or https://docs.example.com' : 'example.com/blog', onchange: (e) => set({ url: e.target.value.trim() }) }),
+          h('input', { value: src.url ?? '', autocomplete: 'off', placeholder: src.projectId ? '/blog or https://docs.example.com' : 'example.com/blog', onchange: (/** @type {FieldEvent} */ e) => set({ url: e.target.value.trim() }) }),
           `${own.id}:url`, src.projectId ? PROJECT_NAMES.slice(1, 3).concat([['project.repoUrl', 'The project’s first GitHub repo, as a link']]) : [],
           src.projectId ? 'Empty reads the project’s website. A path such as /blog reads that page of it; a full link reads any page, such as {{project.repoUrl}}.' : null)
       : null,
     src.source === 'page'
       ? field('Linked pages to read too',
-          h('input', { type: 'number', min: 0, max: MAX_FOLLOW, value: String(src.follow ?? 0), onchange: (e) => set({ follow: Math.min(MAX_FOLLOW, Math.max(0, Math.round(Number(e.target.value) || 0))) }) }),
+          h('input', { type: 'number', min: 0, max: MAX_FOLLOW, value: String(src.follow ?? 0), onchange: (/** @type {FieldEvent} */ e) => set({ follow: Math.min(MAX_FOLLOW, Math.max(0, Math.round(Number(e.target.value) || 0))) }) }),
           'Also reads the best pages of the same site it links to, such as a blog’s latest posts or a site’s main sections, so the next step gets their content and not only a list of links. 0 reads this page alone.')
       : null,
     src.source === 'text'
-      ? varField('Text', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, src.text ?? ''), `${own.id}:text`,
+      ? varField('Text', h('textarea', { rows: 4, onchange: (/** @type {FieldEvent} */ e) => set({ text: e.target.value }) }, src.text ?? ''), `${own.id}:text`,
           varNames(flow, flow.steps.findIndex((s) => sourcesOf(s).some((x) => x.id === own.id)), [], src.projectId), null,
           () => previewVars(store, flow, flow.steps.find((s) => sourcesOf(s).some((x) => x.id === own.id)), src.projectId))
       : null,
     field('Label (optional)',
-      h('input', { value: src.label ?? '', autocomplete: 'off', placeholder: sourceLabel(store, { ...src, label: '' }), onchange: (e) => set({ label: e.target.value.trim() }) })),
+      h('input', { value: src.label ?? '', autocomplete: 'off', placeholder: sourceLabel(store, { ...src, label: '' }), onchange: (/** @type {FieldEvent} */ e) => set({ label: e.target.value.trim() }) })),
     about ? h('p', { class: 'muted small' }, about) : null);
 }
 
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ */
 function gatherForm(store, flow, step) {
   const sources = sourcesOf(step);
   // Edits move a step saved with one source on the step itself to the list form.
+  /** @param {(list: CronSource[]) => CronSource[] | void} mutate */
   const edit = (mutate) => updateFlow(store, flow.id, (f) => {
     const s = f.steps.find((x) => x.id === step.id);
     if (!s) return;
     const list = sourcesOf(s).map((x) => ({ ...x }));
-    for (const k of ['source', 'projectId', 'url', 'text', 'count']) delete s[k];
+    for (const k of /** @type {const} */ (['source', 'projectId', 'url', 'text', 'count'])) delete s[k];
     s.sources = mutate(list) ?? list;
   });
+  /**
+   * @param {string} id
+   * @param {Partial<CronSource>} patch
+   */
   const setSource = (id, patch) => edit((list) => list.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   const index = flow.steps.indexOf(step);
   return h('div', { class: 'stack' },
@@ -914,22 +1203,29 @@ function gatherForm(store, flow, step) {
     sources.length > 1 ? h('p', { class: 'muted small' }, 'Each source’s data goes under a heading with its label, in this order.') : null,
     index > 0
       ? h('label', { class: 'check' },
-          h('input', { type: 'checkbox', checked: Boolean(step.append), onchange: (e) => updateFlow(store, flow.id, (f) => { const s = f.steps.find((x) => x.id === step.id); if (s) s.append = e.target.checked; }) }),
+          h('input', { type: 'checkbox', checked: Boolean(step.append), onchange: (/** @type {FieldEvent} */ e) => updateFlow(store, flow.id, (f) => { const s = f.steps.find((x) => x.id === step.id); if (s) s.append = e.target.checked; }) }),
           ' Add to the previous step’s output instead of replacing it')
       : null);
 }
 
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ */
 function stepForm(store, flow, step) {
+  /** @param {Partial<CronStep>} patch */
   const set = (patch) => updateFlow(store, flow.id, (f) => Object.assign(f.steps.find((x) => x.id === step.id) ?? {}, patch));
   const names = varNames(flow, flow.steps.indexOf(step));
+  /** @param {string} name */
   const key = (name) => `${step.id}:${name}`;
   const vars = () => previewVars(store, flow, step);
   if (step.type === 'gather') return gatherForm(store, flow, step);
   if (step.type === 'ai') {
     return h('div', { class: 'stack' },
-      varField('Prompt', h('textarea', { rows: 6, class: 'mono-text', onchange: (e) => set({ prompt: e.target.value }) }, step.prompt), key('prompt'), names,
+      varField('Prompt', h('textarea', { rows: 6, class: 'mono-text', onchange: (/** @type {FieldEvent} */ e) => set({ prompt: e.target.value }) }, step.prompt), key('prompt'), names,
         'Ask for JSON to pick its parts in later steps, such as {{step2.title}}.', vars),
-      varField('System instructions (optional)', h('textarea', { rows: 2, onchange: (e) => set({ system: e.target.value }) }, step.system ?? ''), key('system'), names, null, vars),
+      varField('System instructions (optional)', h('textarea', { rows: 2, onchange: (/** @type {FieldEvent} */ e) => set({ system: e.target.value }) }, step.system ?? ''), key('system'), names, null, vars),
       h('div', { class: 'row' },
         h('span', { class: 'muted small' }, 'Model'),
         modelChip({ value: step.model, nullable: true, nullLabel: `Default (${modelForTask(store, AI_TASK) || 'not set'})`, onPick: (model) => set({ model: model ?? '' }) })),
@@ -937,7 +1233,7 @@ function stepForm(store, flow, step) {
   }
   if (step.type === 'task') {
     return h('div', { class: 'stack' },
-      varField('Task title', h('input', { value: step.title, autocomplete: 'off', onchange: (e) => set({ title: e.target.value }) }), key('title'), names,
+      varField('Task title', h('input', { value: step.title, autocomplete: 'off', onchange: (/** @type {FieldEvent} */ e) => set({ title: e.target.value }) }), key('title'), names,
         'The first line is used. The full input becomes the description.'),
       h('div', { class: 'row cron-fields' },
         field('Project', stepProjectPick(store, flow, step.projectId, (projectId) => set({ projectId }), { none: 'Personal' })),
@@ -949,7 +1245,7 @@ function stepForm(store, flow, step) {
     return h('div', { class: 'stack' },
       h('div', { class: 'row cron-fields' },
         field('Stop when', select(step.when, STOP_WHEN, (when) => set({ when }))),
-        needsText ? field('Words', h('input', { value: step.text ?? '', autocomplete: 'off', onchange: (e) => set({ text: e.target.value }) }), 'Not case-sensitive.') : null),
+        needsText ? field('Words', h('input', { value: step.text ?? '', autocomplete: 'off', onchange: (/** @type {FieldEvent} */ e) => set({ text: e.target.value }) }), 'Not case-sensitive.') : null),
       h('p', { class: 'muted small' }, 'The run ends here without counting as a failure, and the steps after this one are skipped. Put it after a data step to stay quiet when there is nothing to report.'));
   }
   if (step.type === 'profile') {
@@ -976,6 +1272,7 @@ function stepForm(store, flow, step) {
     const value = devRunValue(step);
     // A preset removed in Settings still shows as chosen, so the step does not silently change what it runs.
     if (!options.some(([v]) => v === value)) options.splice(1, 0, [value, 'Removed preset']);
+    /** @param {string} v */
     const run = (v) => {
       if (v.startsWith('preset:')) return set({ mode: 'preset', preset: v.slice(7) });
       // A custom command starts from what the step ran until now, so it only needs the change.
@@ -999,28 +1296,28 @@ function stepForm(store, flow, step) {
           list: folders, name: (p) => (p.localPath ? p.name : `${p.name} (no local folder)`),
         }), 'Projects show here once they have a local folder.')),
       step.mode === 'custom'
-        ? field('Dev command', h('input', { value: step.devCommand ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (e) => set({ devCommand: e.target.value }) }),
+        ? field('Dev command', h('input', { value: step.devCommand ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (/** @type {FieldEvent} */ e) => set({ devCommand: e.target.value }) }),
             'The Dev prompt is passed to it as its last word. A bare --worktree gets a name, as from a task.')
         : null,
       preview ? h('code', { class: 'muted small' }, preview) : null,
       claude
-        ? varField('Dev prompt', h('textarea', { rows: 6, class: 'mono-text', onchange: (e) => set({ prompt: e.target.value }) }, step.prompt ?? ''), key('prompt'), devNames, null, vars)
-        : varField('Command', h('input', { value: step.command ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, placeholder: 'npm run build', onchange: (e) => set({ command: e.target.value }) }), key('command'), devNames,
+        ? varField('Dev prompt', h('textarea', { rows: 6, class: 'mono-text', onchange: (/** @type {FieldEvent} */ e) => set({ prompt: e.target.value }) }, step.prompt ?? ''), key('prompt'), devNames, null, vars)
+        : varField('Command', h('input', { value: step.command ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, placeholder: 'npm run build', onchange: (/** @type {FieldEvent} */ e) => set({ command: e.target.value }) }), key('command'), devNames,
             'Each {{…}} goes in as one quoted word, so text from a model never runs as a command.'),
       h('div', { class: 'row cron-fields' },
         h('label', { class: 'check' },
-          h('input', { type: 'checkbox', checked: waits, onchange: (e) => set({ wait: e.target.checked === !last ? undefined : e.target.checked }) }),
+          h('input', { type: 'checkbox', checked: waits, onchange: (/** @type {FieldEvent} */ e) => set({ wait: e.target.checked === !last ? undefined : e.target.checked }) }),
           ' Wait for the terminal to finish, and pass on what it did'),
         waits
           ? field('Wait at most (minutes)', h('input', {
               type: 'number', min: 1, max: 720, value: String(step.waitMinutes ?? DEV_WAIT_MINUTES),
-              onchange: (e) => set({ waitMinutes: Math.min(720, Math.max(1, Math.round(Number(e.target.value) || DEV_WAIT_MINUTES))) }),
+              onchange: (/** @type {FieldEvent} */ e) => set({ waitMinutes: Math.min(720, Math.max(1, Math.round(Number(e.target.value) || DEV_WAIT_MINUTES))) }),
             }))
           : null),
       claude && devJsonOffered(flow, step)
         ? h('div', { class: 'stack' },
             h('label', { class: 'check' },
-              h('input', { type: 'checkbox', checked: Boolean(step.json), onchange: (e) => set({ json: e.target.checked || undefined }) }),
+              h('input', { type: 'checkbox', checked: Boolean(step.json), onchange: (/** @type {FieldEvent} */ e) => set({ json: e.target.checked || undefined }) }),
               ' Ask for its final output as JSON, for the Run in Dev after it'),
             step.json
               ? h('p', { class: 'muted small' },
@@ -1043,10 +1340,16 @@ function stepForm(store, flow, step) {
         'Needs the runner that bun start starts.'));
   }
   return h('div', { class: 'stack' },
-    varField('Message', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, step.text), key('text'), names, null, vars),
+    varField('Message', h('textarea', { rows: 4, onchange: (/** @type {FieldEvent} */ e) => set({ text: e.target.value }) }, step.text), key('text'), names, null, vars),
     h('p', { class: 'muted small' }, 'Sent to the bell, and to Telegram when Settings › Notifications says so for Cron flows.'));
 }
 
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {string} id
+ * @param {number} by
+ */
 function moveStep(store, flow, id, by) {
   const i = flow.steps.findIndex((s) => s.id === id);
   const j = i + by;
@@ -1057,6 +1360,11 @@ function moveStep(store, flow, id, by) {
 // A test that fails on an earlier step leaves this one without data, so it says where it stopped.
 // A Dev step's test starts its terminal, so its work can be watched; a test that only said what it would start
 // would tell little.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {string} stepId
+ */
 function runTest(store, flow, stepId) {
   const live = flow.steps.find((s) => s.id === stepId)?.type === 'dev';
   testStep(store, flow.id, stepId, { live }).then((r) => {
@@ -1065,9 +1373,15 @@ function runTest(store, flow, stepId) {
 }
 
 // What a step could read before it was tested: earlier test data, else the last run's outputs.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {number} index
+ */
 function knownVars(store, flow, index) {
   const tested = testsOf(store, flow.id);
   const last = lastRunOf(store, flow.id);
+  /** @type {Vars & { $data: Record<string, unknown> }} */
   const vars = { input: '', date: todayISO(), flow: flow.name, $data: {} };
   const step = flow.steps[index];
   const projectId = (step?.type !== 'gather' && step?.projectId) || flowProjectId(flow);
@@ -1076,6 +1390,7 @@ function knownVars(store, flow, index) {
     vars.project = project.name;
     vars.$data.project = project;
   }
+  /** @type {Map<string, { output: string, data: unknown }>} */
   const outs = new Map();
   flow.steps.slice(0, index).forEach((s, i) => {
     const t = tested.get(s.id);
@@ -1097,18 +1412,33 @@ function knownVars(store, flow, index) {
 
 // What a field's Preview fills its variables with: the step's own test, else what it could read before it.
 // A data step's source may have a project of its own.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {CronStep | undefined} step
+ * @param {string} [projectId]
+ * @returns {Vars}
+ */
 function previewVars(store, flow, step, projectId = '') {
-  const index = flow.steps.indexOf(step);
-  const vars = testsOf(store, flow.id).get(step?.id)?.vars ?? knownVars(store, flow, index);
+  const index = flow.steps.indexOf(/** @type {CronStep} */ (step));
+  // No step has no test: get(undefined) is undefined.
+  const vars = testsOf(store, flow.id).get(/** @type {string} */ (step?.id))?.vars ?? knownVars(store, flow, index);
   const project = projectId ? projectVars(store.get('projects').projects.find((p) => p.id === projectId)) : null;
   return project ? { ...vars, project: project.name, $data: { ...vars.$data, project } } : vars;
 }
 
 // The step's test, as n8n shows a node: what it read and what it gave, as JSON. A key in the input goes into the
 // field last focused; a key in the output copies its variable, for the steps after this one.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {number} index
+ */
 function testPanel(store, flow, step, index) {
   const result = testsOf(store, flow.id).get(step.id);
   const vars = result?.vars ?? knownVars(store, flow, index);
+  /** @param {string} path */
   const copy = (path) => navigator.clipboard.writeText(`{{${path}}}`).then(() => toast(`Copied {{${path}}}`), () => toast('Could not copy'));
   const next = flow.steps[index + 1];
   const outTree = result
@@ -1138,7 +1468,9 @@ function testPanel(store, flow, step, index) {
           : null)),
     result?.note ? h('p', { class: 'muted small' }, result.note) : null,
     // A Dev step's test, or a test run of the flow, shows its terminal here as it runs.
-    step.type === 'dev' && result?.ok && result.data?.session ? terminalViewer(store, result.data.session, result.data.cwd) : null,
+    step.type === 'dev' && result?.ok && /** @type {DevTestData | null | undefined} */ (result.data)?.session
+      ? terminalViewer(store, /** @type {string} */ (/** @type {DevTestData} */ (result.data).session), /** @type {DevTestData} */ (result.data).cwd)
+      : null,
     h('div', { class: 'cron-test-grid' },
       h('div', { class: 'cron-col' },
         h('span', { class: 'muted small' }, 'Input · click a key to add it at the cursor'),
@@ -1148,6 +1480,10 @@ function testPanel(store, flow, step, index) {
         outTree)));
 }
 
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ */
 function inspector(store, flow) {
   const step = flow.steps.find((s) => s.id === view.node);
   if (!step) {
@@ -1202,8 +1538,25 @@ function inspector(store, flow) {
 // terminal's output after it ends, until it is closed in Dev, so a run's terminal can be read later. A viewer is made
 // once per terminal and moved into each new page, so its scroll survives re-renders; it reads the runner only while
 // it is on the page. A terminal Dev reads already is shown from Dev's copy.
+/**
+ * @typedef {object} Viewer
+ * @property {string} session
+ * @property {import('../vt.js').Terminal} term
+ * @property {string} state
+ * @property {boolean} running
+ * @property {Exit | null} exit
+ * @property {number} frame
+ * @property {boolean} mirror
+ * @property {HTMLElement} dot
+ * @property {HTMLElement} status
+ * @property {ReturnType<typeof terminalView>} view
+ * @property {HTMLElement} el
+ * @property {() => void} [stop]
+ */
+/** @type {Map<string, Viewer>} */
 const viewers = new Map();
 
+/** @param {Viewer} v */
 function drawViewer(v) {
   v.frame = 0;
   const live = v.mirror ? liveSession(v.session) : null;
@@ -1212,15 +1565,19 @@ function drawViewer(v) {
   const exit = live ? live.exit : v.exit;
   v.view.paint(t);
   v.view.el.hidden = !t.history.length && !t.used();
-  const state = { loading: 'loading', missing: 'gone', offline: 'gone' }[v.state] ?? (running ? 'working' : exit ? (exit.code === 0 ? 'done' : 'failed') : 'idle');
+  const state = /** @type {Record<string, string>} */ ({ loading: 'loading', missing: 'gone', offline: 'gone' })[v.state] ?? (running ? 'working' : exit ? (exit.code === 0 ? 'done' : 'failed') : 'idle');
   v.dot.className = `term-dot dev-${state}`;
-  v.status.textContent = {
+  v.status.textContent = /** @type {Record<string, string>} */ ({
     loading: 'Reading the terminal…',
     missing: 'The runner no longer has this terminal: it was closed in Dev.',
     offline: 'Could not reach the terminal runner. Start it with bun start, then open this again.',
-  }[v.state] ?? (running ? 'Running' : exit ? exitText(exit) : 'Not started yet');
+  })[v.state] ?? (running ? 'Running' : exit ? exitText(exit) : 'Not started yet');
 }
 
+/**
+ * @param {Store} store
+ * @param {Viewer} v
+ */
 function attachViewer(store, v) {
   const paintSoon = () => (v.frame ||= requestAnimationFrame(() => drawViewer(v)));
   if (liveSession(v.session)) {
@@ -1251,7 +1608,8 @@ function attachViewer(store, v) {
       else if (e.t === 'exit') {
         Object.assign(v, { running: false, exit: e.stopped ? { stopped: true, ms: e.ms } : { code: e.code, signal: e.signal, ms: e.ms } });
         term.reset();
-        term.note(exitText(v.exit), v.exit.code === 0 ? 't-meta t-ok' : 't-meta');
+        // Set just above.
+        term.note(exitText(v.exit), /** @type {Exit} */ (v.exit).code === 0 ? 't-meta t-ok' : 't-meta');
       }
       paintSoon();
     },
@@ -1265,10 +1623,17 @@ function attachViewer(store, v) {
   paintSoon();
 }
 
+/**
+ * @param {Store} store
+ * @param {string} session
+ * @param {string} [cwd]
+ * @param {string[]} [taskIds]
+ */
 function terminalViewer(store, session, cwd = '', taskIds = []) {
   let v = viewers.get(session);
   if (!v) {
-    v = { session, term: createTerminal({ cols: 120, rows: 32, background: terminalBackground }), state: 'loading', running: false, exit: null, frame: 0, mirror: false };
+    // Its elements are added just below.
+    v = /** @type {Viewer} */ ({ session, term: createTerminal({ cols: 120, rows: 32, background: terminalBackground }), state: 'loading', running: false, exit: null, frame: 0, mirror: false });
     v.dot = h('span', { class: 'term-dot' });
     v.status = h('span', { class: 'muted small grow' });
     v.view = terminalView('Run in Dev terminal output');
@@ -1297,6 +1662,12 @@ window.addEventListener('hashchange', () => requestAnimationFrame(sweepViewers))
 
 // A terminal folded under a run's step; it is read once opened, and stays open through re-renders. `start` opens it
 // the first time it is drawn (a step still running).
+/**
+ * @param {Store} store
+ * @param {string} session
+ * @param {string | undefined} cwd
+ * @param {{ start?: boolean, taskIds?: string[] }} [options]
+ */
 function terminalFold(store, session, cwd, { start = false, taskIds = [] } = {}) {
   if (start && !view.seenTerms.has(session)) view.terms.add(session);
   view.seenTerms.add(session);
@@ -1304,7 +1675,7 @@ function terminalFold(store, session, cwd, { start = false, taskIds = [] } = {})
   return h('details', {
     class: 'cron-output',
     open,
-    ontoggle: (e) => {
+    ontoggle: (/** @type {Event & { target: HTMLDetailsElement }} */ e) => {
       if (e.target.open === view.terms.has(session)) return;
       if (e.target.open) view.terms.add(session);
       else view.terms.delete(session);
@@ -1318,7 +1689,9 @@ function terminalFold(store, session, cwd, { start = false, taskIds = [] } = {})
 // What the terminals of the runs on the page are doing, asked of the runner every few seconds while Cron is shown,
 // so a run's terminal chip says whether claude is still working, as a task's Dev button does.
 const TERM_POLL_MS = 4000;
+/** @type {{ status: Awaited<ReturnType<typeof sessionStatus>>, timer: number, ids: string[] }} */
 const termWatch = { status: {}, timer: 0, ids: [] };
+/** @type {Record<string, string>} */
 const TERM_STATES = {
   working: 'Working',
   waiting: 'Waiting for you',
@@ -1329,6 +1702,10 @@ const TERM_STATES = {
   gone: 'Closed in Dev',
 };
 
+/**
+ * @param {Store} store
+ * @param {string[]} ids
+ */
 function watchTerminals(store, ids) {
   termWatch.ids = ids;
   if (termWatch.timer || !ids.length) return;
@@ -1348,11 +1725,13 @@ function watchTerminals(store, ids) {
 }
 
 // A terminal's state as the runner last told it: unknown until asked, 'gone' once the runner no longer has it.
+/** @param {string} session */
 const termState = (session) => (termWatch.status[session]?.state ?? (termWatch.ids.includes(session) && Object.keys(termWatch.status).length ? 'gone' : ''));
 
 // --- Runs ---
 
 // [label, dot class, pill tone]
+/** @type {Record<string, string[]>} */
 const RUN_STATUS = {
   running: ['Running', 'running', 'doing'],
   ok: ['Done', 'on', 'done'],
@@ -1361,22 +1740,31 @@ const RUN_STATUS = {
   lost: ['Interrupted', 'warn', 'medium'],
 };
 
+/** @param {number} ms */
 const duration = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : ms < 3600000 ? `${Math.floor(ms / 60000)} min ${Math.round((ms % 60000) / 1000)} s` : `${Math.floor(ms / 3600000)} h ${Math.round((ms % 3600000) / 60000)} min`);
 
 // The things a run made, gathered from its steps (and the step running now), newest last.
+// Each list keeps the steps that have the field, so the casts only drop undefined.
+/** @param {CronRun} r */
 function runOutcomes(r) {
+  /** @type {Partial<CronRunStep>[]} */
   const steps = [...r.steps, ...(r.current ? [r.current] : [])];
   return {
-    tasks: [...new Set(steps.map((s) => s.taskId).filter(Boolean))],
-    terms: steps.filter((s) => s.session).map((s) => ({ session: s.session, cwd: s.cwd ?? '', terminal: s.terminal, taskId: s.taskId ?? '' })),
-    prs: steps.filter((s) => s.pr?.url).map((s) => s.pr),
-    branches: [...new Set(steps.map((s) => s.branch).filter(Boolean))],
+    tasks: [...new Set(/** @type {string[]} */ (steps.map((s) => s.taskId).filter(Boolean)))],
+    terms: steps.filter((s) => s.session).map((s) => ({ session: /** @type {string} */ (s.session), cwd: s.cwd ?? '', terminal: s.terminal, taskId: s.taskId ?? '' })),
+    prs: steps.filter((s) => s.pr?.url).map((s) => /** @type {CronPr} */ (s.pr)),
+    branches: [...new Set(/** @type {string[]} */ (steps.map((s) => s.branch).filter(Boolean)))],
   };
 }
 
 // Tasks open in their project's list, scrolled to and opened (todos.js reads `task`).
+/** @param {Task} t */
 const taskHref = (t) => `#/todos?${new URLSearchParams({ filter: t.projectId || 'personal', status: 'all', task: t.id })}`;
 
+/**
+ * @param {Store} store
+ * @param {string} id
+ */
 function taskChip(store, id) {
   const t = store.get('todos').items.find((x) => x.id === id);
   if (!t) return h('span', { class: 'run-chip muted', title: 'The task this run made was deleted' }, icon('check-square'), 'Task deleted');
@@ -1387,6 +1775,10 @@ function taskChip(store, id) {
     status ? pill(status.name, statusLook(status)) : null);
 }
 
+/**
+ * @param {Store} store
+ * @param {{ session: string, cwd: string, terminal?: number, taskId: string }} term
+ */
 function terminalChip(store, term) {
   const state = termState(term.session);
   const label = TERM_STATES[state] ?? 'Terminal';
@@ -1399,10 +1791,13 @@ function terminalChip(store, term) {
   }, h('span', { class: `term-dot dev-${state || 'idle'}` }), icon('terminal'), `Terminal ${term.terminal ?? ''}`.trim(), h('span', { class: 'muted small' }, label));
 }
 
+/** @param {CronPr} pr */
 const prChip = (pr) => h('a', { class: 'run-chip', href: pr.url, target: '_blank', rel: 'noopener noreferrer', title: `${pr.repo} #${pr.number}` }, icon('git-pull-request'), `PR #${pr.number}`);
+/** @param {string} name */
 const branchChip = (name) => h('span', { class: 'run-chip mono', title: 'The branch the Dev step worked on' }, icon('git-branch'), name);
 
 // A step's output: short ones in full, long ones folded under their first line.
+/** @param {CronRunStep} s */
 function stepOutput(s) {
   const text = s.output || '';
   if (!text) return s.ok ? null : h('pre', { class: 'error' }, '(no message)');
@@ -1414,12 +1809,31 @@ function stepOutput(s) {
 }
 
 // A run's steps as a timeline: what each did, the step running now, and the steps a stop or a failure skipped.
+/**
+ * @param {Store} store
+ * @param {CronFlow | null} flow
+ * @param {CronRun} r
+ * @param {string} state
+ */
 function runSteps(store, flow, r, state) {
+  /**
+   * @param {string} id
+   * @param {string} [saved]
+   */
   const typeOfStep = (id, saved) => flow?.steps.find((x) => x.id === id)?.type ?? saved ?? '';
+  /** @param {string} id */
   const nameOf = (id) => {
     const i = flow ? flow.steps.findIndex((s) => s.id === id) : -1;
-    return i < 0 ? 'Removed step' : `${i + 1}. ${typeOf(flow.steps[i].type)[1]}`;
+    // i is -1 without a flow.
+    return i < 0 ? 'Removed step' : `${i + 1}. ${typeOf(/** @type {CronFlow} */ (flow).steps[i].type)[1]}`;
   };
+  /**
+   * @param {string} cls
+   * @param {string} type
+   * @param {string} title
+   * @param {Child} meta
+   * @param {Child} body
+   */
   const item = (cls, type, title, meta, body) => h('li', { class: `cron-run-step ${cls}` },
     h('span', { class: `flow-node-icon kind-${type || 'stop'}` }, icon(typeOf(type)[2])),
     h('div', { class: 'cron-run-step-body' },
@@ -1446,6 +1860,12 @@ function runSteps(store, flow, r, state) {
 
 // One run: a header that opens it (status dot, flow, time, how it started, how long it took), then what it made
 // (its task, terminals, PR, its preview and branch) as links, then, once opened, each step.
+/**
+ * @param {Store} store
+ * @param {CronFlow | null} flow
+ * @param {CronRun} r
+ * @param {{ showFlow?: boolean }} [options]
+ */
 function runCard(store, flow, r, { showFlow = false } = {}) {
   const state = runState(r);
   const [label, dot, tone] = RUN_STATUS[state] ?? RUN_STATUS.error;
@@ -1493,8 +1913,13 @@ function runCard(store, flow, r, { showFlow = false } = {}) {
 }
 
 // The terminals of these runs, for the status poll.
+/** @param {CronRun[]} runs */
 const sessionsOf = (runs) => [...new Set(runs.flatMap((r) => runOutcomes(r).terms.map((t) => t.session)))];
 
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ */
 function runList(store, flow) {
   const runs = store.get(COLLECTION).runs.filter((r) => r.flowId === flow.id).slice(0, 10);
   watchTerminals(store, sessionsOf(runs));
@@ -1507,6 +1932,10 @@ function runList(store, flow) {
 
 // --- Editor ---
 
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ */
 function editor(store, flow) {
   const busy = isRunning(flow.id);
   return h('div', { class: 'stack-lg cron-editor' },
@@ -1517,13 +1946,13 @@ function editor(store, flow) {
           value: flow.name,
           'aria-label': 'Flow name',
           autocomplete: 'off',
-          onchange: (e) => updateFlow(store, flow.id, (f) => {
+          onchange: (/** @type {FieldEvent} */ e) => updateFlow(store, flow.id, (f) => {
             f.name = e.target.value.trim() || 'Untitled flow';
           }),
         }),
         h('div', { class: 'row' },
           h('label', { class: 'check' },
-            h('input', { type: 'checkbox', checked: flow.enabled, onchange: (e) => setEnabled(store, flow, e.target.checked) }),
+            h('input', { type: 'checkbox', checked: flow.enabled, onchange: (/** @type {FieldEvent} */ e) => setEnabled(store, flow, e.target.checked) }),
             ' On schedule'),
           h('button', {
             type: 'button',
@@ -1546,6 +1975,7 @@ function editor(store, flow) {
     runList(store, flow));
 }
 
+/** @param {Store} store */
 function flowsTab(store) {
   const all = store.get(COLLECTION).flows;
   // A filter whose project no flow uses any more is dropped, and so is one that hides the flow a link opened.
@@ -1561,6 +1991,10 @@ function flowsTab(store) {
         h('button', { type: 'button', class: 'btn-link', onclick: () => openTemplates(store) }, 'Start from a template'))));
 }
 
+/**
+ * @param {HTMLElement} root
+ * @param {Store} store
+ */
 function draw(root, store) {
   if (!TABS.some(([k]) => k === view.tab)) view.tab = 'flows';
   const body = view.tab === 'runs' ? runsTab(store) : view.tab === 'templates' ? templatesTab(store) : flowsTab(store);
@@ -1598,7 +2032,7 @@ export default {
   defaults: DEFAULTS,
   render: draw,
   serialize: () => ({ tab: view.tab === 'flows' ? '' : view.tab, flow: view.flow }),
-  restore: (p = {}) => {
+  restore: (/** @type {Record<string, string>} */ p = {}) => {
     if (p.flow && p.flow !== view.flow) view.node = 'trigger';
     view.flow = p.flow || '';
     // A notification links to #/cron?flow=…, with no tab, so it opens the Flows tab.
