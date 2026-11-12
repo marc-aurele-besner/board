@@ -1,22 +1,28 @@
+// @ts-check
 // Full-page search, opened from the last row of the palette. "All" shows a few matches of each kind; a tab per kind
 // shows every match of that kind.
+/** @import { Store, IconName } from '../../types/data' */
+/** @import { SearchResult } from '../search.js' */
 import { h, icon, empty } from '../ui.js';
 import { searchAll, GROUPS } from '../search.js';
 import { QUERY_HINT } from '../task-query.js';
 import { modules } from './index.js';
 
 const PREVIEW = 5;
+/** @type {[string, string, IconName][]} */
 const TABS = [['all', 'All', 'search'], ...GROUPS];
 
 // query: the search text. tab: 'all' or a GROUPS key.
 const view = { query: '', tab: 'all' };
 
+/** @param {SearchResult} item */
 function resultRow(item) {
   const body = [icon(item.iconName), h('span', { class: 'grow' }, item.label), item.hint ? h('span', { class: 'muted small' }, item.hint) : null];
   return h('li', { class: item.done ? 'search-row done' : 'search-row' },
     item.href ? h('a', { href: item.href }, ...body) : h('button', { type: 'button', onclick: item.run }, ...body));
 }
 
+/** @param {Store} store @param {string} key @param {string} label @param {SearchResult[]} items @param {number} limit */
 function groupBlock(store, key, label, items, limit) {
   const shown = limit ? items.slice(0, limit) : items;
   const tasksLink = key === 'tasks'
@@ -37,6 +43,7 @@ function groupBlock(store, key, label, items, limit) {
       : null);
 }
 
+/** @param {HTMLElement} root @param {Store} store */
 function draw(root, store) {
   const box = h('div', { class: 'search-results' });
   const tabs = h('div', { class: 'segmented r-tabs search-tabs', role: 'group', 'aria-label': 'Result kinds' });
@@ -60,11 +67,13 @@ function draw(root, store) {
       const blocks = GROUPS.filter(([key]) => found[key].length).map(([key, label]) => groupBlock(store, key, label, found[key], PREVIEW));
       box.replaceChildren(...(blocks.length ? blocks : [empty(`Nothing matches “${view.query.trim()}”.`)]));
     } else {
-      const [key, label] = GROUPS.find(([k]) => k === view.tab);
+      // restore() only keeps a tab that exists.
+      const [key, label] = /** @type {[string, string, IconName]} */ (GROUPS.find(([k]) => k === view.tab));
       box.replaceChildren(found[key].length ? groupBlock(store, key, label, found[key], 0) : empty(`No ${label.toLowerCase()} match “${view.query.trim()}”.`));
     }
   };
   fill();
+  /** @type {number | null} */
   let urlTimer = null;
   root.append(h('div', { class: 'stack-lg search-page' },
     h('header', null, h('h2', null, 'Search')),
@@ -76,11 +85,11 @@ function draw(root, store) {
         autocomplete: 'off',
         value: view.query,
         'data-autofocus': true,
-        oninput: (e) => {
+        oninput: (/** @type {Event & { target: HTMLInputElement }} */ e) => {
           view.query = e.target.value;
           fill();
           // The address follows the search without re-rendering the page.
-          clearTimeout(urlTimer);
+          clearTimeout(/** @type {number} */ (urlTimer));
           urlTimer = setTimeout(() => {
             const params = new URLSearchParams(Object.entries(serialize()).filter(([, v]) => v));
             history.replaceState(null, '', `#/search${params.size ? `?${params}` : ''}`);
@@ -101,7 +110,7 @@ export default {
   hidden: true, // opened from the palette
   render: draw,
   serialize,
-  restore: (p = {}) => {
+  restore: (/** @type {Record<string, string>} */ p = {}) => {
     view.query = p.q || '';
     view.tab = TABS.some(([k]) => k === p.tab) ? p.tab : 'all';
   },
