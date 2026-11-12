@@ -29,7 +29,7 @@ js/modules/index.js   registry of sections (the nav is built from this list)
 js/modules/*.js       one file per section (todos, projects, kitchen, money, tools, ...)
 js/notifications.js   the bell, its drawer, and notify(); saved in notifications.json
 js/automations.js     site checks and the rules that turn their results into tasks
-js/terminal.js        Dev's calls to the command runner: info, folders and files, a command's streamed output, keys
+js/terminal.js        Dev's calls to the command runner: info, folders and files, a command's streamed output, keys, git
 js/folder-picker.js   the dialog that finds a folder on this machine through the runner (Projects → Local folder)
 js/vt.js              the terminal emulator Dev draws command output with (cursor moves, colours, alternate screen)
 js/highlight.js       syntax colours for the Dev file reader, per language, with no dependency
@@ -63,7 +63,7 @@ tools/start.js        one command for the board: starts serve.js and relays.js t
 tools/log.js          terminal lines prefixed with each runner's name
 tools/serve.js        local static server with no-cache headers; no dependencies
 tools/relays.js       local relays for Bing's and Resend's APIs (Inbox), which send no CORS header
-tools/terminal.js     the Dev section's runner: terminal sessions that outlive the page (output kept on disk), typed keys, read-only file reads; localhost only
+tools/terminal.js     the Dev section's runner: terminal sessions that outlive the page (output kept on disk), typed keys, read-only file reads, git for Source control; localhost only
 ```
 
 ## Conventions
