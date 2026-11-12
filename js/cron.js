@@ -1116,6 +1116,58 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Whether a Dev step waits for its terminal: as the step says, else when a step follows it.
 export const devWaits = (flow, step) => step.wait ?? flow.steps.findIndex((s) => s.id === step.id) < flow.steps.length - 1;
 
+// A claude Dev step with another Run in Dev after it can ask for its final answer as JSON, which the next one reads
+// as {{stepN.json}}. Only offered there, so a step moved last stops asking.
+export const DEV_JSON_PROMPT = 'Output format: Output the final output in valid JSON';
+export const devJsonOffered = (flow, step) =>
+  step.mode !== 'command' && flow.steps.slice(flow.steps.findIndex((s) => s.id === step.id) + 1).some((s) => s.type === 'dev');
+export const devJson = (flow, step) => Boolean(step.json) && devJsonOffered(flow, step);
+
+// The last JSON object or array in a terminal's output. claude draws its answer after a ⏺ and wraps long lines with
+// an indent, so a block that does not parse as printed is tried again with its line breaks taken out.
+const JSON_SCAN = 40000;
+function closingOf(text, start) {
+  const stack = [];
+  let str = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (str) {
+      if (c === '\\') i++;
+      else if (c === '"') str = false;
+    } else if (c === '"') str = true;
+    else if (c === '{' || c === '[') stack.push(c === '{' ? '}' : ']');
+    else if (c === '}' || c === ']') {
+      if (stack.pop() !== c) return -1;
+      if (!stack.length) return i;
+    }
+  }
+  return -1;
+}
+export function lastJson(output) {
+  const text = String(output ?? '').slice(-JSON_SCAN).replace(/⏺/g, ' ');
+  const parse = (t) => {
+    for (const s of [t, t.replace(/\n[ \t]*/g, ' ')]) {
+      try {
+        return { value: JSON.parse(s) };
+      } catch {}
+    }
+    return null;
+  };
+  let found;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '{' && text[i] !== '[') continue;
+    const end = closingOf(text, i);
+    if (end < 0) continue;
+    const r = parse(text.slice(i, end + 1));
+    // A bare [] or [1] in prose is not the answer; an object, or an array of objects or several items, is.
+    if (r && (r.value && typeof r.value === 'object') && (!Array.isArray(r.value) || r.value.length > 1 || typeof r.value[0] === 'object')) {
+      found = r.value;
+      i = end;
+    }
+  }
+  return found;
+}
+
 async function waitForSession(store, session, minutes, beat) {
   const deadline = Date.now() + Math.max(1, Number(minutes) || DEV_WAIT_MINUTES) * MINUTE;
   let quietSince = 0;
@@ -1163,7 +1215,7 @@ const OUTPUT_KEPT = 4000;
 
 // What the terminal left: the runner's git view of the folder it worked in, and the links in its output. A PR the
 // prompt already named is not counted as one it opened.
-async function devOutcome(store, { session, path, prompt, task }) {
+async function devOutcome(store, { session, path, prompt, task, json }) {
   let raw = { output: '', repo: false };
   try {
     raw = await sessionOutcome(runnerOf(store), { session, path });
@@ -1197,6 +1249,7 @@ async function devOutcome(store, { session, path, prompt, task }) {
       prs: prs.map(pick),
       issues: links.filter((l) => l.kind === 'issue').map(pick),
       output: text.slice(-OUTPUT_KEPT),
+      ...(json ? { json: lastJson(text) ?? null } : {}),
       ...(raw.error ? { error: raw.error } : {}),
     },
   };
@@ -1218,6 +1271,7 @@ function outcomeText(o, { terminal, where, state }) {
     if (rest) lines.push(`- and ${rest} more`);
   } else if (o.repo) lines.push('', 'No file changed.');
   if (o.uncommitted) lines.push(`${o.uncommitted} change${o.uncommitted === 1 ? ' is' : 's are'} not committed.`);
+  if ('json' in o) lines.push('', o.json == null ? 'No JSON found in its final output.' : `JSON output:\n${JSON.stringify(o.json, null, 2)}`);
   if (o.error) lines.push(`Could not read the outcome: ${o.error}`);
   if (o.output) lines.push('', 'End of the terminal output:', o.output.split('\n').slice(-40).join('\n'));
   return lines.join('\n');
@@ -1237,7 +1291,9 @@ async function runDev(store, flow, step, input, vars, ctx) {
   if (projectId && !project) throw new Error('The project of this step was removed. Choose another.');
   if (project && !project.localPath) throw new Error(`${project.name} has no local folder. Add one in Projects.`);
   const v = { ...vars, task: taskText(task, input) };
-  const prompt = claude ? fill(step.prompt || '{{input}}', v).trim() : '';
+  const json = devJson(flow, step);
+  const filled = claude ? fill(step.prompt || '{{input}}', v).trim() : '';
+  const prompt = filled && json ? `${filled}\n\n${DEV_JSON_PROMPT}` : filled;
   // Values go into a command as one quoted word each, so text from a model cannot run as shell.
   const command = claude ? '' : fill(step.command, v, shellQuote).trim();
   if (claude ? !prompt : !command) throw new Error(claude ? 'Write the Dev prompt.' : 'Enter the command to run.');
@@ -1248,7 +1304,7 @@ async function runDev(store, flow, step, input, vars, ctx) {
   if (ctx.dry && !ctx.live) {
     const how = devCommand ? `start “${devCommand.trim()}” with this prompt` : claude ? 'hand this prompt to the project’s Dev command' : 'run this command';
     ctx.note = `Test run: would ${how} in a new Dev terminal, in ${where}${waits ? ', then wait for it and pass on its branch, commit, files and PR' : ''}.`;
-    ctx.data = { ...(claude ? { devCommand: devCommand || null, prompt } : { command }), folder: where, ...(waits ? OUTCOME_SHAPE : {}) };
+    ctx.data = { ...(claude ? { devCommand: devCommand || null, prompt } : { command }), folder: where, ...(waits ? { ...OUTCOME_SHAPE, ...(json ? { json: {} } : {}) } : {}) };
     return claude ? prompt : command;
   }
   const { id, n, worktree } = await devStarter({ store, claude, prompt, command, devCommand, projectId, taskIds: task ? [task.id] : [], title: task?.text || flow.name });
@@ -1281,7 +1337,7 @@ async function runDev(store, flow, step, input, vars, ctx) {
   const status = await waitForSession(store, id, step.waitMinutes ?? DEV_WAIT_MINUTES, ctx.beat);
   if (status.state === 'failed') throw new Error(`${on} ended with exit ${status.code ?? 'an error'}.`);
   if (status.state === 'stopped') throw new Error(`${on} was stopped.`);
-  const { links, data } = await devOutcome(store, { session: id, path: workPath || cwd, prompt: claude ? prompt : command, task });
+  const { links, data } = await devOutcome(store, { session: id, path: workPath || cwd, prompt: claude ? prompt : command, task, json });
   // The PR and issues go to the task even when Dev was not open to see them printed.
   // The session has ended or waits for its user by now, so a PR moves the task on to review.
   if (task && links.length) addTaskLinks(store, [task.id], links, { review: true });
