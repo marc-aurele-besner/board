@@ -7,3 +7,6 @@ data/
 Thumbs.db
 .vscode/
 .idea/
+
+# Dev-only tools (TypeScript checks the JSDoc); installed by bun install
+node_modules/

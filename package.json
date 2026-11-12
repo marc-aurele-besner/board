@@ -2,11 +2,18 @@
   "name": "board",
   "private": true,
   "type": "module",
-  "description": "Scripts only: the board has no dependencies and no build step.",
+  "description": "Scripts only: the board has no runtime dependencies and no build step. TypeScript only checks the JSDoc.",
   "scripts": {
     "start": "bun tools/start.js",
     "dev": "bun --watch --no-clear-screen tools/start.js",
     "serve": "bun tools/serve.js",
-    "terminal": "bun tools/terminal.js"
+    "terminal": "bun tools/terminal.js",
+    "typecheck": "tsc -p jsconfig.json && tsc -p tools/jsconfig.json",
+    "check": "for f in js/*.js js/*/*.js tools/*.js tools/*/*.js; do node --experimental-default-type=module --check \"$f\" || { echo \"FAIL $f\"; exit 1; }; done && node tools/check-imports.js && node tools/check-merge.js && bun run typecheck",
+    "prepare": "git config core.hooksPath .githooks"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "typescript": "5.9.3"
   }
 }
