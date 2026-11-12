@@ -9,6 +9,8 @@ import { openDialog } from '../modal.js';
 import { issuesOf, prsOf, moveToReview } from '../task-links.js';
 import { startClaudeSession, openSession, runnerOf } from './dev.js';
 import { sessionStatus } from '../terminal.js';
+import { imagesOf, imageDrop, imageStrip, imagePathsFor } from '../task-images.js';
+import { dragsFiles } from '../images.js';
 import { ask, parseJson } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
@@ -443,14 +445,17 @@ function issueControl(store, item, repos) {
     }, icon(any ? 'plus' : 'repo')));
 }
 
-// A task as Markdown: a checklist line with its status, project and deadline, then its description indented.
-function taskMarkdown(store, item, projects) {
+// A task as Markdown: a checklist line with its status, project and deadline, then its description indented, then
+// the paths of its images when they were saved for claude.
+function taskMarkdown(store, item, projects, images = []) {
   const status = statusOf(item);
   const project = projects.find((p) => p.id === item.projectId)?.name;
   const details = [status === 'done' ? '' : statusName(store, status), project, item.due ? `due ${item.due}` : ''].filter(Boolean);
   const head = `- [${status === 'done' ? 'x' : ' '}] ${item.text}${details.length ? ` (${details.join(' · ')})` : ''}`;
   const desc = (item.description ?? '').trim();
-  return desc ? `${head}\n${desc.split(/\r?\n/).map((l) => `  ${l}`).join('\n')}` : head;
+  const lines = desc ? desc.split(/\r?\n/) : [];
+  if (images.length) lines.push(images.length === 1 ? 'Image (read it):' : 'Images (read them):', ...images.map((p) => `- ${p}`));
+  return lines.length ? `${head}\n${lines.map((l) => `  ${l}`).join('\n')}` : head;
 }
 
 // A copied task is being handed on, so it moves to "On Deck" (completed ones stay done) and leaves the selection.
@@ -483,10 +488,19 @@ function copyButton(store, item) {
 // Hands tasks to claude in a new Dev terminal, in the folder of the first task's project that has one.
 // The issues and PRs it opens come back to the tasks (task-links.js).
 // They are being worked on now, so open ones move to "In progress" (completed ones stay done).
-function devTasks(store, items) {
+// Their images go along as files the runner saves, named in the prompt.
+async function devTasks(store, items) {
   if (!items.length) return;
+  let images = new Map();
+  if (items.some((i) => imagesOf(i).length)) {
+    try {
+      images = await imagePathsFor(store, runnerOf(store), items);
+    } catch (err) {
+      toast(`Starting without the images: ${err.message}`);
+    }
+  }
   const projects = projectsOf(store);
-  const list = items.map((i) => taskMarkdown(store, i, projects)).join('\n');
+  const list = items.map((i) => taskMarkdown(store, i, projects, images.get(i.id))).join('\n');
   const folder = items.map((i) => projects.find((p) => p.id === i.projectId)).find((p) => p?.localPath);
   for (const i of items) view.selected.delete(i.id);
   const moving = items.filter((i) => !['done', 'doing'].includes(statusOf(i))).map((i) => i.id);
@@ -702,6 +716,8 @@ function todoRow(store, item, ctx) {
     .map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) }));
   const categoryNames = categoriesFor(store, item.projectId);
   if (item.category && !categoryNames.includes(item.category)) categoryNames.push(item.category);
+  // Images dropped anywhere on the row are added to the task.
+  const drop = imageDrop(store, item);
 
   return h('li', {
     class: ['todo-item', status === 'done' ? 'done' : '', view.selected.has(item.id) ? 'selected' : ''].filter(Boolean).join(' '),
@@ -720,14 +736,19 @@ function todoRow(store, item, ctx) {
       e.currentTarget.classList.remove('dragging');
     },
     ondragover: (e) => {
+      if (dragsFiles(e)) return drop.ondragover(e);
       if (!reorderEnabled() || !view.dragId || view.dragId === item.id || !canDropOn(item)) return;
       e.preventDefault();
       const side = dropSide(e);
       e.currentTarget.classList.toggle('drop-before', side === 'before');
       e.currentTarget.classList.toggle('drop-after', side === 'after');
     },
-    ondragleave: (e) => clearDropMarks(e.currentTarget),
+    ondragleave: (e) => {
+      clearDropMarks(e.currentTarget);
+      drop.ondragleave(e);
+    },
     ondrop: (e) => {
+      if (dragsFiles(e)) return drop.ondrop(e);
       if (!reorderEnabled() || !view.dragId || !canDropOn(item)) return;
       e.preventDefault();
       const after = dropSide(e) === 'after';
@@ -805,6 +826,7 @@ function todoRow(store, item, ctx) {
         hasDescription
           ? h('span', { class: 'desc-indicator', title: 'Has a description', 'aria-label': 'Has a description' }, icon('align-left'))
           : null,
+        imageCount(item),
         copyButton(store, item),
         h('button', {
           type: 'button',
@@ -823,7 +845,7 @@ function todoRow(store, item, ctx) {
         }, icon('x')))),
 
     expanded
-      ? h('div', { class: 'todo-desc' },
+      ? h('div', { class: 'todo-desc', tabindex: '-1', onpaste: drop.onpaste },
           editText({
             value: item.description,
             placeholder: 'Add a description… paste notes, links, steps',
@@ -831,8 +853,16 @@ function todoRow(store, item, ctx) {
             multiline: true,
             allowEmpty: true,
             onSave: (description) => updateItem(store, item.id, { description }),
-          }))
+          }),
+          imageStrip(store, item))
       : null);
+}
+
+function imageCount(item) {
+  const n = imagesOf(item).length;
+  if (!n) return null;
+  const text = n === 1 ? 'Has an image' : `Has ${n} images`;
+  return h('span', { class: 'desc-indicator', title: text, 'aria-label': text }, icon('image'));
 }
 
 // --- Board: one column per status; dragging a card to a column changes its status ---
@@ -841,6 +871,7 @@ function boardCard(store, item, projects, order) {
   const p = projects.find((x) => x.id === item.projectId);
   const priority = item.priority ?? 'none';
   const expanded = view.expanded.has(item.id);
+  const { onpaste, ...dropProps } = imageDrop(store, item);
   return h('article', {
     class: view.selected.has(item.id) ? 'kanban-card selected' : 'kanban-card',
     draggable: 'true',
@@ -854,6 +885,7 @@ function boardCard(store, item, projects, order) {
       view.dragId = null;
       e.currentTarget.classList.remove('dragging');
     },
+    ...dropProps,
   },
     h('div', { class: 'row kanban-title' },
       selectBox(store, item, order),
@@ -874,6 +906,7 @@ function boardCard(store, item, projects, order) {
         doneButton(store, item)),
       h('div', { class: 'row kanban-actions' },
         item.description ? h('span', { class: 'desc-indicator', title: 'Has a description', 'aria-label': 'Has a description' }, icon('align-left')) : null,
+        imageCount(item),
         devButton(store, item),
         copyButton(store, item),
         h('button', {
@@ -887,7 +920,7 @@ function boardCard(store, item, projects, order) {
         h('button', { type: 'button', class: 'icon-btn', title: 'Delete', 'aria-label': `Delete "${item.text}"`, onclick: () => removeItem(store, item.id) }, icon('x')))),
     // The same details as a table row, so a card never needs the table to be edited.
     expanded
-      ? h('div', { class: 'kanban-details' },
+      ? h('div', { class: 'kanban-details', tabindex: '-1', onpaste: imageDrop(store, item).onpaste },
           h('label', { class: 'row small muted' }, 'Deadline',
             h('input', {
               type: 'date',
@@ -903,7 +936,8 @@ function boardCard(store, item, projects, order) {
             multiline: true,
             allowEmpty: true,
             onSave: (description) => updateItem(store, item.id, { description }),
-          }))
+          }),
+          imageStrip(store, item))
       : null);
 }
 

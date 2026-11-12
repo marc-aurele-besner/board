@@ -41,6 +41,9 @@ function memoryFolder(name, initial) {
         },
       };
     },
+    async removeEntry(file) {
+      files.delete(prefix + file);
+    },
   });
   return folder('');
 }
