@@ -2,7 +2,7 @@
 import { h, icon, empty, notice, statusOf, copyable } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { connect, isConnected, accountAvatar } from '../google.js';
-import { checkBot, findChat, pollTelegram, hasTelegram } from '../telegram.js';
+import { checkBot, findChat, hasTelegram } from '../telegram.js';
 import { propertyName, checkBing, BING_RELAY } from '../webstats.js';
 import { checkResend, resendSettings } from '../resend.js';
 import { connectGmail, disconnectGmail, isGmailConnected, gmailAccounts } from '../gmail.js';
@@ -190,7 +190,10 @@ export function telegramCard(store) {
           h('button', {
             type: 'button',
             class: 'input-addon',
-            // Uses the token in the field, so it works before Save is pressed.
+            // Uses the token in the field, so it works before Save is pressed. Only while no chat is saved: once one is,
+            // the runners read the bot, and Telegram allows one reader at a time (see js/telegram.js).
+            disabled: hasTelegram(store),
+            title: hasTelegram(store) ? 'Clear the chat first to find another one.' : null,
             onclick: (e) => {
               const token = String(e.currentTarget.form.elements.token.value ?? '').trim();
               if (!token) return say(store, 'telegram', 'Paste the bot token first.', false);
@@ -204,11 +207,6 @@ export function telegramCard(store) {
         h('div', { class: 'svc-actions' },
           h('button', { class: 'primary', type: 'submit' }, 'Save'),
           h('button', { type: 'button', disabled: !t.token, onclick: () => tryIt(() => checkBot(t.token), (text) => text) }, 'Test connection'),
-          h('button', {
-            type: 'button',
-            disabled: !hasTelegram(store),
-            onclick: () => tryIt(() => pollTelegram(store), (n) => (n ? `${n} new task${n === 1 ? '' : 's'} read.` : 'No new messages.')),
-          }, 'Read messages now'),
           t.token ? h('button', { type: 'button', class: 'danger', onclick: () => { save({ token: '', chatId: '', offset: 0 }); say(store, 'telegram', ''); } }, icon('x'), 'Clear') : null),
         result('telegram'))));
 }
