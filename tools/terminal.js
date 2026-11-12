@@ -503,7 +503,7 @@ async function removeWorktree(req, res, cors) {
   const id = String(body.session ?? '');
   // Without a folder, the repo is the one the session's first command started in.
   let cwd = String(body.cwd ?? '');
-  if (SESSION_ID.test(id)) {
+  if (SESSION_ID.test(id) && (sessions.has(id) || (await stat(logFile(id)).catch(() => null)))) {
     const s = await sessionOf(id);
     stopJob(s.run);
     for (let waited = 0; s.run && waited < KILL_AFTER_MS + 2000; waited += 100) await new Promise((r) => setTimeout(r, 100));
@@ -746,6 +746,80 @@ async function searchFiles(params) {
   });
 }
 
+// What a terminal left behind, for a Cron step that runs after a Run in Dev step: the end of its output (escape
+// sequences and all; the page reads links from it), and, in the folder it worked in, the branch, the last commit,
+// and the commits and files that differ from the default branch (uncommitted ones included).
+const OUTCOME_OUTPUT = 20000;
+const OUTCOME_FILES = 300;
+const OUTCOME_COMMITS = 30;
+async function sessionOutcome(params) {
+  const id = params.get('session') ?? '';
+  let output = '';
+  if (SESSION_ID.test(id) && (sessions.has(id) || (await stat(logFile(id)).catch(() => null)))) {
+    const s = await sessionOf(id);
+    const chunks = [];
+    let size = 0;
+    for (let i = s.events.length - 1; i >= 0 && size < OUTCOME_OUTPUT; i--) {
+      const e = s.events[i];
+      if (e.t !== 'out' && e.t !== 'err') continue;
+      chunks.push(e.d);
+      size += e.d.length;
+    }
+    output = chunks.reverse().join('').slice(-OUTCOME_OUTPUT);
+  }
+  const root = await repoOf(params.get('path') ?? '').catch(() => null);
+  if (!root) return { output, repo: false };
+  const status = parseStatus(await git(root, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', ...NOT_WORKTREES]));
+  const head = (await git(root, ['log', '-1', '--format=%H%x1f%h%x1f%s'], { ok: [0, 128] }).catch(() => '')).trim().split('\x1f');
+  // The default branch as the remote names it, else a local main or master.
+  const remoteHead = (await git(root, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], { ok: [0, 1, 128] }).catch(() => '')).trim();
+  let base = remoteHead;
+  for (const name of ['main', 'master']) {
+    if (base) break;
+    if ((await git(root, ['rev-parse', '--verify', '--quiet', name], { ok: [0, 1, 128] }).catch(() => '')).trim()) base = name;
+  }
+  const mergeBase = base ? (await git(root, ['merge-base', 'HEAD', base], { ok: [0, 1, 128] }).catch(() => '')).trim() : '';
+  let files = [];
+  let commits = [];
+  if (mergeBase) {
+    const names = await git(root, ['diff', '--name-status', '-z', '-M', mergeBase, ...NOT_WORKTREES]).catch(() => '');
+    const parts = names.split('\0');
+    for (let i = 0; i < parts.length - 1;) {
+      const code = parts[i++];
+      if (!code) continue;
+      const renamed = /^[RC]/.test(code);
+      const from = renamed ? parts[i++] : '';
+      files.push({ status: code[0], path: parts[i++], ...(renamed ? { from } : {}) });
+    }
+    const log = await git(root, ['log', `-n${OUTCOME_COMMITS}`, '--format=%H%x1f%h%x1f%s%x1e', `${mergeBase}..HEAD`]).catch(() => '');
+    commits = log.split('\x1e').map((l) => l.trim()).filter(Boolean).map((l) => {
+      const [hash, short, subject] = l.split('\x1f');
+      return { hash, short, subject };
+    });
+  }
+  // Untracked files are not in the diff; they are changes too.
+  for (const f of status.files) if (f.untracked && !files.some((x) => x.path === f.path)) files.push({ status: '?', path: f.path });
+  const more = Math.max(0, files.length - OUTCOME_FILES);
+  files = files.slice(0, OUTCOME_FILES);
+  return {
+    output,
+    repo: true,
+    root,
+    branch: status.branch,
+    upstream: status.upstream,
+    ahead: status.ahead,
+    behind: status.behind,
+    base: base.replace(/^origin\//, ''),
+    commit: head[0] ?? '',
+    short: head[1] ?? '',
+    subject: head[2] ?? '',
+    commits,
+    files,
+    more,
+    uncommitted: status.files.length,
+  };
+}
+
 // A file's changes (staged, or in the working folder), or a commit's.
 async function gitDiff(params) {
   const root = await repoOf(params.get('path') ?? '');
@@ -905,6 +979,15 @@ createServer(async (req, res) => {
     const params = new URL(req.url, 'http://terminal').searchParams;
     try {
       const body = path === '/git' ? await gitStatus(params.get('path') ?? '') : await gitDiff(params);
+      res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(body));
+    } catch (err) {
+      res.writeHead(400, cors).end(err.message);
+    }
+    return;
+  }
+  if (req.method === 'GET' && path === '/outcome') {
+    try {
+      const body = await sessionOutcome(new URL(req.url, 'http://terminal').searchParams);
       res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(body));
     } catch (err) {
       res.writeHead(400, cors).end(err.message);

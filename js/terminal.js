@@ -133,6 +133,11 @@ export const removeWorktree = async (base, { cwd, name, path, session }) => (awa
 // [{ path, name, branch, head, claude, locked, prunable, pid, running, commands, changes }] }.
 export const listWorktrees = async (base, path) => (await call(base, `/worktrees?path=${encodeURIComponent(path)}`)).json();
 
+// What a terminal left behind, for the Cron step after it: { output } (the end of its raw output), and when `path`
+// is in a repository { repo: true, root, branch, upstream, ahead, behind, base, commit, short, subject, commits:
+// [{ hash, short, subject }], files: [{ status, path, from? }], more, uncommitted }.
+export const sessionOutcome = async (base, { session, path }) => (await call(base, `/outcome?${new URLSearchParams({ session, path })}`)).json();
+
 // What the claude sessions in worktrees [{ name, cwd }] used, from Claude Code's transcripts: { [name]: { sessions,
 // models: { [id]: { provider, input, output, thinking, cacheRead, cacheWrite, cost } }, cost, duration, apiDuration,
 // linesAdded, linesRemoved, efforts, replies, start, end } }. Worktrees with no transcript are left out.
