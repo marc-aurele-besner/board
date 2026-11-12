@@ -53,6 +53,8 @@ export interface RunnerJobState {
   accounts?: number;
   entries?: number;
   started?: number;
+  // Worktrees given back.
+  removed?: number;
 }
 
 export interface RunnersData {

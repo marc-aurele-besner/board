@@ -1,8 +1,10 @@
+// @ts-check
 // Reads each project's Resend emails into inbox.json. Node is not bound by CORS, so it calls api.resend.com
 // directly; the board asks this job for one email's body and for a key check.
+/** @import { Job } from '../../types/runner' */
 import { syncInbox, keyedProjects, readEmailOf, checkResendKey } from '../../js/resend.js';
 
-export default {
+export default /** @satisfies {Job} */ ({
   id: 'resend',
   delay: 4000,
   timeout: 5 * 60000,
@@ -16,4 +18,4 @@ export default {
     'GET /resend/email/*': (_body, id, store) => readEmailOf(store, id),
     'POST /resend/check': async (body) => ({ text: await checkResendKey(String(body.key ?? '')) }),
   },
-};
+});

@@ -1,11 +1,15 @@
+// @ts-check
 // Starts the Cron flows that are due, every minute. isDue() runs one missed slot once, not every missed slot, so a Mac
 // waking after a night runs a daily flow once. Only this job runs flows on schedule, so two open tabs and the runners
 // run a due flow once, not three times. The board's Run now asks it for one flow (POST /run/cron { flowId }).
 // Flows are started, not awaited: a Run in Dev step can wait an hour for its terminal, and the next due flow should not
 // wait for it. runFlow() marks a flow's lastRun before its first step, so the next tick does not start it again.
+/** @import { CronFlow } from '../../types/data' */
+/** @import { Job, Logger, NodeStore } from '../../types/runner' */
 import { isDue, runFlow, isRunning, COLLECTION } from '../../js/cron.js';
 import { useRunnerOrigin } from '../../js/terminal.js';
 
+/** @param {NodeStore} store @param {Logger} log @param {CronFlow} flow */
 function start(store, log, flow, manual = false) {
   runFlow(store, flow.id, { manual })
     .then((run) => {
@@ -14,7 +18,7 @@ function start(store, log, flow, manual = false) {
     .catch((err) => log.error(`cron flow “${flow.name}” failed: ${err.message}`));
 }
 
-export default {
+export default /** @satisfies {Job} */ ({
   id: 'cron',
   delay: 4000,
   timeout: 60000,
@@ -36,4 +40,4 @@ export default {
     for (const flow of due) start(store, log, flow);
     return due.length ? { started: due.length } : {};
   },
-};
+});
