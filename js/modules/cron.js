@@ -663,7 +663,12 @@ function stepForm(store, flow, step) {
     const devNames = varNames(flow, flow.steps.indexOf(step), [['task', 'The task made above: its title and description']]);
     return h('div', { class: 'stack' },
       h('div', { class: 'row cron-fields' },
-        field('Run', select(value, options, run)),
+        field('Run', pickChip({
+          value,
+          options: options.map(([v, label]) => ({ value: v, label, plainIcon: () => icon(v === 'command' ? 'terminal' : v === 'custom' ? 'code' : v.startsWith('preset:') ? 'sparkle' : 'play') })),
+          className: 'field-pick',
+          onPick: (v) => v && run(v),
+        })),
         field('Folder', stepProjectPick(store, flow, step.projectId, (projectId) => set({ projectId }), {
           none: 'The task’s project, else this board',
           list: folders, name: (p) => (p.localPath ? p.name : `${p.name} (no local folder)`),
