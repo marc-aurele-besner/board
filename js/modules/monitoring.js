@@ -8,6 +8,8 @@ import { setupBanner } from '../integrations.js';
 import { analyticsTab, searchTab, sortTable } from './monitoring-web.js';
 import { contractsActivityTab, contractsActivitySerialize, contractsActivityRestore } from './monitoring-contracts.js';
 import { usageRecords, sumUsage, modelName, modelsByUse, fmtDuration, tokensOf } from '../dev-usage.js';
+import { sessionStatus } from '../terminal.js';
+import { runnerOf } from '../dev-core.js';
 
 const COLLECTION = 'usage';
 const DAY = 86400000;
@@ -282,6 +284,34 @@ function aiTab(store, w) {
 
 // --- Dev sessions: what claude used for tasks, from its transcripts (dev-usage.js) ---
 
+// What each Dev session's terminal is doing, asked of the command runner while the AI tab is shown, so the sessions
+// still running stand out from the finished ones. Working or waiting for you counts as in progress.
+const LIVE_POLL_MS = 5000;
+const live = { status: {}, ids: [], timer: 0 };
+const LIVE_STATES = { working: 'Working', waiting: 'Waiting for you' };
+const aiShown = () => location.hash.startsWith('#/monitoring') && view.tab === 'ai';
+
+// Asks for `ids` now and every few seconds while the AI tab is shown; the page draws again only when a state changed.
+function pollLive(store, ids) {
+  live.ids = ids;
+  if (live.timer || !ids.length) return;
+  const poll = async () => {
+    // Held while the runner answers, so a page drawn meanwhile does not start a second poll.
+    live.timer = 'asking';
+    if (!aiShown() || !live.ids.length) return (live.timer = 0);
+    try {
+      const status = await sessionStatus(runnerOf(store), live.ids);
+      const changed = JSON.stringify(status) !== JSON.stringify(live.status);
+      live.status = status;
+      if (changed && aiShown()) store.refresh();
+    } catch {
+      // An unreachable runner says nothing about the sessions: they show as they were.
+    }
+    live.timer = setTimeout(poll, LIVE_POLL_MS);
+  };
+  live.timer = setTimeout(poll, 0);
+}
+
 // A session counts in the period its last reply falls in.
 function devSessions(store, w) {
   const records = usageRecords(store).filter((r) => inWindow(r.end ?? null, w));
@@ -302,11 +332,16 @@ function devSessions(store, w) {
     { name: 'Extra, billed', color: 'var(--warn)', values: extra.map(round) },
   ];
   const models = modelsByUse(sum).map((id) => ({ id, ...sum.models[id], tokens: tokensOf(sum.models[id]) }));
+  // The terminal session of a record: its own, or one of its tasks' (records saved before they named it).
+  const sessionOf = (r) => r.session || tasks.find((t) => r.taskIds?.includes(t.id) && t.devSession)?.devSession || '';
+  pollLive(store, [...new Set(records.map(sessionOf).filter(Boolean))]);
   const rows = records.map((r) => {
     const one = sumUsage([r]);
     const named = tasks.filter((t) => r.taskIds?.includes(t.id)).map((t) => t.text);
-    return { label: named.join(', ') || r.name, name: r.name, one, end: r.end };
+    const state = live.status[sessionOf(r)]?.state;
+    return { label: named.join(', ') || r.name, name: r.name, one, end: r.end, state: LIVE_STATES[state] ? state : '' };
   });
+  const running = rows.filter((r) => r.state).length;
   const costCell = (v, partial) => (v === null ? '—' : `${partial ? '≥ ' : ''}${usdPrecise(v)}`);
   return h('section', { class: 'card stack' },
     h('h3', null, 'Dev sessions'),
@@ -316,7 +351,7 @@ function devSessions(store, w) {
           h('div', { class: 'summary' },
             stat('Included', costCell(sum.included, sum.costPartial), sum.billing === 'api' ? 'no Claude plan: every token is billed' : 'covered by the Claude plan'),
             stat('Extra', costCell(sum.extraCost), sum.costPartial ? 'some sessions still running' : 'billed beyond the plan'),
-            stat('Sessions', String(sum.sessions), `for ${rows.length} task worktree${rows.length === 1 ? '' : 's'}`),
+            stat('Sessions', String(sum.sessions), `for ${rows.length} task worktree${rows.length === 1 ? '' : 's'}${running ? `, ${running} in progress` : ''}`),
             stat('Tokens', fmtTokens(sum.tokens), 'input, cache and output'),
             stat('Time', fmtDuration(sum.duration), sum.linesAdded || sum.linesRemoved ? `+${sum.linesAdded} −${sum.linesRemoved} lines` : 'worked')),
           barChart(w.items.map((b) => b.label), series, { format: usdPrecise }),
@@ -331,6 +366,7 @@ function devSessions(store, w) {
           ], models),
           sortTable('dev-tasks', [
             { label: 'Task', clip: true, value: (r) => r.label, format: (v, r) => h('span', { title: r.name }, v) },
+            { label: 'Status', value: (r) => (r.state ? 0 : 1), format: (v, r) => h('span', { class: `pill dev-state dev-${r.state || 'finished'}`, title: r.state ? 'claude is still running: the numbers keep growing until it quits' : 'claude has quit or nothing is running' }, r.state ? LIVE_STATES[r.state] : 'Finished') },
             { label: 'Model', value: (r) => modelsByUse(r.one).map(modelName).join(', ') },
             { label: 'Effort', value: (r) => r.one.effort || '—' },
             { label: 'Tokens', num: true, value: (r) => r.one.tokens, format: fmtTokens },
@@ -338,7 +374,7 @@ function devSessions(store, w) {
             { label: 'Extra', num: true, value: (r) => r.one.extraCost, format: (v) => costCell(v) },
             { label: 'Time', num: true, value: (r) => r.one.duration, format: fmtDuration },
             { label: 'Last reply', num: true, value: (r) => r.end, format: (v) => new Date(v).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) },
-          ], rows.sort((a, b) => b.end - a.end)),
+          ], rows.sort((a, b) => b.end - a.end), (r) => (r.state ? `dev-live dev-${r.state}` : '')),
         ]
       : empty('No Dev sessions in this period. Start claude on a task with its Dev button and its usage shows here.'));
 }

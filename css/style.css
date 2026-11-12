@@ -405,6 +405,15 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .mon-sort:hover .icon, th[aria-sort] .mon-sort .icon { opacity: 1; }
 .mon-table th.num .mon-sort { flex-direction: row-reverse; }
 .mon-table .num, .mon-recent .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Dev sessions still running: a coloured edge and tint until claude quits */
+.mon-table tr.dev-live td { background: color-mix(in srgb, var(--live) 8%, transparent); }
+.mon-table tr.dev-live td:first-child { box-shadow: inset 3px 0 0 var(--live); }
+.mon-table tr.dev-working { --live: var(--accent); }
+.mon-table tr.dev-waiting { --live: var(--warn); }
+.pill.dev-state { --c: var(--muted); color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
+.pill.dev-working { --c: var(--accent); }
+.pill.dev-working::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: currentColor; vertical-align: middle; animation: pulse 1.4s ease-in-out infinite; }
+.pill.dev-waiting { --c: var(--warn); }
 .mon-recent { display: flex; flex-direction: column; }
 .mon-recent li { display: flex; align-items: center; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .bars-day { display: flex; align-items: flex-end; gap: 4px; height: 150px; padding-top: 8px; }
