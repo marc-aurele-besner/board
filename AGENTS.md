@@ -49,7 +49,8 @@ js/multicall.js       Multicall3: many read-only calls in one request
 js/balances.js        native and token balances of the DeFi wallets (DeFi → Wallets)
 js/aave.js            Aave v3 supply, debt and health factor of the DeFi wallets (DeFi → Lending / Borrowing)
 js/resend.js          the Inbox's Resend reads: email lists per project key, and one email's body
-js/google.js          every Google sign-in, kept in google.json and renewed before it expires; account pictures
+js/google.js          every Google sign-in, kept in google.json; the sign-in popup and account pictures
+js/google-core.js     Google tokens without the DOM: live access tokens, googleFetch; only the runners renew a token
 js/gmail.js           the Inbox's Gmail reads: one sign-in per account, its email list, and one email's body
 js/gcal.js            Calendar's Google reads: one sign-in per account, its calendar list, and the events of a range
 js/background.js      timers for the above; started once the data folder is open
@@ -79,7 +80,8 @@ tools/worker.js       the runners: one worker that runs the background jobs on a
 tools/worker/store.js the store for Node (get, update, save over node:fs), merged with what the tabs write through js/merge.js
 tools/worker/schedule.js  intervals, no overlap, timeouts, backoff, and the runners.json heartbeat
 tools/worker/http.js  the worker's localhost API: status, Run now, data folder
-tools/jobs/*.js       one file per job: { id, every, timeout, delay, run(ctx) }; listed in tools/jobs/index.js
+tools/jobs/*.js       one file per job: { id, timeout, delay, setup(store), run(ctx) }; listed in tools/jobs/index.js
+tools/jobs/google.js  renews Google access tokens; a tab that finds one expired asks it through POST /run/google
 tools/check-imports.js  loads every worker module under plain Node, to catch a missing import or a DOM call at load time
 tools/check-merge.js  the worker and a tab change two fields of one file; both must survive
 tools/usage.js        reads Claude Code's transcripts for the runner: a task worktree's models, tokens, cost and effort

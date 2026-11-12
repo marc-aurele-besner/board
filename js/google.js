@@ -1,37 +1,34 @@
 // Google, read-only, straight from the browser. Every sign-in (Gmail and Calendar per account, Analytics and Search
 // Console together) is kept in google.json in the data folder, with a refresh token, so any browser profile that opens
-// the folder is connected and the board renews each access token before it expires. Nothing is kept in the browser.
+// the folder is connected; the runners renew each access token before it expires. Nothing is kept in the browser.
+// The token handling without the DOM is in google-core.js, which the runners load too.
 import { h } from './ui.js';
+import { GOOGLE, GOOGLE_DEFAULTS, WEB, scopeOf, SERVICE_SCOPES, googleData, saveGoogleData, bindGoogleStore, useRenewer, tokenRequest, hasToken, tokenScopes, removeToken, accessToken, isConnected, googleFetch } from './google-core.js';
+import { runJob } from './runners.js';
 
-export const GOOGLE = 'google';
-// tokens: { "<gmail|gcal>:<address>" or "web": { refresh, access, expiresAt, scope, at } }
-// pictures: { <address>: url }; events: { "<address>|<calendarId>": [{ from, to, at, events }] }, Calendar's cache.
-export const GOOGLE_DEFAULTS = { tokens: {}, pictures: {}, events: {} };
+export { GOOGLE, GOOGLE_DEFAULTS, googleData, saveGoogleData, hasToken, tokenScopes, accessToken, isConnected, googleFetch };
 
-const AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
-const TOKEN = 'https://oauth2.googleapis.com/token';
 const REVOKE = 'https://oauth2.googleapis.com/revoke';
-// An access token is renewed this long before it expires, so a read never starts with one about to lapse.
-const EARLY = 5 * 60 * 1000;
+const AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
 const SIGN_IN_WAIT = 5 * 60 * 1000;
 
-const SCOPES = {
-  analytics: 'https://www.googleapis.com/auth/analytics.readonly',
-  search: 'https://www.googleapis.com/auth/webmasters.readonly',
-};
-const WEB = 'web';
-
 let store = null;
-const data = () => store?.get(GOOGLE) ?? GOOGLE_DEFAULTS;
-const tokens = () => data().tokens;
-
-// google.json for the other Google modules: Calendar keeps its event cache in it. Saved without a re-render.
-export const googleData = data;
-export const saveGoogleData = (mutate) => store?.save(GOOGLE, mutate);
+const tokens = () => googleData().tokens;
 
 // Gives google.json's store to the Google modules. Runs once the data folder is open.
+// The runners renew every token (tools/jobs/google.js). A tab that finds one expired asks them, then reads the
+// renewed token from google.json; it never renews one itself, so the two never fight over a refresh token.
 export function useGoogleStore(next) {
   store = next;
+  bindGoogleStore(next);
+  useRenewer(async (key) => {
+    await runJob('google', { key });
+    await store.sync();
+    const token = tokens()[key];
+    if (token?.removed || !token?.refresh) throw new Error('Google signed this account out. Connect it again.');
+    if (!token.access || !(token.expiresAt > Date.now())) throw new Error('Google sign-in could not be renewed. Check Settings → Runners.');
+    return token.access;
+  });
   // Earlier versions kept tokens, pictures and the event cache in the browser; none of it is read any more.
   try {
     for (const key of Object.keys(localStorage)) {
@@ -47,22 +44,6 @@ export const redirectUri = () => `${location.origin}/oauth.html`;
 
 const base64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const randomText = () => base64url(crypto.getRandomValues(new Uint8Array(32)));
-
-async function tokenRequest(fields) {
-  const { clientId = '', clientSecret = '' } = store?.get('settings').google ?? {};
-  const res = await fetch(TOKEN, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, ...fields }),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const err = new Error(body.error_description || body.error || `Google sign-in error ${res.status}`);
-    err.code = body.error ?? '';
-    throw err;
-  }
-  return body;
-}
 
 let pending = null;
 
@@ -117,20 +98,11 @@ export async function signIn({ scopes, address = '' }) {
   return { refresh: body.refresh_token, access: body.access_token, expiresAt: Date.now() + Number(body.expires_in) * 1000, scope: body.scope ?? '' };
 }
 
-export const hasToken = (key) => Boolean(tokens()[key]?.refresh);
-export const tokenScopes = (key) => String(tokens()[key]?.scope ?? '').split(' ').filter(Boolean);
-
 export function saveToken(key, token) {
   store.update(GOOGLE, (d) => {
     d.tokens[key] = { ...token, at: Date.now() };
   });
 }
-
-// A removed sign-in leaves { removed: true, at }, so a profile that still holds the old one in memory takes the
-// removal in (see mergeFromDisk) instead of writing the sign-in back.
-const removeToken = (key) => store.update(GOOGLE, (d) => {
-  d.tokens[key] = { removed: true, at: Date.now() };
-});
 
 // Removes a sign-in. Revoking at Google ends every sign-in of that account to this client (Gmail and Calendar
 // share it), so a Gmail or Calendar one is revoked only when the other service is not connected to the same account.
@@ -146,103 +118,19 @@ export function forgetToken(key, { revoke = true } = {}) {
   removeToken(key);
 }
 
-const refreshing = new Map();
-
-async function renew(key) {
-  const token = tokens()[key];
-  try {
-    const body = await tokenRequest({ grant_type: 'refresh_token', refresh_token: token.refresh });
-    // Saved without a re-render: nothing on screen changes.
-    store.save(GOOGLE, (d) => {
-      if (!d.tokens[key]) return;
-      Object.assign(d.tokens[key], {
-        access: body.access_token,
-        expiresAt: Date.now() + Number(body.expires_in) * 1000,
-        ...(body.refresh_token ? { refresh: body.refresh_token } : {}),
-        at: Date.now(),
-      });
-    });
-    return body.access_token;
-  } catch (err) {
-    // Revoked, expired or the password changed: the sign-in is gone for good. Other failures are tried again later.
-    if (err.code === 'invalid_grant') {
-      removeToken(key);
-      throw new Error('Google signed this account out. Connect it again.');
-    }
-    throw err;
-  }
-}
-
-// A live access token for a sign-in, renewed first when it is close to expiring (or when `force` is set, after
-// Google refused it).
-export function accessToken(key, force = false) {
-  const token = tokens()[key];
-  if (!token?.refresh) return Promise.reject(new Error('Not connected to Google.'));
-  if (!force && token.access && token.expiresAt - EARLY > Date.now()) return Promise.resolve(token.access);
-  if (!refreshing.has(key)) refreshing.set(key, renew(key).finally(() => refreshing.delete(key)));
-  return refreshing.get(key);
-}
-
-// Another profile may have the folder open too and written google.json since it was loaded. Its newer sign-ins
-// and pictures are taken in, so this profile does not write over them with older ones.
-async function mergeFromDisk() {
-  let disk;
-  try {
-    disk = JSON.parse(await (await store.files.read(`${GOOGLE}.json`)).text());
-  } catch {
-    return;
-  }
-  const ours = data();
-  const newer = Object.entries(disk.tokens ?? {}).filter(([key, t]) => t && (t.at ?? 0) > (ours.tokens[key]?.at ?? 0));
-  const pictures = Object.entries(disk.pictures ?? {}).filter(([address, url]) => url && !ours.pictures[address]);
-  if (!newer.length && !pictures.length) return;
-  store.update(GOOGLE, (d) => {
-    for (const [key, t] of newer) d.tokens[key] = t;
-    for (const [address, url] of pictures) d.pictures[address] = url;
-  });
-}
-
-// Renews every access token that expires soon. Runs from the background timer.
-export async function refreshTokens() {
-  if (!store) return;
-  await mergeFromDisk();
-  for (const [key, token] of Object.entries(tokens())) {
-    if (token.refresh && !(token.expiresAt - 2 * EARLY > Date.now())) {
-      await accessToken(key, true).catch((err) => console.warn(`Google token ${key} was not renewed:`, err.message));
-    }
-  }
-}
-
 // --- Analytics and Search Console ---
 // One sign-in covers both. Connecting the second asks for both permissions again.
 
-// True when the sign-in covers the service: 'analytics' or 'search'.
-export const isConnected = (service) => hasToken(WEB) && tokenScopes(WEB).includes(SCOPES[service]);
-
 export async function connect(_clientId, service) {
-  const wanted = new Set([...(hasToken(WEB) ? tokenScopes(WEB).filter((s) => Object.values(SCOPES).includes(s)) : []), SCOPES[service]]);
+  const wanted = new Set([...(hasToken(WEB) ? tokenScopes(WEB).filter((s) => SERVICE_SCOPES.includes(s)) : []), scopeOf(service)]);
   const token = await signIn({ scopes: [...wanted] });
-  if (!token.scope.split(' ').includes(SCOPES[service])) throw new Error('Google did not grant this permission. Tick its box on the consent screen.');
+  if (!token.scope.split(' ').includes(scopeOf(service))) throw new Error('Google did not grant this permission. Tick its box on the consent screen.');
   // The new sign-in replaces the old one. Neither is revoked: the account may also be connected to Gmail or Calendar,
   // and revoking would sign those out too.
   saveToken(WEB, token);
 }
 
 export const disconnect = () => forgetToken(WEB, { revoke: false });
-
-// A signed request to a Google API. `name` is how the service is called in error messages.
-export async function googleFetch(service, name, url, options = {}) {
-  if (!isConnected(service)) throw new Error(`Connect ${name} in Settings first.`);
-  const send = async (force) => fetch(url, { ...options, headers: { ...(options.headers ?? {}), Authorization: `Bearer ${await accessToken(WEB, force)}` } });
-  let res = await send(false);
-  if (res.status === 401) res = await send(true);
-  if (res.status === 401) throw new Error('Google refused the sign-in. Connect again.');
-  if (!res.ok) {
-    const detail = await res.json().then((d) => d.error?.message).catch(() => '');
-    throw new Error(`${name} error ${res.status}${detail ? `: ${detail}` : ''}`);
-  }
-  return res.json();
-}
 
 // --- Account pictures ---
 // Gmail and Calendar also ask for the basic profile, only to show each account's Google picture. Its URL is kept in
@@ -263,7 +151,7 @@ export async function rememberPicture(address, accessValue, grantedScope) {
   }
 }
 
-export const pictureOf = (address) => data().pictures[address] ?? '';
+export const pictureOf = (address) => googleData().pictures[address] ?? '';
 
 // A round avatar for a Google account: its picture, or its first letter when there is none or it fails to load.
 export function accountAvatar(address, className = 'account-avatar') {
