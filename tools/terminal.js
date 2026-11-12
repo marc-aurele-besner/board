@@ -25,7 +25,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logger } from './log.js';
-import { worktreeActivity, worktreeUsage } from './usage.js';
+import { sessionTranscript, worktreeActivity, worktreeUsage } from './usage.js';
 
 const PORT = Number(process.env.TERMINAL_PORT) || 8419;
 const MAX = Number(process.env.TERMINAL_MAX) || 12;
@@ -69,7 +69,7 @@ const log = logger('terminal');
 /**
  * @typedef {{ id: string, events: SessionEvent[], size: number, open: SessionEvent | null, listeners: Set<ServerResponse>,
  *   run: Job | null, known: boolean, pending: string, rewrite: boolean, timer: NodeJS.Timeout | number,
- *   disk: Promise<unknown>, closed: boolean, lastOut?: number, taps?: Set<(event: SessionEvent) => void> }} Session
+ *   disk: Promise<unknown>, closed: boolean, lastOut?: number, taps?: Set<(event: SessionEvent) => void>, transcript?: string }} Session
  */
 
 // Running commands by pid: the child, the folder it reports into, and its session.
@@ -250,10 +250,26 @@ const WORKTREE_FLAG = /(?:^|\s)(?:--worktree|-w)(?:=|\s+)([\w.-]{1,64})(?=\s|$)/
 /** @param {string} [command] */
 const worktreeOf = (command = '') => WORKTREE_FLAG.exec(String(command).split(/\s--\s/)[0])?.[1] ?? '';
 
+// The claude transcript of a session that started claude: found by its folder, start time and prompt (the last word
+// of the command, quoted by shellQuote() in js/dev-core.js), then remembered. Null for any other command.
+const PROMPT_ARG = /\s--\s+('(?:[^']|'\\'')*')\s*$/;
+/** @param {string} [command] */
+const startsClaude = (command = '') => /(?:^|[\s/])claude(?:\s|$)/.test(command.split(/\s--\s/)[0]);
+/** @param {Session} s */
+async function transcriptOf(s) {
+  const start = s.open ?? s.events.findLast((e) => e.t === 'start');
+  if (start?.t !== 'start' || !start.at || !startsClaude(start.command)) return null;
+  const quoted = PROMPT_ARG.exec(start.command)?.[1];
+  const prompt = quoted ? quoted.slice(1, -1).replace(/'\\''/g, "'") : '';
+  const t = await sessionTranscript({ cwd: start.cwd, at: start.at, prompt, worktree: worktreeOf(start.command), known: s.transcript }).catch(() => null);
+  if (t) s.transcript = t.file;
+  return t;
+}
+
 // What a session is doing, for a task's Dev button: running (and how long it has been quiet, as a program waiting
 // for its user prints nothing), ended (with its exit code), or idle. A session that is gone is left out.
-// Quiet is not enough for claude in a worktree: a long tool call or a background subagent prints nothing either, so
-// it waits only once its transcript says the turn ended and no subagent is still working.
+// Quiet is not enough for claude: a long tool call or a background subagent prints nothing either, so it waits only
+// once its transcript says the turn ended and no subagent is still working.
 const QUIET_MS = 8000;
 /** @param {string} id */
 async function statusOf(id) {
@@ -264,7 +280,8 @@ async function statusOf(id) {
     const cwd = s.open?.cwd ?? '';
     if (Date.now() - (s.lastOut ?? 0) < QUIET_MS) return { state: 'working', cwd };
     const name = worktreeOf(s.open?.command);
-    const activity = name && cwd ? (await worktreeActivity([{ name, cwd }]).catch(() => /** @type {Record<string, { busy: boolean, agents: number }>} */ ({})))[name] : null;
+    const activity = (await transcriptOf(s))
+      ?? (name && cwd ? (await worktreeActivity([{ name, cwd }]).catch(() => /** @type {Record<string, { busy: boolean, agents: number }>} */ ({})))[name] : null);
     return { state: activity?.busy ? 'working' : 'waiting', cwd, ...(activity ? { agents: activity.agents } : {}) };
   }
   const exit = s.events.findLast((e) => e.t === 'exit');
@@ -965,17 +982,23 @@ async function searchFiles(params) {
 }
 
 // What a terminal left behind, for a Cron step that runs after a Run in Dev step: the end of its output (escape
-// sequences and all; the page reads links from it), and, in the folder it worked in, the branch, the last commit,
-// and the commits and files that differ from the default branch (uncommitted ones included).
+// sequences and all; the page reads links from it), claude's last answer and the files it wrote (from its
+// transcript), and, in the folder it worked in, the branch, the last commit, and the commits and files that differ
+// from the default branch (uncommitted ones included).
 const OUTCOME_OUTPUT = 20000;
 const OUTCOME_FILES = 300;
 const OUTCOME_COMMITS = 30;
+const OUTCOME_REPLY = 30000;
 /** @param {URLSearchParams} params */
 async function sessionOutcome(params) {
   const id = params.get('session') ?? '';
   let output = '';
+  /** @type {{ reply?: string, written?: string[] }} */
+  let claude = {};
   if (SESSION_ID.test(id) && (sessions.has(id) || (await stat(logFile(id)).catch(() => null)))) {
     const s = await sessionOf(id);
+    const t = await transcriptOf(s);
+    if (t) claude = { reply: t.reply.slice(-OUTCOME_REPLY), written: t.written.slice(-OUTCOME_FILES) };
     /** @type {string[]} */
     const chunks = [];
     let size = 0;
@@ -988,7 +1011,7 @@ async function sessionOutcome(params) {
     output = chunks.reverse().join('').slice(-OUTCOME_OUTPUT);
   }
   const root = await repoOf(params.get('path') ?? '').catch(() => null);
-  if (!root) return { output, repo: false };
+  if (!root) return { output, ...claude, repo: false };
   const status = parseStatus(await git(root, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', ...NOT_WORKTREES]));
   const head = (await git(root, ['log', '-1', '--format=%H%x1f%h%x1f%s'], { ok: [0, 128] }).catch(() => '')).trim().split('\x1f');
   // The default branch as the remote names it, else a local main or master.
@@ -1025,6 +1048,7 @@ async function sessionOutcome(params) {
   files = files.slice(0, OUTCOME_FILES);
   return {
     output,
+    ...claude,
     repo: true,
     root,
     branch: status.branch,
