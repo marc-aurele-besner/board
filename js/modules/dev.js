@@ -239,6 +239,7 @@ function paint(s) {
   const cursorY = s.running && term.cursor ? term.y : -1;
   screen.replaceChildren(...term.screen.slice(0, term.used()).map((l, y) => lineNode(l, y === cursorY ? Math.min(term.x, term.cols - 1) : -1)));
   if (s.stick) out.scrollTop = out.scrollHeight;
+  s.el.top = out.scrollTop;
 }
 
 let frame = 0;
@@ -318,6 +319,40 @@ function onTerminalPaste(store, s, e) {
   if (text) sendInput(runnerOf(store), s.pid, { data: s.term.paste ? `\x1b[200~${text}\x1b[201~` : text });
 }
 
+// Scrolling up to read stops following new output; scrolling back to the end follows it again. The direction
+// decides, not only the distance: a smooth wheel scroll starts a few pixels from the end, and following output
+// there would pull it straight back down.
+function onTerminalScroll(s) {
+  const { out } = s.el;
+  const top = out.scrollTop;
+  if (top < s.el.top - 1) s.stick = false;
+  else if (out.scrollHeight - top - out.clientHeight < 24) s.stick = true;
+  s.el.top = top;
+}
+
+// A full-screen program (the Claude CLI, less, vim) keeps no scrollback here, so the wheel goes to it, as a
+// terminal sends it: mouse reports when it asked for them, otherwise arrow keys on the alternate screen.
+function onTerminalWheel(store, s, e) {
+  if (e.deltaY < 0) s.stick = false;
+  const { term } = s;
+  if (!s.running || !s.pid || !e.deltaY || (!term.mouse && !term.main)) return;
+  e.preventDefault();
+  const up = e.deltaY < 0;
+  const lines = Math.min(10, Math.max(1, Math.round(Math.abs(e.deltaMode ? e.deltaY : e.deltaY / 40))));
+  let data;
+  if (term.mouse) {
+    const box = s.el.screen.getBoundingClientRect();
+    const x = Math.min(term.cols, Math.max(1, Math.ceil(((e.clientX - box.left) / box.width) * term.cols) || 1));
+    const y = Math.min(term.rows, Math.max(1, Math.ceil(((e.clientY - box.top) / box.height) * term.rows) || 1));
+    const b = up ? 64 : 65;
+    const one = term.mouseSgr ? `\x1b[<${b};${x};${y}M` : `\x1b[M${String.fromCharCode(32 + b, 32 + Math.min(x, 223), 32 + Math.min(y, 223))}`;
+    data = one.repeat(Math.min(lines, 3));
+  } else {
+    data = `${term.appCursor ? '\x1bO' : '\x1b['}${up ? 'A' : 'B'}`.repeat(lines);
+  }
+  sendInput(runnerOf(store), s.pid, { data });
+}
+
 function elementsOf(store, s) {
   if (s.el) return s.el;
   const history = h('div', { class: 'term-history' });
@@ -327,12 +362,12 @@ function elementsOf(store, s) {
     tabindex: '0',
     role: 'log',
     'aria-label': `Terminal ${s.n} output`,
-    // Scrolling up to read stops following new output; scrolling back to the end follows it again.
-    onscroll: () => (s.stick = out.scrollHeight - out.scrollTop - out.clientHeight < 24),
+    onscroll: () => onTerminalScroll(s),
+    onwheel: (e) => onTerminalWheel(store, s, e),
     onkeydown: (e) => onTerminalKey(store, s, e),
     onpaste: (e) => onTerminalPaste(store, s, e),
   }, history, screen);
-  s.el = { out, history, screen, from: 0 };
+  s.el = { out, history, screen, from: 0, top: 0 };
   s.observer = new ResizeObserver(() => fit(s));
   s.observer.observe(out);
   return s.el;
