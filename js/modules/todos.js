@@ -1,3 +1,11 @@
+// @ts-check
+/** @import { Store, Task, TaskLink, Project, ProjectLabel, IconName } from '../../types/data' */
+/** @import { RunnerStatus } from '../../types/terminal' */
+/** @import { PickOption } from '../inline.js' */
+/** @typedef {{ text: string, status: string[], priority: string[], project: string[], category: string[] }} ColFilter */
+/** @typedef {{ id: string, title: string, category: string, priority: string }} TidySuggestion */
+// What this section reads of repoStats(): the counts are there when status is 'ok'.
+/** @typedef {{ status: string, issues: number, prs: number, error?: string | null }} RepoState */
 import { h, uid, icon, statusOf, notice, todayISO } from '../ui.js';
 import { makeTask } from '../capture.js';
 import { AUTO_SOURCES } from '../automations.js';
@@ -28,24 +36,34 @@ const PRIORITIES = [
   ['high', 'High'],
 ];
 // The "Show" filter: "Open" (anything not done) and each status by the name it has in Settings → Labels.
+/** @param {Store} store */
 const statusFilters = (store) => [{ value: 'open', label: 'Open' }, ...taskStatuses(store).map((s) => ({ value: s.key, label: s.name, ...statusLook(s) }))];
+/** @type {Record<string, number>} */
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2, none: 3 };
 const NO_CATEGORY = '__none';
 // Lists that are not a project: everything, no project, due today or late, waiting to be organized, made by a rule.
 const SMART_LISTS = ['all', 'personal', 'today', 'organize', 'auto'];
 // Ways to lay out the same tasks: [key, label, icon]. The list, status and column filters apply to all of them.
+/** @type {[string, string, IconName][]} */
 const LAYOUTS = [['table', 'Table', 'list'], ['board', 'Board', 'columns'], ['project', 'By project', 'folder'], ['status', 'By status', 'check-square']];
 // In "By status", what is being worked on comes first and what is done comes last.
 const STATUS_GROUP_ORDER = ['doing', 'review', 'ondeck', 'todo', 'blocked', 'paused', 'done'];
 
 // Tasks open sorted by status, so what is being worked on is on top. An empty key means the manual (dragged) order.
 const DEFAULT_SORT = { key: 'status', dir: 'asc' };
+/** @param {{ key: string, dir: string }} s */
 const isDefaultSort = (s) => s.key === DEFAULT_SORT.key && s.dir === DEFAULT_SORT.dir;
 
 // View state lives here so it survives re-renders.
 // filter: one of SMART_LISTS, or a project id. status, category: lists of picked values; empty means any.
 // sort: { key, dir }. colFilter: the title filter, and a list of picked values per column. Empty means "any".
 // query: the search box, read by taskMatcher (words plus #project, !priority, is:status, cat:, due: tokens).
+/**
+ * @type {{ layout: string, query: string, filter: string, status: string[], category: string[], expanded: Set<string>,
+ *   selected: Set<string>, lastPicked: string | null, dragId: string | null, dragStatus: string | null, creatingProject: boolean,
+ *   showProject: boolean, sort: { key: string, dir: string }, colFilter: ColFilter,
+ *   tidy: { status: string, items: TidySuggestion[], error?: string }, focusTask: string }}
+ */
 const view = {
   layout: 'table',
   query: '',
@@ -68,25 +86,31 @@ const view = {
   focusTask: '',
 };
 
+/** @returns {ColFilter} */
 function emptyColFilter() {
   return { text: '', status: [], priority: [], project: [], category: [] };
 }
+/** @param {string} f */
 const isProjectFilter = (f) => !SMART_LISTS.includes(f);
+/** @param {Task} item */
 const matchesFilter = (item) => {
   const f = view.filter;
   if (f === 'all') return true;
   if (f === 'personal') return item.projectId === null;
-  if (f === 'today') return Boolean(item.due) && item.due <= todayISO();
+  if (f === 'today') return Boolean(item.due) && /** @type {string} */ (item.due) <= todayISO();
   if (f === 'organize') return Boolean(item.inbox);
   if (f === 'auto') return Boolean(item.auto);
   return item.projectId === f;
 };
+/** @param {Task} item */
 const matchesStatus = (item) => {
   const s = statusOf(item);
   if (!view.status.length) return true;
   return view.status.includes(s) || (s !== 'done' && view.status.includes('open'));
 };
+/** @param {Task} item */
 const matchesCategory = (item) => !view.category.length || view.category.includes(item.category || NO_CATEGORY);
+/** @param {Task} item */
 const matchesColumns = (item) => {
   const f = view.colFilter;
   if (f.text && !item.text.toLowerCase().includes(f.text.toLowerCase())) return false;
@@ -96,16 +120,23 @@ const matchesColumns = (item) => {
   if (f.category.length && !f.category.includes(item.category || NO_CATEGORY)) return false;
   return true;
 };
+/** @param {Store} store */
 const projectsOf = (store) => store.get('projects').projects;
-const formValues = (form) => Object.fromEntries(new FormData(form));
+// The forms here hold only text fields.
+/** @param {HTMLFormElement} form */
+const formValues = (form) => /** @type {Record<string, string>} */ (Object.fromEntries(new FormData(form)));
+/** @param {string} a @param {string} b */
 const sameLower = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
+/** @param {string[][]} list @param {string} key */
 const label = (list, key) => list.find(([k]) => k === key)?.[1] ?? '';
 
 // Task categories. Each has a scope: 'all' (every project), 'project' (one project),
 // or 'projectCategory' (every project carrying one of its project labels, such as Web).
+/** @param {Store} store */
 const todoCategories = (store) => store.get(COLLECTION).categories ?? [];
 
 // Names a todo in this project can use: general ones, plus those scoped to the project or one of its labels.
+/** @param {Store} store @param {string | null} projectId */
 function categoriesFor(store, projectId) {
   const project = projectsOf(store).find((p) => p.id === projectId);
   const labels = project ? labelsOf(project) : [];
@@ -119,6 +150,7 @@ function categoriesFor(store, projectId) {
 // "buy milk #home" files the item under project "home" (created if missing).
 // Extra lines from a multi-line paste arrive as the description.
 // Images pasted or dropped on the add field go to the task it adds.
+/** @param {Store} store @param {string} raw @param {string} [description] */
 function addItem(store, raw, description = '') {
   let text = raw.trim();
   const tag = text.match(/(?:^|\s)#([\w-]+)/);
@@ -144,7 +176,9 @@ function addItem(store, raw, description = '') {
 
 // --- Images waiting on the add field, shown under it until the task is added ---
 
+/** @type {{ file: File, url: string }[]} */
 const pending = []; // { file, url }
+/** @type {HTMLDivElement | null} */
 let pendingStrip = null;
 
 function clearPending() {
@@ -152,6 +186,7 @@ function clearPending() {
   drawPending();
 }
 
+/** @param {File[]} files */
 function takePending(files) {
   pending.push(...files.map((file) => ({ file, url: URL.createObjectURL(file) })));
   drawPending();
@@ -185,6 +220,7 @@ function pendingImagesStrip() {
 }
 
 // Pasting several lines: first non-empty line is the title, the rest is the description.
+/** @param {Store} store @param {ClipboardEvent} e */
 function pasteAsTodo(store, e) {
   const files = imageFiles(e.clipboardData);
   if (files.length) {
@@ -202,6 +238,7 @@ function pasteAsTodo(store, e) {
 }
 
 // Every edit to a todo goes through here, one task or a batch. A status change also drops the legacy `done` flag.
+/** @param {Store} store @param {string[]} ids @param {Partial<Task>} patch */
 function updateItems(store, ids, patch) {
   const pick = new Set(ids);
   store.update(COLLECTION, (d) => {
@@ -214,9 +251,11 @@ function updateItems(store, ids, patch) {
     }
   });
 }
+/** @param {Store} store @param {string} id @param {Partial<Task>} patch */
 const updateItem = (store, id, patch) => updateItems(store, [id], patch);
 
 // Deleting is immediate, with a few seconds to take it back.
+/** @param {Store} store @param {string} id */
 function removeItem(store, id) {
   const items = store.get(COLLECTION).items;
   const index = items.findIndex((i) => i.id === id);
@@ -229,6 +268,7 @@ function removeItem(store, id) {
 }
 
 // Deleting a batch, with the same few seconds to take it back.
+/** @param {Store} store @param {string[]} ids */
 function removeItems(store, ids) {
   const pick = new Set(ids);
   const before = store.get(COLLECTION).items;
@@ -247,6 +287,7 @@ function removeItems(store, ids) {
 }
 
 // The deadline next to a title: today and late ones stand out.
+/** @param {Task} item */
 function dueChip(item) {
   if (!item.due || statusOf(item) === 'done') return null;
   const today = todayISO();
@@ -256,9 +297,12 @@ function dueChip(item) {
 }
 
 // Time left until the end of the deadline day: hours on the last day, days before that.
+/** @param {string} due */
 function timeLeft(due) {
+  // @ts-expect-error a Date subtracts as its time in milliseconds
   const ms = new Date(`${due}T23:59:59`) - Date.now();
   const hours = Math.floor(Math.abs(ms) / 3_600_000);
+  /** @param {number} n @param {string} unit */
   const plural = (n, unit) => `${n} ${unit}${n === 1 ? '' : 's'}`;
   const span = hours < 24 ? plural(Math.max(hours, 1), 'hour') : plural(Math.floor(hours / 24), 'day');
   return ms < 0 ? `${span} late` : `in ${span}`;
@@ -266,6 +310,7 @@ function timeLeft(due) {
 
 // The deadline in a task row: an icon button when none is set, the time left when one is.
 // Both open the native date picker on a hidden input.
+/** @param {Store} store @param {Task} item */
 function dueControl(store, item) {
   const input = h('input', {
     type: 'date',
@@ -273,7 +318,7 @@ function dueControl(store, item) {
     value: item.due ?? '',
     tabindex: '-1',
     'aria-hidden': 'true',
-    onchange: (e) => updateItem(store, item.id, { due: e.target.value }),
+    onchange: (/** @type {Event & { target: HTMLInputElement }} */ e) => updateItem(store, item.id, { due: e.target.value }),
   });
   const open = () => {
     try { input.showPicker(); } catch { input.focus(); }
@@ -286,13 +331,15 @@ function dueControl(store, item) {
 }
 
 // The flag on a task the board created by itself, naming where it came from.
+/** @param {Task} item */
 function autoBadge(item) {
   if (!item.auto) return null;
   const telegram = item.auto === 'telegram';
-  return h('span', { class: 'auto-badge', title: `Created automatically by ${AUTO_SOURCES[item.auto] ?? 'a rule'}` }, icon(telegram ? 'send' : 'zap'), telegram ? 'Telegram' : 'Auto');
+  return h('span', { class: 'auto-badge', title: `Created automatically by ${/** @type {Record<string, string>} */ (AUTO_SOURCES)[item.auto] ?? 'a rule'}` }, icon(telegram ? 'send' : 'zap'), telegram ? 'Telegram' : 'Auto');
 }
 
 // A category on a card: in its colour when Settings → Labels gives it one, otherwise a plain tag.
+/** @param {Store} store @param {string} name */
 function categoryTag(store, name) {
   if (!name) return null;
   const color = categoryColor(store, name);
@@ -300,9 +347,11 @@ function categoryTag(store, name) {
 }
 
 // What a task in "To Organize" still needs.
+/** @param {Task} item */
 const missingFor = (item) => [item.projectId ? '' : 'a project', item.due ? '' : 'a deadline'].filter(Boolean).join(' and ') || 'a look';
 
 // Creates a todo category from a todo's category picker. It is scoped to that todo's project, if it has one.
+/** @param {Store} store @param {string} name @param {string | null} projectId */
 function createTodoCategory(store, name, projectId) {
   const existing = todoCategories(store).find((c) => sameLower(c.name, name));
   if (!existing) {
@@ -312,6 +361,7 @@ function createTodoCategory(store, name, projectId) {
   return name;
 }
 
+/** @param {Store} store @param {string} id */
 const toggleExpanded = (store, id) => {
   if (view.expanded.has(id)) view.expanded.delete(id);
   else view.expanded.add(id);
@@ -319,10 +369,12 @@ const toggleExpanded = (store, id) => {
 };
 
 // Used by drag-and-drop onto a sidebar list. projectId null means Personal.
+/** @param {Store} store @param {string} id @param {string | null} projectId */
 const moveToProject = (store, id, projectId) => updateItem(store, id, { projectId });
 
 // Move `id` next to `targetId` (before it, or after it when `after` is true).
 // The stored array order is the display order, so this is the reorder.
+/** @param {Store} store @param {string} id @param {string} targetId @param {boolean} after */
 function moveItem(store, id, targetId, after) {
   if (id === targetId) return;
   store.update(COLLECTION, (d) => {
@@ -336,25 +388,30 @@ function moveItem(store, id, targetId, after) {
 }
 
 // Drop indicator: above or below the row depending on pointer position.
+/** @param {DragEvent & { currentTarget: HTMLElement }} e */
 function dropSide(e) {
   const r = e.currentTarget.getBoundingClientRect();
   return e.clientY > r.top + r.height / 2 ? 'after' : 'before';
 }
+/** @param {HTMLElement} el */
 function clearDropMarks(el) {
   el.classList.remove('drop-before', 'drop-after');
 }
 
 // The project currently being dragged in the sidebar (a task drag uses view.dragId).
+/** @type {string | null} */
 let dragProjectId = null;
 
 // Sorting by a column replaces the stored order, so drag-to-reorder is off while a sort is active.
 // The status sort is stable and keeps the stored order within a status, so tasks of the same status can still be dragged.
 const reorderEnabled = () => !view.sort.key || view.sort.key === 'status';
+/** @param {Task} item */
 const canDropOn = (item) => !view.sort.key || view.dragStatus === statusOf(item);
 
 // --- GitHub issues and pull requests for a task ---
 
 // "#12", "12" or a github.com issue or PR link, as { repo, number }. null when the text is not a reference.
+/** @param {unknown} text @param {string} defaultRepo */
 function parseIssueRef(text, defaultRepo) {
   const t = String(text ?? '').trim();
   const link = t.match(/github\.com\/([^/\s]+\/[^/\s]+)\/(?:issues|pull)\/(\d+)/);
@@ -365,11 +422,15 @@ function parseIssueRef(text, defaultRepo) {
 }
 
 // GitHub answers issues and PRs on the same API; the link says which one it is.
+/** @param {{ url: string }} link */
 const isPr = (link) => /\/pull\/\d+/.test(link.url);
+/** @param {{ repo: string, number: number }} a @param {{ repo: string, number: number }} b */
 const sameLink = (a, b) => a.repo.toLowerCase() === b.repo.toLowerCase() && a.number === b.number;
+/** @param {TaskLink} l */
 const linkTitle = (l) => `${l.repo} #${l.number}${l.title ? `: ${l.title}` : ''}`;
 
 // Adds an issue or a PR to the task's list of its kind, or takes one out.
+/** @param {Store} store @param {string} id @param {TaskLink} link */
 function saveLink(store, id, link) {
   store.update(COLLECTION, (d) => {
     const item = d.items.find((i) => i.id === id);
@@ -379,6 +440,7 @@ function saveLink(store, id, link) {
     delete item.issue;
   });
 }
+/** @param {Store} store @param {string} id @param {TaskLink} link */
 function unlinkLink(store, id, link) {
   store.update(COLLECTION, (d) => {
     const item = d.items.find((i) => i.id === id);
@@ -391,6 +453,7 @@ function unlinkLink(store, id, link) {
 
 // Lists a task's issues and PRs, creates a new issue, or links an existing issue or PR.
 // The task keeps each one's repo, number, link and title.
+/** @param {Store} store @param {Task} item @param {string[]} repos */
 function openIssueDialog(store, item, repos) {
   let repo = repos[0] ?? '';
   let mode = repos.length ? 'create' : 'link';
@@ -399,16 +462,20 @@ function openIssueDialog(store, item, repos) {
   const dialog = openDialog({ title: 'GitHub issues and PRs', body: h('div', { class: 'stack' }, body, message) });
   const current = () => store.get(COLLECTION).items.find((i) => i.id === item.id) ?? item;
 
+  /** @param {string} text */
   const fail = (text) => message.replaceChildren(notice({ text }));
+  /** @param {TaskLink} link */
   const saved = (link) => {
     saveLink(store, item.id, link);
     dialog.close();
   };
+  /** @param {string} title @param {string} text */
   const create = (title, text) => {
-    createIssue(repo, title, text).then(saved).catch((err) => fail(err.message));
+    createIssue(repo, title, text).then(saved).catch((/** @type {Error} */ err) => fail(err.message));
   };
+  /** @param {string} target @param {number} number */
   const link = (target, number) => {
-    getIssue(target, number).then(saved).catch((err) => fail(err.message));
+    getIssue(target, number).then(saved).catch((/** @type {Error} */ err) => fail(err.message));
   };
 
   const paint = () => {
@@ -434,7 +501,7 @@ function openIssueDialog(store, item, repos) {
       ? h('label', { class: 'bill-field' },
           h('span', { class: 'muted small' }, 'Repository'),
           h('select', {
-            onchange: (e) => {
+            onchange: (/** @type {Event & { target: HTMLSelectElement }} */ e) => {
               repo = e.target.value;
               paint();
             },
@@ -455,7 +522,7 @@ function openIssueDialog(store, item, repos) {
     const form = mode === 'create'
       ? h('form', {
           class: 'stack',
-          onsubmit: (e) => {
+          onsubmit: (/** @type {SubmitEvent & { currentTarget: HTMLFormElement }} */ e) => {
             e.preventDefault();
             const f = new FormData(e.currentTarget);
             create(String(f.get('title') ?? '').trim(), String(f.get('body') ?? '').trim());
@@ -466,7 +533,7 @@ function openIssueDialog(store, item, repos) {
           h('div', { class: 'row end' }, h('button', { class: 'primary', type: 'submit' }, 'Create issue')))
       : h('form', {
           class: 'stack',
-          onsubmit: (e) => {
+          onsubmit: (/** @type {SubmitEvent & { currentTarget: HTMLFormElement }} */ e) => {
             e.preventDefault();
             const ref = parseIssueRef(new FormData(e.currentTarget).get('ref'), repo);
             if (!ref?.repo) return fail(repo ? 'Enter a number like 12, or a github.com issue or pull request link.' : 'Enter a github.com issue or pull request link.');
@@ -475,17 +542,19 @@ function openIssueDialog(store, item, repos) {
         },
           h('input', { name: 'ref', placeholder: repo ? '#12, or a github.com issue or PR link' : 'A github.com issue or PR link', 'aria-label': 'Issue or PR number or link' }),
           h('div', { class: 'row end' }, h('button', { class: 'primary', type: 'submit' }, 'Link')));
-    body.replaceChildren(...[list, repoPick, modes, form].filter(Boolean));
+    body.replaceChildren(.../** @type {HTMLElement[]} */ ([list, repoPick, modes, form].filter(Boolean)));
   };
   paint();
 }
 
 // A task's issues and PRs as links (#12, opens in a new tab), shown beside its title where they have room.
 // A Dev session started on the task adds the ones it opens. A PR's Vercel or Netlify preview follows it.
+/** @param {Store} store @param {Task} item */
 function linkChips(store, item) {
   const issues = issuesOf(item);
   const prs = prsOf(item);
   if (!issues.length && !prs.length) return null;
+  /** @param {TaskLink} l @param {boolean} pr */
   const chip = (l, pr) => h('a', {
     href: l.url,
     target: '_blank',
@@ -498,6 +567,7 @@ function linkChips(store, item) {
 }
 
 // One button in the actions to see a task's issues and PRs, link more, or create one.
+/** @param {Store} store @param {Task} item @param {string[]} repos */
 function issueControl(store, item, repos) {
   const any = issuesOf(item).length + prsOf(item).length > 0;
   return h('button', {
@@ -511,6 +581,7 @@ function issueControl(store, item, repos) {
 
 // A task as Markdown: a checklist line with its status, project and deadline, then its description indented, then
 // the paths of its images when they were saved for claude.
+/** @param {Store} store @param {Task} item @param {Project[]} projects @param {string[]} [images] */
 function taskMarkdown(store, item, projects, images = []) {
   const status = statusOf(item);
   const project = projects.find((p) => p.id === item.projectId)?.name;
@@ -523,6 +594,7 @@ function taskMarkdown(store, item, projects, images = []) {
 }
 
 // A copied task is being handed on, so it moves to "On Deck" (completed ones stay done) and leaves the selection.
+/** @param {Store} store @param {Task[]} items */
 async function copyTasks(store, items) {
   if (!items.length) return;
   const text = items.map((i) => taskMarkdown(store, i, projectsOf(store))).join('\n');
@@ -539,6 +611,7 @@ async function copyTasks(store, items) {
   toast(`${items.length === 1 ? 'Task' : `${items.length} tasks`} copied${moving.length ? ', moved to On Deck' : ''}`);
 }
 
+/** @param {Store} store @param {Task} item */
 function copyButton(store, item) {
   return h('button', {
     type: 'button',
@@ -553,14 +626,16 @@ function copyButton(store, item) {
 // The issues and PRs it opens come back to the tasks (task-links.js).
 // They are being worked on now, so open ones move to "In progress" (completed ones stay done).
 // Their images go along as files the runner saves, named in the prompt.
+/** @param {Store} store @param {Task[]} items */
 async function devTasks(store, items) {
   if (!items.length) return;
+  /** @type {Map<string, string[]>} */
   let images = new Map();
   if (items.some((i) => imagesOf(i).length)) {
     try {
       images = await imagePathsFor(store, runnerOf(store), items);
     } catch (err) {
-      toast(`Starting without the images: ${err.message}`);
+      toast(`Starting without the images: ${/** @type {Error} */ (err).message}`);
     }
   }
   const projects = projectsOf(store);
@@ -589,7 +664,9 @@ async function devTasks(store, items) {
 // A task waits for review once claude quits, or once it has a PR and claude waits for its user: the runner says
 // waiting only when claude's turn ended and no subagent still works, so a PR opened mid-turn does not count yet.
 const DEV_POLL_MS = 4000;
+/** @type {{ status: Record<string, RunnerStatus>, withPr: Set<string>, timer: number }} */
 const devWatch = { status: {}, withPr: new Set(), timer: 0 };
+/** @type {Record<string, string>} */
 const DEV_STATES = {
   working: 'claude is working',
   waiting: 'Waiting for you',
@@ -599,12 +676,13 @@ const DEV_STATES = {
   idle: 'Nothing running',
 };
 
+/** @param {Store} store */
 export function watchDevSessions(store) {
   if (devWatch.timer || !store.get(COLLECTION).items.some((t) => t.devSession)) return;
   const poll = async () => {
     devWatch.timer = 0;
     const items = store.get(COLLECTION).items;
-    const ids = [...new Set(items.map((t) => t.devSession).filter(Boolean))];
+    const ids = /** @type {string[]} */ ([...new Set(items.map((t) => t.devSession).filter(Boolean))]);
     let status;
     try {
       status = await sessionStatus(runnerOf(store), ids);
@@ -620,8 +698,9 @@ export function watchDevSessions(store) {
     // Only on a change (claude quit, started waiting, or a PR came while it waits), so a task put back in progress
     // while claude waits stays there.
     const ready = items.filter((t) => {
-      const now = status[t.devSession]?.state;
-      const before = was[t.devSession]?.state;
+      // A task with no session reads no entry.
+      const now = status[/** @type {string} */ (t.devSession)]?.state;
+      const before = was[/** @type {string} */ (t.devSession)]?.state;
       if (now === 'done') return before !== 'done';
       return now === 'waiting' && withPr.has(t.id) && (before !== 'waiting' || !hadPr.has(t.id));
     });
@@ -633,6 +712,7 @@ export function watchDevSessions(store) {
 
 // Starts a Dev session on the task, or, once it has one, opens it in Dev; the colour says what the terminal is doing.
 // Shift-click starts a new session anyway.
+/** @param {Store} store @param {Task} item */
 function devButton(store, item) {
   const status = item.devSession ? devWatch.status[item.devSession] : null;
   if (!status) {
@@ -651,16 +731,18 @@ function devButton(store, item) {
     class: `icon-btn dev-btn dev-${state}`,
     title: `Dev: ${label}. Click to open its terminal; Shift-click to start a new session.`,
     'aria-label': `Open the Dev terminal of "${item.text}" (${label})`,
-    onclick: (e) => {
+    onclick: (/** @type {MouseEvent} */ e) => {
       if (e.shiftKey) return devTasks(store, [item]);
       const taskIds = store.get(COLLECTION).items.filter((t) => t.devSession === item.devSession).map((t) => t.id);
-      openSession({ id: item.devSession, cwd: status.cwd, taskIds });
+      // It has a session: its status was found by it.
+      openSession({ id: /** @type {string} */ (item.devSession), cwd: status.cwd, taskIds });
     },
   }, icon('terminal'));
 }
 
 // On a task a Cron flow made: opens the run that made it, or the flow when the run is gone (or the task predates
 // runs keeping it).
+/** @param {Store} store @param {Task} item */
 function cronButton(store, item) {
   if (item.auto !== 'cron' || !item.autoRef) return null;
   const flow = store.get('cron')?.flows?.find((f) => f.id === item.autoRef);
@@ -675,6 +757,7 @@ function cronButton(store, item) {
 }
 
 // Marks a task done, or back to "To do" when it already is.
+/** @param {Store} store @param {Task} item */
 function doneButton(store, item) {
   const done = statusOf(item) === 'done';
   return h('button', {
@@ -689,6 +772,7 @@ function doneButton(store, item) {
 
 // The checkbox picks the task for the batch actions. Shift+click picks the whole range from the last one.
 // order: the ids shown, top to bottom.
+/** @param {Store} store @param {Task} item @param {string[]} [order] */
 function selectBox(store, item, order = []) {
   return h('input', {
     type: 'checkbox',
@@ -696,9 +780,10 @@ function selectBox(store, item, order = []) {
     checked: view.selected.has(item.id),
     title: 'Select (Shift+click for a range)',
     'aria-label': `Select "${item.text}"`,
-    onclick: (e) => {
+    onclick: (/** @type {MouseEvent & { currentTarget: HTMLInputElement }} */ e) => {
       const on = e.currentTarget.checked;
-      const from = order.indexOf(view.lastPicked);
+      // No task picked yet reads as -1.
+      const from = order.indexOf(/** @type {string} */ (view.lastPicked));
       const to = order.indexOf(item.id);
       const ids = e.shiftKey && from >= 0 && to >= 0
         ? order.slice(Math.min(from, to), Math.max(from, to) + 1)
@@ -713,21 +798,28 @@ function selectBox(store, item, order = []) {
 // Shown while tasks are ticked: change them all at once, copy them, or delete them.
 // Each field opens the same searchable, colored picker as a row's chips; picking a value applies it to every ticked task.
 // In the table, the bar takes the table's columns when it is wide enough (see .batch-bar.aligned), so each picker sits above its column.
+/**
+ * @param {Store} store @param {Task[]} visible @param {Project[]} projects @param {string[]} categories
+ * @param {{ aligned?: boolean, showDue?: boolean }} [options]
+ */
 function batchBar(store, visible, projects, categories, { aligned = false, showDue = true } = {}) {
   const items = store.get(COLLECTION).items.filter((i) => view.selected.has(i.id));
   if (!items.length) return null;
   const ids = items.map((i) => i.id);
+  /** @param {Partial<Task>} patch */
   const apply = (patch) => updateItems(store, ids, patch);
+  /** @template V @param {string} name @param {PickOption<V>[]} options @param {(value: V) => void} onPick */
   const select = (name, options, onPick) =>
     pickButton({ label: name, title: `Set the ${name.toLowerCase()} of the selected tasks`, options, onPick });
   // The text hides when the bar follows the table's columns, where only the icon fits.
+  /** @param {IconName} iconName @param {string} text */
   const labelled = (iconName, text) => [icon(iconName), h('span', { class: 'batch-label' }, text)];
   const deadline = h('input', {
     type: 'date',
     class: 'due-picker',
     tabindex: '-1',
     'aria-hidden': 'true',
-    onchange: (e) => apply({ due: e.target.value }),
+    onchange: (/** @type {Event & { target: HTMLInputElement }} */ e) => apply({ due: e.target.value }),
   });
   const deadlineControl = h('span', { class: 'due-control' },
     h('button', {
@@ -802,6 +894,7 @@ function batchBar(store, visible, projects, categories, { aligned = false, showD
         }, ...labelled('trash', 'Delete')))));
 }
 
+/** @param {Store} store @param {Task[]} visible */
 // Ticks or unticks every task shown, from the table header.
 function selectAllBox(store, visible) {
   const picked = visible.filter((i) => view.selected.has(i.id)).length;
@@ -812,7 +905,7 @@ function selectAllBox(store, visible) {
     disabled: !visible.length,
     title: 'Select all shown',
     'aria-label': 'Select all shown tasks',
-    onchange: (e) => {
+    onchange: (/** @type {Event & { target: HTMLInputElement }} */ e) => {
       for (const i of visible) e.target.checked ? view.selected.add(i.id) : view.selected.delete(i.id);
       store.refresh();
     },
@@ -822,6 +915,7 @@ function selectAllBox(store, visible) {
 }
 
 // One todo row. Title, description, and the pickers all edit in place.
+/** @param {Store} store @param {Task} item @param {{ store: Store, projects: Project[], projectLabel: string, order: string[], showDue: boolean }} ctx */
 // ctx: { store, projects, projectLabel, order, showDue }. Without a deadline column, its button sits with the actions.
 function todoRow(store, item, ctx) {
   const expanded = view.expanded.has(item.id);
@@ -839,7 +933,7 @@ function todoRow(store, item, ctx) {
   return h('li', {
     class: ['todo-item', status === 'done' ? 'done' : '', view.selected.has(item.id) ? 'selected' : ''].filter(Boolean).join(' '),
     'data-id': item.id,
-    ondragstart: (e) => {
+    ondragstart: (/** @type {DragEvent & { currentTarget: HTMLElement, dataTransfer: DataTransfer }} */ e) => {
       if (!reorderEnabled()) return e.preventDefault();
       view.dragId = item.id;
       view.dragStatus = statusOf(item);
@@ -847,12 +941,12 @@ function todoRow(store, item, ctx) {
       e.dataTransfer.setData('text/plain', item.id); // Firefox needs data to start a drag
       e.currentTarget.classList.add('dragging');
     },
-    ondragend: (e) => {
+    ondragend: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
       view.dragId = null;
       e.currentTarget.draggable = false;
       e.currentTarget.classList.remove('dragging');
     },
-    ondragover: (e) => {
+    ondragover: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
       if (dragsFiles(e)) return drop.ondragover(e);
       if (!reorderEnabled() || !view.dragId || view.dragId === item.id || !canDropOn(item)) return;
       e.preventDefault();
@@ -860,11 +954,11 @@ function todoRow(store, item, ctx) {
       e.currentTarget.classList.toggle('drop-before', side === 'before');
       e.currentTarget.classList.toggle('drop-after', side === 'after');
     },
-    ondragleave: (e) => {
+    ondragleave: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
       clearDropMarks(e.currentTarget);
       drop.ondragleave(e);
     },
-    ondrop: (e) => {
+    ondrop: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
       if (dragsFiles(e)) return drop.ondrop(e);
       if (!reorderEnabled() || !view.dragId || !canDropOn(item)) return;
       e.preventDefault();
@@ -880,8 +974,8 @@ function todoRow(store, item, ctx) {
         title: reorderEnabled() ? 'Drag to reorder' : 'Clear the sort to reorder',
         'aria-label': 'Drag to reorder',
         // Only the grip makes the row draggable, so text stays selectable.
-        onpointerdown: (e) => {
-          if (reorderEnabled()) e.currentTarget.closest('li').draggable = true;
+        onpointerdown: (/** @type {PointerEvent & { currentTarget: HTMLElement }} */ e) => {
+          if (reorderEnabled()) /** @type {HTMLLIElement} */ (e.currentTarget.closest('li')).draggable = true;
         },
       }, icon('grip')),
       selectBox(store, item, ctx.order),
@@ -979,6 +1073,7 @@ function todoRow(store, item, ctx) {
 }
 
 // What the task's claude sessions used, read from their transcripts (dev-usage.js); shown with its details.
+/** @param {Store} store @param {Task} item */
 function usageNote(store, item) {
   const records = recordsOfTask(store, item.id);
   if (!records.length) return null;
@@ -986,6 +1081,7 @@ function usageNote(store, item) {
   return h('p', { class: 'muted small task-usage', title: usageTitle(sum) }, icon('cpu'), `AI usage: ${usageLine(sum)}`);
 }
 
+/** @param {Task} item */
 function imageCount(item) {
   const n = imagesOf(item).length;
   if (!n) return null;
@@ -995,6 +1091,7 @@ function imageCount(item) {
 
 // --- Board: one column per status; dragging a card to a column changes its status ---
 
+/** @param {Store} store @param {Task} item @param {Project[]} projects @param {string[]} order */
 function boardCard(store, item, projects, order) {
   const p = projects.find((x) => x.id === item.projectId);
   const priority = item.priority ?? 'none';
@@ -1004,13 +1101,13 @@ function boardCard(store, item, projects, order) {
     class: view.selected.has(item.id) ? 'kanban-card selected' : 'kanban-card',
     'data-id': item.id,
     draggable: 'true',
-    ondragstart: (e) => {
+    ondragstart: (/** @type {DragEvent & { currentTarget: HTMLElement, dataTransfer: DataTransfer }} */ e) => {
       view.dragId = item.id;
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', item.id); // Firefox needs data to start a drag
       e.currentTarget.classList.add('dragging');
     },
-    ondragend: (e) => {
+    ondragend: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
       view.dragId = null;
       e.currentTarget.classList.remove('dragging');
     },
@@ -1057,7 +1154,7 @@ function boardCard(store, item, projects, order) {
               class: 'due-input',
               value: item.due ?? '',
               'aria-label': `Deadline for "${item.text}"`,
-              onchange: (e) => updateItem(store, item.id, { due: e.target.value }),
+              onchange: (/** @type {Event & { target: HTMLInputElement }} */ e) => updateItem(store, item.id, { due: e.target.value }),
             })),
           editText({
             value: item.description,
@@ -1072,6 +1169,7 @@ function boardCard(store, item, projects, order) {
       : null);
 }
 
+/** @param {Store} store @param {Task[]} items @param {Project[]} projects @param {string[]} order */
 function boardView(store, items, projects, order) {
   // A status hidden in Settings → Labels keeps its column only while a task shown is in it.
   const columns = taskStatuses(store).filter((s) => !s.hidden || items.some((i) => statusOf(i) === s.key));
@@ -1080,13 +1178,13 @@ function boardView(store, items, projects, order) {
     const cards = items.filter((i) => statusOf(i) === key);
     return h('section', {
       class: 'kanban-col',
-      ondragover: (e) => {
+      ondragover: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
         if (!view.dragId) return;
         e.preventDefault();
         e.currentTarget.classList.add('drop-target');
       },
-      ondragleave: (e) => e.currentTarget.classList.remove('drop-target'),
-      ondrop: (e) => {
+      ondragleave: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => e.currentTarget.classList.remove('drop-target'),
+      ondrop: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
         e.preventDefault();
         e.currentTarget.classList.remove('drop-target');
         if (view.dragId) updateItem(store, view.dragId, { status: key });
@@ -1100,6 +1198,7 @@ function boardView(store, items, projects, order) {
 
 // --- Sorting and column filters ---
 
+/** @param {Task} item @param {string} key @param {Project[]} projects */
 const columnValue = (item, key, projects) => {
   if (key === 'text') return item.text.toLowerCase();
   if (key === 'status') return STATUS_GROUP_ORDER.indexOf(statusOf(item));
@@ -1109,6 +1208,7 @@ const columnValue = (item, key, projects) => {
   return (item.category || '￿').toLowerCase(); // empty categories sort last
 };
 
+/** @param {Task[]} items @param {Project[]} projects */
 function sortItems(items, projects) {
   const { key, dir } = view.sort;
   if (!key) return items;
@@ -1116,12 +1216,14 @@ function sortItems(items, projects) {
   return [...items].sort((a, b) => {
     const x = columnValue(a, key, projects);
     const y = columnValue(b, key, projects);
-    const cmp = typeof x === 'number' ? x - y : String(x).localeCompare(String(y));
+    // A column gives numbers for every task or strings for every task.
+    const cmp = typeof x === 'number' ? x - /** @type {number} */ (y) : String(x).localeCompare(String(y));
     return cmp * sign;
   });
 }
 
 // Click a column title: ascending, then descending, then the manual order.
+/** @param {Store} store @param {string} key */
 function cycleSort(store, key) {
   if (view.sort.key !== key) view.sort = { key, dir: 'asc' };
   else if (view.sort.dir === 'asc') view.sort = { key, dir: 'desc' };
@@ -1129,8 +1231,10 @@ function cycleSort(store, key) {
   store.refresh();
 }
 
+/** @param {string} key */
 const sortMark = (key) => (view.sort.key !== key ? '' : view.sort.dir === 'asc' ? ' ↑' : ' ↓');
 
+/** @param {Store} store @param {string} key @param {string} text */
 function columnHeader(store, key, text) {
   return h('button', {
     type: 'button',
@@ -1141,13 +1245,16 @@ function columnHeader(store, key, text) {
 }
 
 // Filter row under the headers, one control per column, aligned with the rows.
+/** @param {Store} store @param {Project[]} projects @param {string[]} categories @param {boolean} showDue */
 function columnFilters(store, projects, categories, showDue) {
   const f = view.colFilter;
-  const set = (key) => (e) => {
+  /** @param {'text'} key */
+  const set = (key) => (/** @type {Event & { target: HTMLInputElement }} */ e) => {
     view.colFilter = { ...view.colFilter, [key]: e.target.value };
     store.refresh();
   };
   // Searchable, and several values can be picked; a task matching any of them is shown.
+  /** @param {'status' | 'priority' | 'project' | 'category'} key @param {PickOption<string>[]} options */
   const select = (key, options) =>
     pickMulti({
       key: `todo-filter-${key}`,
@@ -1189,6 +1296,7 @@ function columnFilters(store, projects, categories, showDue) {
 
 // --- AI: tidy todo titles (task 3) ---
 
+/** @param {Store} store */
 async function runTidy(store) {
   const open = store.get(COLLECTION).items.filter((i) => statusOf(i) !== 'done').slice(0, 40);
   if (!open.length) {
@@ -1209,29 +1317,34 @@ async function runTidy(store) {
       },
     ]);
     const parsed = parseJson(reply);
+    /** @type {{ id: string, title?: unknown, category?: unknown, priority?: string }[]} */
     const list = Array.isArray(parsed) ? parsed : parsed.items ?? [];
     const known = new Map(open.map((i) => [i.id, i]));
     const items = list
       .filter((s) => s && known.has(s.id))
       .map((s) => {
-        const before = known.get(s.id);
-        const priority = PRIORITIES.some(([k]) => k === s.priority) ? s.priority : before.priority ?? 'none';
+        // Only ids of the tasks sent are kept above.
+        const before = /** @type {Task} */ (known.get(s.id));
+        const priority = PRIORITIES.some(([k]) => k === s.priority) ? /** @type {string} */ (s.priority) : before.priority ?? 'none';
         return { id: s.id, title: String(s.title ?? '').trim() || before.text, category: String(s.category ?? '').trim(), priority };
       })
-      .filter((s) => s.title !== known.get(s.id).text || s.category !== (known.get(s.id).category || '') || s.priority !== (known.get(s.id).priority ?? 'none'));
+      .filter((s) => s.title !== /** @type {Task} */ (known.get(s.id)).text || s.category !== (/** @type {Task} */ (known.get(s.id)).category || '') || s.priority !== (/** @type {Task} */ (known.get(s.id)).priority ?? 'none'));
     view.tidy = { status: 'ok', items };
   } catch (err) {
-    view.tidy = { status: 'error', error: err.message };
+    // An error shows no suggestions.
+    view.tidy = /** @type {typeof view.tidy} */ ({ status: 'error', error: /** @type {Error} */ (err).message });
   }
   store.refresh();
 }
 
+/** @param {Store} store @param {TidySuggestion} s */
 function applyTidy(store, s) {
   updateItem(store, s.id, { text: s.title, category: s.category, priority: s.priority });
   view.tidy.items = view.tidy.items.filter((x) => x.id !== s.id);
   store.refresh();
 }
 
+/** @param {Store} store */
 function tidyPanel(store) {
   const t = view.tidy;
   if (t.status === 'idle' && !hasOpenRouter(store)) return setupBanner('openrouter', 'Tidy with AI needs an OpenRouter key.');
@@ -1272,11 +1385,13 @@ function tidyPanel(store) {
 
 // Project summary under the title. "Show more" reveals the project's details.
 // The labels a project carries, as objects with names.
-const labelsFor = (store, p) => labelsOf(p)
+/** @param {Store} store @param {Project} p */
+const labelsFor = (store, p) => /** @type {ProjectLabel[]} */ (labelsOf(p)
   .map((id) => (store.get('projects').categories ?? []).find((c) => c.id === id))
-  .filter(Boolean);
+  .filter(Boolean));
 
 // Inline after the title: labels, open count, and a toggle for the details panel.
+/** @param {Store} store @param {Project | undefined} p */
 function projectMeta(store, p) {
   if (!p) return null;
   const open = store.get(COLLECTION).items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
@@ -1294,6 +1409,7 @@ function projectMeta(store, p) {
     }, view.showProject ? 'Less' : 'More'));
 }
 
+/** @param {Store} store @param {Project} p */
 function projectDetails(store, p) {
   const items = store.get(COLLECTION).items.filter((i) => i.projectId === p.id);
   const done = items.filter((i) => statusOf(i) === 'done').length;
@@ -1314,7 +1430,7 @@ function projectDetails(store, p) {
     p.github.repos.length
       ? h('ul', { class: 'repo-summary' },
           p.github.repos.map((r) => {
-            const s = repoStats(r, onLoad);
+            const s = /** @type {RepoState} */ (repoStats(r, onLoad));
             const text = s.status === 'ok' ? `${s.issues} issues · ${s.prs} PRs` : s.status === 'loading' ? 'loading…' : s.error;
             return h('li', null,
               githubLink(r),
@@ -1327,6 +1443,7 @@ function projectDetails(store, p) {
 
 // Each keystroke re-renders the list; the shell keeps focus and the caret in the box across the render. It has to run
 // inside the input event: a render from a timer counts as a background one and is held while the box has focus.
+/** @param {Store} store */
 function searchBox(store) {
   const input = h('input', {
     type: 'search',
@@ -1335,11 +1452,11 @@ function searchBox(store) {
     title: `Search tasks: ${QUERY_HINT}`,
     'aria-label': 'Search tasks',
     autocomplete: 'off',
-    oninput: (e) => {
+    oninput: (/** @type {Event & { target: HTMLInputElement }} */ e) => {
       view.query = e.target.value;
       store.refresh();
     },
-    onkeydown: (e) => {
+    onkeydown: (/** @type {KeyboardEvent} */ e) => {
       if (e.key === 'Escape' && view.query) {
         e.stopPropagation();
         view.query = '';
@@ -1350,6 +1467,7 @@ function searchBox(store) {
   return h('label', { class: view.query ? 'todo-search active' : 'todo-search' }, icon('search'), input);
 }
 
+/** @param {HTMLElement} root @param {Store} store */
 function draw(root, store) {
   watchDevSessions(store);
   if (view.focusTask) {
@@ -1370,17 +1488,20 @@ function draw(root, store) {
   const categories = taskCategoryNames(store);
   view.category = view.category.filter((c) => c === NO_CATEGORY || categories.includes(c));
 
+  /** @param {(i: Task) => boolean} pred */
   const openCount = (pred) => items.filter((i) => statusOf(i) !== 'done' && pred(i)).length;
+  /** @param {string | null} id */
   const projectName = (id) => projects.find((p) => p.id === id)?.name ?? '';
   const currentLabel =
-    { all: 'All', personal: 'Personal', today: 'Today', organize: 'To Organize', auto: 'Automated' }[view.filter] ?? projectName(view.filter);
-  const listHint = {
+    /** @type {Record<string, string | undefined>} */ ({ all: 'All', personal: 'Personal', today: 'Today', organize: 'To Organize', auto: 'Automated' })[view.filter] ?? projectName(view.filter);
+  const listHint = /** @type {Record<string, string | undefined>} */ ({
     today: 'Tasks whose deadline is today or has passed.',
     organize: 'Tasks that arrived without a project or a deadline, for example from Telegram. Give them both, or press Organized.',
     auto: 'Tasks the board created by itself. Each one says why in its description.',
-  }[view.filter];
+  })[view.filter];
 
   // Personal and project lists accept dropped todos; "All" does not, since it has no project.
+  /** @param {string} key @param {string} text @param {number} count @param {Node} [leading] */
   const navItem = (key, text, count, leading) => {
     const accepts = key === 'personal' || isProjectFilter(key);
     return h('button', {
@@ -1390,13 +1511,13 @@ function draw(root, store) {
         view.filter = key;
         store.refresh();
       },
-      ondragover: (e) => {
+      ondragover: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
         if (!accepts || !view.dragId) return;
         e.preventDefault();
         e.currentTarget.classList.add('drop-target');
       },
-      ondragleave: (e) => e.currentTarget.classList.remove('drop-target'),
-      ondrop: (e) => {
+      ondragleave: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => e.currentTarget.classList.remove('drop-target'),
+      ondrop: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
         if (!accepts || !view.dragId) return;
         e.preventDefault();
         e.currentTarget.classList.remove('drop-target');
@@ -1423,7 +1544,9 @@ function draw(root, store) {
   for (const id of view.selected) if (!order.includes(id)) view.selected.delete(id);
   // A deadline column with nothing in it only takes room, so it shows once a task on screen has one.
   const showDue = visible.some((i) => i.due);
+  /** @param {Task} item */
   const rowOf = (item) => todoRow(store, item, { store, projects, order, showDue, projectLabel: view.filter === 'all' ? projectName(item.projectId) : '' });
+  /** @param {[string, Task[]][]} groups */
   const grouped = (groups) => h('div', { class: 'todo-groups' },
     groups.filter(([, rows]) => rows.length).map(([name, rows]) =>
       h('section', { class: 'todo-group' },
@@ -1437,7 +1560,7 @@ function draw(root, store) {
   } else if (view.layout === 'board') {
     listBody = boardView(store, visible, projects, order);
   } else if (view.layout === 'project') {
-    listBody = grouped([['Personal', visible.filter((i) => !i.projectId)], ...projectTree(projects).map(({ project: p }) => [p.name, visible.filter((i) => i.projectId === p.id)])]);
+    listBody = grouped([['Personal', visible.filter((i) => !i.projectId)], ...projectTree(projects).map(({ project: p }) => /** @type {[string, Task[]]} */ ([p.name, visible.filter((i) => i.projectId === p.id)]))]);
   } else if (view.layout === 'status') {
     listBody = grouped(STATUS_GROUP_ORDER.map((key) => [statusName(store, key), visible.filter((i) => statusOf(i) === key)]));
   } else {
@@ -1451,7 +1574,7 @@ function draw(root, store) {
           h('h2', null, 'Lists'),
           h('span', { class: 'muted small' }, 'drag onto a list to move')),
         navItem('all', 'All', openCount(() => true)),
-        navItem('today', 'Today', openCount((i) => Boolean(i.due) && i.due <= todayISO()), icon('clock')),
+        navItem('today', 'Today', openCount((i) => Boolean(i.due) && /** @type {string} */ (i.due) <= todayISO()), icon('clock')),
         navItem('personal', 'Personal', openCount((i) => i.projectId === null)),
         navItem('organize', 'To Organize', openCount((i) => Boolean(i.inbox)), icon('inbox')),
         navItem('auto', 'Automated', openCount((i) => Boolean(i.auto)), icon('zap')),
@@ -1472,7 +1595,7 @@ function draw(root, store) {
         view.creatingProject
           ? h('form', {
               class: 'stack',
-              onsubmit: (e) => {
+              onsubmit: (/** @type {SubmitEvent & { currentTarget: HTMLFormElement }} */ e) => {
                 e.preventDefault();
                 const name = formValues(e.currentTarget).name.trim();
                 if (!name) return;
@@ -1488,26 +1611,26 @@ function draw(root, store) {
           h('div', {
             class: 'tree-row',
             style: { paddingLeft: `${depth * 14}px` },
-            ondragstart: (e) => {
+            ondragstart: (/** @type {DragEvent & { currentTarget: HTMLElement, dataTransfer: DataTransfer }} */ e) => {
               dragProjectId = p.id;
               e.dataTransfer.effectAllowed = 'move';
               e.dataTransfer.setData('text/plain', p.id); // Firefox needs data to start a drag
               e.currentTarget.classList.add('dragging');
             },
-            ondragend: (e) => {
+            ondragend: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
               dragProjectId = null;
               e.currentTarget.draggable = false;
               e.currentTarget.classList.remove('dragging');
             },
-            ondragover: (e) => {
+            ondragover: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
               if (!dragProjectId || dragProjectId === p.id) return;
               e.preventDefault();
               const side = dropSide(e);
               e.currentTarget.classList.toggle('drop-before', side === 'before');
               e.currentTarget.classList.toggle('drop-after', side === 'after');
             },
-            ondragleave: (e) => e.currentTarget.classList.remove('drop-before', 'drop-after'),
-            ondrop: (e) => {
+            ondragleave: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => e.currentTarget.classList.remove('drop-before', 'drop-after'),
+            ondrop: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
               if (!dragProjectId) return;
               e.preventDefault();
               e.currentTarget.classList.remove('drop-before', 'drop-after');
@@ -1520,8 +1643,8 @@ function draw(root, store) {
               title: 'Drag to reorder projects',
               'aria-label': 'Drag to reorder project',
               // Only the grip makes the row draggable; a task dragged onto the name still files the task.
-              onpointerdown: (e) => {
-                e.currentTarget.closest('.tree-row').draggable = true;
+              onpointerdown: (/** @type {PointerEvent & { currentTarget: HTMLElement }} */ e) => {
+                /** @type {HTMLElement} */ (e.currentTarget.closest('.tree-row')).draggable = true;
               },
             }, icon('grip')),
             navItem(p.id, p.name, openCount((i) => i.projectId === p.id), projectIcon(p))))),
@@ -1588,7 +1711,8 @@ function draw(root, store) {
         listHint ? h('p', { class: 'muted small' }, listHint) : null,
 
         isProjectFilter(view.filter) && view.showProject
-          ? projectDetails(store, projects.find((p) => p.id === view.filter))
+          // The list is reset to All above when its project is gone.
+          ? projectDetails(store, /** @type {Project} */ (projects.find((p) => p.id === view.filter)))
           : null,
 
         tidyPanel(store),
@@ -1596,9 +1720,9 @@ function draw(root, store) {
         // While tasks are ticked, their actions take the place of the add field, so the list below stays put.
         batchBar(store, visible, projects, categories, { aligned: view.layout === 'table', showDue }) ?? h('form', {
           class: 'quick',
-          onsubmit: (e) => {
+          onsubmit: (/** @type {SubmitEvent & { currentTarget: HTMLFormElement }} */ e) => {
             e.preventDefault();
-            const input = e.currentTarget.querySelector('input[name="todo"]');
+            const input = /** @type {HTMLInputElement} */ (e.currentTarget.querySelector('input[name="todo"]'));
             addItem(store, input.value);
           },
         },
@@ -1608,9 +1732,9 @@ function draw(root, store) {
             'aria-label': 'New todo',
             autocomplete: 'off',
             'data-autofocus': true,
-            onpaste: (e) => pasteAsTodo(store, e),
-            ondragover: (e) => dragsFiles(e) && e.preventDefault(),
-            ondrop: (e) => {
+            onpaste: (/** @type {ClipboardEvent} */ e) => pasteAsTodo(store, e),
+            ondragover: (/** @type {DragEvent} */ e) => dragsFiles(e) && e.preventDefault(),
+            ondrop: (/** @type {DragEvent & { dataTransfer: DataTransfer }} */ e) => {
               if (!dragsFiles(e)) return;
               e.preventDefault();
               const files = imageFiles(e.dataTransfer);
@@ -1654,7 +1778,7 @@ export default {
     more: view.showProject ? '1' : '',
     sort: isDefaultSort(view.sort) ? '' : view.sort.key ? `${view.sort.key}.${view.sort.dir}` : 'manual',
   }),
-  restore: (p = {}) => {
+  restore: (/** @type {Record<string, string>} */ p = {}) => {
     view.layout = LAYOUTS.some(([k]) => k === p.view) ? p.view : 'table';
     view.filter = p.filter || 'all';
     view.query = p.q || '';
