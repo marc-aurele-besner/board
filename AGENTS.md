@@ -29,7 +29,10 @@ js/keep-fields.js     keeps unsubmitted fields across re-renders; holds backgrou
 js/ui.js              h() DOM helper, icon(), ids, dates, money formatting
 js/modules/index.js   registry of sections (the nav is built from this list)
 js/modules/*.js       one file per section (todos, projects, kitchen, money, tools, ...)
-js/notifications.js   the bell, its drawer, and notify(); saved in notifications.json
+js/notifications.js   the bell and its drawer
+js/notify-core.js     notify(), the kinds and their preferences, the deadline check; saved in notifications.json (no DOM)
+js/money-core.js      budgets gone over and recurring due dates (no DOM)
+js/projects-core.js   a project's shape, and createProject() from a #tag (no DOM)
 js/automations.js     site checks and the rules that turn their results into tasks
 js/terminal.js        Dev's calls to the command runner: info, folders and files, a command's streamed output, keys, git
 js/folder-picker.js   the dialog that finds a folder on this machine through the runner (Projects → Local folder)
@@ -83,6 +86,7 @@ tools/worker/http.js  the worker's localhost API: status, Run now, data folder
 tools/jobs/*.js       one file per job: { id, timeout, delay, setup(store), run(ctx) }; listed in tools/jobs/index.js
 tools/jobs/gmail.js, resend.js  read new mail into inbox.json; resend.js also answers GET /resend/email/<id> and POST /resend/check
 tools/jobs/calendar.js  reads every shown calendar's window into calendar.json, or a range Calendar asks for
+tools/jobs/monitoring.js  deadlines, budgets, site checks, status pages and the rules that make tasks, every 5 minutes
 tools/jobs/google.js  renews Google access tokens; a tab that finds one expired asks it through POST /run/google
 tools/check-imports.js  loads every worker module under plain Node, to catch a missing import or a DOM call at load time
 tools/check-merge.js  the worker and a tab change two fields of one file; both must survive
