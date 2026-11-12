@@ -19,7 +19,7 @@ const cache = new Map();
 // The parts of a transcript line that are read. Lines are Claude's JSON, so every field may be missing.
 /** @typedef {{ input_tokens?: number, output_tokens?: number, cache_read_input_tokens?: number, cache_creation_input_tokens?: number, output_tokens_details?: { thinking_tokens?: number } }} ReplyUsage */
 /** @typedef {ReplyUsage & { inputTokens?: number, outputTokens?: number, thinkingTokens?: number, cacheReadInputTokens?: number, cacheCreationInputTokens?: number, costUSD?: number }} ModelTokens */
-/** @typedef {{ id?: string, model?: string, usage?: ReplyUsage, stop_reason?: string | null, content?: string | { type?: string, text: string }[] }} ReplyMessage */
+/** @typedef {{ id?: string, model?: string, usage?: ReplyUsage, stop_reason?: string | null, content?: string | { type?: string, text: string, name?: string, input?: { file_path?: unknown, notebook_path?: unknown } }[] }} ReplyMessage */
 /** @typedef {{ isUsingOverage?: boolean, resetsAt?: number }} Quota */
 /** @typedef {{ startTime?: string, totalCostUSD?: number, totalDuration?: number, totalAPIDuration?: number, totalLinesAdded?: number, totalLinesRemoved?: number, modelUsage?: Record<string, ModelTokens> }} CostState */
 /**
@@ -124,6 +124,14 @@ function parse(text, billing) {
   const weights = {};
   // Whether claude is in the middle of a turn, rather than waiting for the user (see turnOpen).
   let open = false;
+  // The first prompt, to find the session a terminal started; the last reply's text; the files claude wrote.
+  /** @type {{ text: string, at: number } | null} */
+  let prompt = null;
+  let reply = '';
+  /** @type {string | undefined} */
+  let replyId;
+  /** @type {Set<string>} */
+  const written = new Set();
   for (const line of text.split('\n')) {
     if (!line) continue;
     /** @type {TranscriptLine} */
@@ -134,6 +142,28 @@ function parse(text, billing) {
       continue;
     }
     open = turnOpen(o, open);
+    if (!o.isSidechain) {
+      const c = o.message?.content;
+      if (o.type === 'user' && !prompt && !o.isMeta) {
+        const text = typeof c === 'string' ? c : Array.isArray(c) && c[0]?.type === 'text' ? c[0].text : '';
+        if (text) prompt = { text: text.slice(0, PROMPT_KEPT), at: Date.parse(/** @type {string} */ (o.timestamp)) || 0 };
+      } else if (o.type === 'assistant' && Array.isArray(c) && o.message?.model !== '<synthetic>') {
+        // A reply comes as several lines with one id, a block each: its text blocks make the answer.
+        const text = c.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n\n');
+        if (text) {
+          const id = o.message?.id ?? o.uuid;
+          reply = id === replyId ? `${reply}\n\n${text}` : text;
+          replyId = id;
+        }
+        for (const b of c) {
+          const path = b.type === 'tool_use' && WRITES.includes(b.name ?? '') ? b.input?.file_path ?? b.input?.notebook_path : null;
+          if (typeof path === 'string' && path) {
+            written.delete(path);
+            written.add(path);
+          }
+        }
+      }
+    }
     const quota = o.quotaLimits ?? o.apiErrorParams?.rate_limit_info;
     if (quota && typeof quota.isUsingOverage === 'boolean') overageUntil = quota.isUsingOverage ? (Number(quota.resetsAt) * 1000 || Infinity) : 0;
     if (o.type === 'worktree-state' && o.worktreeSession?.worktreeName) worktrees.add(o.worktreeSession.worktreeName);
@@ -182,7 +212,7 @@ function parse(text, billing) {
   }
   if (!counted.length) for (const m of replies.values()) addModel(models, m.model, tokensOf(m.usage), null);
   const extraCost = cost === null ? null : Object.values(models).reduce((s, m) => s + (m.extraCost ?? 0), 0);
-  return { worktrees: [...worktrees], models, cost, extraCost, billing, duration, apiDuration, linesAdded, linesRemoved, efforts, replies: replies.size, start, end, open };
+  return { worktrees: [...worktrees], models, cost, extraCost, billing, duration, apiDuration, linesAdded, linesRemoved, efforts, replies: replies.size, start, end, open, prompt, reply, written: [...written] };
 }
 
 // Whether a turn is still going after transcript line `o`. A reply that stopped for anything but a tool call ends
@@ -217,6 +247,10 @@ function carries(next, prev) {
   if (!(Number(next.totalCostUSD) >= Number(prev.totalCostUSD))) return false;
   return Object.entries(prev.modelUsage ?? {}).every(([id, u]) => Number(next.modelUsage?.[id]?.outputTokens) >= Number(u.outputTokens));
 }
+
+const PROMPT_KEPT = 400;
+// The tools that write a file, and where they name it.
+const WRITES = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'];
 
 /** @param {string} path @param {string} billing */
 async function readTranscript(path, billing) {
@@ -302,8 +336,14 @@ async function activityOf({ name, cwd }) {
     if (t?.worktrees.includes(name)) latest = { file, t, mtime: info.mtimeMs };
   }
   if (!latest) return null;
-  // Claude keeps a session's subagents beside it, in <session>/subagents.
-  const folder = join(latest.file.slice(0, -'.jsonl'.length), 'subagents');
+  const agents = await agentsOf(latest.file, billing);
+  return { busy: latest.t.open || agents > 0, agents };
+}
+
+// How many of a session's subagents are still working. Claude keeps them beside it, in <session>/subagents.
+/** @param {string} file @param {string} billing */
+async function agentsOf(file, billing) {
+  const folder = join(file.slice(0, -'.jsonl'.length), 'subagents');
   let agents = 0;
   for (const n of await readdir(folder).catch(() => [])) {
     if (!n.endsWith('.jsonl')) continue;
@@ -311,7 +351,7 @@ async function activityOf({ name, cwd }) {
     if (!info || Date.now() - info.mtimeMs > STALE_MS) continue;
     if ((await readTranscript(join(folder, n), billing))?.open) agents++;
   }
-  return { busy: latest.t.open || agents > 0, agents };
+  return agents;
 }
 
 // [{ name, cwd }] → { [name]: { busy, agents } }; worktrees with no transcript are left out.
@@ -325,4 +365,36 @@ export async function worktreeActivity(list) {
     if (activity) out[w.name] = activity;
   }
   return out;
+}
+
+// The transcript of the claude a terminal started at `at` in `cwd` (in worktree `worktree` of it, when named): the
+// one in that folder whose first prompt is `prompt` (any prompt when none is known), the earliest begun after `at`.
+// { file, busy, agents, reply, written }, or null before claude wrote one. `file` is passed back as `known` to skip
+// the search next time.
+/** @param {{ cwd: string, at: number, prompt?: string, worktree?: string, known?: string }} where */
+export async function sessionTranscript({ cwd, at, prompt = '', worktree = '', known = '' }) {
+  const billing = await loginBilling();
+  let file = known;
+  if (!file) {
+    const repo = resolve(expand(cwd));
+    const folders = worktree && WORKTREE_NAME.test(worktree) ? [join(repo, '.claude', 'worktrees', worktree), repo] : [repo];
+    const want = prompt.replace(/\s+/g, ' ').trim().slice(0, 200);
+    let best = Infinity;
+    for (const folder of folders) {
+      for (const f of await transcriptsIn(folderKey(folder))) {
+        const info = await stat(f).catch(() => null);
+        if (!info || info.mtimeMs < at) continue;
+        const first = (await readTranscript(f, billing))?.prompt;
+        // Claude notes the prompt a moment after the terminal started it.
+        if (!first || first.at < at - 5000 || first.at >= best) continue;
+        if (want && !first.text.replace(/\s+/g, ' ').trim().startsWith(want.slice(0, first.text.length))) continue;
+        best = first.at;
+        file = f;
+      }
+    }
+  }
+  const t = file ? await readTranscript(file, billing) : null;
+  if (!t) return null;
+  const agents = await agentsOf(file, billing);
+  return { file, busy: t.open || agents > 0, agents, reply: t.reply, written: t.written };
 }
