@@ -1,6 +1,7 @@
 // Dev: a small IDE for this machine, Cursor style. A workspace folder (the board, the home folder, or a project's
 // local folder) is shown as a file tree; files open read-only with syntax colours; terminals sit below. The side
-// panel switches to Source Control, which shows and commits the folder's git changes.
+// panel switches to Search, which finds text in the folder's files, and to Source Control, which shows and commits
+// the folder's git changes.
 // Commands run in a real pseudo-terminal through the runner `bun start` starts, so interactive programs such as
 // the Claude CLI work: keys typed in the terminal go to the program, and vt.js draws what it prints.
 // The runner owns the sessions: a command keeps running through a reload, and the page attaches to each terminal
@@ -14,6 +15,7 @@ import { createTerminal, styleOf, colorOf } from '../vt.js';
 import { readTheme, themedColors } from '../term-colors.js';
 import { explorer, editor, setRoot, hasOpenFiles, baseName } from './dev-files.js';
 import { sourceControl, refreshGit, decorOf, changeCount } from './dev-git.js';
+import { searchPanel } from './dev-search.js';
 import { pickChip } from '../inline.js';
 import { projectIcon } from './projects.js';
 import { linkWatcher, moveToReview } from '../task-links.js';
@@ -25,7 +27,7 @@ const RECENT_SHOWN = 8;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 // Where this browser kept the open terminals before the runner did; read once, then removed.
 const OLD_SESSIONS_KEY = 'board:dev-sessions';
-// The side panel shown: 'files' or 'git'.
+// The side panel shown: 'files', 'search' or 'git'.
 const SIDE_KEY = 'board:dev-side';
 
 // View state: the workspace, the sessions, the one shown, and what the runner said about itself.
@@ -34,7 +36,8 @@ let currentStore = null;
 
 function readSide() {
   try {
-    return localStorage.getItem(SIDE_KEY) === 'git' ? 'git' : 'files';
+    const side = localStorage.getItem(SIDE_KEY);
+    return side === 'git' || side === 'search' ? side : 'files';
   } catch {
     return 'files';
   }
@@ -729,7 +732,7 @@ function workspacePicker(store) {
   return chip;
 }
 
-// Files or Source Control, as icons along the top like Cursor's activity bar. Source Control shows how many files
+// Files, Search or Source Control, as icons along the top like Cursor's activity bar. Source Control shows how many files
 // changed as a badge on its icon.
 function sideSwitcher(store) {
   const tab = (side, name, label, badge) => h('button', {
@@ -750,6 +753,7 @@ function sideSwitcher(store) {
   const count = changeCount();
   return h('nav', { class: 'ide-side-tabs', role: 'tablist', 'aria-label': 'Side panel' },
     tab('files', 'files', 'Explorer'),
+    tab('search', 'search', 'Search'),
     tab('git', 'git-branch', count ? `Source control · ${count} changed ${count === 1 ? 'file' : 'files'}` : 'Source control',
       count ? h('span', { class: 'ide-side-badge' }, count > 99 ? '99+' : count) : null));
 }
@@ -926,7 +930,9 @@ function draw(root, store) {
       h('div', { class: 'ide' },
         view.side === 'git'
           ? sourceControl(ctx, workspacePicker(store), sideSwitcher(store), rootPath(store, view.workspace))
-          : explorer(ctx, workspacePicker(store), sideSwitcher(store)),
+          : view.side === 'search'
+            ? searchPanel(ctx, workspacePicker(store), sideSwitcher(store), rootPath(store, view.workspace))
+            : explorer(ctx, workspacePicker(store), sideSwitcher(store)),
         h('div', { class: hasOpenFiles() ? 'ide-main has-file' : 'ide-main' },
           editor(ctx),
           s ? terminal(store, s) : h('section', { class: 'card term' }, h('p', { class: 'muted small' }, 'Asking the runner for the open terminals…'))))));
