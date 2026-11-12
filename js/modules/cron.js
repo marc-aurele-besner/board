@@ -386,10 +386,14 @@ const startDrag = (e, what) => {
 };
 const endDrag = (e) => e.currentTarget.closest('.cron-editor')?.classList.remove('dragging');
 
+// Tests are kept by step id and their variables are rebuilt from the steps before, so an edit only drops the tests
+// of the steps from `index` on, whose input may now differ. The steps before keep their data.
+const clearTestsFrom = (store, flow, index) => clearTests(store, flow.id, flow.steps.slice(Math.max(0, index)).map((s) => s.id));
+
 function addStepAt(store, flow, index, type) {
   const step = makeStep(type);
+  clearTestsFrom(store, flow, index);
   updateFlow(store, flow.id, (f) => reorderSteps(f, [...f.steps.slice(0, index), step, ...f.steps.slice(index)]));
-  clearTests(store, flow.id);
   view.node = step.id;
   store.refresh();
 }
@@ -399,14 +403,13 @@ function moveStepTo(store, flow, id, index) {
   const i = flow.steps.findIndex((s) => s.id === id);
   const at = index > i ? index - 1 : index;
   if (i < 0 || at === i) return;
+  clearTestsFrom(store, flow, Math.min(i, at));
   updateFlow(store, flow.id, (f) => {
     const from = f.steps.findIndex((s) => s.id === id);
     if (from < 0) return;
     const rest = f.steps.filter((s) => s.id !== id);
     reorderSteps(f, [...rest.slice(0, at), f.steps[from], ...rest.slice(at)]);
   });
-  // The tested data names steps by their old numbers.
-  clearTests(store, flow.id);
 }
 
 // Every node there is, always in view: a click adds one after the selected node, a drag puts it on any +.
@@ -442,7 +445,7 @@ function inputPick(store, flow, step, index) {
       if (from) s.from = from;
       else delete s.from;
     });
-    clearTests(store, flow.id);
+    clearTestsFrom(store, flow, flow.steps.findIndex((s) => s.id === step.id));
   }), 'What {{input}} holds. Pick an earlier step to branch from it; every {{stepN}} stays readable either way.');
 }
 
@@ -1162,8 +1165,8 @@ function inspector(store, flow) {
           title: 'Remove step',
           'aria-label': 'Remove step',
           onclick: () => {
+            clearTestsFrom(store, flow, index);
             updateFlow(store, flow.id, (f) => reorderSteps(f, f.steps.filter((s) => s.id !== step.id)));
-            clearTests(store, flow.id);
             view.node = 'trigger';
             store.refresh();
           },

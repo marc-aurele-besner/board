@@ -1456,10 +1456,13 @@ export function testsOf(store, flowId) {
   return map;
 }
 
-export function clearTests(store, flowId) {
-  if (!store.get(COLLECTION).tests?.[flowId]) return;
+// Drops flowId's test results: all of them, or only those of the steps in `stepIds`.
+export function clearTests(store, flowId, stepIds) {
+  const saved = store.get(COLLECTION).tests?.[flowId];
+  if (!saved || (stepIds && !stepIds.some((id) => id in saved))) return;
   store.update(COLLECTION, (d) => {
-    delete d.tests?.[flowId];
+    if (!stepIds) delete d.tests?.[flowId];
+    else for (const id of stepIds) delete d.tests?.[flowId]?.[id];
   });
 }
 
