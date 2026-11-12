@@ -570,6 +570,7 @@ export function gmailCard(store) {
       .catch((err) => say(store, 'gmail', err.message, false));
   };
   // Accounts grouped by project, in project order.
+  /** @type {Map<string | null, number>} */
   const order = new Map(projects.map((p, i) => [p.id, i]));
   const sorted = [...accounts].sort((a, b) => (order.get(a.projectId) ?? 1e9) - (order.get(b.projectId) ?? 1e9) || a.email.localeCompare(b.email));
 
