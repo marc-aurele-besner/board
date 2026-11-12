@@ -190,7 +190,14 @@ function flowList(store, all, flows) {
               title: f.enabled ? 'On schedule. Uncheck to pause.' : 'Paused. Check to run on schedule.',
               'aria-label': `Run “${f.name}” on schedule`,
               onchange: (e) => setEnabled(store, f, e.target.checked),
-            }));
+            }),
+            h('button', {
+              type: 'button',
+              class: 'icon-btn cron-flow-copy',
+              title: 'Duplicate flow',
+              'aria-label': `Duplicate “${f.name}”`,
+              onclick: () => duplicateFlow(store, f),
+            }, icon('copy')));
         }))
       : empty('No flow yet. Start from a template or a blank flow.'));
 }
