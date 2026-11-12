@@ -1,3 +1,4 @@
+// @ts-check
 import { h, icon, refreshIcon, empty, notice, copyable } from '../ui.js';
 import { toast } from '../toast.js';
 import { redirectUri } from '../google.js';
@@ -16,6 +17,11 @@ import { devEnvironmentCard } from './settings-dev.js';
 import { runnersCard } from './settings-runners.js';
 import { modelForTask } from '../models.js';
 import { logo } from './positions.js';
+
+/** @import { Store, IconName, AddedPosition, GithubOrgToken, UniswapSettings, PoolRow, ModelsSettings, ModelTask, GoogleSettings } from '../../types/data' */
+/** @import { Child } from '../../types/ui' */
+/** @typedef {SubmitEvent & { currentTarget: HTMLFormElement }} FormSubmit */
+/** @typedef {AddedPosition & { version: string }} Added */
 
 const COLLECTION = 'settings';
 const OPENROUTER_CHECK = 'https://openrouter.ai/api/v1/auth/key';
@@ -36,6 +42,7 @@ export const DEFAULT_TASKS = [
 ];
 
 // Adds tasks that were introduced after a user's settings.json was created.
+/** @param {Store} store */
 export function ensureTasks(store) {
   const have = new Set(store.get(COLLECTION).models.tasks.map((t) => t.id));
   const missing = DEFAULT_TASKS.filter((t) => !have.has(t.id));
@@ -46,6 +53,7 @@ export function ensureTasks(store) {
 }
 
 // Settings pages in nav order, grouped. Each item is [key, label, icon].
+/** @type {{ title: string, items: [string, string, IconName][] }[]} */
 const SECTION_GROUPS = [
   {
     title: 'Connections',
@@ -86,15 +94,21 @@ export { modelForTask };
 
 
 // UI state: current section, last test result per service, whether a key is shown, and the model list.
+/**
+ * @type {{ section: string, results: Record<string, { status: string, text?: string } | null>, reveal: Record<string, boolean>,
+ *   catalog: { status: string, items?: { value: string, label: string, name: string }[], error?: string } }}
+ */
 const view = { section: 'github', results: {}, reveal: {}, catalog: { status: 'idle' } };
 
+/** @param {string} key */
 async function checkOpenRouterKey(key) {
   const res = await fetch(OPENROUTER_CHECK, { headers: { Authorization: `Bearer ${key}` } });
   if (!res.ok) throw new Error(res.status === 401 ? 'OpenRouter rejected this key. Create a new one at openrouter.ai/keys.' : `OpenRouter error ${res.status}`);
-  const { data } = await res.json();
+  const { data } = /** @type {{ data?: { label?: string } }} */ (await res.json());
   return data?.label ? `Connected as “${data.label}”` : 'Connected';
 }
 
+/** @param {Store} store */
 function loadCatalog(store) {
   if (view.catalog.status === 'loading') return;
   view.catalog = { status: 'loading' };
@@ -104,7 +118,7 @@ function loadCatalog(store) {
       if (!res.ok) throw new Error(`OpenRouter error ${res.status}`);
       return res.json();
     })
-    .then(({ data }) => {
+    .then((/** @type {{ data: { id: string, name: string }[] }} */ { data }) => {
       view.catalog = { status: 'ok', items: data.map((m) => ({ value: m.id, label: m.id, name: m.name })) };
     })
     .catch((err) => {
@@ -113,8 +127,10 @@ function loadCatalog(store) {
     .finally(() => store.refresh());
 }
 
+/** @param {string} href @param {Child} text */
 const link = (href, text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
 
+/** @param {string} saved @param {{ status: string } | null | undefined} result */
 function statusBadge(saved, result) {
   if (!saved) return h('span', { class: 'pill tone-plain' }, 'Not set');
   if (result?.status === 'ok') return h('span', { class: 'pill tone-done' }, 'Connected');
@@ -123,15 +139,22 @@ function statusBadge(saved, result) {
 }
 
 // A key card: setup steps on the left, the key field and its actions on the right.
+/**
+ * @param {Store} store
+ * @param {{ id: 'github' | 'openrouter', field: string, title: string, fieldLabel?: string, intro: string, steps: Child[], placeholder: string,
+ *   check: (key: string) => Promise<string>, note: string, docs?: string }} cfg
+ */
 function credentialCard(store, cfg) {
   const { id, field, title, fieldLabel, intro, steps, placeholder, check, note, docs } = cfg;
-  const saved = store.get(COLLECTION)[id]?.[field] ?? '';
+  // `field` is the card's key field in that part of the settings (github.token, openrouter.key).
+  const saved = /** @type {Record<string, string> | undefined} */ (/** @type {unknown} */ (store.get(COLLECTION)[id]))?.[field] ?? '';
   const result = view.results[id];
   const revealed = Boolean(view.reveal[id]);
 
+  /** @param {string} value */
   const save = (value) => {
     store.update(COLLECTION, (d) => {
-      d[id] = { ...d[id], [field]: value };
+      /** @type {Record<string, object>} */ (/** @type {unknown} */ (d))[id] = { ...d[id], [field]: value };
     });
     if (id === 'github') configure(store.get(COLLECTION).github);
     view.results[id] = null;
@@ -164,9 +187,10 @@ function credentialCard(store, cfg) {
 
       h('form', {
         class: 'svc-section',
+        /** @param {FormSubmit} e */
         onsubmit: (e) => {
           e.preventDefault();
-          save(new FormData(e.currentTarget).get('secret').trim());
+          save(/** @type {string} */ (new FormData(e.currentTarget).get('secret')).trim());
         },
       },
         h('h3', null, fieldLabel ?? `${title} key`),
@@ -202,12 +226,14 @@ function credentialCard(store, cfg) {
 
 // --- Models & tasks ---
 
+/** @param {Store} store @param {Partial<ModelsSettings>} patch */
 function updateModels(store, patch) {
   store.update(COLLECTION, (d) => {
     d.models = { ...d.models, ...patch };
   });
 }
 
+/** @param {Store} store @param {string} id @param {Partial<ModelTask>} patch */
 function updateTask(store, id, patch) {
   store.update(COLLECTION, (d) => {
     const t = d.models.tasks.find((x) => x.id === id);
@@ -215,12 +241,14 @@ function updateTask(store, id, patch) {
   });
 }
 
+/** @param {Store} store @param {string} name @param {string} description */
 function addTask(store, name, description) {
   store.update(COLLECTION, (d) => {
     d.models.tasks.push({ id: `task-${Date.now().toString(36)}`, name, description, model: '' });
   });
 }
 
+/** @param {Store} store @param {string} id */
 function removeTask(store, id) {
   if (!confirm('Remove this task? Its model pin goes with it.')) return;
   store.update(COLLECTION, (d) => {
@@ -228,6 +256,7 @@ function removeTask(store, id) {
   });
 }
 
+/** @param {Store} store */
 function modelsPanel(store) {
   const { models } = store.get(COLLECTION);
   const cat = view.catalog;
@@ -299,11 +328,12 @@ function modelsPanel(store) {
 
     h('form', {
       class: 'add-task',
+      /** @param {FormSubmit} e */
       onsubmit: (e) => {
         e.preventDefault();
         const f = new FormData(e.currentTarget);
-        const name = f.get('name').trim();
-        if (name) addTask(store, name, f.get('description').trim());
+        const name = /** @type {string} */ (f.get('name')).trim();
+        if (name) addTask(store, name, /** @type {string} */ (f.get('description')).trim());
       },
     },
       h('input', { name: 'name', placeholder: 'New task, e.g. Weekly review', 'aria-label': 'New task name', autocomplete: 'off', class: 'grow' }),
@@ -314,12 +344,15 @@ function modelsPanel(store) {
 // --- Exchange rates ---
 
 // The last check of each provider, shown on its row: { [id]: { status: 'checking' | 'ok' | 'error', text } }.
+/** @type {{ results: Record<string, { status: string, text: string }> }} */
 const exchange = { results: {} };
 
+/** @param {Store} store */
 function exchangeCard(store) {
   const manual = manualRate();
   const first = providerId();
   const fallback = fallbackOn();
+  /** @param {{ id: string }} p */
   const check = (p) => {
     exchange.results[p.id] = { status: 'checking', text: 'Checking…' };
     store.refresh();
@@ -332,6 +365,7 @@ function exchangeCard(store) {
       })
       .finally(() => store.refresh());
   };
+  /** @param {FormSubmit} e */
   const saveManual = (e) => {
     e.preventDefault();
     const v = Number(new FormData(e.currentTarget).get('rate'));
@@ -349,7 +383,8 @@ function exchangeCard(store) {
         : results.some((r) => r.status === 'error')
           ? h('span', { class: 'pill tone-high' }, 'Failed')
           : h('span', { class: 'pill tone-plain' }, 'Not checked');
-  const used = PROVIDERS.find((p) => p.id === (lastSource.id ?? first));
+  // providerId() is always one of them, and the last source is one too.
+  const used = /** @type {typeof PROVIDERS[number]} */ (PROVIDERS.find((p) => p.id === (lastSource.id ?? first)));
 
   return h('section', { class: 'card panel' },
     h('header', { class: 'panel-head' },
@@ -390,7 +425,7 @@ function exchangeCard(store) {
             h('input', {
               type: 'checkbox',
               checked: fallback,
-              onchange: (e) => {
+              onchange: (/** @type {{ target: HTMLInputElement }} */ e) => {
                 setFallback(e.target.checked);
                 store.refresh();
               },
@@ -433,8 +468,10 @@ function exchangeCard(store) {
 
 // --- Google Calendar ---
 
+/** @param {Store} store */
 function googleCard(store) {
   const { clientId = '', clientSecret = '' } = store.get(COLLECTION).google ?? {};
+  /** @param {GoogleSettings} fields */
   const save = (fields) => {
     store.update(COLLECTION, (d) => {
       d.google = { ...d.google, ...fields };
@@ -468,10 +505,11 @@ function googleCard(store) {
 
         h('form', {
           class: 'svc-section',
+          /** @param {FormSubmit} e */
           onsubmit: (e) => {
             e.preventDefault();
             const form = new FormData(e.currentTarget);
-            save({ clientId: form.get('clientId').trim(), clientSecret: form.get('clientSecret').trim() });
+            save({ clientId: /** @type {string} */ (form.get('clientId')).trim(), clientSecret: /** @type {string} */ (form.get('clientSecret')).trim() });
           },
         },
           h('h3', null, 'OAuth Client ID'),
@@ -504,6 +542,7 @@ const DENSITY_KEY = 'board:density'; // 'comfortable' (default) or 'compact'
 
 // Applies the saved theme and density. Runs at startup and whenever either changes.
 export function applyAppearance() {
+  /** @type {string | null} */
   let theme = null;
   let density = 'comfortable';
   try {
@@ -517,6 +556,7 @@ export function applyAppearance() {
   document.body.classList.toggle('compact', density === 'compact');
 }
 
+/** @type {{ message: string, ok: boolean | null }} */
 const uniswapView = { message: '', ok: null };
 
 // Token logos, read once from the token list; the page redraws when they arrive.
@@ -524,22 +564,27 @@ let tokenLogoMap = new Map();
 let tokenLogosAsked = false;
 
 // The positions added by hand, with the pair and range from the last Liquidity Pools read when there is one.
+/** @param {Store} store @param {Added[]} added @param {(x: Added) => void} remove */
 function addedList(store, added, remove) {
   if (!tokenLogosAsked) {
     tokenLogosAsked = true;
-    tokenLogos().then((map) => {
+    tokenLogos().then((/** @type {Map<string, string>} */ map) => {
       tokenLogoMap = map;
       store.refresh();
     });
   }
   // The same key as a pools row's ref: v3 rows have no version in it.
+  /** @param {Added} x */
   const refOf = (x) => (x.version === 'v3' ? `${x.chainId}:${x.tokenId}` : `${x.chainId}:${x.version}:${x.tokenId}`);
+  /** @type {Map<string, PoolRow>} */
   const read = new Map();
   for (const part of Object.values(store.get('pools')?.cache ?? {})) for (const r of part.rows ?? []) read.set(r.ref, r);
+  /** @param {number} chainId @param {string | undefined} address */
   const tokenLogo = (chainId, address) => (address ? tokenLogoMap.get(`${chainId}:${address.toLowerCase()}`) ?? null : null);
   const rows = added
     .map((x) => ({ x, r: read.get(refOf(x)) ?? null, chain: CHAINS.find((c) => c.id === x.chainId) }))
     .sort((a, b) => (a.chain?.name ?? '').localeCompare(b.chain?.name ?? '') || Number(a.x.tokenId) - Number(b.x.tokenId));
+  /** @param {PoolRow | null} r */
   const status = (r) => (!r ? ['unread', 'Not read yet'] : r.closed ? ['closed', 'Closed'] : r.inRange ? ['in', 'In range'] : ['out', 'Out of range']);
 
   return h('ul', { class: 'added-list' },
@@ -560,20 +605,26 @@ function addedList(store, added, remove) {
     }));
 }
 
+/** @type {{ message: string, ok: boolean | null }} */
 const walletsView = { message: '', ok: null };
 
 // Saves into settings.uniswap, where the wallet list was first kept, so older data folders keep their wallets.
+/** @param {Store} store @param {Partial<UniswapSettings>} patch */
 const saveUniswap = (store, patch) => {
   store.update(COLLECTION, (d) => {
-    d.uniswap = { wallets: [], chains: {}, ...d.uniswap, ...patch };
+    // Older files may lack the lists.
+    d.uniswap = { wallets: [], chains: {}, .../** @type {Partial<UniswapSettings>} */ (d.uniswap), ...patch };
   });
   store.refresh();
 };
 
 // Public wallet addresses that every DeFi tab reads: Liquidity Pools, Wallets and Lending / Borrowing.
+/** @param {Store} store */
 function walletsCard(store) {
   const wallets = store.get(COLLECTION).uniswap?.wallets ?? [];
+  /** @param {Partial<UniswapSettings>} patch */
   const save = (patch) => saveUniswap(store, patch);
+  /** @param {FormSubmit} e */
   const addWallet = (e) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -609,11 +660,16 @@ function walletsCard(store) {
 }
 
 // Uniswap positions added by hand, for those the board does not find in the wallets.
+/** @param {Store} store */
 function uniswapCard(store) {
+  /** @type {UniswapSettings} */
   const cfg = store.get(COLLECTION).uniswap ?? { wallets: [], chains: {} };
+  /** @type {Added[]} */
   const added = addedPositions(cfg);
+  /** @param {Partial<UniswapSettings>} patch */
   const save = (patch) => saveUniswap(store, patch);
   // A position the board does not find: a link from the Uniswap app, or a number with its chain and version.
+  /** @param {FormSubmit} e */
   const addAdded = (e) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -624,7 +680,9 @@ function uniswapCard(store) {
     if (!error) e.currentTarget.reset();
     store.refresh();
   };
+  /** @param {Added} x */
   const removeAdded = (x) => {
+    /** @type {'v3ids' | 'v4ids'} */
     const list = addedListOf(x.version);
     save({ [list]: (cfg[list] ?? []).filter((y) => !(y.chainId === x.chainId && String(y.tokenId) === String(x.tokenId))) });
   };
@@ -646,6 +704,7 @@ function uniswapCard(store) {
     uniswapView.message ? notice({ tone: uniswapView.ok ? 'info' : 'error', text: uniswapView.message }) : null);
 }
 
+/** @param {string} key @param {string | null} value */
 function setStored(key, value) {
   try {
     if (value) localStorage.setItem(key, value);
@@ -655,7 +714,9 @@ function setStored(key, value) {
   }
 }
 
+/** @param {Store} store */
 function appearanceCard(store) {
+  /** @type {string | null} */
   let theme = null;
   let density = 'comfortable';
   try {
@@ -664,6 +725,7 @@ function appearanceCard(store) {
   } catch {
     /* storage blocked */
   }
+  /** @param {string} label @param {string | null} value @param {string | null} current @param {(value: string | null) => void} onPick */
   const choice = (label, value, current, onPick) =>
     h('button', {
       type: 'button',
@@ -671,11 +733,13 @@ function appearanceCard(store) {
       'aria-pressed': String(current === value),
       onclick: () => onPick(value),
     }, label);
+  /** @param {string | null} value */
   const pickTheme = (value) => {
     setStored(THEME_KEY, value);
     applyAppearance();
     store.refresh();
   };
+  /** @param {string | null} value */
   const pickDensity = (value) => {
     setStored(DENSITY_KEY, value === 'compact' ? 'compact' : null);
     applyAppearance();
@@ -705,15 +769,20 @@ function appearanceCard(store) {
 // --- Keys per organization ---
 
 // The organization name from what was typed: a name, or a github.com link to one.
+/** @param {unknown} text */
 const orgNameFrom = (text) => String(text ?? '').trim().replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\/.*$/, '');
 
 // Result of the last test of an organization key, which one is being tested, and the organization picked
 // in the dropdown (set by the "Add token" button on a row).
+/** @type {{ message: string, ok: boolean, testing: string | null, pick: string }} */
 const orgKeys = { message: '', ok: true, testing: null, pick: '' };
 
 // Every organization the projects use: the org set on each project, and the owner of each linked repo.
+/** @param {Store} store */
 function knownOrgs(store) {
+  /** @type {Map<string, string>} */
   const names = new Map(); // lower-case name -> name as written
+  /** @param {unknown} name */
   const add = (name) => {
     const v = String(name ?? '').trim();
     if (v && !names.has(v.toLowerCase())) names.set(v.toLowerCase(), v);
@@ -725,8 +794,10 @@ function knownOrgs(store) {
   return [...names.values()];
 }
 
+/** @param {Store} store */
 function orgKeysCard(store) {
   const orgs = store.get(COLLECTION).github?.orgs ?? [];
+  /** @param {string} name */
   const tokenFor = (name) => orgs.find((x) => x.org.toLowerCase() === name.toLowerCase());
   // Projects' organizations, plus any organization that has a token but no project yet.
   const known = knownOrgs(store);
@@ -734,6 +805,7 @@ function orgKeysCard(store) {
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   const missing = all.filter((name) => !tokenFor(name));
 
+  /** @param {GithubOrgToken[]} list */
   const saveOrgs = (list) => {
     store.update(COLLECTION, (d) => {
       d.github = { ...d.github, orgs: list };
@@ -741,6 +813,7 @@ function orgKeysCard(store) {
     configure(store.get(COLLECTION).github);
     store.refresh();
   };
+  /** @param {GithubOrgToken} entry */
   const testOrg = (entry) => {
     orgKeys.testing = entry.org;
     orgKeys.message = '';
@@ -759,6 +832,7 @@ function orgKeysCard(store) {
         store.refresh();
       });
   };
+  /** @param {string} token */
   const mask = (token) => `••••${token.slice(-4)}`;
 
   const rows = all.length
@@ -814,6 +888,7 @@ function orgKeysCard(store) {
     h('h3', null, 'Add a token'),
     h('form', {
       class: 'org-key-form',
+      /** @param {FormSubmit} e */
       onsubmit: (e) => {
         e.preventDefault();
         const f = new FormData(e.currentTarget);
@@ -853,6 +928,7 @@ function tokenGuide() {
 
 // --- Page ---
 
+/** @param {HTMLElement} root @param {Store} store */
 function draw(root, store) {
   if (view.section === 'models' && view.catalog.status === 'idle') {
     // Load after this render finishes, so the refresh does not run inside it.
@@ -955,6 +1031,7 @@ export default {
   defaults: { github: { token: '', orgs: [] }, openrouter: { key: '' }, google: { clientId: '', clientSecret: '' }, uniswap: { wallets: [], chains: {} }, blockchains: { custom: [] }, contracts: [], telegram: { token: '', chatId: '', confirm: true, offset: 0 }, analytics: { properties: {} }, bing: { key: '', relay: '' }, resend: { relay: '', keys: {} }, gmail: { accounts: [] }, gcal: { accounts: [] }, automations: {}, models: { default: '', tasks: DEFAULT_TASKS.map((t) => ({ ...t, model: '' })) }, prompts: {} },
   render: draw,
   serialize: () => ({ section: view.section === 'github' ? '' : view.section }),
+  /** @param {Record<string, string>} [p] */
   restore: (p = {}) => {
     view.section = PAGES.includes(p.section) ? p.section : 'github';
   },

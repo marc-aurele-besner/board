@@ -1,3 +1,4 @@
+// @ts-check
 // Settings sections for Google Calendar accounts, Telegram, Google Analytics, the search consoles, Resend, Gmail, notifications and automations.
 import { h, icon, empty, notice, statusOf, copyable } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
@@ -13,27 +14,43 @@ import { hostOf } from '../sitecheck.js';
 import { projectIcon, projectTree, labelColor } from './projects.js';
 import { setupBanner } from '../integrations.js';
 
+/** @import { Store, Project, CalendarAccount, CalendarChoice, GmailAccount, TelegramSettings, ResendSettings, AutomationRule } from '../../types/data' */
+/** @import { Child } from '../../types/ui' */
+/** @typedef {{ target: HTMLInputElement }} InputEvent_ */
+/** @typedef {SubmitEvent & { currentTarget: HTMLFormElement }} FormSubmit */
+
+/** @param {string} href @param {Child} text */
 const link = (href, text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
+/** @param {Child[]} list */
 const steps = (list) => h('ol', { class: 'steps' }, list.map((s) => h('li', null, h('span', { class: 'step-text' }, s))));
+/** @param {string} text @param {string} tone */
 const badge = (text, tone) => h('span', { class: `pill tone-${tone}` }, text);
+/** @param {string} title @param {string} intro @param {Child} [right] */
 const head = (title, intro, right) =>
   h('header', { class: 'panel-head' }, h('div', null, h('h2', null, title), h('p', { class: 'muted' }, intro)), right ? h('div', { class: 'row' }, right) : null);
+/** @param {boolean} checked @param {string} label @param {(on: boolean) => void} onchange */
 const toggle = (checked, label, onchange) =>
-  h('label', { class: 'row check' }, h('input', { type: 'checkbox', checked, 'aria-label': label, onchange: (e) => onchange(e.target.checked) }), h('span', null, label));
+  h('label', { class: 'row check' }, h('input', { type: 'checkbox', checked, 'aria-label': label, onchange: (/** @type {InputEvent_} */ e) => onchange(e.target.checked) }), h('span', null, label));
 
 // Messages shown on each card after an action: { text, ok }.
+/** @type {Record<string, { text: string, ok: boolean } | null>} */
 const messages = {};
+/** @param {Store} store @param {string} key @param {string} text @param {boolean} [ok] */
 const say = (store, key, text, ok = true) => {
   messages[key] = text ? { text, ok } : null;
   store.refresh();
 };
+/** @param {string} key */
 const result = (key) => (messages[key] ? h('p', { class: `test-result ${messages[key].ok ? 'ok' : 'error'}`, role: 'status' }, messages[key].text) : null);
+/** @param {{ name?: string }} a @param {{ name?: string }} b */
 const byName = (a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), undefined, { sensitivity: 'base' });
 
 // A project in the searchable pickers below, with its icon, since the project list can grow long.
+/** @param {Project} p */
 const projectOption = (p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) });
 
 // Optional project and project-label pickers for an account or a calendar. Empty is a choice: `none` names it.
+/** @param {Project[]} projects @param {string | null | undefined} value @param {string} none @param {(id: string | null) => void} onPick */
 function projectPick(projects, value, none, onPick) {
   return pickChip({
     value: value ?? null,
@@ -46,9 +63,12 @@ function projectPick(projects, value, none, onPick) {
 }
 
 // Project labels in their colours. A label that was deleted since reads as none.
+/** @param {Store} store */
 const projectLabels = (store) => store.get('projects').categories ?? [];
+/** @param {Store} store @param {string | null | undefined} id */
 const labelName = (store, id) => projectLabels(store).find((c) => c.id === id)?.name ?? '';
 
+/** @param {Store} store @param {string | null | undefined} value @param {string} none @param {(id: string | null) => void} onPick */
 function labelPick(store, value, none, onPick) {
   const labels = projectLabels(store);
   return pickChip({
@@ -63,12 +83,13 @@ function labelPick(store, value, none, onPick) {
 
 // --- Google Calendar accounts ---
 
+/** @param {Store} store @param {CalendarAccount} account @param {CalendarChoice} cal @param {Project[]} projects */
 function calendarRow(store, account, cal, projects) {
   const accountProject = projects.find((p) => p.id === account.projectId);
   const accountLabel = labelName(store, account.labelId);
   return h('li', { class: 'resend-row has-key gcal-row' },
     h('label', { class: 'resend-name check' },
-      h('input', { type: 'checkbox', checked: cal.on, 'aria-label': `Show ${cal.name}`, onchange: (e) => setCalendar(store, account.email, cal.id, { on: e.target.checked }) }),
+      h('input', { type: 'checkbox', checked: cal.on, 'aria-label': `Show ${cal.name}`, onchange: (/** @type {InputEvent_} */ e) => setCalendar(store, account.email, cal.id, { on: e.target.checked }) }),
       h('span', { class: 'gcal-swatch', style: { '--c': cal.color || 'var(--accent)' } }),
       h('strong', { title: cal.id }, cal.name)),
     // Left empty, a calendar takes the account's project and label.
@@ -80,9 +101,11 @@ function calendarRow(store, account, cal, projects) {
         (labelId) => setCalendar(store, account.email, cal.id, { labelId }))));
 }
 
+/** @param {Store} store @param {CalendarAccount} account @param {Project[]} projects @param {string} clientId */
 function calendarAccount(store, account, projects, clientId) {
   const key = `gcal:${account.email}`;
   const connected = isCalendarConnected(account.email);
+  /** @param {string} text @param {boolean} [ok] */
   const sayRow = (text, ok) => say(store, key, text, ok);
   const reconnect = () => {
     sayRow('Waiting for Google…');
@@ -117,6 +140,7 @@ function calendarAccount(store, account, projects, clientId) {
 }
 
 // The accounts the Calendar section reads, each with its calendars. Shown under the Client ID on the Google Calendar page.
+/** @param {Store} store */
 export function calendarAccountsCard(store) {
   const clientId = store.get('settings').google?.clientId ?? '';
   const accounts = calendarAccounts(store);
@@ -145,11 +169,14 @@ export function calendarAccountsCard(store) {
 
 // --- Telegram ---
 
+/** @param {Store} store */
 export function telegramCard(store) {
   const t = store.get('settings').telegram ?? {};
+  /** @param {Partial<TelegramSettings>} patch */
   const save = (patch) => store.update('settings', (d) => {
     d.telegram = { ...d.telegram, ...patch };
   });
+  /** @template T @param {() => Promise<T>} work @param {(value: T) => string} done */
   const tryIt = (work, done) => {
     say(store, 'telegram', 'Asking Telegram…');
     work().then((value) => say(store, 'telegram', done(value))).catch((err) => say(store, 'telegram', err.message, false));
@@ -173,6 +200,7 @@ export function telegramCard(store) {
         h('p', { class: 'muted small' }, 'The board has no server. It reads the bot’s new messages while it is open, about once a minute, so a task sent at night appears the next time you open it.')),
       h('form', {
         class: 'svc-section',
+        /** @param {FormSubmit} e */
         onsubmit: (e) => {
           e.preventDefault();
           const f = new FormData(e.currentTarget);
@@ -194,6 +222,7 @@ export function telegramCard(store) {
             // the runners read the bot, and Telegram allows one reader at a time (see js/telegram.js).
             disabled: hasTelegram(store),
             title: hasTelegram(store) ? 'Clear the chat first to find another one.' : null,
+            /** @param {MouseEvent & { currentTarget: HTMLButtonElement & { form: HTMLFormElement & { elements: { token: HTMLInputElement } } } }} e */
             onclick: (e) => {
               const token = String(e.currentTarget.form.elements.token.value ?? '').trim();
               if (!token) return say(store, 'telegram', 'Paste the bot token first.', false);
@@ -213,6 +242,7 @@ export function telegramCard(store) {
 
 // --- Google Analytics ---
 
+/** @param {Store} store @param {import('../google-core.js').WebService} service @param {string} name @param {string} key */
 function googleConnect(store, service, name, key) {
   const clientId = store.get('settings').google?.clientId ?? '';
   const connected = isConnected(service);
@@ -231,9 +261,11 @@ function googleConnect(store, service, name, key) {
     result(key));
 }
 
+/** @param {Store} store */
 export function analyticsCard(store) {
   const props = store.get('settings').analytics?.properties ?? {};
   const sites = [...sitesOf(store)].sort(byName);
+  /** @param {string} id @param {string} value */
   const setProp = (id, value) => store.update('settings', (d) => {
     d.analytics = { ...d.analytics, properties: { ...(d.analytics?.properties ?? {}), [id]: value } };
   });
@@ -272,8 +304,10 @@ export function analyticsCard(store) {
 
 // --- Search consoles ---
 
+/** @param {Store} store */
 export function searchCard(store) {
   const bingKey = store.get('settings').bing?.key ?? '';
+  /** @param {string} key */
   const saveBing = (key) => store.update('settings', (d) => {
     d.bing = { key };
   });
@@ -303,6 +337,7 @@ export function searchCard(store) {
           notice({ tone: 'info', text: 'Bing’s API does not let a web page read its answers, so the runners read them into webstats.json, and Monitoring shows that file.' })),
         h('form', {
           class: 'svc-section',
+          /** @param {FormSubmit} e */
           onsubmit: (e) => {
             e.preventDefault();
             const form = new FormData(e.currentTarget);
@@ -329,10 +364,13 @@ export function searchCard(store) {
 // --- Resend ---
 
 // The project whose key is being typed, and the search over the project list.
+/** @type {{ editing: string | null, query: string }} */
 const resendView = { editing: null, query: '' };
 // "re_AbCd…wxyz": enough to tell keys apart without showing them.
+/** @param {string} key */
 const maskKey = (key) => (key.length > 12 ? `${key.slice(0, 7)}…${key.slice(-4)}` : 're_…');
 
+/** @param {Store} store @param {Project} p @param {Record<string, string>} keys @param {(id: string, key: string) => void} setKey */
 function resendRow(store, p, keys, setKey) {
   const key = keys[p.id] ?? '';
   const msg = messages[`resend:${p.id}`];
@@ -342,6 +380,7 @@ function resendRow(store, p, keys, setKey) {
     say(store, `resend:${p.id}`, 'Testing…');
     checkResend(key).then((text) => say(store, `resend:${p.id}`, text)).catch((err) => say(store, `resend:${p.id}`, err.message, false));
   };
+  /** @param {string | null} id */
   const edit = (id) => {
     resendView.editing = id;
     store.refresh();
@@ -350,6 +389,7 @@ function resendRow(store, p, keys, setKey) {
   const body = editing
     ? h('form', {
         class: 'resend-edit',
+        /** @param {FormSubmit} e */
         onsubmit: (e) => {
           e.preventDefault();
           const value = String(new FormData(e.currentTarget).get('key') ?? '').trim();
@@ -388,13 +428,17 @@ function resendRow(store, p, keys, setKey) {
         : h('button', { type: 'button', class: 'btn-small', onclick: () => edit(p.id) }, icon('plus'), 'Add key')));
 }
 
+/** @param {Store} store */
 export function resendCard(store) {
   const cfg = resendSettings(store);
   const keys = cfg.keys ?? {};
+  /** @param {Partial<ResendSettings>} patch */
   const save = (patch) => store.update('settings', (d) => {
-    const { relay: _relay, ...rest } = d.resend ?? {};
+    // Older files may lack keys.
+    const { relay: _relay, ...rest } = /** @type {Partial<ResendSettings>} */ (d.resend ?? {});
     d.resend = { keys: {}, ...rest, ...patch };
   });
+  /** @param {string} id @param {string} key */
   const setKey = (id, key) => save({ keys: Object.fromEntries(Object.entries({ ...keys, [id]: key }).filter(([, v]) => v)) });
   // Projects with a key first, each group by name.
   const all = projectTree(store.get('projects').projects).map(({ project }) => project).sort(byName);
@@ -438,6 +482,7 @@ export function resendCard(store) {
               value: resendView.query,
               'aria-label': 'Find a project',
               // Only the list is redrawn, so the field keeps focus while typing.
+              /** @param {InputEvent_} e */
               oninput: (e) => {
                 resendView.query = e.target.value;
                 paint();
@@ -450,12 +495,19 @@ export function resendCard(store) {
 // --- Gmail ---
 
 // The project a newly added account goes to, if any.
+/** @type {{ project: string | null }} */
 const gmailView = { project: null };
 
+/**
+ * @param {Store} store @param {GmailAccount} account @param {Project[]} projects
+ * @param {(list: GmailAccount[]) => void} saveAccounts @param {string} clientId
+ */
 function gmailRow(store, account, projects, saveAccounts, clientId) {
   const msg = messages[`gmail:${account.email}`];
   const connected = isGmailConnected(account.email);
+  /** @param {string} text @param {boolean} [ok] */
   const sayRow = (text, ok) => say(store, `gmail:${account.email}`, text, ok);
+  /** @param {string | null} projectId */
   const setProject = (projectId) => {
     saveAccounts(gmailAccounts(store).map((a) => (a.email === account.email ? { ...a, projectId } : a)));
     // Saved mail follows the account to its new project.
@@ -495,10 +547,12 @@ function gmailRow(store, account, projects, saveAccounts, clientId) {
       h('button', { type: 'button', class: 'icon-btn', title: 'Remove account', 'aria-label': `Remove ${account.email}`, onclick: remove }, icon('x'))));
 }
 
+/** @param {Store} store */
 export function gmailCard(store) {
   const clientId = store.get('settings').google?.clientId ?? '';
   const accounts = gmailAccounts(store);
   const projects = projectTree(store.get('projects').projects).map(({ project }) => project);
+  /** @param {GmailAccount[]} list */
   const saveAccounts = (list) => store.update('settings', (d) => {
     d.gmail = { ...d.gmail, accounts: list };
   });
@@ -516,6 +570,7 @@ export function gmailCard(store) {
       .catch((err) => say(store, 'gmail', err.message, false));
   };
   // Accounts grouped by project, in project order.
+  /** @type {Map<string | null, number>} */
   const order = new Map(projects.map((p, i) => [p.id, i]));
   const sorted = [...accounts].sort((a, b) => (order.get(a.projectId) ?? 1e9) - (order.get(b.projectId) ?? 1e9) || a.email.localeCompare(b.email));
 
@@ -560,6 +615,7 @@ export function gmailCard(store) {
 
 const DATA_FILES = ['projects', 'todos', 'recipes', 'finance', 'tools', 'inbox', 'calendar', 'github', 'webstats', 'fx', 'notifications', 'usage', 'settings', 'runners'];
 
+/** @param {Store} store */
 export function dataCard(store) {
   return h('section', { class: 'card panel' },
     head('Data folder', 'Your data lives as plain JSON files in a folder you chose. It stays on this computer; back it up the way you back up any other folder.', badge('Connected', 'done')),
@@ -574,6 +630,7 @@ export function dataCard(store) {
 
 // --- Notifications ---
 
+/** @param {Store} store */
 export function notificationsCard(store) {
   return h('section', { class: 'card panel' },
     head('Notifications', 'Notifications appear under the bell at the top of every page. Each kind can also be sent to your Telegram chat.'),
@@ -585,35 +642,37 @@ export function notificationsCard(store) {
           const pref = prefOf(store, key);
           return h('tr', null,
             h('td', null, h('span', { class: 'row' }, icon(iconName), label)),
-            h('td', null, h('input', { type: 'checkbox', checked: pref.app, 'aria-label': `${label} in the board`, onchange: (e) => setPref(store, key, { app: e.target.checked }) })),
-            h('td', null, h('input', { type: 'checkbox', checked: pref.telegram, disabled: !hasTelegram(store), 'aria-label': `${label} on Telegram`, onchange: (e) => setPref(store, key, { telegram: e.target.checked }) })));
+            h('td', null, h('input', { type: 'checkbox', checked: pref.app, 'aria-label': `${label} in the board`, onchange: (/** @type {InputEvent_} */ e) => setPref(store, key, { app: e.target.checked }) })),
+            h('td', null, h('input', { type: 'checkbox', checked: pref.telegram, disabled: !hasTelegram(store), 'aria-label': `${label} on Telegram`, onchange: (/** @type {InputEvent_} */ e) => setPref(store, key, { telegram: e.target.checked }) })));
         })))),
     h('p', { class: 'muted small' }, 'A task with a deadline notifies you on the day, and once more when the deadline has passed. It stays in Tasks › Today until it is done or moved.'));
 }
 
 // --- Automations ---
 
+/** @param {Store} store */
 export function automationsCard(store) {
+  /** @param {string} key @param {AutomationRule} patch */
   const setRule = (key, patch) => store.update('settings', (d) => {
     d.automations = { ...d.automations, [key]: { ...ruleOf(store, key), ...patch } };
   });
   const open = store.get('todos').items.filter((t) => t.auto && t.auto !== 'telegram' && statusOf(t) !== 'done').length;
   return h('section', { class: 'card panel' },
     head('Automations', 'The board can create tasks by itself. An automated task shows an “Auto” flag, says why it exists in its description, and is listed under Tasks › Automated. A rule never creates a second task while its first one is still open.'),
-    h('ul', { class: 'rule-list' }, RULES.map(([key, title, text, setting]) => {
+    h('ul', { class: 'rule-list' }, /** @type {[string, string, string, boolean | string][]} */ (RULES).map(([key, title, text, setting]) => {
       const rule = ruleOf(store, key);
       return h('li', null,
         h('div', { class: 'grow' }, h('strong', null, title), h('div', { class: 'muted small' }, text)),
         setting === true
           ? h('label', { class: 'row rule-days' },
-              h('input', { type: 'number', min: '1', max: '120', value: String(rule.days), 'aria-label': `${title}: days before`, onchange: (e) => setRule(key, { days: Math.min(120, Math.max(1, Number(e.target.value) || 1)) }) }),
+              h('input', { type: 'number', min: '1', max: '120', value: String(rule.days), 'aria-label': `${title}: days before`, onchange: (/** @type {InputEvent_} */ e) => setRule(key, { days: Math.min(120, Math.max(1, Number(e.target.value) || 1)) }) }),
               h('span', { class: 'muted small' }, 'days before'))
           : setting === 'factor'
             ? h('label', { class: 'row rule-days' },
                 h('span', { class: 'muted small' }, 'below'),
-                h('input', { type: 'number', min: '1', max: '5', step: '0.05', value: String(rule.factor), 'aria-label': `${title}: health factor`, onchange: (e) => setRule(key, { factor: Math.min(5, Math.max(1, Number(e.target.value) || 1.2)) }) }))
+                h('input', { type: 'number', min: '1', max: '5', step: '0.05', value: String(rule.factor), 'aria-label': `${title}: health factor`, onchange: (/** @type {InputEvent_} */ e) => setRule(key, { factor: Math.min(5, Math.max(1, Number(e.target.value) || 1.2)) }) }))
             : null,
-        h('input', { type: 'checkbox', checked: rule.on, 'aria-label': `${title}: on`, onchange: (e) => setRule(key, { on: e.target.checked }) }));
+        h('input', { type: 'checkbox', checked: rule.on, 'aria-label': `${title}: on`, onchange: (/** @type {InputEvent_} */ e) => setRule(key, { on: e.target.checked }) }));
     })),
     h('p', { class: 'muted small' }, `${open} automated task${open === 1 ? ' is' : 's are'} open now. Site checks run in the runners (Settings → Runners → Monitoring) and show in `, h('a', { href: '#/tools' }, 'Tools'), '.'));
 }

@@ -1,12 +1,18 @@
+// @ts-check
 // Settings → Prompts: read and replace the system prompt of every AI feature, plus one prompt added to every call.
 import { h, icon } from '../ui.js';
 import { PROMPTS, GLOBAL_PROMPT, overrides } from '../prompts.js';
 import { modelForTask } from './settings.js';
 
+/** @import { Store } from '../../types/data' */
+
 // Text being edited, kept across re-renders (a background save re-renders the page), and which prompts are open.
+/** @type {Record<string, string>} */
 const drafts = {};
+/** @type {Set<string>} */
 const open = new Set();
 
+/** @param {Store} store @param {string} id @param {string} text @param {string} fallback */
 function save(store, id, text, fallback) {
   delete drafts[id];
   store.update('settings', (d) => {
@@ -17,6 +23,7 @@ function save(store, id, text, fallback) {
   });
 }
 
+/** @param {Store} store @param {{ id: string, fallback: string, rows: number, label: string, vars?: string[] }} options */
 function editor(store, { id, fallback, rows, label, vars = [] }) {
   const saved = overrides(store)[id] ?? '';
   const current = saved || fallback;
@@ -27,11 +34,12 @@ function editor(store, { id, fallback, rows, label, vars = [] }) {
     class: 'mono-text prompt-text',
     'aria-label': label,
     placeholder: id === GLOBAL_PROMPT ? 'For example: Answer in French. Keep replies short.' : '',
+    /** @param {{ target: HTMLTextAreaElement }} e */
     oninput: (e) => {
       drafts[id] = e.target.value;
       // Show the buttons without a re-render, which would drop focus.
-      const actions = e.target.parentElement.querySelector('.prompt-actions');
-      actions.querySelector('[data-save]').disabled = e.target.value === current;
+      const actions = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (e.target.parentElement).querySelector('.prompt-actions'));
+      /** @type {HTMLButtonElement} */ (actions.querySelector('[data-save]')).disabled = e.target.value === current;
     },
   }, value);
   return h('div', { class: 'stack' },
@@ -52,6 +60,7 @@ function editor(store, { id, fallback, rows, label, vars = [] }) {
         : null));
 }
 
+/** @param {Store} store */
 export function promptsCard(store) {
   const saved = overrides(store);
   const tasks = new Map((store.get('settings').models?.tasks ?? []).map((t) => [t.id, t.name]));
@@ -76,6 +85,7 @@ export function promptsCard(store) {
         h('details', {
           class: 'prompt-item',
           open: open.has(p.id),
+          /** @param {{ target: HTMLDetailsElement }} e */
           ontoggle: (e) => (e.target.open ? open.add(p.id) : open.delete(p.id)),
         },
           h('summary', null,
