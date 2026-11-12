@@ -82,7 +82,8 @@ function render({ user = true } = {}) {
   const kept = before && mod.id === lastSection ? snapshot(before) : [];
   const main = h('main', { class: 'view' });
   // Only a change of section plays the entrance animation; edits within a section re-render silently.
-  if (mod.id !== lastSection) {
+  const entered = mod.id !== lastSection;
+  if (entered) {
     main.classList.add('enter');
     lastSection = mod.id;
   }
@@ -126,7 +127,8 @@ function render({ user = true } = {}) {
     main,
   ].filter(Boolean));
   markDrawn(main);
-  if (user) main.querySelector('[data-autofocus]')?.focus();
+  // Within a section the page keeps its place: focusing a field near the top would scroll back up to it.
+  if (user) main.querySelector('[data-autofocus]')?.focus({ preventScroll: !entered });
   restore(main, kept);
 }
 
