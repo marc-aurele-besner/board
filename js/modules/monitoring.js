@@ -7,13 +7,14 @@ import { fetchActivity } from '../github.js';
 import { setupBanner } from '../integrations.js';
 import { analyticsTab, searchTab, sortTable } from './monitoring-web.js';
 import { contractsActivityTab, contractsActivitySerialize, contractsActivityRestore } from './monitoring-contracts.js';
+import { usageRecords, sumUsage, modelName, modelsByUse, fmtDuration, tokensOf } from '../dev-usage.js';
 
 const COLLECTION = 'usage';
 const DAY = 86400000;
 const HOUR = 3600000;
 const TABS = [['ai', 'AI usage'], ['github', 'GitHub activity'], ['analytics', 'Web analytics'], ['search', 'Search'], ['contracts', 'Contracts']];
 const SUBTITLES = {
-  ai: 'AI calls made by the board, with their cost and tokens.',
+  ai: 'AI calls made by the board, and what the claude sessions Dev ran for tasks used.',
   github: 'Commits, pull requests and issues across the repos linked to your projects.',
   analytics: 'Visitors and page views for each project website, from Google Analytics.',
   search: 'How each project website shows up in Google and Bing search.',
@@ -261,6 +262,7 @@ function aiTab(store, w) {
     h('div', { class: 'split-2' },
       groupTable('By model', groupCalls(entries, (e) => e.model, (e) => e.model), 'Model'),
       groupTable('By task', groupCalls(entries, (e) => e.task, (e) => taskName(e.task)), 'Task')),
+    devSessions(store, w),
     h('section', { class: 'card stack' },
       h('h3', null, 'Recent calls'),
       recent.length
@@ -276,6 +278,58 @@ function aiTab(store, w) {
           }))
         : empty('No AI calls yet. Calls appear here after you use a feature such as Tidy with AI or reading a bill.'),
       recent.length ? h('p', { class: 'muted small' }, 'Select a call to see what was sent, the full reply and its details.') : null));
+}
+
+// --- Dev sessions: what claude used for tasks, from its transcripts (dev-usage.js) ---
+
+// A session counts in the period its last reply falls in.
+function devSessions(store, w) {
+  const records = usageRecords(store).filter((r) => inWindow(r.end ?? null, w));
+  const tasks = store.get('todos').items;
+  const sum = sumUsage(records);
+  const costs = w.items.map(() => 0);
+  for (const r of records) {
+    const b = bucketOf(r.end, w);
+    if (b >= 0 && r.cost) costs[b] += r.cost;
+  }
+  const series = [{ name: 'Cost (USD)', color: 'var(--accent)', values: costs.map((v) => Number(v.toFixed(4))) }];
+  const models = modelsByUse(sum).map((id) => ({ id, ...sum.models[id], tokens: tokensOf(sum.models[id]) }));
+  const rows = records.map((r) => {
+    const one = sumUsage([r]);
+    const named = tasks.filter((t) => r.taskIds?.includes(t.id)).map((t) => t.text);
+    return { label: named.join(', ') || r.name, name: r.name, one, end: r.end };
+  });
+  const costCell = (v, partial) => (v === null ? '—' : `${partial ? '≥ ' : ''}${usdPrecise(v)}`);
+  return h('section', { class: 'card stack' },
+    h('h3', null, 'Dev sessions'),
+    h('p', { class: 'muted small' }, 'What the claude sessions started from tasks used, read from Claude Code\'s transcripts while the board and its runner are open. A session\'s cost is known once claude quits.'),
+    records.length
+      ? [
+          h('div', { class: 'summary' },
+            stat('Cost', costCell(sum.cost, sum.costPartial), sum.costPartial ? 'some sessions still running' : 'USD, as Claude Code counts it'),
+            stat('Sessions', String(sum.sessions), `for ${rows.length} task worktree${rows.length === 1 ? '' : 's'}`),
+            stat('Tokens', fmtTokens(sum.tokens), 'input, cache and output'),
+            stat('Time', fmtDuration(sum.duration), sum.linesAdded || sum.linesRemoved ? `+${sum.linesAdded} −${sum.linesRemoved} lines` : 'worked')),
+          barChart(w.items.map((b) => b.label), series, { format: usdPrecise }),
+          sortTable('dev-models', [
+            { label: 'Model', value: (m) => modelName(m.id), format: (v, m) => h('span', { title: m.id }, v) },
+            { label: 'Provider', value: (m) => m.provider },
+            { label: 'Input', num: true, value: (m) => m.input + m.cacheRead + m.cacheWrite, format: fmtTokens },
+            { label: 'Cached', num: true, value: (m) => m.cacheRead, format: fmtTokens },
+            { label: 'Output', num: true, value: (m) => m.output, format: fmtTokens },
+            { label: 'Cost', num: true, value: (m) => m.cost, format: (v) => costCell(v) },
+          ], models),
+          sortTable('dev-tasks', [
+            { label: 'Task', clip: true, value: (r) => r.label, format: (v, r) => h('span', { title: r.name }, v) },
+            { label: 'Model', value: (r) => modelsByUse(r.one).map(modelName).join(', ') },
+            { label: 'Effort', value: (r) => r.one.effort || '—' },
+            { label: 'Tokens', num: true, value: (r) => r.one.tokens, format: fmtTokens },
+            { label: 'Cost', num: true, value: (r) => r.one.cost, format: (v, r) => costCell(v, r.one.costPartial) },
+            { label: 'Time', num: true, value: (r) => r.one.duration, format: fmtDuration },
+            { label: 'Last reply', num: true, value: (r) => r.end, format: (v) => new Date(v).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) },
+          ], rows.sort((a, b) => b.end - a.end)),
+        ]
+      : empty('No Dev sessions in this period. Start claude on a task with its Dev button and its usage shows here.'));
 }
 
 // --- GitHub activity ---

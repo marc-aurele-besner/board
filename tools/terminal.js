@@ -1,8 +1,8 @@
 // Local command runner for the Dev section: `bun run terminal` (or `node tools/terminal.js`), or with the board
 // through `bun start`. It runs a command in the user's shell and streams its output back as it comes, and lists
 // folders, reads and searches files for the Dev file explorer and Search (read only), and runs git for Dev's Source Control. It also
-// removes the git worktree a task's session made once the task is completed, and only a clean one, and saves the
-// images the page hands to claude as files.
+// removes the git worktree a task's session made once the task is completed, and only a clean one, saves the
+// images the page hands to claude as files, and reads what a task's claude session used from its transcripts.
 // The runner owns each terminal session: a command keeps running when the page reloads or closes, and the session's
 // output is kept (in memory and in TERMINAL_STATE, a folder in the system's temp folder by default) so the page
 // shows it again when it comes back, even after the runner restarted. The list of open terminals is kept there too,
@@ -19,6 +19,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logger } from './log.js';
+import { worktreeUsage } from './usage.js';
 
 const PORT = Number(process.env.TERMINAL_PORT) || 8419;
 const MAX = Number(process.env.TERMINAL_MAX) || 12;
@@ -893,6 +894,16 @@ createServer(async (req, res) => {
   if (req.method === 'POST' && path === '/sessions' && json) return saveList(req, res, cors);
   if (req.method === 'POST' && ['/stop', '/clear', '/close'].includes(path) && json) return control(req, res, cors, path.slice(1));
   if (req.method === 'POST' && path === '/worktree/remove' && json) return removeWorktree(req, res, cors);
+  if (req.method === 'POST' && path === '/usage' && json) {
+    const body = await jsonBody(req, res, cors);
+    if (!body) return;
+    try {
+      res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(await worktreeUsage(body.worktrees)));
+    } catch (err) {
+      res.writeHead(500, cors).end(err.message);
+    }
+    return;
+  }
   // An image type also needs a preflight, so other websites cannot send one either.
   const imageType = IMAGE_TYPES[(req.headers['content-type'] ?? '').split(';')[0].trim()];
   if (req.method === 'POST' && path === '/image' && imageType) return saveImage(req, res, cors, imageType);

@@ -1215,6 +1215,8 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .opt-plain .project-icon { width: 14px; height: 14px; }
 
 /* A task's GitHub issues and PRs */
+.task-usage { display: flex; align-items: center; gap: 6px; margin: 0; }
+.task-usage .icon { width: 14px; height: 14px; flex: none; }
 .task-link-chips { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .task-links { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .task-links li { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -2470,6 +2472,8 @@ button.sum-line:hover { background: var(--surface-2); }
 .term-new { background: none; border: none; min-height: 0; padding: 4px 6px; border-radius: 6px; color: var(--muted); }
 .term-new:hover { background: var(--surface-2); color: var(--text); }
 .term-new .icon { width: 14px; height: 14px; }
+.term-usage { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.term-usage .icon { width: 14px; height: 14px; flex: none; }
 .term-cwd { flex: 1; min-width: 8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 0.78rem ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); text-align: right; }
 .term-actions { flex: none; gap: 2px; }
 .term > .term-out { flex: 1; min-height: 0; }

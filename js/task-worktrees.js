@@ -5,6 +5,7 @@
 import { removeWorktree, TERMINAL_RUNNER } from './terminal.js';
 import { toast } from './toast.js';
 import { statusOf } from './ui.js';
+import { rememberWorktrees } from './dev-usage.js';
 
 const COLLECTION = 'todos';
 // After the runner could not be reached, wait this long before asking again.
@@ -39,6 +40,8 @@ function forget(store, name, patch) {
 
 async function remove(store, { worktree, tasks }) {
   busy.add(worktree.name);
+  // Its record outlives the task's entry, so what its session used is still read once it is gone.
+  rememberWorktrees(store, [{ worktree, taskIds: tasks.map((t) => t.id) }]);
   try {
     const { removed } = await removeWorktree(runnerOf(store), worktree);
     forget(store, worktree.name);
