@@ -7,6 +7,7 @@ import { editText, pickChip, pickButton, pickMulti, pill } from '../inline.js';
 import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
 import { openDialog } from '../modal.js';
 import { issuesOf, prsOf, moveToReview } from '../task-links.js';
+import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startClaudeSession, openSession, runnerOf } from './dev.js';
 import { sessionStatus } from '../terminal.js';
 import { imagesOf, imageDrop, imageStrip, imagePathsFor } from '../task-images.js';
@@ -858,8 +859,17 @@ function todoRow(store, item, ctx) {
             allowEmpty: true,
             onSave: (description) => updateItem(store, item.id, { description }),
           }),
-          imageStrip(store, item))
+          imageStrip(store, item),
+          usageNote(store, item))
       : null);
+}
+
+// What the task's claude sessions used, read from their transcripts (dev-usage.js); shown with its details.
+function usageNote(store, item) {
+  const records = recordsOfTask(store, item.id);
+  if (!records.length) return null;
+  const sum = sumUsage(records);
+  return h('p', { class: 'muted small task-usage', title: usageTitle(sum) }, icon('cpu'), `AI usage: ${usageLine(sum)}`);
 }
 
 function imageCount(item) {
@@ -941,7 +951,8 @@ function boardCard(store, item, projects, order) {
             allowEmpty: true,
             onSave: (description) => updateItem(store, item.id, { description }),
           }),
-          imageStrip(store, item))
+          imageStrip(store, item),
+          usageNote(store, item))
       : null);
 }
 
