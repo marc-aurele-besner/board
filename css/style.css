@@ -1851,6 +1851,12 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .cron-flows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .cron-flow-row { display: flex; align-items: center; gap: 6px; }
 .cron-flow-toggle { flex: none; margin-right: 6px; }
+.cron-flow-copy { flex: none; margin-right: 4px; }
+.icon-btn.cron-flow-copy:hover { color: var(--accent); }
+/* Shown on hover or focus where a pointer can hover; always shown on touch. */
+@media (hover: hover) {
+  .cron-flow-row:not(:hover):not(:focus-within) .cron-flow-copy { opacity: 0; }
+}
 .cron-list .cron-project-filter { width: 100%; }
 .cron-flow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: none; border-radius: 8px; background: none; text-align: left; color: var(--text); font-weight: 400; }
 .cron-flow:hover { background: var(--surface-2); }
