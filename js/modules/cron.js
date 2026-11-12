@@ -2,7 +2,7 @@
 // The editor draws a flow as a chain of nodes, like a workflow canvas; the inspector below edits the selected node.
 import { h, icon, empty, notice, now, uid, todayISO, statusOf } from '../ui.js';
 import { projectTree, projectIcon } from './projects.js';
-import { pickChip, pill } from '../inline.js';
+import { pickChip, pickButton, pill } from '../inline.js';
 import { taskStatuses, statusLook } from '../task-labels.js';
 import { modelChip } from '../model-picker.js';
 import { openDialog } from '../modal.js';
@@ -18,13 +18,14 @@ import { modelForTask } from '../models.js';
 import { openSession, runnerOf, liveSession, onSessionPaint, exitText, terminalView, terminalBackground, startDevSession } from './dev.js';
 import { runJob } from '../runners.js';
 import { previewChips } from '../previews.js';
-import { attachSession, sessionStatus } from '../terminal.js';
+import { attachSession, sessionStatus, listSkills } from '../terminal.js';
 import { createTerminal } from '../vt.js';
 import { hasProfileSources } from '../profile.js';
 /** @import { Store, CronFlow, CronStep, CronSource, CronFormatField, CronSchedule, CronTemplate, CronRun, CronRunStep, CronPr, Project, Task, IconName } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @import { Vars } from '../cron.js' */
 /** @import { Exit } from './dev.js' */
+/** @import { RunnerSkills } from '../../types/terminal' */
 // The input, textarea or select a change handler is on; all three have value.
 /** @typedef {Event & { target: HTMLInputElement }} FieldEvent */
 // A drag on a node, the palette or a +: the browser always gives it data and the element it is on.
@@ -769,6 +770,69 @@ function insertVar(key, name) {
   return true;
 }
 
+// Claude Code's skills per folder, read through the runner for a Dev step's skill picker. A folder is read again
+// after STALE_SKILLS_MS, and the page redrawn only when what it lists changed.
+const STALE_SKILLS_MS = 30000;
+/** @type {Map<string, { data: RunnerSkills | null, json: string, error: string, at: number, loading: boolean }>} */
+const skillCache = new Map();
+
+/** @param {Store} store @param {string} path */
+function skillsFor(store, path) {
+  let entry = skillCache.get(path);
+  if (!entry) skillCache.set(path, (entry = { data: null, json: '', error: '', at: 0, loading: false }));
+  const e = entry;
+  if (!e.loading && Date.now() - e.at > STALE_SKILLS_MS) {
+    e.loading = true;
+    listSkills(runnerOf(store), path)
+      .then((data) => {
+        const json = JSON.stringify(data);
+        if (json === e.json && !e.error) return false;
+        Object.assign(e, { data, json, error: '' });
+        return true;
+      }, (/** @type {Error} */ err) => {
+        if (err.message === e.error) return false;
+        e.error = err.message;
+        return true;
+      })
+      .then((changed) => {
+        Object.assign(e, { loading: false, at: Date.now() });
+        if (changed) store.refresh();
+      });
+  }
+  return e;
+}
+
+// Puts /<skill> at the start of a Dev prompt, where claude reads it as the skill to run. A skill already there is
+// replaced; the rest of the prompt stays, as its arguments.
+/** @param {string} key @param {string} name */
+function putSkill(key, name) {
+  const el = /** @type {HTMLTextAreaElement | null} */ (document.querySelector(`[data-var-field="${CSS.escape(key)}"]`));
+  if (!el) return;
+  if (el.hidden) /** @type {HTMLButtonElement | null | undefined} */ (el.closest('.cron-col')?.querySelector('[data-tab="edit"]'))?.click();
+  const head = `/${name} `;
+  el.value = head + el.value.replace(/^\s*\/[\w:.-]+[ \t]*/, '');
+  el.focus();
+  el.setSelectionRange(head.length, head.length);
+  view.cursor = { key, start: head.length, end: head.length };
+  el.dispatchEvent(new Event('change'));
+}
+
+// The Dev step's skill picker: the folder's skills, then the user's own, as Dev's Skills panel lists them.
+/** @param {Store} store @param {string} path @param {string} key */
+function skillPick(store, path, key) {
+  const { data, error } = skillsFor(store, path);
+  const all = data ? [...data.project, ...data.global.filter((g) => !data.project.some((p) => p.name === g.name))] : [];
+  const hint = error
+    ? `Could not read the skills: ${error}`
+    : !data ? 'Reading the skills…' : all.length ? null : 'No skills in ~/.claude/skills or the folder’s .claude/skills.';
+  return field('Skill', pickButton({
+    label: 'Add a skill',
+    title: 'Start the Dev prompt with a skill, as /<skill>',
+    options: all.map((s) => ({ value: s.name, label: `/${s.name}`, plainIcon: () => icon('zap') })),
+    onPick: (name) => putSkill(key, name),
+  }), hint);
+}
+
 // Chips and tree keys keep the field's focus: a click that blurred it would save and re-render first, losing the click.
 /** @param {Event} e */
 const keepFocus = (e) => e.preventDefault();
@@ -1342,7 +1406,8 @@ function stepForm(store, flow, step) {
         field('Folder', stepProjectPick(store, flow, step.projectId, (projectId) => set({ projectId }), {
           none: 'The task’s project, else this board',
           list: folders, name: (p) => (p.localPath ? p.name : `${p.name} (no local folder)`),
-        }), 'Projects show here once they have a local folder.')),
+        }), 'Projects show here once they have a local folder.'),
+        claude ? skillPick(store, projectsOf(store).find((p) => p.id === own)?.localPath ?? '', key('prompt')) : null),
       step.mode === 'custom'
         ? field('Dev command', h('input', { value: step.devCommand ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (/** @type {FieldEvent} */ e) => set({ devCommand: e.target.value }) }),
             'The Dev prompt is passed to it as its last word. A bare --worktree gets a name, as from a task.')
