@@ -2,7 +2,8 @@
 import { h, icon, refreshIcon, empty, notice, uid } from '../ui.js';
 import { projectIcon, projectTree } from './projects.js';
 import { hostOf, daysUntil, statusPageOf } from '../sitecheck.js';
-import { sitesOf, siteData, checkSite, checkAllSites, runRules, autoTaskFor, ruleOf, emailGaps, checkProviders, TOOLS_DEFAULTS } from '../automations.js';
+import { runJob } from '../runners.js';
+import { sitesOf, siteData, checkSite, runRules, autoTaskFor, ruleOf, emailGaps, checkProviders, TOOLS_DEFAULTS } from '../automations.js';
 import { makeTask } from '../capture.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
@@ -599,7 +600,8 @@ const readAll = (store, part, label) =>
     class: 'btn-small primary',
     disabled: view.busy.has('all'),
     onclick: () => run(store, 'all', async () => {
-      const made = await checkAllSites(store, [part]);
+      const { tasks: made } = await runJob('monitoring', { parts: [part] });
+      await store.sync();
       toast(made ? `${made} task${made === 1 ? '' : 's'} created automatically` : 'All sites read');
     }),
   }, refreshIcon(view.busy.has('all')), view.busy.has('all') ? 'Reading…' : label);
@@ -896,7 +898,7 @@ function draw(root, store) {
   root.replaceChildren(
     h('div', { class: 'stack-lg tools' },
       h('header', { class: 'row between' },
-        h('div', null, h('h2', null, 'Tools'), h('p', { class: 'muted small' }, contracts ? 'Read and write the smart contracts saved in Settings.' : 'Checks that run against the website of each project, and the services they rely on, while the board is open.')),
+        h('div', null, h('h2', null, 'Tools'), h('p', { class: 'muted small' }, contracts ? 'Read and write the smart contracts saved in Settings.' : 'Checks that run against the website of each project, and the services they rely on. The runners check every 5 minutes, with or without the board open.')),
         !contracts && (sites.length || (status && store.get(COLLECTION).providers.length)) && view.tab !== 'meta'
           ? h('div', { class: 'row' },
               h('label', { class: 'inline' }, 'Check every',
@@ -912,12 +914,15 @@ function draw(root, store) {
                 class: 'btn-small primary',
                 disabled: all,
                 onclick: () => run(store, 'all', async () => {
+                  // The runners check (tools/jobs/monitoring.js); the results arrive through tools.json.
                   if (status) {
-                    await checkProviders(store);
+                    await runJob('monitoring', { providers: true });
+                    await store.sync();
                     toast('All status pages read');
                     return;
                   }
-                  const made = await checkAllSites(store, TAB_PARTS[view.tab] ?? ['health']);
+                  const { tasks: made } = await runJob('monitoring', { parts: TAB_PARTS[view.tab] ?? ['health'] });
+                  await store.sync();
                   toast(made ? `${made} task${made === 1 ? '' : 's'} created automatically` : 'All sites checked');
                 }),
               }, refreshIcon(all), all ? 'Checking…' : 'Check all now'))
