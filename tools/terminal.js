@@ -139,8 +139,18 @@ function push(s, event) {
   if (event.t === 'out' || event.t === 'err' || event.t === 'start') s.lastOut = Date.now();
   if (event.t === 'exit') s.open = null;
   if (s.size <= LOG_MAX) return;
-  // Too long: the oldest output goes, down to three quarters, but the running command's start stays.
-  while (s.events.length > 1 && s.size > LOG_MAX * 0.75) s.size -= sizeOf(s.events.shift());
+  // Too long: the oldest output goes, down to three quarters, but the running command's start stays, followed by
+  // the terminal's size at the cut, so the output after it is replayed at the size it was drawn at.
+  let dims = null;
+  while (s.events.length > 1 && s.size > LOG_MAX * 0.75) {
+    const gone = s.events.shift();
+    s.size -= sizeOf(gone);
+    if (gone.cols) dims = { cols: gone.cols, rows: gone.rows };
+  }
+  if (dims && !s.events[0].cols) {
+    s.events.unshift({ t: 'size', ...dims });
+    s.size += sizeOf(s.events[0]);
+  }
   if (s.open && !s.events.includes(s.open)) {
     s.events.unshift(s.open);
     s.size += sizeOf(s.open);
@@ -302,7 +312,7 @@ async function run(req, res, cors) {
   Object.assign(job, { child, dir });
   running.set(child.pid, job);
   log.info(`started pid ${child.pid} in ${cwd} (${running.size} running)`);
-  record(s, { t: 'start', pid: child.pid, cwd, command, at: Date.now() });
+  record(s, { t: 'start', pid: child.pid, cwd, command, at: Date.now(), cols, rows });
   child.stdout.setEncoding('utf8').on('data', (d) => record(s, { t: 'out', d }));
   child.stderr.setEncoding('utf8').on('data', (d) => record(s, { t: 'err', d }));
   child.stdin.on('error', () => {});
@@ -473,7 +483,11 @@ async function input(req, res, cors) {
   if (body.cols && body.rows && run.dir) {
     const tty = (await readFile(join(run.dir, 'tty'), 'utf8').catch(() => '')).trim();
     if (tty.startsWith('/dev/')) {
-      spawn('stty', [process.platform === 'darwin' ? '-f' : '-F', tty, 'cols', String(size(body.cols, 100, 500)), 'rows', String(size(body.rows, 30, 200))], { stdio: 'ignore' }).on('error', () => {});
+      const cols = size(body.cols, 100, 500);
+      const rows = size(body.rows, 30, 200);
+      spawn('stty', [process.platform === 'darwin' ? '-f' : '-F', tty, 'cols', String(cols), 'rows', String(rows)], { stdio: 'ignore' }).on('error', () => {});
+      // Kept with the output: a page that attaches later replays what follows at this size.
+      record(run.session, { t: 'size', cols, rows });
     }
   }
   res.writeHead(204, cors).end();

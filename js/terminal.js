@@ -34,7 +34,7 @@ export const listFolder = async (base, path) => (await call(base, `/files?path=$
 export const readFile = async (base, path) => (await call(base, `/file?path=${encodeURIComponent(path)}`)).json();
 
 // Attaches to a terminal session and calls onEvent for each line the runner streams: `session` (known: whether
-// the runner had it), the events so far (start, out, err, cwd, exit), `live`, then new events as they come.
+// the runner had it), the events so far (start, out, err, size, cwd, exit), `live`, then new events as they come.
 // The stream ends when `signal` is aborted, the session is closed, or the runner stops.
 export async function attachSession(base, { session, signal, onEvent }) {
   const res = await call(base, `/attach?session=${encodeURIComponent(session)}`, { signal });
