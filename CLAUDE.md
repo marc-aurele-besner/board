@@ -10,4 +10,4 @@ Claude-specific notes:
 - Commit in logical steps on a feature branch from `origin/main`. Open the PR against `main` with `gh pr create`.
 - Commit regularly, so the log tells a story: one step per commit, subjects short, bodies only when the why is not obvious.
 - Keep PR titles and descriptions short.
-- **Never leave a PR unmerged.** Merge every PR you open in the same turn, once the strict syntax check passes. Before ending a turn, run `gh pr list --state open` and merge anything still open.
+- **Never leave a PR unmerged.** Merge every PR you open in the same turn, once `bun run check` passes (run it right before `gh pr merge`). Never use `--no-verify`. Before ending a turn, run `gh pr list --state open` and merge anything still open.

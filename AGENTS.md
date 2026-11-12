@@ -10,8 +10,10 @@ A personal command center that runs locally. It is plain HTML, CSS and JavaScrip
 
 - Start the board with `bun start` (or `node tools/start.js`): it runs the static server, the command runner and the runners (the worker) together, each logging with its name as prefix. `bun dev` runs the same and restarts them when a file in `tools/` changes. `bun run serve` alone serves the folder. Then open `http://localhost:8000` in Chrome or Edge. The File System Access API needs a secure context (`localhost` counts) and does not work in Firefox or Safari.
 - A changed module is not always picked up: `python3 -m http.server` sends no cache headers, so the browser reuses the module it cached and keeps running the old code. `tools/serve.js` marks every file `no-cache`, so a reload runs the new code. With the Python server, ask the user for a hard reload (Cmd+Shift+R) before checking a change in the browser.
+- Run `bun install` once after cloning. It installs TypeScript as a dev-only tool (it never ships to the browser) and turns on `.githooks/pre-commit`.
 - Syntax check every module before committing:
   `for f in js/*.js js/modules/*.js tools/*.js tools/*/*.js; do node --experimental-default-type=module --check "$f" || echo "FAIL $f"; done`
+- Type check with `bun run typecheck`. It runs `tsc` over the JSDoc with two configs: `jsconfig.json` for the browser code (`js/`, `types/`) and `tools/jsconfig.json` for the Node runner. A file is checked once its first line is `// @ts-check`. `bun run check` runs the syntax loop, the import and merge checks and the type check together; the pre-commit hook runs it.
 - The worker imports modules from `js/` under Node, so those must not touch `document`, `window`, `localStorage` or `location` when they load, nor import a module that does. `node tools/check-imports.js` loads every job and catches both a missing import and a DOM call at load time. `node tools/check-merge.js` checks that the worker's writes and a tab's merge without losing either.
 - Test real behavior in the browser when you can. Folder picking needs a user click, so ask the user to drive that step if you cannot.
 
@@ -80,7 +82,10 @@ js/task-query.js      the Tasks search: words plus #project, !priority, is:statu
 js/shortcuts.js       the single-key shortcuts ("g" then a letter) and the sheet that lists them
 js/sample.js          "Explore with sample data": a data folder in memory with placeholder content
 fonts/                bundled typefaces (SIL Open Font License)
-package.json          scripts only (start, dev, serve, terminal); no dependencies
+package.json          scripts (start, dev, serve, terminal, typecheck, check); no runtime dependencies, only TypeScript as a dev tool
+jsconfig.json         the type check of the browser code (tools/jsconfig.json checks the Node runner)
+types/                .d.ts files: browser APIs missing from lib.dom, and the shared data model
+.githooks/pre-commit  runs bun run check before each commit
 tools/start.js        one command for the board: starts serve.js, terminal.js and worker.js together
 tools/log.js          terminal lines prefixed with each runner's name
 tools/serve.js        local static server with no-cache headers; no dependencies
@@ -137,4 +142,4 @@ tools/usage.js        reads Claude Code's transcripts for the runner: a task wor
 - Keep PR titles short. The description lists what changed and how it was checked, in a few lines.
 - **Never leave a PR unmerged.** Every PR you open is merged in the same turn, as soon as the strict syntax check passes and the change is complete. Do not ask whether to merge, do not wait for approval, and do not end a turn with an open PR. If a merge is blocked (conflict, failing check), fix it in the same turn and merge; if that is impossible, say so explicitly and stop.
 - Before finishing any turn, list open PRs (`gh pr list --state open`). If any are open, merge them now.
-- Run the strict syntax check before every commit, and stop if it fails: `for f in js/*.js js/modules/*.js tools/*.js tools/*/*.js; do node --experimental-default-type=module --check "$f" || { echo "FAIL $f"; exit 1; }; done && node tools/check-imports.js && node tools/check-merge.js`
+- Run the strict check before every commit and again before `gh pr merge`, and stop if it fails: `bun run check` (the syntax loop, `node tools/check-imports.js`, `node tools/check-merge.js` and `bun run typecheck`). Never commit with `--no-verify`.
