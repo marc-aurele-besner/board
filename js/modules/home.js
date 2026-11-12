@@ -375,6 +375,7 @@ function draw(root, store) {
         githubPanel(store, projects))));
 }
 
+/** @satisfies {import('../../types/data').Module} */
 export default {
   id: 'home',
   title: 'Board',

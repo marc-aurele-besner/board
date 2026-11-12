@@ -635,6 +635,7 @@ function draw(root, store) {
       body));
 }
 
+/** @satisfies {import('../../types/data').Module} */
 export default {
   id: 'monitoring',
   title: 'Monitoring',

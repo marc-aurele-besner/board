@@ -1635,6 +1635,7 @@ function draw(root, store) {
           listBody))));
 }
 
+/** @satisfies {import('../../types/data').Module} */
 export default {
   id: 'todos',
   title: 'Tasks',

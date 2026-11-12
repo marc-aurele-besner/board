@@ -1320,6 +1320,7 @@ function draw(root, store) {
       h('section', { class: 'card main-pane' }, detail)));
 }
 
+/** @satisfies {import('../../types/data').Module} */
 export default {
   id: 'projects',
   title: 'Projects',

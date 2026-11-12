@@ -638,6 +638,7 @@ function draw(root, store) {
 // Received emails in the Inbox not opened yet, for the Home page.
 export const unreadCount = (store) => store.get(COLLECTION).emails.filter((e) => FOLDERS[0][3](e) && e.unread).length;
 
+/** @satisfies {import('../../types/data').Module} */
 export default {
   id: 'inbox',
   title: 'Inbox',

@@ -93,6 +93,7 @@ function draw(root, store) {
 
 const serialize = () => ({ q: view.query, tab: view.tab === 'all' ? '' : view.tab });
 
+/** @satisfies {import('../../types/data').Module} */
 export default {
   id: 'search',
   title: 'Search',

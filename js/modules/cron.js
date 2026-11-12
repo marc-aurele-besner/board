@@ -1589,6 +1589,7 @@ function draw(root, store) {
   }
 }
 
+/** @satisfies {import('../../types/data').Module} */
 export default {
   id: 'cron',
   title: 'Cron',

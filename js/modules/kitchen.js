@@ -746,6 +746,7 @@ function draw(root, store) {
   root.replaceChildren(selected ? detailPane(store, selected) : gallery(store, recipes));
 }
 
+/** @satisfies {import('../../types/data').Module} */
 export default {
   id: 'kitchen',
   title: 'Kitchen',

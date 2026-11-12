@@ -2186,6 +2186,7 @@ function draw(root, store) {
   keepPickerFocus(root);
 }
 
+/** @satisfies {import('../../types/data').Module} */
 export default {
   id: 'positions',
   title: 'Liquidity Pools',
