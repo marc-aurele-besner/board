@@ -12,6 +12,7 @@ export const JOBS = [
   { id: 'telegram', label: 'Telegram', every: 0.5, fixed: 'Listens all the time', description: 'Turns messages sent to your bot into tasks, within a second or two.' },
   { id: 'github', label: 'GitHub', every: 15, description: 'Reads open issue and PR counts and the newest open items of every project’s repos.' },
   { id: 'previews', label: 'PR previews', every: 2, description: 'Reads the Vercel and Netlify preview links posted on the PRs of open tasks and recent Cron runs.' },
+  { id: 'link-states', label: 'Task issues and PRs', every: 2, description: 'Reads whether the issues and PRs linked to tasks are open, merged or closed, so Tasks can colour them.' },
   { id: 'npm', label: 'npm', every: 60, description: 'Reads the packages of every project’s npm org, and each listed package’s latest version and weekly downloads.' },
   { id: 'webstats', label: 'Bing search data', every: 360, description: 'Reads each project website’s Bing Webmaster numbers for Monitoring.' },
   { id: 'fx', label: 'Exchange rates', every: 1440, description: 'Reads the USD to CAD rate of every day Money needs.' },

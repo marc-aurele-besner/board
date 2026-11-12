@@ -16,6 +16,10 @@
       "failedAt": 1762896400000
     }
   },
+  "links": {
+    "example-org/example-app#12": { "state": "merged", "error": null, "at": 1762896400000 },
+    "example-org/example-app#14": { "state": "", "error": "GitHub error 500", "at": 1762896400000 }
+  },
   "previews": {
     "example-org/example-app#12": {
       "items": [{ "provider": "vercel", "name": "example-app", "url": "https://example-app-git-pricing.example.com", "state": "ready" }],

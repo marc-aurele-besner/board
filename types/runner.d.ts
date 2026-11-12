@@ -64,6 +64,8 @@ export interface JobParams {
   orgs?: string[];
   packages?: string[];
   prs?: { repo: string; number: number }[];
+  // link-states: the task issues and PRs never read.
+  links?: { repo: string; number: number }[];
   websites?: string[];
   // monitoring: the site checks to run, or the status pages.
   parts?: string[];

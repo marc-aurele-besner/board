@@ -9,6 +9,7 @@ import monitoring from './monitoring.js';
 import telegram from './telegram.js';
 import github from './github.js';
 import previews from './previews.js';
+import linkStates from './link-states.js';
 import npm from './npm.js';
 import webstats from './webstats.js';
 import fx from './fx.js';
@@ -18,4 +19,4 @@ import cron from './cron.js';
 import defi from './defi.js';
 
 /** @type {Job[]} */
-export const jobs = [google, gmail, resend, calendar, monitoring, telegram, github, previews, npm, webstats, fx, devUsage, worktrees, cron, ...defi];
+export const jobs = [google, gmail, resend, calendar, monitoring, telegram, github, previews, linkStates, npm, webstats, fx, devUsage, worktrees, cron, ...defi];

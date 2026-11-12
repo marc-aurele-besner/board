@@ -64,6 +64,7 @@ js/runners.js         the board's side of the runners: their heartbeat in runner
 js/modules/monitoring-runners.js  Monitoring → Board runners: the static server, command runner and worker, and every job's last outcome
 js/modules/settings-runners.js  Settings → Runners: the worker's status and folder, and each job's switch, interval and Run now
 js/task-links.js      a task's GitHub issues and PRs; finds the links a Dev session prints and adds them to its tasks
+js/link-states.js     whether a task's issues and PRs are open, merged or closed: read by the runners into github.json, coloured on tasks
 js/previews.js        the Vercel and Netlify preview links in PR comments: read by the runners into github.json, shown on tasks and Cron runs
 js/images.js          which pasted or dropped files are images claude reads
 js/task-images.js     a task's images: kept in the data folder, shown on the task, saved through the runner for claude
@@ -104,6 +105,7 @@ tools/jobs/github.js, npm.js, webstats.js, fx.js  GitHub counts (github.json), n
 tools/jobs/dev-usage.js, worktrees.js  what claude sessions used; removing done tasks' worktrees through the command runner
 tools/jobs/defi.js    the DeFi jobs (positions, fee history, wallets, lending, hourly snapshots), run one at a time
 tools/jobs/cron.js    starts due Cron flows every minute, and one flow on Run now
+tools/jobs/link-states.js  reads the states of tasks' issues and PRs every 2 minutes
 tools/jobs/previews.js  reads the preview links of open tasks' and recent Cron runs' PRs every 2 minutes
 tools/jobs/google.js  renews Google access tokens; a tab that finds one expired asks it through POST /run/google
 tools/check-imports.js  loads every worker module under plain Node, to catch a missing import or a DOM call at load time
