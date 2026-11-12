@@ -8,7 +8,7 @@ import { modelChip } from '../model-picker.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import {
-  COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, TEMPLATES, devRunOptions, devRunValue, devCommandPreview, daysOf,
+  COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, PROFILE_EDITED, profileEditedMode, TEMPLATES, devRunOptions, devRunValue, devCommandPreview, daysOf,
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, templateFromFlow, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
   testStep, testsOf, isTesting, clearTests, useDevStarter, varsTree, pathTo, remapStepRefs, parseData, projectVars, runState, devWaits, DEV_WAIT_MINUTES,
@@ -326,7 +326,8 @@ function stepSummary(store, flow, step) {
   if (step.type === 'stop') return stopLabel(step);
   if (step.type === 'profile') {
     const id = withFlowProject(flow, step).projectId;
-    return id ? `${projectName(store, id)}${step.keepEdited === false ? '' : ' · keeps an edited profile'}` : 'Choose a project';
+    const edited = { merge: ' · keeps hand edits', replace: ' · replaces hand edits', keep: ' · skips an edited profile' }[profileEditedMode(step)];
+    return id ? `${projectName(store, id)}${edited}` : 'Choose a project';
   }
   if (step.type === 'dev') {
     const id = withFlowProject(flow, step).projectId;
@@ -786,13 +787,11 @@ function stepForm(store, flow, step) {
         field('Project', stepProjectPick(store, flow, step.projectId, (projectId) => set({ projectId }), {
           none: 'Choose…',
           list: readable, name: (p) => (hasProfileSources(p) ? p.name : `${p.name} (nothing to read)`),
-        }), 'Projects show here once they have a local folder, a repository or a website.')),
-      h('label', { class: 'check' },
-        h('input', { type: 'checkbox', checked: step.keepEdited !== false, onchange: (e) => set({ keepEdited: e.target.checked }) }),
-        ' Keep a profile I edited by hand'),
+        }), 'Projects show here once they have a local folder, a repository or a website.'),
+        field('When I edited it by hand', select(profileEditedMode(step), PROFILE_EDITED, (onEdited) => set({ onEdited })))),
       h('p', { class: 'muted small' },
         'Reads the project’s README, docs and recent commits through the runner, its GitHub repos and its website, then asks the model once and saves the profile on the project, as Refresh does in Projects. ',
-        'Its output is the new profile. When the profile was edited by hand and is kept, the run stops here quietly. A test only says what it would do; “Test run” of the flow rebuilds it.'),
+        'Its output is the new profile. A profile you edited by hand never stops the run: by default the model updates it and keeps your edits. A test only says what it would do; “Test run” of the flow rebuilds it.'),
       store.get('settings').openrouter?.key ? null : notice({ tone: 'info', text: 'Profiles need an OpenRouter key.', actions: [h('a', { href: '#/settings?section=openrouter', class: 'btn-link' }, 'Add a key')] }));
   }
   if (step.type === 'dev') {
