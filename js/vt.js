@@ -17,9 +17,9 @@ const touch = (line) => {
 // Styles are shared by key: '' is the default.
 const styles = new Map([['', {}]]);
 const keyOf = (s) => {
-  const key = [s.fg ?? '', s.bg ?? '', s.bold ? 'b' : '', s.dim ? 'd' : '', s.italic ? 'i' : '', s.under ? 'u' : '', s.inverse ? 'r' : '', s.strike ? 's' : '', s.cls ?? ''].join('|');
+  const key = [s.fg ?? '', s.bg ?? '', s.bold ? 'b' : '', s.dim ? 'd' : '', s.italic ? 'i' : '', s.under ? 'u' : '', s.inverse ? 'r' : '', s.strike ? 's' : '', s.cls ?? '', s.link ?? ''].join('|');
   if (!styles.has(key)) styles.set(key, { ...s });
-  return key === '||||||||' ? '' : key;
+  return key === '|||||||||' ? '' : key;
 };
 export const styleOf = (key) => styles.get(key) ?? {};
 
@@ -144,7 +144,7 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
         return undefined;
       };
       const s = t.style;
-      if (n === 0) t.style = {};
+      if (n === 0) t.style = s.link ? { link: s.link } : {}; // a link (OSC 8) outlives a colour reset
       else if (n === 1) s.bold = true;
       else if (n === 2) s.dim = true;
       else if (n === 3) s.italic = true;
@@ -248,6 +248,13 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
     if ((code === '10' || code === '11') && value === '?') {
       const color = background(code === '10' ? 'fg' : 'bg');
       if (color) reply(`\x1b]${code};${color}\x1b\\`);
+    }
+    // OSC 8 ; params ; uri starts a hyperlink, and an empty uri ends it. Only web links are kept.
+    if (code === '8') {
+      const uri = seq.slice(seq.indexOf(';', 2) + 1);
+      const { link, ...rest } = t.style;
+      t.style = /^https?:\/\//i.test(uri) ? { ...rest, link: uri } : rest;
+      t.key = keyOf(t.style);
     }
   }
 
