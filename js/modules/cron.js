@@ -1,7 +1,8 @@
 // Cron: recurring flows that gather board data, ask an AI model, and turn the answer into a task, a notification or work for claude in Dev.
 // The editor draws a flow as a chain of nodes, like a workflow canvas; the inspector below edits the selected node.
 import { h, icon, empty, notice, now, uid } from '../ui.js';
-import { projectTree } from './projects.js';
+import { projectTree, projectIcon } from './projects.js';
+import { pickChip } from '../inline.js';
 import { modelChip } from '../model-picker.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
@@ -284,6 +285,19 @@ function select(value, options, onchange, attrs = {}) {
     options.map(([v, l]) => h('option', { value: String(v) }, l)));
 }
 
+// A searchable project list with each project's icon, since a board with many projects makes a plain dropdown long.
+// `none` labels the empty choice; `list` narrows the projects and `name` changes how one reads.
+function projectPick(store, value, none, onPick, { list = projectsOf(store), name = (p) => p.name } = {}) {
+  return pickChip({
+    value: value || null,
+    options: list.map((p) => ({ value: p.id, label: name(p), plainIcon: () => projectIcon(p) })),
+    nullable: true,
+    nullLabel: none,
+    className: 'field-pick project-field-pick',
+    onPick: (v) => onPick(v ?? ''),
+  });
+}
+
 const chip = (label, on, onclick, title) =>
   h('button', { type: 'button', class: on ? 'cron-day on' : 'cron-day', 'aria-pressed': String(on), title, onclick }, label);
 const toggled = (list, v) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
@@ -393,7 +407,6 @@ function triggerForm(store, flow) {
 
 function stepForm(store, flow, step) {
   const set = (patch) => updateFlow(store, flow.id, (f) => Object.assign(f.steps.find((x) => x.id === step.id) ?? {}, patch));
-  const projects = [['', 'Personal'], ...projectsOf(store).map((p) => [p.id, p.name])];
   const vars = h('p', { class: 'muted small' }, 'Use {{input}} for the previous step’s output, {{date}} for today and {{flow}} for the flow’s name.');
   if (step.type === 'gather') {
     const index = flow.steps.indexOf(step);
@@ -405,8 +418,8 @@ function stepForm(store, flow, step) {
     return h('div', { class: 'stack' },
       h('div', { class: 'row cron-fields' },
         field('Source', select(step.source, SOURCES, (source) => set({ source }))),
-        step.source === 'project' ? field('Project', select(step.projectId, [['', 'Choose…'], ...projects.slice(1)], (projectId) => set({ projectId }))) : null,
-        step.source === 'page' ? field('Project', select(step.projectId, [['', 'None: use the address below'], ...projects.slice(1)], (projectId) => set({ projectId }))) : null,
+        step.source === 'project' ? field('Project', projectPick(store, step.projectId, 'Choose…', (projectId) => set({ projectId }))) : null,
+        step.source === 'page' ? field('Project', projectPick(store, step.projectId, 'None: use the address below', (projectId) => set({ projectId }))) : null,
         step.source === 'history'
           ? field('How many runs', h('input', { type: 'number', min: 1, max: 20, value: String(step.count ?? 5), onchange: (e) => set({ count: Math.min(20, Math.max(1, Number(e.target.value) || 5)) }) }))
           : null),
@@ -438,7 +451,7 @@ function stepForm(store, flow, step) {
       field('Task title', h('input', { value: step.title, autocomplete: 'off', onchange: (e) => set({ title: e.target.value }) }), 'The first line is used. The full input becomes the description.'),
       vars,
       h('div', { class: 'row cron-fields' },
-        field('Project', select(step.projectId, projects, (projectId) => set({ projectId }))),
+        field('Project', projectPick(store, step.projectId, 'Personal', (projectId) => set({ projectId }))),
         field('Priority', select(step.priority, [['none', 'No priority'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], (priority) => set({ priority }))),
         field('Due', select(step.due, [['', 'No deadline'], ['today', 'Day of the run'], ['tomorrow', 'Day after the run']], (due) => set({ due })))));
   }
@@ -452,12 +465,14 @@ function stepForm(store, flow, step) {
   }
   if (step.type === 'dev') {
     const claude = step.mode !== 'command';
-    const folders = [['', 'The task’s project, else this board'], ...projectsOf(store).filter((p) => p.localPath || p.id === step.projectId).map((p) => [p.id, p.localPath ? p.name : `${p.name} (no local folder)`])];
+    const folders = projectsOf(store).filter((p) => p.localPath || p.id === step.projectId);
     const hasTask = flow.steps.slice(0, flow.steps.indexOf(step)).some((s) => s.type === 'task');
     return h('div', { class: 'stack' },
       h('div', { class: 'row cron-fields' },
         field('Run', select(step.mode, DEV_MODES, (mode) => set({ mode }))),
-        field('Folder', select(step.projectId, folders, (projectId) => set({ projectId })), 'Projects show here once they have a local folder.')),
+        field('Folder', projectPick(store, step.projectId, 'The task’s project, else this board', (projectId) => set({ projectId }), {
+          list: folders, name: (p) => (p.localPath ? p.name : `${p.name} (no local folder)`),
+        }), 'Projects show here once they have a local folder.')),
       claude
         ? field('Prompt for claude', h('textarea', { rows: 6, class: 'mono-text', onchange: (e) => set({ prompt: e.target.value }) }, step.prompt ?? ''))
         : field('Command', h('input', { value: step.command ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, placeholder: 'npm run build', onchange: (e) => set({ command: e.target.value }) }),
