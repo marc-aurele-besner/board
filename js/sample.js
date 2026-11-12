@@ -1,9 +1,14 @@
+// @ts-check
 // "Explore with sample data": a data folder that lives in memory, filled with placeholder content.
 // It has the few methods of a real folder handle that storage.js and store.js call, so the rest of the app cannot tell.
 // Nothing is written to disk, and it is gone when the page reloads.
 
+/** @import { Collections, Task, FinanceEntry, DevUsage, InboxMessage, Site } from '../types/data' */
+
+/** @param {number} n */
 const pad = (n) => String(n).padStart(2, '0');
 // A date as YYYY-MM-DD, `offset` days from today, so the sample always has something due today and something late.
+/** @param {number} offset */
 function day(offset) {
   const d = new Date();
   d.setDate(d.getDate() + offset);
@@ -34,13 +39,16 @@ const SAMPLE_PROFILE = {
   usageId: '',
 };
 
+/** @param {string} name @param {Record<string, string | Blob>} initial */
 function memoryFolder(name, initial) {
   const files = new Map(Object.entries(initial)); // path -> text or Blob
   const missing = () => Object.assign(new Error('Not found'), { name: 'NotFoundError' });
+  /** @param {string} prefix @returns {object} */
   const folder = (prefix) => ({
     name,
     kind: 'directory',
-    getDirectoryHandle: async (part) => folder(`${prefix}${part}/`),
+    getDirectoryHandle: async (/** @type {string} */ part) => folder(`${prefix}${part}/`),
+    /** @param {string} file @param {{ create?: boolean }} [options] */
     async getFileHandle(file, { create = false } = {}) {
       const path = prefix + file;
       if (!files.has(path)) {
@@ -50,12 +58,13 @@ function memoryFolder(name, initial) {
       return {
         async getFile() {
           const value = files.get(path);
-          return value instanceof Blob ? value : new Blob([value], { type: 'application/json' });
+          return value instanceof Blob ? value : new Blob([/** @type {string} */ (value)], { type: 'application/json' });
         },
         async createWritable() {
+          /** @type {string | Blob} */
           let next = '';
           return {
-            write: async (data) => {
+            write: async (/** @type {string | Blob} */ data) => {
               next = data;
             },
             close: async () => {
@@ -65,6 +74,7 @@ function memoryFolder(name, initial) {
         },
       };
     },
+    /** @param {string} file */
     async removeEntry(file) {
       files.delete(prefix + file);
     },
@@ -72,13 +82,29 @@ function memoryFolder(name, initial) {
   return folder('');
 }
 
+// Top-level fields left out are filled with the collection's defaults when the store loads.
+/** @returns {{ [K in keyof Collections]?: Partial<Collections[K]> }} */
 function collections() {
   const at = new Date().toISOString();
+  /**
+   * @param {string} id @param {string} text @param {string} status @param {string} priority @param {string | null} projectId
+   * @param {Partial<Task>} [more]
+   * @returns {Task}
+   */
   const task = (id, text, status, priority, projectId, more = {}) =>
     ({ id, text, description: '', status, priority, category: '', projectId, due: '', created: at, ...more });
+  /**
+   * @param {string} id @param {number} offset @param {string} type @param {number} amount @param {string} category @param {string} note
+   * @param {string | null} [projectId]
+   * @returns {FinanceEntry}
+   */
   const entry = (id, offset, type, amount, category, note, projectId = null) =>
     ({ id, date: day(offset), type, amount, tax: 0, billId: '', currency: 'USD', category, note, projectId, source: '', created: at });
   // models: { id: [input, output, cache read, cache write, cost] }; the session ended `offset` days from today.
+  /**
+   * @param {string} name @param {string[]} taskIds @param {number} offset @param {Record<string, number[]>} models @param {string} effort
+   * @returns {DevUsage}
+   */
   const devRecord = (name, taskIds, offset, models, effort) => {
     const end = Date.now() + offset * 86400000 - 3600000;
     const list = Object.entries(models);
@@ -89,10 +115,16 @@ function collections() {
       models: Object.fromEntries(list.map(([id, [input, output, cacheRead, cacheWrite, cost]]) => [id, { provider: 'Anthropic', input, output, thinking: 0, cacheRead, cacheWrite, cost }])),
     };
   };
+  /**
+   * @param {string} id @param {string} dir @param {number} hoursAgo @param {string} from @param {string} subject
+   * @param {Partial<InboxMessage>} [more]
+   * @returns {InboxMessage}
+   */
   const mail = (id, dir, hoursAgo, from, subject, more = {}) => ({
     id, dir, from, to: ['Atlas <hello@example.com>'], cc: [], subject, status: '', projectId: 'p-atlas', taskId: null,
     at: new Date(Date.now() - hoursAgo * 3600000).toISOString(), ...more,
   });
+  /** @param {boolean} up @param {number} sslDays @returns {Site} */
   const site = (up, sslDays) => ({
     health: { status: up ? 'up' : 'down', ms: up ? 182 : 0, at },
     history: Array.from({ length: 30 }, (_, i) => ({ at, ok: up || i < 28, ms: 150 + i * 3 })),
@@ -185,5 +217,6 @@ function collections() {
 
 export function sampleFolder() {
   const files = Object.fromEntries(Object.entries(collections()).map(([name, data]) => [`${name}.json`, JSON.stringify(data)]));
-  return memoryFolder('Sample data', files);
+  // Not a real handle: it has only the methods storage.js and store.js call.
+  return /** @type {FileSystemDirectoryHandle} */ (memoryFolder('Sample data', files));
 }

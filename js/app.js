@@ -1,3 +1,4 @@
+// @ts-check
 // Shell: folder connection, hash router, and top navigation.
 import { fsSupported, pickFolder, loadHandle, hasPermission } from './storage.js';
 import { createStore } from './store.js';
@@ -20,14 +21,21 @@ import { sampleFolder } from './sample.js';
 import { toast } from './toast.js';
 import { markDrawn, snapshot, restore, holding, watchCommits } from './keep-fields.js';
 
-const app = document.getElementById('app');
+/** @import { Store, Module } from '../types/data' */
+
+// index.html always has it.
+const app = /** @type {HTMLElement} */ (document.getElementById('app'));
 const STATUS_LABELS = { saved: 'Saved', saving: 'Saving…', error: 'Save failed' };
 // With sample data nothing reaches the disk, so the status never claims a save.
+/** @param {keyof typeof STATUS_LABELS} status */
 const statusText = (status) => (sample ? 'Not saved' : STATUS_LABELS[status]);
 
+/** @type {Store | null} */
 let store = null;
 let sample = false; // exploring with sample data, kept in memory only
+/** @type {string | null} */
 let lastSection = null;
+/** @type {FileSystemDirectoryHandle | null | undefined} */
 let pendingHandle = null; // remembered folder that still needs permission
 let connectError = '';
 let held = false; // a rebuild is waiting for the user to leave the field they are typing in
@@ -72,15 +80,18 @@ function readRoute() {
 const currentModule = () => modules.find((m) => m.id === readRoute().id) ?? modules[0];
 
 // Writes the section's view into the URL without adding history entries.
+/** @param {Module} mod */
 function syncUrl(mod) {
   const params = mod.serialize?.() ?? {};
   const kept = Object.entries(params).filter(([, v]) => v !== '' && v !== null && v !== undefined && v !== false);
-  const query = new URLSearchParams(kept).toString();
+  // URLSearchParams turns each value into text.
+  const query = new URLSearchParams(/** @type {[string, string][]} */ (kept)).toString();
   const hash = `#/${mod.id}${query ? `?${query}` : ''}`;
   if (location.hash !== hash) history.replaceState(null, '', hash);
 }
 
 // `user` is false for a render no click or key asked for, which must not move the focus.
+/** @param {{ user?: boolean }} [options] */
 function render({ user = true } = {}) {
   if (!store) return renderConnect();
   const mod = currentModule();
@@ -102,14 +113,14 @@ function render({ user = true } = {}) {
   mod.render(main, store);
   syncUrl(mod);
   // replaceChildren would print a null as text, so the parts that may be absent are filtered out.
-  app.replaceChildren(...[
+  app.replaceChildren(.../** @type {HTMLElement[]} */ ([
     h('header', { class: 'topbar' },
       h('nav', { class: 'tabs' },
         modules.filter((m) => !m.hidden).map((m) =>
           h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab', title: m.title, 'aria-current': m.id === mod.id ? 'page' : null },
             icon(m.icon), h('span', { class: 'tab-label' }, m.short ?? m.title)))),
       h('div', { class: 'topbar-end' },
-        h('button', { type: 'button', class: 'search-btn', title: 'Search or jump', onclick: () => openPalette(store, modules) },
+        h('button', { type: 'button', class: 'search-btn', title: 'Search or jump', onclick: () => openPalette(/** @type {Store} */ (store), modules) },
           icon('search'), h('span', { class: 'grow' }, 'Search or jump…'), h('kbd', null, isMac ? '⌘K' : 'Ctrl K')),
         h('a', { id: 'runners-offline', class: 'pill tone-high runner-offline', href: '#/settings?section=runners', title: 'The runners are not running, so mail, calendars, wallets and site checks are not refreshed. Start the board with bun start.', hidden: runnersBadgeHidden() },
           icon('alert'), 'Runners offline'),
@@ -139,10 +150,10 @@ function render({ user = true } = {}) {
             : h('span', { class: 'muted small' }, 'Open the board in Chrome or Edge to keep your own data.'))
       : null,
     main,
-  ].filter(Boolean));
+  ].filter(Boolean)));
   markDrawn(main);
   // Within a section the page keeps its place: focusing a field near the top would scroll back up to it.
-  if (user) main.querySelector('[data-autofocus]')?.focus({ preventScroll: !entered });
+  if (user) /** @type {HTMLElement | null} */ (main.querySelector('[data-autofocus]'))?.focus({ preventScroll: !entered });
   restore(main, kept);
 }
 
@@ -154,6 +165,7 @@ const BACKGROUND_GAP_MS = 1000;
 let lastRender = 0;
 let gapTimer = 0;
 
+/** @param {{ user: boolean }} info */
 function onData({ user }) {
   if (user) return render({ user });
   held = true;
@@ -177,13 +189,16 @@ function settle() {
 const runnersBadgeHidden = () => sample || !runnersKnown() || runnersOnline();
 
 // A section with readsRunners redraws when a job's outcome changes; 'all' also when only run times did.
+/** @param {{ outcome: boolean }} change */
 function onRunners({ outcome }) {
   const badge = document.getElementById('runners-offline');
   if (badge) badge.hidden = runnersBadgeHidden();
   const reads = currentModule().readsRunners;
-  if (reads === 'all' || (reads && outcome)) store.refresh();
+  // The runners are watched once a store is open.
+  if (reads === 'all' || (reads && outcome)) /** @type {Store} */ (store).refresh();
 }
 
+/** @param {keyof typeof STATUS_LABELS} status */
 function updateStatus(status) {
   const el = document.getElementById('save-status');
   if (!el) return;
@@ -223,12 +238,13 @@ function exploreSample() {
   return open(sampleFolder());
 }
 
+/** @param {FileSystemDirectoryHandle} handle */
 async function open(handle) {
   const next = createStore(handle, collectionDefaults());
   try {
     await next.load();
   } catch (err) {
-    connectError = `Could not read data: ${err.message}`;
+    connectError = `Could not read data: ${/** @type {Error} */ (err).message}`;
     return renderConnect();
   }
   store = next;
@@ -251,7 +267,7 @@ async function open(handle) {
     watchRunners(store, onRunners);
   }
   // Another tab or browser may save to the same folder: bring its changes in while this one is in view.
-  setInterval(() => document.hidden || store.sync(), SYNC_MS);
+  setInterval(() => document.hidden || /** @type {Store} */ (store).sync(), SYNC_MS);
 }
 
 const SYNC_MS = 3000;
@@ -261,11 +277,12 @@ let chordAt = 0; // when "g" was pressed, waiting for the letter of a section
 
 // Cmd/Ctrl+K anywhere opens the search palette. The single keys only work outside a field and with nothing open
 // over the page: "/" and "n" open the palette, "?" lists the shortcuts, and "g" then a letter jumps to a section.
+/** @param {KeyboardEvent} e */
 function onShortcut(e) {
   if (!store) return;
   // Dev's terminal output takes keys too: they go to the running program, or to the command line under it.
-  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable
-    || Boolean(e.target.closest?.('.term-out'));
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(/** @type {HTMLElement} */ (e.target).tagName) || /** @type {HTMLElement} */ (e.target).isContentEditable
+    || Boolean(/** @type {HTMLElement} */ (e.target).closest?.('.term-out'));
   const combo = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k';
   if (combo || (e.key === '/' && !typing)) {
     e.preventDefault();
@@ -295,17 +312,18 @@ async function chooseFolder() {
   try {
     await open(await pickFolder());
   } catch (err) {
-    if (err.name !== 'AbortError') connectError = `Could not open folder: ${err.message}`;
+    if (/** @type {Error} */ (err).name !== 'AbortError') connectError = `Could not open folder: ${/** @type {Error} */ (err).message}`;
     renderConnect();
   }
 }
 
 async function reconnect() {
   try {
-    if (await hasPermission(pendingHandle, true)) return open(pendingHandle);
+    // The Reconnect button is only shown with a remembered folder.
+    if (await hasPermission(/** @type {FileSystemDirectoryHandle} */ (pendingHandle), true)) return open(/** @type {FileSystemDirectoryHandle} */ (pendingHandle));
     connectError = 'Permission was not granted.';
   } catch (err) {
-    connectError = `Could not reconnect: ${err.message}`;
+    connectError = `Could not reconnect: ${/** @type {Error} */ (err).message}`;
   }
   renderConnect();
 }
@@ -341,7 +359,7 @@ async function boot() {
       await pickFolder();
       location.reload();
     } catch (err) {
-      if (err.name !== 'AbortError') console.error('Could not open folder', err);
+      if (/** @type {Error} */ (err).name !== 'AbortError') console.error('Could not open folder', err);
     }
   });
   if (!fsSupported()) return renderConnect();
