@@ -18,7 +18,7 @@ const MINUTE = 60000;
 
 // [type, label, icon, short description]
 export const STEP_TYPES = [
-  ['gather', 'Gather data', 'list', 'Reads tasks, a project or spending from the board.'],
+  ['gather', 'Gather data', 'list', 'Reads tasks, projects, money, calendar, web pages and more; several sources at once.'],
   ['ai', 'AI generate', 'cpu', 'Sends a prompt to a model through OpenRouter.'],
   ['stop', 'Stop if', 'filter', 'Ends the run early, for example when there is nothing to report.'],
   ['task', 'Create task', 'check-square', 'Adds a task with the output as its description.'],
@@ -51,22 +51,59 @@ const NOTHING = {
   'pools-out': 'Every pool position is in range.',
   page: 'The page had no readable text.',
   history: 'Nothing yet: this is the first run.',
+  overdue: 'No task is overdue.',
+  high: 'No open high priority task.',
+  projects: 'No projects yet.',
+  'spending-last': 'No expenses last month.',
+  income: 'No income this month yet.',
+  'calendar-week': 'No events in the next 7 days.',
+  notifications: 'No unread notifications.',
+  flow: 'That flow has no successful run yet.',
 };
 
+// [key, label, icon]
 export const SOURCES = [
-  ['open', 'Open tasks'],
-  ['due', 'Tasks due within 7 days'],
-  ['project', 'One project (description and tasks)'],
-  ['spending', 'Spending this month'],
-  ['calendar', 'Calendar events today'],
-  ['inbox', 'Unread emails in the Inbox'],
-  ['sites', 'Site check problems (last 24 hours)'],
-  ['pools', 'Liquidity pool positions'],
-  ['pools-out', 'Pool positions out of range'],
-  ['page', 'A web page (a project’s site, its blog, any address)'],
-  ['history', 'Past outputs of this flow'],
-  ['text', 'Fixed text'],
+  ['open', 'Open tasks', 'check-square'],
+  ['due', 'Tasks due within 7 days', 'check-square'],
+  ['overdue', 'Overdue tasks', 'alert'],
+  ['high', 'High priority open tasks', 'star'],
+  ['project', 'One project (description and tasks)', 'folder'],
+  ['projects', 'All projects (overview)', 'folder'],
+  ['spending', 'Spending this month', 'coins'],
+  ['spending-last', 'Spending last month', 'coins'],
+  ['income', 'Income this month', 'coins'],
+  ['calendar', 'Calendar events today', 'calendar'],
+  ['calendar-week', 'Calendar events in the next 7 days', 'calendar'],
+  ['inbox', 'Unread emails in the Inbox', 'inbox'],
+  ['notifications', 'Unread notifications', 'bell'],
+  ['sites', 'Site check problems (last 24 hours)', 'activity'],
+  ['pools', 'Liquidity pool positions', 'droplet'],
+  ['pools-out', 'Pool positions out of range', 'droplet'],
+  ['page', 'A web page (a project’s site, its blog, any link)', 'globe'],
+  ['history', 'Past outputs of this flow', 'repeat'],
+  ['flow', 'Latest output of another flow', 'repeat'],
+  ['text', 'Fixed text', 'align-left'],
 ];
+
+export const makeSource = (source = 'open', fields = {}) => ({ id: uid(), source, label: '', projectId: '', url: '', text: '', count: 5, flowId: '', ...fields });
+
+// A data step's sources. Steps saved before a step could hold several kept one source in the step itself.
+export function sourcesOf(step) {
+  if (Array.isArray(step.sources)) return step.sources;
+  return [makeSource(step.source || 'open', { id: step.id, projectId: step.projectId ?? '', url: step.url ?? '', text: step.text ?? '', count: step.count ?? 5 })];
+}
+
+// The heading a source's data gets when it sits next to other data: its own label, else what it reads.
+export function sourceLabel(store, src) {
+  if (String(src.label ?? '').trim()) return src.label.trim();
+  const base = SOURCES.find(([k]) => k === src.source)?.[1] ?? src.source;
+  const project = src.projectId ? store.get('projects').projects.find((p) => p.id === src.projectId) : null;
+  if (src.source === 'project') return project ? `Project: ${project.name}` : base;
+  if (src.source === 'page') return project ? `${project.name} website${src.url ? ` ${src.url}` : ''}` : src.url || 'Web page';
+  if (src.source === 'history') return `Last ${src.count ?? 5} outputs of this flow`;
+  if (src.source === 'flow') return `Latest output of “${store.get(COLLECTION).flows.find((f) => f.id === src.flowId)?.name ?? 'a removed flow'}”`;
+  return base;
+}
 
 // How much of a page is passed on, so one long page does not crowd out the rest of the prompt.
 const PAGE_CHARS = 12000;
@@ -75,7 +112,7 @@ export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday',
 
 export function makeStep(type) {
   const base = { id: uid(), type };
-  if (type === 'gather') return { ...base, source: 'open', projectId: '', text: '', url: '', count: 5, append: false };
+  if (type === 'gather') return { ...base, sources: [makeSource()], append: false };
   if (type === 'ai') return { ...base, prompt: 'Summarize this in five bullet points:\n\n{{input}}', system: '', model: '' };
   if (type === 'task') return { ...base, title: '{{flow}} · {{date}}', projectId: '', priority: 'none', due: '' };
   if (type === 'stop') return { ...base, when: 'nothing', text: '' };
@@ -286,8 +323,15 @@ export const TEMPLATES = [
   },
 ];
 
+// Templates write a data step's single source on the step itself, which reads shorter.
+function templateStep(s) {
+  if (s.type !== 'gather' || s.sources) return { ...makeStep(s.type), ...s };
+  const { type, source, append, ...fields } = s;
+  return { ...makeStep(type), sources: [makeSource(source, fields)], append: Boolean(append) };
+}
+
 export function flowFromTemplate(t) {
-  return makeFlow({ name: t.name, schedule: { ...makeFlow().schedule, ...t.schedule },steps: t.steps.map((s) => ({ ...makeStep(s.type), ...s })) });
+  return makeFlow({ name: t.name, schedule: { ...makeFlow().schedule, ...t.schedule },steps: t.steps.map(templateStep) });
 }
 
 // --- Schedule ---
@@ -605,12 +649,15 @@ function taskLines(store, list) {
 }
 
 // The page a web page step reads: a project's website, a path on it (/blog), or any address.
+// With a project, a full link (with or without https://) is read as it is, so a project can point at its docs or repo.
+const looksLikeLink = (raw) => /^https?:\/\//i.test(raw) || /^[\w-]+(\.[\w-]+)+(:\d+)?(\/|$)/.test(raw);
 export function pageUrl(store, step) {
   const raw = String(step.url ?? '').trim();
   if (step.projectId) {
     const p = store.get('projects').projects.find((x) => x.id === step.projectId);
-    if (!p) throw new Error('Choose a project for this step.');
-    if (!p.website) throw new Error(`${p.name} has no website. Add one in Projects.`);
+    if (!p) throw new Error('Choose a project for this source.');
+    if (raw && looksLikeLink(raw)) return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    if (!p.website) throw new Error(`${p.name} has no website. Add one in Projects, or enter a full link.`);
     try {
       return raw ? new URL(raw, p.website).href : p.website;
     } catch {
@@ -621,7 +668,17 @@ export function pageUrl(store, step) {
   return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
 }
 
-// The source's data as plain text, or '' when it found nothing.
+function moneyTotals(store, type, month) {
+  const totals = {};
+  for (const e of store.get('money').entries) {
+    if (e.type !== type || !e.date?.startsWith(month)) continue;
+    const key = `${e.category || 'Other'} (${e.currency || 'USD'})`;
+    totals[key] = (totals[key] ?? 0) + Number(e.amount || 0);
+  }
+  return Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([k, v]) => `- ${k}: ${v.toFixed(2)}`).join('\n');
+}
+
+// One source's data as plain text, or '' when it found nothing.
 async function gather(store, step, flow) {
   if (step.source === 'page') {
     const url = pageUrl(store, step);
@@ -647,18 +704,29 @@ async function gather(store, step, flow) {
     if (!p) throw new Error('Choose a project for this step.');
     return `Project: ${p.name}\n${p.description || ''}\n\nOpen tasks:\n${taskLines(store, open.filter((t) => t.projectId === p.id)) || 'none'}`;
   }
-  if (step.source === 'spending') {
-    const month = todayISO().slice(0, 7);
-    const totals = {};
-    for (const e of store.get('money').entries) {
-      if (e.type !== 'expense' || !e.date?.startsWith(month)) continue;
-      const key = `${e.category} (${e.currency || 'USD'})`;
-      totals[key] = (totals[key] ?? 0) + Number(e.amount || 0);
-    }
-    const rows = Object.entries(totals).sort((a, b) => b[1] - a[1]);
-    return rows.map(([k, v]) => `- ${k}: ${v.toFixed(2)}`).join('\n');
+  if (step.source === 'overdue') return taskLines(store, open.filter((t) => t.due && t.due < todayISO()));
+  if (step.source === 'high') return taskLines(store, open.filter((t) => t.priority === 'high'));
+  if (step.source === 'projects') return projectsOverview(store, open);
+  if (step.source === 'spending') return moneyTotals(store, 'expense', todayISO().slice(0, 7));
+  if (step.source === 'income') return moneyTotals(store, 'income', todayISO().slice(0, 7));
+  if (step.source === 'spending-last') {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() - 1);
+    return moneyTotals(store, 'expense', `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
   }
-  if (step.source === 'calendar') return gatherCalendar(store);
+  if (step.source === 'calendar') return gatherCalendar(store, 1);
+  if (step.source === 'calendar-week') return gatherCalendar(store, 7);
+  if (step.source === 'notifications') {
+    const unread = (store.get('notifications')?.items ?? []).filter((n) => !n.read).slice(0, 50);
+    return unread.map((n) => `- ${String(n.at ?? '').slice(0, 16).replace('T', ' ')}: ${n.text}`).join('\n');
+  }
+  if (step.source === 'flow') {
+    const other = store.get(COLLECTION).flows.find((f) => f.id === step.flowId);
+    if (!other) throw new Error('Choose the flow to read.');
+    const last = store.get(COLLECTION).runs.find((r) => r.flowId === other.id && r.status === 'ok' && !r.dry);
+    return last?.steps.at(-1)?.output ?? '';
+  }
   if (step.source === 'inbox') {
     const unread = (store.get('inbox')?.emails ?? []).filter((e) => e.dir === 'received' && !e.archived && e.unread).slice(0, 50);
     return unread.map((e) => `- ${e.from || 'Unknown sender'}: ${e.subject || '(no subject)'}`).join('\n');
@@ -681,19 +749,30 @@ async function gather(store, step, flow) {
   return step.text || '';
 }
 
-// Today's events of every shown calendar. Calendar sign-ins last one session, so a flow fails until they are renewed.
-async function gatherCalendar(store) {
+function projectsOverview(store, open) {
+  return store.get('projects').projects.map((p) => {
+    const count = open.filter((t) => t.projectId === p.id).length;
+    const about = String(p.description ?? '').split('\n')[0].trim();
+    return `- ${p.name}${p.website ? ` (${p.website})` : ''}: ${count} open task${count === 1 ? '' : 's'}${about ? `. ${about}` : ''}`;
+  }).join('\n');
+}
+
+// The events of every shown calendar from today on, for `days` days. Calendar sign-ins last one session,
+// so a flow fails until they are renewed.
+async function gatherCalendar(store, days) {
   if (!calendarAccounts(store).length) throw new Error('Connect a Google Calendar in Settings first.');
   const from = new Date();
   from.setHours(0, 0, 0, 0);
   const to = new Date(from);
-  to.setDate(to.getDate() + 1);
+  to.setDate(to.getDate() + days);
   const { events, errors, waiting } = await calendarEvents(store, from, to);
   if (!events.length && (waiting.length || errors.length)) {
     throw new Error(waiting.length ? `Sign in again to ${waiting.join(', ')} in Calendar.` : errors.join(' · '));
   }
   const clock = (v) => eventDate(v).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return events.map((e) => `- ${e.allDay ? 'All day' : `${clock(e.start)}–${clock(e.end)}`}: ${e.title}${e.location ? ` (${e.location})` : ''}`).join('\n');
+  // Over several days each event says its day.
+  const day = (v) => (days > 1 ? `${eventDate(v).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} ` : '');
+  return events.map((e) => `- ${day(e.start)}${e.allDay ? 'All day' : `${clock(e.start)}–${clock(e.end)}`}: ${e.title}${e.location ? ` (${e.location})` : ''}`).join('\n');
 }
 
 // Whether a "Stop if" step ends the run, given its input and whether the last data step found nothing.
@@ -760,13 +839,19 @@ async function runDev(store, flow, step, input, vars, ctx) {
 async function runStep(store, flow, step, input, ctx) {
   const vars = { input, date: todayISO(), flow: flow.name };
   if (step.type === 'gather') {
-    const text = await gather(store, step, flow);
-    ctx.nothing = !text.trim();
-    const body = text || NOTHING[step.source] || '';
-    // Appended under a heading, so a prompt can tell the website, its blog and past outputs apart.
-    if (!step.append || !input.trim()) return body;
-    const label = SOURCES.find(([k]) => k === step.source)?.[1] ?? step.source;
-    return `${input}\n\n## ${label}\n\n${body}`;
+    const sources = sourcesOf(step);
+    if (!sources.length) throw new Error('Add a source to this step.');
+    const parts = [];
+    for (const src of sources) {
+      const text = await gather(store, src, flow);
+      parts.push({ src, text, body: text || NOTHING[src.source] || '' });
+    }
+    ctx.nothing = parts.every((p) => !p.text.trim());
+    const appending = step.append && input.trim();
+    // Several sources, or data added to earlier data, go under headings so a prompt can tell them apart.
+    if (parts.length === 1 && !appending) return parts[0].body;
+    const sections = parts.map((p) => `## ${sourceLabel(store, p.src)}\n\n${p.body}`).join('\n\n');
+    return appending ? `${input}\n\n${sections}` : sections;
   }
   if (step.type === 'stop') {
     ctx.stop = stopsOn(step, input, ctx.nothing);
