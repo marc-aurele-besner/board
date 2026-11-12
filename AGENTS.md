@@ -51,6 +51,8 @@ js/gmail.js           the Inbox's Gmail reads: one sign-in per account, its emai
 js/gcal.js            Calendar's Google reads: one sign-in per account, its calendar list, and the events of a range
 js/background.js      timers for the above; started once the data folder is open
 js/task-links.js      a task's GitHub issues and PRs; finds the links a Dev session prints and adds them to its tasks
+js/images.js          which pasted or dropped files are images claude reads
+js/task-images.js     a task's images: kept in the data folder, shown on the task, saved through the runner for claude
 js/task-worktrees.js  the worktrees Dev sessions made for tasks; removed through the runner once their tasks are done
 js/capture.js         parseTask(), parseMoney() and makeTask(): one place for a task's shape
 js/palette.js         the Cmd/Ctrl+K search palette: jump, or capture a task, a Money entry or a recipe link
@@ -64,7 +66,7 @@ tools/start.js        one command for the board: starts serve.js and relays.js t
 tools/log.js          terminal lines prefixed with each runner's name
 tools/serve.js        local static server with no-cache headers; no dependencies
 tools/relays.js       local relays for Bing's and Resend's APIs (Inbox), which send no CORS header
-tools/terminal.js     the Dev section's runner: terminal sessions that outlive the page (output and the list of open terminals kept on disk), typed keys, read-only file reads, git for Source control, removing a done task's worktree; localhost only
+tools/terminal.js     the Dev section's runner: terminal sessions that outlive the page (output and the list of open terminals kept on disk), typed keys, read-only file reads, git for Source control, removing a done task's worktree, saving images for claude; localhost only
 ```
 
 ## Conventions
