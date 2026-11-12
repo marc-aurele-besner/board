@@ -1,0 +1,58 @@
+{
+  "items": [
+    {
+      "id": "task-1",
+      "text": "Example task",
+      "description": "Example description.",
+      "status": "doing",
+      "priority": "high",
+      "category": "Example category",
+      "projectId": "project-1",
+      "due": "2026-01-15",
+      "created": "2026-01-01T09:00:00.000Z",
+      "devSession": "example-session-1",
+      "images": [{ "path": "tasks/task-1-image-1.png", "name": "Pasted image", "type": "image/png" }],
+      "worktrees": [{ "name": "example-worktree", "cwd": "~/example/project", "session": "example-session-1", "kept": "Example git message" }],
+      "prs": [{ "repo": "example-org/example-repo", "number": 12, "url": "https://github.com/example-org/example-repo/pull/12", "title": "Example PR" }],
+      "issues": [{ "repo": "example-org/example-repo", "number": 11, "url": "https://github.com/example-org/example-repo/issues/11", "title": "" }]
+    },
+    {
+      "id": "task-2",
+      "text": "Example automated task",
+      "description": "Created automatically: example reason.",
+      "status": "todo",
+      "priority": "none",
+      "category": "",
+      "projectId": null,
+      "due": "",
+      "created": "2026-01-02T09:00:00.000Z",
+      "auto": "cron",
+      "autoRef": "flow-1",
+      "cronRun": "run-1",
+      "inbox": true,
+      "email": { "id": "email-1", "dir": "in" }
+    },
+    {
+      "id": "task-3",
+      "text": "Example old task",
+      "priority": "low",
+      "category": "",
+      "projectId": null,
+      "created": "2025-06-01T09:00:00.000Z",
+      "done": true,
+      "issue": { "repo": "example-org/example-repo", "number": 3, "url": "https://github.com/example-org/example-repo/issues/3", "title": "Example issue" }
+    }
+  ],
+  "categories": [
+    { "id": "cat-1", "name": "Example category", "scope": "all", "projectId": null, "projectCategoryIds": [], "color": "#2f6f4e" },
+    { "id": "cat-2", "name": "Example label category", "scope": "projectCategory", "projectId": null, "projectCategoryIds": ["label-1"], "color": "#3b6ea8" },
+    { "id": "cat-3", "name": "Example old category", "scope": "projectCategory", "projectId": null, "projectCategoryId": "label-1" }
+  ],
+  "statuses": {
+    "todo": { "color": "#3b6ea8" },
+    "review": { "name": "Example review", "color": "#b08416" },
+    "paused": { "hidden": true }
+  },
+  "statusOrder": ["todo", "doing", "review", "done"],
+  "schemaVersion": 1
+}

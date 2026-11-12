@@ -526,6 +526,7 @@ function draw(root, store) {
   if (view.mode !== 'month') scrollGrid(root, from, days);
 }
 
+/** @satisfies {import('../../types/data').Module} */
 export default {
   id: 'calendar',
   title: 'Calendar',

@@ -941,6 +941,7 @@ function draw(root, store) {
       h('div', { class: 'settings-main' }, content)));
 }
 
+/** @satisfies {import('../../types/data').Module} */
 export default {
   id: 'settings',
   title: 'Settings',

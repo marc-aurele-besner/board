@@ -1088,6 +1088,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
   schedulePaint();
 });
 
+/** @satisfies {import('../../types/data').Module} */
 export default {
   id: 'dev',
   title: 'Dev',

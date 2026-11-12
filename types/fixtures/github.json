@@ -1,0 +1,33 @@
+{
+  "repos": {
+    "example-org/example-app": {
+      "at": 1762896400000,
+      "issues": 2,
+      "prs": 1,
+      "items": [
+        { "number": 12, "title": "Add a pricing page", "pr": true, "updated": "2026-11-10T12:00:00Z", "author": "example-user", "labels": ["enhancement"] },
+        { "number": 11, "title": "Typo in the footer", "pr": false, "updated": "2026-11-09T12:00:00Z", "author": "example-user", "labels": [] }
+      ],
+      "error": null,
+      "failedAt": 1762890000000
+    },
+    "example-org/private-thing": {
+      "error": "Not found, or private. Add a token in Settings",
+      "failedAt": 1762896400000
+    }
+  },
+  "previews": {
+    "example-org/example-app#12": {
+      "items": [{ "provider": "vercel", "name": "example-app", "url": "https://example-app-git-pricing.example.com", "state": "ready" }],
+      "error": null,
+      "at": 1762896400000,
+      "first": 1762800000000
+    },
+    "example-org/example-app#13": {
+      "error": "GitHub error 500",
+      "at": 1762896400000,
+      "first": 1762896400000
+    }
+  },
+  "schemaVersion": 1
+}

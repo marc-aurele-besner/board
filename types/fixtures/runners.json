@@ -1,0 +1,20 @@
+{
+  "worker": {
+    "pid": 12345,
+    "startedAt": "2026-11-12T08:00:00.000Z",
+    "beatAt": "2026-11-12T09:00:00.000Z",
+    "version": 1,
+    "folderId": "folder-0001"
+  },
+  "jobs": {
+    "google": { "lastRunAt": "2026-11-12T08:55:00.000Z", "lastOkAt": "2026-11-12T08:55:01.000Z", "durationMs": 820, "ok": true, "error": null, "renewed": 2, "warning": null, "on": true, "running": false, "nextRunAt": "2026-11-12T09:05:00.000Z" },
+    "resend": { "lastRunAt": "2026-11-12T08:58:00.000Z", "lastOkAt": "2026-11-12T08:58:02.000Z", "durationMs": 1900, "ok": true, "error": null, "added": 0, "errors": [{ "projectIds": ["p-atlas"], "dir": "sent", "text": "Resend rejected the key." }], "on": true, "running": false, "nextRunAt": "2026-11-12T09:03:00.000Z" },
+    "calendar": { "lastRunAt": "2026-11-12T08:50:00.000Z", "lastOkAt": "2026-11-12T08:50:03.000Z", "durationMs": 3100, "ok": true, "error": null, "read": 3, "errors": ["Work: Google Calendar error 500"], "waiting": null, "on": true, "running": true, "nextRunAt": null },
+    "github": { "lastRunAt": "2026-11-12T08:45:00.000Z", "lastOkAt": "2026-11-12T08:45:04.000Z", "durationMs": 4200, "ok": true, "error": null, "repos": 3, "errors": [{ "text": "example-org/private-thing: Not found" }], "on": true, "running": false, "nextRunAt": "2026-11-12T09:00:00.000Z" },
+    "telegram": { "lastRunAt": "2026-11-12T08:59:00.000Z", "lastOkAt": "2026-11-12T08:59:00.000Z", "durationMs": 5, "ok": true, "error": null, "waiting": "No bot and chat are set up.", "on": true, "running": false, "nextRunAt": "2026-11-12T08:59:05.000Z" },
+    "defi-positions": { "lastRunAt": "2026-11-12T08:40:00.000Z", "lastOkAt": "2026-11-12T08:40:09.000Z", "durationMs": 9000, "ok": true, "error": null, "positions": 2, "warnings": null, "on": true, "running": false, "nextRunAt": "2026-11-12T09:10:00.000Z" },
+    "defi-wallets": { "lastRunAt": "2026-11-12T08:41:00.000Z", "lastOkAt": "2026-11-12T08:41:02.000Z", "durationMs": 2000, "ok": true, "error": null, "failed": 1, "on": true, "running": false, "nextRunAt": "2026-11-12T09:11:00.000Z" },
+    "fx": { "lastRunAt": "2026-11-12T08:30:00.000Z", "lastOkAt": null, "durationMs": 30000, "ok": false, "error": "Timed out after 30 s", "on": true, "running": false, "nextRunAt": "2026-11-12T09:30:00.000Z" },
+    "cron": { "on": false, "running": false, "nextRunAt": null }
+  }
+}

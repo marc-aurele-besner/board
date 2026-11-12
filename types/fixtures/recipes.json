@@ -1,0 +1,34 @@
+{
+  "recipes": [
+    {
+      "id": "r-001",
+      "title": "Sample bread",
+      "status": "testing",
+      "tags": ["bread"],
+      "ingredients": ["500 g flour", "350 g water", "10 g salt"],
+      "steps": ["Mix", "Rest", "Bake"],
+      "notes": "Placeholder notes.",
+      "source": "https://example.com/recipes/sample-bread",
+      "images": ["https://example.com/images/sample-bread.jpg"],
+      "versions": [
+        { "id": "v-001", "date": "2026-01-10", "changes": "Baseline", "rating": 4, "notes": "" },
+        { "id": "v-002", "date": "2026-01-17", "changes": "Less water", "rating": null, "notes": "Placeholder." }
+      ],
+      "created": "2026-01-09T12:00:00.000Z"
+    },
+    {
+      "id": "r-002",
+      "title": "Sample soup",
+      "status": "idea",
+      "tags": [],
+      "ingredients": ["Water", "Vegetables"],
+      "steps": ["Simmer"],
+      "notes": "",
+      "images": [],
+      "scans": ["recipes/r-002-1.jpg"],
+      "versions": [],
+      "created": "2026-02-01T12:00:00.000Z"
+    }
+  ],
+  "schemaVersion": 1
+}

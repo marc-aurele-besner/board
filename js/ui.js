@@ -1,11 +1,26 @@
+// @ts-check
 // Small DOM and formatting helpers. No framework.
+/** @import { Child } from '../types/ui' */
 
 export const CURRENCY = 'USD'; // change to your currency code, e.g. 'CAD' or 'EUR'
 
+/** @template {string} T @typedef {T extends keyof HTMLElementTagNameMap ? HTMLElementTagNameMap[T] : HTMLElement} ElementOf */
+
 // Build an element: h('button', { class: 'primary', onclick: fn }, 'Save')
 // Attributes with null/undefined/false are skipped. `value` and `checked` are set after children exist.
+/**
+ * @template {string} T
+ * @param {T} tag
+ * @param {Record<string, any> | null} [attrs] any: attribute values vary per key (text, handlers, style objects)
+ * @param {...Child} children
+ * @returns {ElementOf<T>}
+ */
 export function h(tag, attrs, ...children) {
   const el = document.createElement(tag);
+  // Style and element properties set by name.
+  const style = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (el.style));
+  const byName = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (el));
+  /** @type {[string, unknown][]} */
   const props = [];
   for (const [key, value] of Object.entries(attrs ?? {})) {
     if (value === null || value === undefined || value === false) continue;
@@ -14,19 +29,19 @@ export function h(tag, attrs, ...children) {
       for (const [prop, val] of Object.entries(value)) {
         // Custom properties (--name) need setProperty; plain properties can be assigned.
         if (prop.startsWith('--')) el.style.setProperty(prop, val);
-        else el.style[prop] = val;
+        else style[prop] = val;
       }
     }
     else if (key.startsWith('on')) el.addEventListener(key.slice(2), value);
     else if (key === 'value' || key === 'checked') props.push([key, value]);
     else el.setAttribute(key, value === true ? '' : value);
   }
-  for (const child of children.flat(Infinity)) {
+  for (const child of /** @type {unknown[]} */ (children).flat(Infinity)) {
     if (child === null || child === undefined || child === false) continue;
     el.append(child instanceof Node ? child : document.createTextNode(String(child)));
   }
-  for (const [key, value] of props) el[key] = value;
-  return el;
+  for (const [key, value] of props) byName[key] = value;
+  return /** @type {ElementOf<T>} */ (el);
 }
 
 export const uid = () =>
@@ -40,20 +55,25 @@ export function todayISO() {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 }
 
+/** @param {string} isoDate */
 export const monthKey = (isoDate) => isoDate.slice(0, 7); // YYYY-MM
 
 export const CURRENCIES = ['USD', 'CAD'];
 
 // Formats an amount with two decimals in the given currency (default: CURRENCY).
+/** @type {Map<string, Intl.NumberFormat>} */
 const formatters = new Map();
+/** @param {number | bigint} n @param {string} [currency] */
 export const money = (n, currency = CURRENCY) => {
   if (!formatters.has(currency)) formatters.set(currency, new Intl.NumberFormat(undefined, { style: 'currency', currency }));
-  return formatters.get(currency).format(n);
+  return /** @type {Intl.NumberFormat} */ (formatters.get(currency)).format(n);
 };
 
+/** @param {Child} text */
 export const empty = (text) => h('p', { class: 'empty' }, text);
 
 // A loading bar for work whose length is not known, with a label saying what is happening.
+/** @param {Child} label */
 export function progress(label) {
   return h('div', { class: 'progress', role: 'status', 'aria-live': 'polite' },
     h('div', { class: 'progress-label' }, label),
@@ -61,6 +81,7 @@ export function progress(label) {
 }
 
 // A status box with an icon, the message, and optional action buttons. tone: 'error' | 'ok' | 'info'.
+/** @param {{ tone?: 'error' | 'ok' | 'info', text: Child, actions?: Child[] }} options */
 export function notice({ tone = 'error', text, actions = [] }) {
   const iconName = tone === 'error' ? 'alert' : tone === 'ok' ? 'check' : 'info';
   return h('div', { class: `notice ${tone}`, role: tone === 'error' ? 'alert' : 'status' },
@@ -71,6 +92,7 @@ export function notice({ tone = 'error', text, actions = [] }) {
 }
 
 // Todo status replaced the old `done` flag. Items saved before that fall back to `done`.
+/** @param {{ status?: string, done?: boolean }} item */
 export const statusOf = (item) => item.status ?? (item.done ? 'done' : 'todo');
 
 // Stroke icons (Lucide-style, 24×24 grid). Markup here is trusted static code.
@@ -163,8 +185,10 @@ const ICON_PATHS = {
 };
 
 // A value the user pastes elsewhere (a handle, a command, an address): one click copies it.
+/** @param {string} text @param {{ label?: string }} [options] */
 export function copyable(text, { label = text } = {}) {
   const mark = h('span', { class: 'copy-mark' }, icon('copy'));
+  /** @type {HTMLButtonElement & { timer?: number }} */
   const btn = h('button', {
     type: 'button',
     class: 'copy-chip',
@@ -175,7 +199,7 @@ export function copyable(text, { label = text } = {}) {
         await navigator.clipboard.writeText(text);
       } catch {
         // Clipboard blocked (no permission, not focused): select the text so Cmd/Ctrl+C still works.
-        getSelection()?.selectAllChildren(btn.querySelector('code'));
+        getSelection()?.selectAllChildren(/** @type {HTMLElement} */ (btn.querySelector('code')));
         return;
       }
       btn.classList.add('copied');
@@ -190,6 +214,9 @@ export function copyable(text, { label = text } = {}) {
   return btn;
 }
 
+/** @typedef {keyof typeof ICON_PATHS} IconName */
+
+/** @param {IconName} name */
 export function icon(name) {
   const span = document.createElement('span');
   span.className = 'icon';
@@ -199,4 +226,5 @@ export function icon(name) {
 }
 
 // The refresh icon of a reload button; it spins while the load runs, so a click visibly does something.
+/** @param {boolean} [busy] */
 export const refreshIcon = (busy) => (busy ? h('span', { class: 'spin-icon' }, icon('refresh')) : icon('refresh'));

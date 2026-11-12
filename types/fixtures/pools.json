@@ -1,0 +1,319 @@
+{
+  "cache": {
+    "8453:v3": {
+      "at": 1767225600000,
+      "rows": [
+        {
+          "version": "v3",
+          "ref": "8453:100001",
+          "chain": "Base",
+          "chainId": 8453,
+          "tokenId": "100001",
+          "wallet": "0x0000000000000000000000000000000000000001",
+          "pricesAt": null,
+          "staleAt": null,
+          "owner": "Main wallet",
+          "addr0": "0x0000000000000000000000000000000000000010",
+          "addr1": "0x0000000000000000000000000000000000000011",
+          "pair": "TKA / TKB",
+          "sym0": "TKA",
+          "sym1": "TKB",
+          "feePct": 0.05,
+          "closed": false,
+          "inRange": true,
+          "full": false,
+          "min": 1.5,
+          "max": 2.5,
+          "current": 2,
+          "marker": 56.3,
+          "a0": 10,
+          "a1": 20,
+          "fee0": 0.1,
+          "fee1": 0.2,
+          "p0": 2,
+          "p1": 1,
+          "value": 40,
+          "fees": 0.4,
+          "feesFull": true,
+          "share0": 0.5,
+          "url": "https://app.uniswap.org/positions/v3/base/100001",
+          "tickLower": -1000,
+          "tickUpper": 1000,
+          "liq": "123456789",
+          "pool": "0x0000000000000000000000000000000000000020",
+          "feePips": 500,
+          "dec0": 18,
+          "dec1": 6
+        }
+      ]
+    },
+    "8453:v4": {
+      "at": 1767225600000,
+      "rows": [
+        {
+          "version": "v4",
+          "ref": "8453:v4:200002",
+          "chain": "Base",
+          "chainId": 8453,
+          "tokenId": "200002",
+          "wallet": "0x0000000000000000000000000000000000000001",
+          "pricesAt": 1767222000000,
+          "staleAt": null,
+          "owner": "Main wallet",
+          "addr0": "0x0000000000000000000000000000000000000000",
+          "addr1": "0x0000000000000000000000000000000000000011",
+          "pair": "ETH / TKB",
+          "sym0": "ETH",
+          "sym1": "TKB",
+          "feePct": 0.3,
+          "closed": false,
+          "inRange": false,
+          "full": true,
+          "min": 0,
+          "max": null,
+          "current": 3000,
+          "marker": null,
+          "a0": 0.5,
+          "a1": 0,
+          "fee0": 0,
+          "fee1": 0,
+          "p0": null,
+          "p1": 1,
+          "value": null,
+          "fees": null,
+          "feesFull": false,
+          "share0": null,
+          "url": null,
+          "tickLower": -887272,
+          "tickUpper": 887272,
+          "liq": "1000",
+          "pool": "0x0000000000000000000000000000000000000000000000000000000000000030",
+          "feePips": 3000,
+          "dec0": 18,
+          "dec1": 6
+        }
+      ]
+    }
+  },
+  "prices": {
+    "8453": {
+      "at": 1767225600000,
+      "usd": {
+        "0x0000000000000000000000000000000000000010": 2,
+        "0x0000000000000000000000000000000000000011": 1
+      }
+    }
+  },
+  "scan": {
+    "8453": {
+      "0x0000000000000000000000000000000000000001": {
+        "node": "https://rpc.example.com",
+        "from": 1000,
+        "to": 5000,
+        "span": 500,
+        "ids": ["200002"],
+        "done": true
+      }
+    }
+  },
+  "fees": {
+    "8453:100001": { "at": 1767225600000, "f0": 0.05, "f1": 0.1, "v": 2 },
+    "8453:v4:200002": { "at": 1767225600000, "f0": 0, "f1": 0 }
+  },
+  "earned": {
+    "8453:100001": {
+      "490896": ["1000000000000000", "2000"],
+      "490897": ["0", "0"]
+    }
+  },
+  "collected": [
+    {
+      "id": "chain:8453:100001:0x00000000000000000000000000000000000000000000000000000000000000aa",
+      "at": "2026-01-01T10:00:00.000Z",
+      "source": "chain",
+      "level": 4,
+      "tx": "0x00000000000000000000000000000000000000000000000000000000000000aa",
+      "ref": "8453:100001",
+      "pair": "TKA / TKB",
+      "chain": "Base",
+      "chainId": 8453,
+      "tokenId": "100001",
+      "a0": 0.1,
+      "a1": 0.2,
+      "sym0": "TKA",
+      "sym1": "TKB",
+      "addr0": "0x0000000000000000000000000000000000000010",
+      "addr1": "0x0000000000000000000000000000000000000011",
+      "usd": 0.4
+    },
+    {
+      "id": "c-auto-1",
+      "at": "2026-01-02T10:00:00.000Z",
+      "since": "2026-01-02T09:00:00.000Z",
+      "source": "auto",
+      "ref": "8453:100001",
+      "pair": "TKA / TKB",
+      "chain": "Base",
+      "chainId": 8453,
+      "tokenId": "100001",
+      "a0": 0.01,
+      "a1": 0.02,
+      "sym0": "TKA",
+      "sym1": "TKB",
+      "addr0": "0x0000000000000000000000000000000000000010",
+      "addr1": "0x0000000000000000000000000000000000000011",
+      "usd": null
+    },
+    {
+      "id": "c-manual-1",
+      "at": "2026-01-03T12:00:00.000Z",
+      "source": "manual",
+      "usd": 12.5,
+      "note": "Logged by hand"
+    }
+  ],
+  "history": {
+    "8453:100001": {
+      "node": "https://rpc.example.com",
+      "from": 1000,
+      "to": 5000,
+      "span": 500,
+      "done": true,
+      "events": [
+        { "kind": "add", "block": 1200, "index": 3, "tx": "0x00000000000000000000000000000000000000000000000000000000000000bb", "liq": "123456789", "a0": "10000000000000000000", "a1": "20000000" },
+        { "kind": "collect", "block": 4000, "index": 1, "tx": "0x00000000000000000000000000000000000000000000000000000000000000aa", "liq": "0", "a0": "100000000000000000", "a1": "200000", "time": 1767261600 }
+      ],
+      "reached": true,
+      "floor": 0
+    },
+    "8453:v4:200002": {
+      "node": "https://rpc.example.com",
+      "from": 2000,
+      "to": 5000,
+      "span": 500,
+      "done": false,
+      "events": [],
+      "reached": false,
+      "floor": 1500,
+      "checked": ["0x00000000000000000000000000000000000000000000000000000000000000cc"]
+    }
+  },
+  "hidden": ["8453:100001|0x00000000000000000000000000000000000000000000000000000000000000dd"],
+  "etherscan": {
+    "8453": {
+      "0x0000000000000000000000000000000000000001": {
+        "block": 4500,
+        "checked": ["0x00000000000000000000000000000000000000000000000000000000000000aa"],
+        "caughtUp": true,
+        "at": 1767225600000
+      }
+    }
+  },
+  "flip": { "TKA/TKB": true },
+  "insights": [
+    {
+      "id": "ins1",
+      "at": 1767225600000,
+      "key": "8453:100001,8453:v4:200002",
+      "summary": "One position is in range, one is out.",
+      "items": [
+        {
+          "ref": "8453:100001",
+          "action": "hold",
+          "headline": "Comfortably in range",
+          "reason": "The price sits near the middle of the range.",
+          "range": null,
+          "pos": { "pair": "TKA / TKB", "chain": "Base", "feePct": 0.05, "tokenId": "100001", "url": "https://app.uniswap.org/positions/v3/base/100001", "inRange": true, "full": false, "sym0": "TKA", "sym1": "TKB", "unit": "TKB", "base": "TKA", "min": 1.5, "max": 2.5, "current": 2 }
+        },
+        {
+          "ref": "8453:v4:200002",
+          "action": "rebalance",
+          "headline": "Move the range up",
+          "reason": "The price is above the range.",
+          "range": { "min": 2800, "max": 3200 },
+          "pos": { "pair": "ETH / TKB", "chain": "Base", "feePct": 0.3, "tokenId": "200002", "url": "", "inRange": false, "full": true, "sym0": "ETH", "sym1": "TKB", "unit": "TKB", "base": "ETH", "min": 0, "max": null, "current": 3000 }
+        }
+      ]
+    }
+  ],
+  "balances": {
+    "8453": {
+      "at": 1767225600000,
+      "rows": [
+        {
+          "ref": "8453:0x0000000000000000000000000000000000000010",
+          "chainId": 8453,
+          "wallet": "0x0000000000000000000000000000000000000001",
+          "label": "Main wallet",
+          "token": "0x0000000000000000000000000000000000000010",
+          "symbol": "TKA",
+          "decimals": 18,
+          "logo": "",
+          "raw": "5000000000000000000",
+          "amount": 5,
+          "price": 2,
+          "value": 10
+        },
+        {
+          "ref": "8453:0x0000000000000000000000000000000000000012",
+          "chainId": 8453,
+          "wallet": "0x0000000000000000000000000000000000000001",
+          "label": "",
+          "token": "0x0000000000000000000000000000000000000012",
+          "symbol": "TKC",
+          "decimals": 6,
+          "logo": "https://example.com/tkc.png",
+          "raw": "1000000",
+          "amount": 1,
+          "price": null,
+          "value": null
+        }
+      ]
+    }
+  },
+  "tokens": [
+    { "chainId": 8453, "address": "0x0000000000000000000000000000000000000012", "symbol": "TKC", "decimals": 6 }
+  ],
+  "hiddenTokens": ["8453:0x0000000000000000000000000000000000000013"],
+  "lending": {
+    "8453": {
+      "at": 1767225600000,
+      "rows": [
+        {
+          "chainId": 8453,
+          "wallet": "0x0000000000000000000000000000000000000001",
+          "collateral": 1000,
+          "debt": 400,
+          "available": 300,
+          "threshold": 0.83,
+          "ltv": 0.8,
+          "health": 2.07,
+          "assets": [
+            { "asset": "0x0000000000000000000000000000000000000010", "symbol": "TKA", "supplied": 500, "borrowed": 0, "suppliedUsd": 1000, "borrowedUsd": 0, "supplyApy": 0.02, "borrowApy": 0.04, "collateral": true },
+            { "asset": "0x0000000000000000000000000000000000000011", "symbol": "TKB", "supplied": 0, "borrowed": 400, "suppliedUsd": 0, "borrowedUsd": 400, "supplyApy": null, "borrowApy": null, "collateral": false }
+          ]
+        }
+      ]
+    }
+  },
+  "read": {
+    "at": 1767225600000,
+    "warnings": { "8453:v3": "", "8453:v4": "Base token prices could not be read, so values use the prices from 1 h ago." },
+    "stale": { "10:v3": 1767222000000 },
+    "shallow": ["Base"],
+    "pending": []
+  },
+  "aprs": {
+    "24h|8453:100001": { "apr": 0.25, "secs": 86400, "full": true, "prev": 0.2, "prevSecs": 86400, "at": 1767225600000 },
+    "7d|8453:100001": { "apr": 0.22, "secs": 3600, "full": false, "prev": null, "prevSecs": 0, "at": 1767225600000 }
+  },
+  "aprWindow": "24h",
+  "balancesRead": {
+    "failed": [{ "name": "Optimism", "error": "The node did not answer.", "at": 0 }],
+    "pending": [],
+    "at": 1767225600000
+  },
+  "lendingRead": { "failed": [], "pending": ["Base"] },
+  "etherscanErrors": { "Optimism": "Invalid API key." },
+  "schemaVersion": 1
+}

@@ -1365,6 +1365,7 @@ function draw(root, store) {
             spendingBlock(store, view.range, inPeriod))))));
 }
 
+/** @satisfies {import('../../types/data').Module} */
 export default {
   id: 'money',
   title: 'Money',

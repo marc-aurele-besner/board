@@ -945,6 +945,7 @@ function draw(root, store) {
         : null));
 }
 
+/** @satisfies {import('../../types/data').Module} */
 export default {
   id: 'tools',
   title: 'Tools',

@@ -1,0 +1,93 @@
+{
+  "flows": [
+    {
+      "id": "flow-1",
+      "name": "Example flow",
+      "enabled": true,
+      "schedule": { "every": "days", "time": "08:00", "times": ["08:00", "17:00"], "weekday": 1, "days": [1, 2, 3, 4, 5], "day": 1, "monthDays": [1, 15], "months": [], "minutes": 60, "from": "", "to": "", "cron": "" },
+      "projectId": "project-1",
+      "steps": [
+        {
+          "id": "step-1",
+          "type": "gather",
+          "sources": [
+            { "id": "source-1", "source": "page", "label": "", "projectId": "", "url": "https://example.com", "text": "", "count": 5, "follow": 3, "flowId": "" }
+          ],
+          "append": false
+        },
+        { "id": "step-2", "type": "ai", "prompt": "Summarize this:\n\n{{input}}", "system": "", "model": "" },
+        { "id": "step-3", "type": "stop", "when": "contains", "text": "nothing" },
+        { "id": "step-4", "type": "task", "title": "{{flow}} · {{date}}", "projectId": "", "priority": "none", "due": "" },
+        { "id": "step-5", "type": "profile", "projectId": "", "onEdited": "merge", "keepEdited": true },
+        { "id": "step-6", "type": "dev", "from": "step-2", "mode": "claude", "preset": "", "devCommand": "", "projectId": "", "prompt": "{{input}}", "command": "", "waitMinutes": 60, "wait": true, "json": false },
+        { "id": "step-7", "type": "gather", "source": "history", "url": "", "count": 5, "follow": 3, "flowId": "", "text": "" }
+      ],
+      "lastRun": "2026-01-14T08:00:00.000Z",
+      "created": "2026-01-01T09:00:00.000Z",
+      "enabledAt": "2026-01-01T09:05:00.000Z"
+    },
+    {
+      "id": "flow-2",
+      "name": "Example old flow",
+      "enabled": false,
+      "schedule": { "every": "weekly", "time": "09:00", "weekday": 1 },
+      "steps": [{ "id": "step-8", "type": "notify", "text": "{{flow}}: {{input}}" }],
+      "lastRun": "",
+      "created": "2025-06-01T09:00:00.000Z"
+    }
+  ],
+  "runs": [
+    {
+      "id": "run-1",
+      "flowId": "flow-1",
+      "at": "2026-01-14T08:00:00.000Z",
+      "manual": false,
+      "dry": false,
+      "status": "ok",
+      "steps": [
+        { "stepId": "step-4", "type": "task", "ok": true, "output": "Example output", "note": "", "ms": 12, "taskId": "task-2" },
+        {
+          "stepId": "step-6", "type": "dev", "ok": true, "output": "Example output", "note": "", "ms": 60000,
+          "session": "example-session-1", "cwd": "~/example/project", "terminal": 1, "worktree": "example-worktree",
+          "branch": "example-branch", "commit": "abc1234",
+          "pr": { "repo": "example-org/example-repo", "number": 12, "url": "https://github.com/example-org/example-repo/pull/12" },
+          "files": 3,
+          "prs": [{ "repo": "example-org/example-repo", "number": 12, "url": "https://github.com/example-org/example-repo/pull/12" }]
+        }
+      ],
+      "error": "",
+      "beat": "2026-01-14T08:01:00.000Z",
+      "ended": "2026-01-14T08:01:00.000Z"
+    },
+    {
+      "id": "run-2",
+      "flowId": "flow-1",
+      "at": "2026-01-15T08:00:00.000Z",
+      "manual": true,
+      "dry": true,
+      "status": "running",
+      "steps": [],
+      "error": "",
+      "beat": "2026-01-15T08:00:30.000Z",
+      "current": { "stepId": "step-6", "session": "example-session-2", "cwd": "~/example/project", "terminal": 2, "worktree": "example-worktree-2", "taskId": "task-2" }
+    }
+  ],
+  "templates": [
+    {
+      "id": "template-1",
+      "name": "Example template",
+      "about": "Example about.",
+      "schedule": { "every": "daily", "time": "08:00", "weekday": 1, "days": [1, 2, 3, 4, 5], "day": 1, "minutes": 60, "from": "", "to": "" },
+      "projectId": "",
+      "steps": [{ "type": "ai", "prompt": "{{input}}", "system": "", "model": "" }],
+      "created": "2026-01-05T09:00:00.000Z"
+    }
+  ],
+  "tests": {
+    "flow-1": {
+      "step-1": { "ok": true, "stepId": "step-1", "output": "Example output", "note": "", "ms": 30, "at": "2026-01-14T07:00:00.000Z", "nothing": false },
+      "step-6": { "ok": true, "pending": true, "output": "", "note": "Started in Dev terminal 2; waiting for it to finish.", "ms": 0, "at": "2026-01-14T07:01:00.000Z", "data": { "session": "example-session-2", "cwd": "~/example/project", "terminal": 2 } }
+    }
+  },
+  "schemaVersion": 1
+}

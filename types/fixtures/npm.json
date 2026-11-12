@@ -1,0 +1,12 @@
+{
+  "orgs": {
+    "example-org": { "at": 1762896400000, "packages": ["@example-org/core", "@example-org/ui"], "error": null },
+    "missing-org": { "error": "Not found on npm.", "failedAt": 1762896400000 }
+  },
+  "packages": {
+    "@example-org/core": { "at": 1762896400000, "version": "1.2.3", "modified": "2026-10-01T12:00:00.000Z", "deprecated": false, "weekly": 1234, "error": null },
+    "@example-org/ui": { "at": 1762896400000, "version": "0.1.0", "modified": "2026-09-01T12:00:00.000Z", "deprecated": true, "weekly": null, "error": null, "failedAt": 1762800000000 },
+    "example-missing": { "error": "Not found on npm.", "failedAt": 1762896400000 }
+  },
+  "schemaVersion": 1
+}

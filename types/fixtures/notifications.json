@@ -1,0 +1,27 @@
+{
+  "items": [
+    {
+      "id": "notification-1",
+      "kind": "deadline",
+      "text": "“Example task” is due today.",
+      "href": "#/todos?filter=today",
+      "key": "deadline:task-1:2026-01-15",
+      "at": "2026-01-15T08:00:00.000Z",
+      "read": false
+    },
+    {
+      "id": "notification-2",
+      "kind": "cron",
+      "text": "Example flow: example output.",
+      "href": "#/cron?flow=flow-1",
+      "key": "",
+      "at": "2026-01-14T08:00:00.000Z",
+      "read": true
+    }
+  ],
+  "prefs": {
+    "health": { "app": true, "telegram": true },
+    "ssl": { "app": false, "telegram": false }
+  },
+  "schemaVersion": 1
+}

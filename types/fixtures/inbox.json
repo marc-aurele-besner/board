@@ -1,0 +1,49 @@
+{
+  "emails": [
+    {
+      "id": "gmail:owner@example.com:msg-001",
+      "source": "gmail",
+      "account": "owner@example.com",
+      "msgId": "msg-001",
+      "projectId": "p-sample",
+      "dir": "received",
+      "from": "Sender <sender@example.net>",
+      "to": ["owner@example.com"],
+      "cc": ["copy@example.net"],
+      "subject": "Sample question",
+      "at": "2026-01-10T09:00:00.000Z",
+      "status": "",
+      "unread": true,
+      "starred": true,
+      "taskId": "t-001"
+    },
+    {
+      "id": "resend-0001",
+      "projectId": "p-sample",
+      "dir": "sent",
+      "from": "Sample <hello@example.com>",
+      "to": ["someone@example.net"],
+      "cc": [],
+      "subject": "Sample welcome",
+      "at": "2026-01-09T09:00:00.000Z",
+      "status": "delivered",
+      "unread": false,
+      "archived": true,
+      "taskId": null
+    },
+    {
+      "id": "resend-0002",
+      "projectId": null,
+      "dir": "received",
+      "from": "Newsletter <news@example.org>",
+      "to": [],
+      "cc": [],
+      "subject": "Sample newsletter",
+      "at": "",
+      "status": "",
+      "taskId": null
+    }
+  ],
+  "syncedAt": "2026-01-10T10:00:00.000Z",
+  "schemaVersion": 1
+}

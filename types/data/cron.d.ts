@@ -1,0 +1,190 @@
+// cron.json: Cron flows, their runs, saved templates and step tests (js/cron.js).
+
+// When a flow runs. every: 'interval', 'daily', 'weekly' (old), 'days', 'monthly' or 'custom'. makeFlow() writes
+// every field; older or template schedules carry only some.
+export interface CronSchedule {
+  every: string;
+  // HH:MM. `times` holds several; flows saved with one keep `time`.
+  time?: string;
+  times?: string[];
+  // 0 (Sunday) to 6, for the old 'weekly'.
+  weekday?: number;
+  days?: number[];
+  // Day of the month, 1 to 31. `monthDays` holds several.
+  day?: number;
+  monthDays?: number[];
+  // 0 to 11; empty means every month.
+  months?: number[];
+  // 'interval': every so many minutes, between `from` and `to` (HH:MM) when both are set.
+  minutes?: number;
+  from?: string;
+  to?: string;
+  // 'custom': a five-field cron expression.
+  cron?: string;
+}
+
+// One source of a 'gather' step (makeSource()).
+export interface CronSource {
+  id: string;
+  // A key from SOURCES in js/cron.js ('open', 'page', 'flow', ...).
+  source: string;
+  label: string;
+  projectId: string;
+  url: string;
+  text: string;
+  count: number;
+  // How many linked pages a 'page' source follows.
+  follow: number;
+  flowId: string;
+}
+
+// A step (makeStep()). type: 'gather', 'ai', 'stop', 'task', 'notify', 'profile' or 'dev'; each type uses some fields.
+export interface CronStep {
+  id: string;
+  type: string;
+  // The step whose output is its input; missing means the step before.
+  from?: string;
+  // gather
+  sources?: CronSource[];
+  append?: boolean;
+  // Old gather steps held one source on the step itself.
+  source?: string;
+  url?: string;
+  count?: number;
+  follow?: number;
+  flowId?: string;
+  // ai
+  prompt?: string;
+  system?: string;
+  model?: string;
+  // task
+  title?: string;
+  priority?: string;
+  due?: string;
+  // task, profile, dev, old gather; '' follows the flow's project.
+  projectId?: string;
+  // stop ('nothing', 'empty', 'contains', 'lacks'); `text` is what contains/lacks look for. notify and old gather use
+  // `text` too.
+  when?: string;
+  text?: string;
+  // profile: 'merge', 'replace' or 'keep'. Older steps have keepEdited instead.
+  onEdited?: string;
+  keepEdited?: boolean;
+  // dev: 'claude', 'preset', 'custom' or 'command'.
+  mode?: string;
+  preset?: string;
+  devCommand?: string;
+  command?: string;
+  waitMinutes?: number;
+  // Whether the run waits for the terminal; missing means wait unless it is the last step.
+  wait?: boolean;
+  // Ask claude to end with JSON the next steps can read.
+  json?: boolean;
+}
+
+export interface CronFlow {
+  id: string;
+  name: string;
+  enabled: boolean;
+  schedule: CronSchedule;
+  // Flows saved before flows had a project lack it.
+  projectId?: string;
+  steps: CronStep[];
+  // When it last started on schedule; '' for never.
+  lastRun: string;
+  created: string;
+  // When it was last switched on.
+  enabledAt?: string;
+}
+
+// A flow saved as a template: steps without ids.
+export interface CronTemplate {
+  id: string;
+  name: string;
+  about: string;
+  schedule: CronSchedule;
+  projectId: string;
+  steps: Array<Omit<CronStep, 'id'>>;
+  created: string;
+}
+
+export interface CronPr {
+  repo: string;
+  number: number;
+  url: string;
+}
+
+// The Dev terminal a run is waiting on.
+export interface CronRunCurrent {
+  stepId: string;
+  session: string;
+  cwd: string;
+  terminal: number;
+  worktree?: string;
+  taskId?: string;
+}
+
+// What a run keeps of one step (stepRecord()).
+export interface CronRunStep {
+  stepId: string;
+  type: string;
+  ok: boolean;
+  output: string;
+  note: string;
+  ms: number;
+  // task: the task it made.
+  taskId?: string;
+  // dev: the terminal, and what the session left.
+  session?: string;
+  cwd?: string;
+  terminal?: number;
+  worktree?: string;
+  branch?: string;
+  commit?: string;
+  pr?: CronPr;
+  // Number of changed files.
+  files?: number;
+  // Read by js/previews.js; nothing writes it now.
+  prs?: CronPr[];
+}
+
+export interface CronRun {
+  id: string;
+  flowId: string;
+  at: string;
+  manual: boolean;
+  // A test run.
+  dry: boolean;
+  // 'running', 'ok', 'stopped' or 'error'.
+  status: string;
+  steps: CronRunStep[];
+  error: string;
+  // Last sign of life while running.
+  beat?: string;
+  current?: CronRunCurrent;
+  ended?: string;
+}
+
+// A step's saved test result. `data` is kept only when it cannot be rebuilt from `output`.
+export interface CronTest {
+  ok: boolean;
+  stepId?: string;
+  output: string;
+  note: string;
+  ms: number;
+  at: string;
+  nothing?: boolean;
+  // Waiting on a Dev terminal.
+  pending?: boolean;
+  data?: unknown;
+}
+
+export interface CronData {
+  flows: CronFlow[];
+  // Newest first.
+  runs: CronRun[];
+  templates: CronTemplate[];
+  // By flow id, then step id.
+  tests: Record<string, Record<string, CronTest>>;
+  schemaVersion?: number;
+}

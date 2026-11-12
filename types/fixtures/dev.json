@@ -1,0 +1,9 @@
+{
+  "history": ["git status", "bun run check"],
+  "runner": "http://127.0.0.1:8421",
+  "presets": [
+    { "id": "preset-1", "name": "Claude", "command": "claude --worktree" },
+    { "id": "preset-2", "name": "Shell", "command": "bash" }
+  ],
+  "schemaVersion": 1
+}
