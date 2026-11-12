@@ -999,6 +999,10 @@ function projectTasks(store, p, items) {
       : h('p', { class: 'muted small' }, 'No open tasks.'));
 }
 
+// The project's tasks in Tasks, filtered by status: 'open', 'done' or 'all'.
+/** @param {Project} p @param {string} status @param {string} text */
+const tasksLink = (p, status, text) => h('a', { href: `#/todos?filter=${p.id}&status=${status}`, title: `Show ${status === 'all' ? 'all' : status} tasks of ${p.name} in Tasks` }, text);
+
 /** @param {Store} store @param {Project} p @param {Task[]} items @param {ProjectLabel[]} categories */
 function projectView(store, p, items, categories) {
   const projects = store.get(COLLECTION).projects;
@@ -1075,7 +1079,10 @@ function projectView(store, p, items, categories) {
 
       h('div', { class: 'pp-field' },
         h('span', { class: 'pp-label' }, 'Open / done'),
-        h('span', null, `${open} open · ${done} done`)),
+        h('span', null,
+          tasksLink(p, 'open', `${open} open`), ' · ',
+          tasksLink(p, 'done', `${done} done`), ' · ',
+          tasksLink(p, 'all', `${open + done} all`))),
 
       googleField(store, p)),
 
@@ -1144,7 +1151,8 @@ function projectView(store, p, items, categories) {
           allowEmpty: true,
           className: 'pp-lines',
           onSave: (/** @type {string} */ repos) => updateProject(store, p.id, { repos }),
-        })),
+        }),
+        p.github.repos.map((r) => githubLink(r))),
       h('section', { class: 'pp-block' },
         h('h3', null, 'npm organization'),
         editText({

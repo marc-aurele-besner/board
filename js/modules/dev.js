@@ -61,9 +61,9 @@ const SIDE_KEY = 'board:dev-side';
  * @type {{ side: string, workspace: string, sessions: Session[], active: string, wanted: number, info: RunnerInfo | null,
  *   infoError: string, checking: boolean, count: number, pending: string | null,
  *   queued: { id: string, prompt: string, projectId: string, taskIds: string[], command: string } | null,
- *   opening: { id: string, cwd: string, taskIds: string[] } | null, restored: boolean, back: string }}
+ *   opening: { id: string, cwd: string, taskIds: string[] } | null, restored: boolean, back: string, filesOnly: boolean }}
  */
-const view = { side: readSide(), workspace: 'board', sessions: [], active: '', wanted: 0, info: null, infoError: '', checking: false, count: 0, pending: null, queued: null, opening: null, restored: false, back: '' };
+const view = { side: readSide(), workspace: 'board', sessions: [], active: '', wanted: 0, info: null, infoError: '', checking: false, count: 0, pending: null, queued: null, opening: null, restored: false, back: '', filesOnly: false };
 // Set by draw(), before any terminal is made or used.
 /** @type {Store | null} */
 let currentStore = null;
@@ -1184,7 +1184,9 @@ function draw(root, store) {
     setRoot(filesCtx(store), rootPath(store, view.workspace));
     const open = view.sessions.find((x) => x.cwd === rootPath(store, view.workspace));
     if (open) view.active = open.id;
-    else newSession(store);
+    // The Explorer link shows the folder's files; it starts a terminal only when there is none at all (below).
+    else if (!view.filesOnly) newSession(store);
+    view.filesOnly = false;
   }
   if (view.queued && view.info && view.restored) startQueued(store);
   if (!view.sessions.length && (view.restored || view.infoError)) newSession(store);
@@ -1253,8 +1255,13 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
   // The terminal shown is in the URL, so a refresh or a shared link opens it.
   serialize: () => ({ term: view.sessions.length > 1 ? activeSession()?.n : '' }),
   // #/dev?project=<id> (from a project page) opens that project's folder, with a terminal in it.
+  // With &side=files (a task list's Explorer button) it shows the folder's files instead of a new terminal.
   restore: (/** @type {Record<string, string>} */ p = {}) => {
     if (p.project) view.pending = `p:${p.project}`;
+    if (p.project && p.side === 'files') {
+      view.side = 'files';
+      view.filesOnly = true;
+    }
     const n = Number(p.term);
     if (Number.isInteger(n) && n > 0) {
       view.wanted = n;
