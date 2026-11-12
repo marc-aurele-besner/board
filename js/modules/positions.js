@@ -1,3 +1,4 @@
+// @ts-check
 import { h, icon, refreshIcon, money, empty, notice, uid, todayISO, copyable, CURRENCIES } from '../ui.js';
 import { knownRate, fetchDayRate } from '../fx.js';
 import { barChart, lineChart, legend } from '../chart.js';
@@ -12,6 +13,48 @@ import { chainById, explorerUrl, etherscanKey } from '../chains.js';
 import { walletsTab, walletsView } from './defi-wallets.js';
 import { lendingTab, lendingView } from './defi-lending.js';
 import { summaryTab } from './defi-summary.js';
+/** @import { Store, PoolsData, CollectEntry, FeeBaseline, IconName } from '../../types/data' */
+/** @import { PositionRow, DefiUi, DefiTab, LpSummary } from '../../types/defi' */
+/** @import { Child } from '../../types/ui' */
+/**
+ * A row with its fee APR over the chosen window (aprOf): from swaps (aprSecs, aprFull, aprPrev), else from the
+ * counter (aprLeft), and its movement from the window before.
+ * @typedef {PositionRow & { apr?: number | null, aprLeft?: number | null, aprSecs?: number, aprFull?: boolean, aprPrev?: number | null, move?: number | null }} Row
+ * @typedef {{ min: number, max: number, current: number, marker: number | null, unit: string, base: string }} Side
+ * @typedef {string | number | bigint} Sortable
+ * @typedef {NonNullable<ReturnType<typeof parsePosition>>} Entry
+ * @typedef {HTMLFormElement & { elements: { position: HTMLInputElement, chain: HTMLSelectElement, version: HTMLSelectElement } }} AddForm
+ * @typedef {{ value: string, label: string, count: number, logo: string | null }} PickerOption
+ * @typedef {(label: string, value: Child, hint?: string | null) => HTMLElement} Stat
+ * @typedef {{ key: string | null, label: string, usd: number, n: number, sample?: CollectEntry, amount?: number | null }} FeeGroup
+ * @typedef {{ list: CollectEntry[], pool: CollectEntry[], start: number, end: number, from: number | null, to: number | null, perDay: number, spanDays: number, nowMs: number, stat: Stat, group: string }} FeeCtx
+ */
+/**
+ * @typedef {object} View
+ * @property {string} currency
+ * @property {string} filter
+ * @property {number | 'all'} chain
+ * @property {string} layout
+ * @property {string} sort
+ * @property {number} dir
+ * @property {boolean} adding
+ * @property {string} window
+ * @property {string} feeSort
+ * @property {number} feeDir
+ * @property {string} feeChain
+ * @property {string} feeToken
+ * @property {string} feeSource
+ * @property {boolean} coverageOpen
+ * @property {string} tab
+ * @property {string | null} detail
+ * @property {string} detailFrom
+ * @property {boolean} feeAuto
+ * @property {string} feeRange
+ * @property {string} feeGroup
+ * @property {string} [feeSplit]
+ * @property {boolean} [logging]
+ * @property {string} [logMessage]
+ */
 
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 // The fee counter, used where swaps cannot be read, needs some time between two reads, or a few cents of fees
@@ -24,7 +67,8 @@ const APR_MIN_MS = 60 * 60 * 1000;
 // window: the WINDOWS key fee APR is read over.
 // feeSort, feeDir: the Fees collected table's sort. feeChain, feeToken, feeSource: its filters.
 // currency: what amounts are shown in. They are read in USD.
-const view = { currency: 'USD', filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, window: '24h', feeSort: 'date', feeDir: -1, feeChain: 'all', feeToken: 'all', feeSource: 'all', coverageOpen: false };
+// The tab, detail and fee range fields are set by restore(), which runs before the first draw.
+const view = /** @type {View} */ ({ currency: 'USD', filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, window: '24h', feeSort: 'date', feeDir: -1, feeChain: 'all', feeToken: 'all', feeSource: 'all', coverageOpen: false });
 // The reads run in js/defi/positions-read.js and save all they find in pools.json; the page draws that file.
 // loading: a read this tab started is running. error: why it failed.
 const COLLECTION = 'pools';
@@ -32,17 +76,24 @@ let loading = false;
 let readAgain = false; // a position was added during a read, so read once more when it ends
 let loadError = '';
 let askedAt = 0; // when this tab last started a read, so a stale page asks once, not on every redraw
+/** @type {Store | null} */
 let bound = null; // the store of the page drawn last, for the state below
+/** @type {Map<number, unknown>} */
 const activity = new Map(); // what the page shows of a search's progress: the runners report none
 // The collect search runs in the runners; it is running while their job is, or while this tab waits on it.
 const historyRunning = () => historyAsking || Boolean(jobState('defi-history')?.running);
+/** @type {{ has: (chainId: number) => boolean, readonly size: number }} */
 const searching = { has: () => historyRunning(), get size() { return historyRunning() ? 1 : 0; } };
 const aprBusy = () => aprAsking;
 
 // The last read as the page shows it: rows from pools.json, and the read's state.
+/** @returns {Partial<NonNullable<PoolsData['read']>>} */
 const readOf = () => bound?.get(COLLECTION)?.read ?? {};
+/** @type {PositionRow[] | null} */
 let memo = null;
+/** @type {PositionRow[]} */
 let symbolRows = []; // the rows knownSymbol looks symbols up in
+/** @param {Store} store */
 function shownRows(store) {
   if (memo) return memo;
   const cfg = store.get('settings').uniswap ?? {};
@@ -79,6 +130,7 @@ const state = {
   },
   // Chains shown from an earlier read because the last one failed, with when that read was.
   get stale() {
+    /** @type {Map<string, number>} */
     const byChain = new Map();
     for (const [key, at] of Object.entries(readOf().stale ?? {})) {
       const name = chainOf(Number(key.split(':')[0]))?.name;
@@ -93,32 +145,41 @@ const state = {
     return loading || jobState('defi-positions')?.running ? readOf().pending ?? [] : [];
   },
 };
+/** @type {Map<string, string>} */
 let logoMap = new Map(); // "chainId:token address" -> logo URL, from the token list
 let logosAsked = false;
+/** @type {Map<string, string>} */
 let listedSyms = new Map(); // "chainId:token address" and "chainId:short address" -> symbol, from the token list
+/** @type {Set<string>} */
 const seen = new Set(); // rows already on screen: only new ones animate in
+/** @type {Record<'value' | 'fees', number>} */
 const shownTotals = { value: 0, fees: 0 }; // the totals on screen, so a change counts from there
 
 // Time left before the counter shows a fee APR, or null when it has no baseline yet.
+/** @param {PositionRow} r @param {Record<string, FeeBaseline>} baselines */
 function counterLeft(r, baselines) {
   const b = baselineOf(baselines, r);
   return b ? Math.max(0, b.at + APR_MIN_MS - Date.now()) : null;
 }
 
 // Yearly fee rate from the fees earned since the baseline, at today's prices. null until enough time has passed.
+/** @param {PositionRow} r @param {Record<string, FeeBaseline>} baselines */
 function feeApr(r, baselines) {
   const b = baselineOf(baselines, r);
   const elapsed = Date.now() - (b?.at ?? Date.now());
-  if (!b || elapsed < APR_MIN_MS || !(r.value > 0) || r.p0 == null || r.p1 == null || typeof r.fee0 !== 'number') return null;
+  // null > 0 is false, so a row with no value stops here.
+  if (!b || elapsed < APR_MIN_MS || !(/** @type {number} */ (r.value) > 0) || r.p0 == null || r.p1 == null || typeof r.fee0 !== 'number') return null;
   const earned = Math.max(0, r.fee0 - b.f0) * r.p0 + Math.max(0, r.fee1 - b.f1) * r.p1;
-  return (earned / r.value) * (YEAR_MS / elapsed);
+  return (earned / /** @type {number} */ (r.value)) * (YEAR_MS / elapsed);
 }
 
 // How safely a position sits in its range: full range first, then the room to the nearer edge, out of range last.
+/** @param {Row} r */
 const rangeRoom = (r) => (r.full ? 101 : !r.inRange ? -1 : r.marker === null ? 0 : Math.min(r.marker, 100 - r.marker));
 
 // What each sort reads from a row, and the direction it starts in. Position numbers only grow, so a higher
 // number is a newer position on the same contract.
+/** @type {Record<string, { value: (r: Row) => Sortable | null | undefined, dir: number }>} */
 const SORTS = {
   value: { value: (r) => r.value, dir: -1 },
   fees: { value: (r) => r.fees, dir: -1 },
@@ -131,24 +192,31 @@ const SORTS = {
   move: { value: (r) => r.move, dir: -1 },
 };
 // The choices in the Sort menu. Sorting by a table column that is not here adds it to the menu as it is.
+/** @type {[string, number, string][]} */
 const PRESETS = [['value', -1, 'Value'], ['fees', -1, 'Unclaimed fees'], ['apr', -1, 'Fee APR'], ['move', -1, 'Movement'], ['number', -1, 'Newest'], ['number', 1, 'Oldest']];
+/** @type {Record<string, string>} */
 const SORT_NAMES = { pool: 'Pool', chain: 'Chain', range: 'Price range', split: 'Distribution', move: 'Movement', value: 'Value', fees: 'Unclaimed fees', apr: 'Fee APR', number: 'Number' };
 
 // Rows without the value sorted on go last, whatever the direction. Ties fall back to the newest first.
+/** @param {Row[]} rows @param {string} key @param {number} dir */
 function sortRows(rows, key, dir) {
   const read = SORTS[key].value;
-  const cmp = (a, b) => (typeof a === 'string' ? a.localeCompare(b) : a < b ? -1 : a > b ? 1 : 0);
+  // Both values come from the same sort, so they are of one kind.
+  /** @param {Sortable} a @param {Sortable} b */
+  const cmp = (a, b) => (typeof a === 'string' ? a.localeCompare(/** @type {string} */ (b)) : a < /** @type {number | bigint} */ (b) ? -1 : a > /** @type {number | bigint} */ (b) ? 1 : 0);
   const newest = SORTS.number.value;
   return rows.sort((x, y) => {
     const a = read(x);
     const b = read(y);
     const missing = (a == null ? 1 : 0) - (b == null ? 1 : 0);
     if (missing) return missing;
-    return (a == null ? 0 : dir * cmp(a, b)) || cmp(newest(y), newest(x));
+    // Here b is set too: a missing one returned above.
+    return (a == null ? 0 : dir * cmp(a, /** @type {Sortable} */ (b))) || cmp(/** @type {bigint} */ (newest(y)), /** @type {bigint} */ (newest(x)));
   });
 }
 
 // A table header that sorts by its column; a second click flips the direction.
+/** @param {Store} store @param {string} key @param {string} label @param {Record<string, string>} [attrs] */
 function sortHead(store, key, label, attrs = {}) {
   const on = view.sort === key;
   return h('th', { ...attrs, 'aria-sort': on ? (view.dir > 0 ? 'ascending' : 'descending') : null },
@@ -164,6 +232,7 @@ function sortHead(store, key, label, attrs = {}) {
 }
 
 // How long ago a time was, in words.
+/** @param {number} at */
 function ago(at) {
   const mins = Math.round((Date.now() - at) / 60000);
   if (mins < 1) return 'just now';
@@ -174,11 +243,13 @@ function ago(at) {
 
 // Open positions as of the last saved read, for Home. Nothing is read from a chain here.
 export { openPositions };
+/** @param {Store} store */
 export const outOfRange = (store) => openPositions(store).filter((r) => !r.inRange);
 
 // The runners read the chains (tools/jobs/defi.js) every few minutes and save what they find in pools.json; the page
 // only draws it. Refresh, a new APR window and Search further ask them to read now.
 // again: a read already running reads once more when it ends, as it took the settings before the change.
+/** @param {Store} store @param {{ again?: boolean }} [options] */
 async function load(store, { again = false } = {}) {
   if (loading) {
     if (again) readAgain = true;
@@ -192,7 +263,7 @@ async function load(store, { again = false } = {}) {
     await runJob('defi-positions', { window: view.window });
     await store.sync();
   } catch (err) {
-    loadError = err.message;
+    loadError = /** @type {Error} */ (err).message;
   } finally {
     loading = false;
     store.refresh();
@@ -205,9 +276,10 @@ async function load(store, { again = false } = {}) {
 
 let aprAsking = false;
 // Fee APR over the chosen window. The window is saved, so the runners keep reading it.
+/** @param {Store} store */
 function loadAprs(store) {
   if (store.get(COLLECTION).aprWindow !== view.window) store.update(COLLECTION, (d) => { d.aprWindow = view.window; });
-  if (aprAsking || store.get(COLLECTION).aprs && Object.keys(store.get(COLLECTION).aprs).some((k) => k.startsWith(`${view.window}|`))) return;
+  if (aprAsking || store.get(COLLECTION).aprs && Object.keys(/** @type {object} */ (store.get(COLLECTION).aprs)).some((k) => k.startsWith(`${view.window}|`))) return;
   aprAsking = true;
   runJob('defi-positions', { window: view.window, aprOnly: true })
     .then(() => store.sync())
@@ -221,24 +293,27 @@ function loadAprs(store) {
 
 let historyAsking = false;
 // One search pass for collects, or of one chain (`only`, the Search further button), in the runners.
+/** @param {Store} store @param {number | null} [only] */
 function loadHistory(store, only = null) {
   if (historyAsking) return;
   historyAsking = true;
   runJob('defi-history', only === null ? {} : { chainId: only })
     .then(() => store.sync())
-    .catch((err) => toast(err.message))
+    .catch((err) => toast(/** @type {Error} */ (err).message))
     .finally(() => {
       historyAsking = false;
       store.refresh();
     });
   store.refresh();
 }
+/** @type {(chainId: number) => string[]} */
 const activityLines = () => [];
 
 // How far the search for collects has got, per position, from 0 to 1. A position is covered in full once its
 // event search reached its opening, or once Etherscan read every transaction of its wallet. Until then, the
 // share of blocks searched back toward the earliest block it could have opened at (v4's start, or for v3 the
 // chain's first block, so a v3 search that has not found its opening reads low).
+/** @param {PositionRow} r @param {Partial<PoolsData>} d @param {string} key */
 function searchShare(r, d, key) {
   const ether = key && chainOf(r.chainId)?.etherscan !== false;
   if (ether && d.etherscan?.[r.chainId]?.[r.wallet]?.caughtUp) return 1;
@@ -252,8 +327,10 @@ function searchShare(r, d, key) {
 }
 
 // The search coverage of every position shown, open and closed: per chain and for all of them.
+/** @param {Store} store */
 function collectCoverage(store) {
   const d = store.get(COLLECTION) ?? {};
+  /** @type {Map<string, { name: string, chainId: number, sum: number, done: number, total: number }>} */
   const chains = new Map();
   for (const r of state.rows) {
     const c = chains.get(r.chain) ?? { name: r.chain, chainId: r.chainId, sum: 0, done: 0, total: 0 };
@@ -270,6 +347,7 @@ function collectCoverage(store) {
 }
 
 // Token logos arrive once, from the token list. The page redraws when they do.
+/** @param {Store} store */
 function askLogos(store) {
   if (logosAsked) return;
   logosAsked = true;
@@ -285,6 +363,11 @@ function askLogos(store) {
 
 // The symbol of a token saved as its short address, from the rows read, the symbols read since, or the token list.
 // An entry that kept no address is matched by its short address.
+/**
+ * @template {string | undefined} S
+ * @param {number | undefined} chainId @param {S} sym @param {string | null | undefined} addr
+ * @returns {S | string}
+ */
 function knownSymbol(chainId, sym, addr) {
   if (!isAddressSymbol(sym)) return sym;
   const keys = [addr && String(addr).toLowerCase(), String(sym).toLowerCase()].filter(Boolean);
@@ -308,6 +391,7 @@ function knownSymbol(chainId, sym, addr) {
 }
 
 // A fee log entry as shown: tokens saved as an address while their symbol could not be read get their symbol.
+/** @param {CollectEntry} c @returns {CollectEntry} */
 function named(c) {
   const chainId = c.chainId ?? CHAINS.find((x) => x.name === c.chain)?.id;
   const row = c.ref ? state.rows.find((r) => r.ref === c.ref) : null;
@@ -323,28 +407,34 @@ function named(c) {
   return pair === c.pair ? c : { ...c, pair };
 }
 
+/** @param {number} n */
 const amount = (n) => (n >= 1000 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toFixed(2) : n.toPrecision(4));
+/** @param {number} n */
 const price = (n) => (n === Infinity ? '∞' : n === 0 ? '0' : amount(n));
 // Amounts are read in USD. In CAD they use today's rate, the same for every amount, and stay in USD until it is known.
 const fxToday = { day: '', status: 'idle', error: '' };
 const shownRate = () => (view.currency === 'CAD' ? knownRate(todayISO()) : null);
+/** @param {number} n */
 const cash = (n) => {
   const rate = shownRate();
   return rate ? money(n * rate, 'CAD') : money(n, 'USD');
 };
+/** @param {number | null} n */
 const usdOrDash = (n) => (n === null ? '—' : cash(n));
 
 // Fetches today's rate once a day when CAD is picked, then draws again.
+/** @param {Store} store */
 function askRate(store) {
   const day = todayISO();
   if (view.currency !== 'CAD' || knownRate(day) !== null || fxToday.day === day) return;
   Object.assign(fxToday, { day, status: 'loading', error: '' });
   fetchDayRate(day)
     .then(() => Object.assign(fxToday, { status: 'ok' }))
-    .catch((err) => Object.assign(fxToday, { status: 'error', error: err.message }))
+    .catch((/** @type {Error} */ err) => Object.assign(fxToday, { status: 'error', error: err.message }))
     .finally(() => store.refresh());
 }
 
+/** @param {Store} store */
 function currencySwitch(store) {
   return h('div', { class: 'segmented money-currency', role: 'group', 'aria-label': 'Show amounts in' },
     CURRENCIES.map((c) => h('button', {
@@ -365,10 +455,16 @@ function rateNotice() {
     ? notice({ text: `The USD to CAD rate could not be read, so amounts stay in USD: ${fxToday.error}` })
     : notice({ tone: 'info', text: 'Reading today\'s USD to CAD rate. Amounts show in USD until then.' });
 }
+/** @param {number} n */
 const pct = (n) => `${(n * 100).toFixed(n < 0.1 ? 2 : 1)}%`;
+/** @param {number} secs */
 const span = (secs) => (secs >= 2 * 86400 ? `${(secs / 86400).toFixed(1)} days` : secs >= 2 * 3600 ? `${(secs / 3600).toFixed(1)} hours` : `${Math.round(secs / 60)} min`);
 // A row with its fee APR over the chosen window, and its movement from the window before when both cover at
 // least half of it. From the counter where swaps could not be read, which has no movement.
+/**
+ * @param {Store} store
+ * @returns {(r: PositionRow) => Row}
+ */
 function aprOf(store) {
   const baselines = store.get(COLLECTION)?.fees ?? {};
   const secs = WINDOWS[view.window][0];
@@ -381,6 +477,7 @@ function aprOf(store) {
 }
 
 // The APR's movement in percentage points, with an arrow.
+/** @param {Row} r */
 function moveView(r) {
   if (r.closed) return h('span', { class: 'muted' }, '—');
   if (r.move == null) return h('span', { class: 'muted', title: moveTitle(r) }, aprBusy() ? '…' : '—');
@@ -391,16 +488,24 @@ function moveView(r) {
     flat ? null : icon(pts > 0 ? 'chevron-up' : 'chevron-down'),
     `${pts > 0 && !flat ? '+' : ''}${pts.toFixed(2)} pts`);
 }
+/** @param {Row} r */
 function moveTitle(r) {
   const win = WINDOWS[view.window][1];
   if (r.move == null) return `Needs fee APR over the last ${win} and the ${win} before it. Swaps or saved hours do not cover both yet.`;
-  return `Fee APR over the last ${win} (${pct(r.apr)}) minus the ${win} before it (${pct(r.aprPrev)}), in percentage points. Both at today's value and prices.`;
+  // A movement is only worked out from two APRs.
+  return `Fee APR over the last ${win} (${pct(/** @type {number} */ (r.apr))}) minus the ${win} before it (${pct(/** @type {number} */ (r.aprPrev))}), in percentage points. Both at today's value and prices.`;
 }
 
 // Prices are shown in token1 per token0 unless the pair is flipped. The choice is saved per pair, so it is the
 // default everywhere the pair shows.
+/** @param {{ sym0: string, sym1: string }} r */
 const flipKey = (r) => `${r.sym0}/${r.sym1}`;
+/** @param {Store} store @param {{ sym0: string, sym1: string }} r */
 const isFlipped = (store, r) => Boolean(store.get(COLLECTION)?.flip?.[flipKey(r)]);
+/**
+ * @param {PositionRow} r @param {boolean} flip
+ * @returns {Side}
+ */
 function sideOf(r, flip) {
   if (!flip) return { min: r.min, max: r.max, current: r.current, marker: r.marker, unit: r.sym1, base: r.sym0 };
   return {
@@ -412,6 +517,7 @@ function sideOf(r, flip) {
     base: r.sym1,
   };
 }
+/** @param {Store} store @param {PositionRow} r @param {boolean} flip */
 function flipButton(store, r, flip) {
   const other = flip ? r.sym1 : r.sym0;
   return h('button', {
@@ -419,7 +525,7 @@ function flipButton(store, r, flip) {
     class: 'icon-btn flip-btn',
     title: `Show prices in ${other}`,
     'aria-label': `Show ${r.pair} prices in ${other}`,
-    onclick: (e) => {
+    onclick: (/** @type {MouseEvent} */ e) => {
       e.stopPropagation();
       store.update(COLLECTION, (d) => {
         const next = { ...d.flip };
@@ -432,12 +538,15 @@ function flipButton(store, r, flip) {
 }
 
 // Fee APR as shown: from swaps, else from the counter, else how long the counter still needs.
+/** @param {Row} r */
 function aprText(r) {
   if (r.apr != null && r.aprSecs != null && !r.aprFull) return `${pct(r.apr)} · ${span(r.aprSecs).replace(/ (days|hours)$/, (m) => (m === ' days' ? ' d' : ' h'))}`;
   if (r.apr != null) return pct(r.apr);
-  if (r.aprLeft > 0) return `counting · ${Math.ceil(r.aprLeft / 60000)} min`;
+  // null > 0 is false.
+  if (/** @type {number} */ (r.aprLeft) > 0) return `counting · ${Math.ceil(/** @type {number} */ (r.aprLeft) / 60000)} min`;
   return aprBusy() ? '…' : '—';
 }
+/** @param {Row} r */
 function aprTitle(r) {
   if (r.aprSecs != null) {
     return r.aprFull
@@ -448,6 +557,7 @@ function aprTitle(r) {
 }
 
 // A short, stable colour for a symbol, so a missing logo still looks like it belongs to its token.
+/** @param {string} text */
 function hueOf(text) {
   let hash = 0;
   for (const c of String(text)) hash = (hash * 31 + c.charCodeAt(0)) % 360;
@@ -456,7 +566,9 @@ function hueOf(text) {
 
 // A logo image, or a monogram when there is no image or it fails to load.
 // Logos already shown once are drawn at once on a redraw: no lazy load and no fade, which made them blink.
+/** @type {Set<string>} */
 const shownLogos = new Set();
+/** @param {string | null | undefined} src @param {string} label @param {string} [cls] */
 export function logo(src, label, cls = '') {
   const monogram = () => h('span', { class: 'mono', style: { '--hue': hueOf(label) }, 'aria-hidden': 'true' }, String(label).slice(0, 2).toUpperCase());
   if (!src) return h('span', { class: `logo ${cls}`, title: label }, monogram());
@@ -468,14 +580,17 @@ export function logo(src, label, cls = '') {
       class: known ? null : 'fresh',
       loading: known ? null : 'lazy',
       onload: () => shownLogos.add(src),
-      onerror: (e) => e.currentTarget.replaceWith(monogram()),
+      onerror: (/** @type {Event} */ e) => /** @type {HTMLImageElement} */ (e.currentTarget).replaceWith(monogram()),
     }));
 }
 
+/** @param {{ chainId: number }} row @param {string} address */
 const tokenLogoOf = (row, address) => logoMap.get(`${row.chainId}:${address.toLowerCase()}`) ?? null;
+/** @param {number} chainId */
 const chainOf = (chainId) => CHAINS.find((c) => c.id === chainId);
 
 // The price range as a track: the band is the position's range and the dot is the current price.
+/** @param {Row} r @param {Store} store */
 function rangeView(r, store) {
   const flip = isFlipped(store, r);
   const p = sideOf(r, flip);
@@ -493,6 +608,7 @@ function rangeView(r, store) {
 }
 
 // The token split as a bar: the share of value in each token.
+/** @param {PositionRow} row */
 function distribution(row) {
   if (row.share0 === null) return h('div', { class: 'muted small' }, `${amount(row.a0)} ${row.sym0} · ${amount(row.a1)} ${row.sym1}`);
   const pct0 = Math.round(row.share0 * 100);
@@ -503,12 +619,14 @@ function distribution(row) {
     h('div', { class: 'muted small' }, `${pct0}% ${row.sym0} · ${100 - pct0}% ${row.sym1}`));
 }
 
+/** @param {PositionRow} r */
 function statusPill(r) {
   if (r.closed) return h('span', { class: 'status-pill closed', title: 'No liquidity and no unclaimed fees left' }, h('span', { class: 'dot' }), 'Closed');
   return h('span', { class: r.inRange ? 'status-pill in' : 'status-pill out' }, h('span', { class: 'dot' }), r.inRange ? 'In range' : 'Out of range');
 }
 
 // Marks a row that may be out of date: read earlier, or valued with earlier prices.
+/** @param {PositionRow} r */
 function outdatedPill(r) {
   if (r.staleAt) return h('span', { class: 'outdated-pill', title: `This read failed. Showing the read from ${ago(r.staleAt)}.` }, `Outdated · ${ago(r.staleAt)}`);
   if (r.pricesAt) return h('span', { class: 'outdated-pill', title: `Prices could not be read. Values use the prices from ${ago(r.pricesAt)}.` }, 'Old prices');
@@ -516,9 +634,14 @@ function outdatedPill(r) {
 }
 
 // A sort as text, "value-desc", for the menu and the address. The first names (newest, oldest, fees, apr) still read.
+/** @param {string} key @param {number} dir */
 const sortName = (key, dir) => `${key}-${dir > 0 ? 'asc' : 'desc'}`;
+/**
+ * @param {string} [text]
+ * @returns {[string, number]}
+ */
 function parseSort(text = '') {
-  const old = { newest: ['number', -1], oldest: ['number', 1] }[text];
+  const old = /** @type {Record<string, [string, number]>} */ ({ newest: ['number', -1], oldest: ['number', 1] })[text];
   if (old) return old;
   const [key, d] = String(text).split('-');
   if (!Object.hasOwn(SORTS, key)) return ['value', -1];
@@ -535,18 +658,20 @@ function sortOptions() {
 
 const APR_TITLE = 'Fees from the pool\'s swaps in the chosen window, as a yearly rate of the value. Where swaps cannot be read, the fees earned since the board started counting.';
 
+/** @param {string} label @param {Child} value @param {string | null} [title] */
 function poolStat(label, value, title = null) {
   return h('div', { class: 'pool-stat', title }, h('span', null, label), h('strong', null, value));
 }
 
 // One position as a card: the pair, its chain and fee, the range, the value and the token split.
+/** @param {Row} r @param {number | null} i @param {Map<string, number>} collected @param {Store} store */
 function poolCard(r, i, collected, store) {
   const chain = chainOf(r.chainId);
   return h('article', {
     class: `pool-card clickable ${r.closed ? 'is-closed' : r.inRange ? 'is-in' : 'is-out'}${i === null ? '' : ' enter'}`,
     style: { '--i': i ?? 0 },
-    onclick: (e) => {
-      if (!e.target.closest('a, button, select, input')) openDetail(store, r.ref);
+    onclick: (/** @type {MouseEvent} */ e) => {
+      if (!/** @type {Element} */ (e.target).closest('a, button, select, input')) openDetail(store, r.ref);
     },
   },
     h('header', { class: 'pool-head' },
@@ -567,7 +692,7 @@ function poolCard(r, i, collected, store) {
       poolStat('Value', usdOrDash(r.value)),
       poolStat('Unclaimed fees', usdOrDash(r.fees)),
       r.closed
-        ? poolStat('Fees collected', collected.has(r.ref) ? cash(collected.get(r.ref)) : '—', 'The collections of this position in the fee log')
+        ? poolStat('Fees collected', collected.has(r.ref) ? cash(/** @type {number} */ (collected.get(r.ref))) : '—', 'The collections of this position in the fee log')
         : [poolStat(`Fee APR · ${WINDOWS[view.window][1]}`, aprText(r), aprTitle(r)),
             poolStat(`Movement · ${WINDOWS[view.window][1]}`, moveView(r), moveTitle(r))]),
     distribution(r),
@@ -577,6 +702,7 @@ function poolCard(r, i, collected, store) {
 }
 
 // Placeholders shown while the first read is running.
+/** @param {number} i */
 function skeletonCard(i) {
   return h('article', { class: 'pool-card ghost', style: { '--i': i }, 'aria-hidden': 'true' },
     h('div', { class: 'pool-head' },
@@ -587,9 +713,11 @@ function skeletonCard(i) {
 }
 
 // Counts a number from what was shown to its new value.
+/** @param {HTMLElement} el @param {number} from @param {number} to @param {(n: number) => string} format */
 function countUp(el, from, to, format) {
   const start = performance.now();
   const duration = 900;
+  /** @param {number} now */
   const step = (now) => {
     const t = Math.min(1, (now - start) / duration);
     const eased = 1 - (1 - t) ** 3;
@@ -606,6 +734,7 @@ function updatedText() {
 }
 
 // The list's price range cell: the range in the pair's chosen currency, with the switch to the other.
+/** @param {Row} r @param {Store} store */
 function rangeCell(r, store) {
   const flip = isFlipped(store, r);
   const p = sideOf(r, flip);
@@ -620,6 +749,7 @@ function rangeCell(r, store) {
 }
 
 // The same positions as a table, for comparing many at once.
+/** @param {Row[]} rows @param {Store} store */
 function poolTable(rows, store) {
   return h('div', { class: 'card mon-scroll' },
     h('table', { class: 'mon-table lp-table' },
@@ -636,8 +766,8 @@ function poolTable(rows, store) {
       h('tbody', null, rows.map((r) =>
         h('tr', {
           class: 'clickable',
-          onclick: (e) => {
-            if (!e.target.closest('a, button, select, input')) openDetail(store, r.ref);
+          onclick: (/** @type {MouseEvent} */ e) => {
+            if (!/** @type {Element} */ (e.target).closest('a, button, select, input')) openDetail(store, r.ref);
           },
         },
           h('td', null, h('div', { class: 'row' },
@@ -657,8 +787,10 @@ function poolTable(rows, store) {
 
 // The add form is built once and kept while it is open. A load re-renders the section each time a chain lands, and
 // a new form each time would drop what was typed, the focus and the last message.
+/** @type {AddForm | null} */
 let addEl = null;
 
+/** @param {Store} store */
 function openAdd(store) {
   view.adding = true;
   store.refresh();
@@ -670,6 +802,7 @@ function openAdd(store) {
   });
 }
 
+/** @param {Store} store */
 function closeAdd(store) {
   view.adding = false;
   addEl = null;
@@ -679,14 +812,17 @@ function closeAdd(store) {
 // Adds positions the board did not find: a link copied from the Uniswap app, or a number with its chain and
 // version. Each is saved in Settings, where it can be removed, and read straight away. The form stays open and
 // empty after each one, so several can be pasted in a row.
+/** @param {Store} store */
 function addForm(store) {
   if (addEl) return addEl;
   const message = h('div', { 'aria-live': 'polite' });
+  /** @param {'error' | 'ok'} tone @param {string} text */
   const say = (tone, text) => message.replaceChildren(notice({ tone, text }));
   const f = positionFields({ placeholder: 'https://app.uniswap.org/positions/v3/base/556505 or 556505' });
+  /** @param {SubmitEvent} e */
   const submit = (e) => {
     e.preventDefault();
-    const form = e.currentTarget;
+    const form = /** @type {AddForm} */ (e.currentTarget);
     const text = form.elements.position.value;
     const entry = parsePosition(text, Number(form.elements.chain.value), String(form.elements.version.value));
     const error = entry ? addPosition(store, entry) : positionError(text);
@@ -694,14 +830,15 @@ function addForm(store) {
       say('error', error);
       return form.elements.position.focus();
     }
-    const chain = chainOf(entry.chainId)?.name ?? `Chain ${entry.chainId}`;
-    say('ok', `Added ${chain} ${entry.version} #${entry.tokenId}. It shows here once it is read.`);
+    // No error means the entry was read.
+    const chain = chainOf(/** @type {Entry} */ (entry).chainId)?.name ?? `Chain ${/** @type {Entry} */ (entry).chainId}`;
+    say('ok', `Added ${chain} ${/** @type {Entry} */ (entry).version} #${/** @type {Entry} */ (entry).tokenId}. It shows here once it is read.`);
     form.elements.position.value = '';
     form.elements.position.dispatchEvent(new Event('input'));
     form.elements.position.focus();
     load(store, { again: true });
   };
-  addEl = h('form', { class: 'card panel stack lp-add', onsubmit: submit },
+  addEl = /** @type {AddForm} */ (h('form', { class: 'card panel stack lp-add', onsubmit: submit },
     h('h3', null, 'Add a position'),
     h('p', { class: 'muted small' }, 'For a position the board does not find: a v3 position held by an address not in your wallets, or a v4 position older than the node keeps. Paste its link from app.uniswap.org and the chain and version are read from it. A plain number needs both picked.'),
     f.input,
@@ -710,15 +847,17 @@ function addForm(store) {
       f.pickers,
       h('button', { type: 'submit', class: 'btn-small' }, 'Add'),
       h('button', { type: 'button', class: 'btn-small', onclick: () => closeAdd(store) }, 'Done')),
-    message);
+    message));
   return addEl;
 }
 
 // A re-render moves the kept add form into the new page, which takes the focus away from it. This puts the focus
 // and the caret back once the new page is on screen.
 function keepAddFocus() {
-  const el = document.activeElement;
+  // A field of the add form: an input has a caret, and the others only need focus().
+  const el = /** @type {HTMLInputElement | null} */ (document.activeElement);
   if (!addEl || !el || !addEl.contains(el)) return;
+  /** @type {[number | null, number | null] | null} */
   const caret = el.tagName === 'INPUT' ? [el.selectionStart, el.selectionEnd] : null;
   queueMicrotask(() => {
     // Something else may have taken the focus in between, such as the form after an add.
@@ -731,12 +870,19 @@ function keepAddFocus() {
 // ---- Fees collected: the log of collections, its averages and a chart over time ----
 
 const DAY_MS = 86400000;
+/** @type {Record<string, [number, string]>} */
 const FEE_RANGES = { today: [0, 'Today'], yesterday: [0, 'Yesterday'], all: [0, 'All time'], 7: [7, '7 days'], 30: [30, '30 days'], 90: [90, '90 days'], 365: [365, '1 year'], month: [0, 'This month'], lastmonth: [0, 'Last month'] };
 const FEE_RANGE_ORDER = ['today', 'yesterday', '7', '30', '90', '365', 'month', 'lastmonth', 'all'];
 // A range's start and its end (excluded) in ms; null for no bound. Months are calendar months in local time.
+/**
+ * @param {string} key @param {number} nowMs
+ * @returns {[number | null, number | null]}
+ */
 function feeRangeBounds(key, nowMs) {
   const now = new Date(nowMs);
+  /** @param {number} back */
   const monthStart = (back) => new Date(now.getFullYear(), now.getMonth() - back, 1).getTime();
+  /** @param {number} back */
   const dayStart = (back) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - back).getTime();
   if (key === 'today') return [dayStart(0), null];
   if (key === 'yesterday') return [dayStart(1), dayStart(0)];
@@ -745,19 +891,25 @@ function feeRangeBounds(key, nowMs) {
   const days = FEE_RANGES[key][0];
   return [days ? nowMs - days * DAY_MS : null, null];
 }
+/** @type {[string, string][]} */
 const FEE_GROUPS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month']];
 // Days by default; a year or more of days is too many bars, so 1 year and All time start on months.
+/** @param {string} range */
 const defaultFeeGroup = (range) => (range === '365' || range === 'all' ? 'month' : 'day');
 
 // Local calendar keys, so a collect late in the evening counts on its own day.
+/** @param {Date} d */
 const localDay = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+/** @param {Date} date @param {string} group */
 function bucketOf(date, group) {
   if (group === 'month') return localDay(date).slice(0, 7);
   if (group === 'week') return localDay(new Date(date.getFullYear(), date.getMonth(), date.getDate() - ((date.getDay() + 6) % 7))); // its Monday
   return localDay(date);
 }
 // Every bucket from the first to the last, so quiet days or months show as gaps rather than vanishing.
+/** @param {Date} from @param {Date} to @param {string} group */
 function bucketsBetween(from, to, group) {
+  /** @type {string[]} */
   const keys = [];
   const d = new Date(from.getFullYear(), from.getMonth(), group === 'month' ? 1 : from.getDate());
   if (group === 'week') d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
@@ -768,11 +920,13 @@ function bucketsBetween(from, to, group) {
   }
   return keys;
 }
+/** @param {string} key @param {string} group */
 const bucketLabel = (key, group) => (group === 'month'
   ? new Date(`${key}-01T00:00`).toLocaleDateString(undefined, { month: 'short', year: '2-digit' })
   : new Date(`${key}T00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
 
 // The full name of a bucket, for the chart's tooltip.
+/** @param {string} key @param {string} group */
 function bucketName(key, group) {
   if (group === 'month') return new Date(`${key}-01T00:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   const date = new Date(`${key}T00:00`).toLocaleDateString(undefined, { weekday: group === 'day' ? 'short' : undefined, month: 'short', day: 'numeric', year: 'numeric' });
@@ -780,8 +934,10 @@ function bucketName(key, group) {
 }
 
 // One bar's tooltip: its total, how many collections, and the positions that gave the most.
+/** @param {string} key @param {string} group @param {CollectEntry[]} list */
 function bucketTip(key, group, list) {
   const total = list.reduce((s, c) => s + (c.usd ?? 0), 0);
+  /** @type {Map<string, number>} */
   const byPos = new Map();
   for (const c of list) {
     const name = c.pair ? `${c.pair}${c.tokenId ? ` #${c.tokenId}` : ''}` : 'No position';
@@ -797,16 +953,20 @@ function bucketTip(key, group, list) {
   ];
 }
 
+/** @param {Store} store */
 const collectedOf = (store) => (store.get(COLLECTION)?.collected ?? []).map(named);
 
 // What the log holds per position, in USD, for the closed cards.
+/** @param {Store} store */
 function collectedByRef(store) {
+  /** @type {Map<string, number>} */
   const out = new Map();
   for (const c of collectedOf(store)) if (c.ref) out.set(c.ref, (out.get(c.ref) ?? 0) + (c.usd ?? 0));
   return out;
 }
 
 // A collect read from the chain or Etherscan would be read again, so its key is kept in `hidden`.
+/** @param {Store} store @param {CollectEntry} entry */
 function removeCollect(store, entry) {
   store.update(COLLECTION, (d) => {
     d.collected = (d.collected ?? []).filter((c) => c.id !== entry.id);
@@ -821,11 +981,13 @@ function removeCollect(store, entry) {
 }
 
 // Logs a collection by hand: one the board did not see, such as a collect with no read before it.
+/** @param {Store} store */
 function logForm(store) {
   const rows = [...state.rows].sort((a, b) => a.pair.localeCompare(b.pair));
+  /** @param {SubmitEvent} e */
   const submit = (e) => {
     e.preventDefault();
-    const form = new FormData(e.currentTarget);
+    const form = new FormData(/** @type {HTMLFormElement} */ (e.currentTarget));
     const usd = Number(String(form.get('usd')).replace(/[$,\s]/g, ''));
     const date = String(form.get('date'));
     if (!(usd > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -862,6 +1024,7 @@ function logForm(store) {
 }
 
 // A token's logo for a collection: from its position, or the addresses it saved, or any position with the symbol.
+/** @param {CollectEntry} c @param {string} sym */
 function collectLogo(c, sym) {
   const row = state.rows.find((r) => r.ref === c.ref);
   const i = c.sym0 === sym ? 0 : c.sym1 === sym ? 1 : -1;
@@ -870,6 +1033,7 @@ function collectLogo(c, sym) {
   if (addr && c.chainId) return logoMap.get(`${c.chainId}:${addr.toLowerCase()}`) ?? null;
   return symbolLogo(sym);
 }
+/** @param {string} sym */
 function symbolLogo(sym) {
   for (const r of state.rows) {
     if (r.sym0 === sym && tokenLogoOf(r, r.addr0)) return tokenLogoOf(r, r.addr0);
@@ -879,16 +1043,19 @@ function symbolLogo(sym) {
 }
 
 // The tokens of a collection, one per line with its logo.
+/** @param {CollectEntry} c */
 function tokenCell(c) {
   if (c.a0 == null) {
     const syms = tokensOf(c);
     return syms.length ? h('div', { class: 'lp-tokens muted' }, syms.map((t) => h('span', { class: 'lp-token' }, logo(symbolLogo(t), t, 'xs'), t))) : '';
   }
   return h('div', { class: 'lp-tokens' },
-    [[c.a0, c.sym0], [c.a1, c.sym1]].map(([n, sym]) => h('span', { class: n ? 'lp-token' : 'lp-token muted' }, logo(collectLogo(c, sym), sym, 'xs'), `${amount(n)} ${sym}`)));
+    // An entry with amounts has both, with their symbols.
+    /** @type {[number, string][]} */ ([[c.a0, c.sym0], [c.a1, c.sym1]]).map(([n, sym]) => h('span', { class: n ? 'lp-token' : 'lp-token muted' }, logo(collectLogo(c, sym), sym, 'xs'), `${amount(n)} ${sym}`)));
 }
 
 // Whether a collection's position is still open: a dot on the log, so closed positions stand out.
+/** @param {CollectEntry} c */
 function positionDot(c) {
   if (!c.ref) return null;
   const row = state.rows.find((r) => r.ref === c.ref);
@@ -905,7 +1072,9 @@ function positionDot(c) {
 // The searchable token filter: logo, symbol and count per token. Typing filters the list in place, without a
 // re-render, so the field keeps its focus.
 const picker = { open: false, query: '' };
+/** @type {((e: Event) => void) | null} */
 let pickerOutside = null;
+/** @param {Store} store */
 function closePicker(store) {
   picker.open = false;
   picker.query = '';
@@ -913,12 +1082,15 @@ function closePicker(store) {
   pickerOutside = null;
   store.refresh();
 }
+/** @param {Store} store @param {PickerOption[]} options */
 function tokenPicker(store, options) {
   const current = options.find((o) => o.value === view.feeToken) ?? options[0];
+  /** @param {string} value */
   const choose = (value) => {
     view.feeToken = value;
     closePicker(store);
   };
+  /** @param {PickerOption} o */
   const item = (o) => h('li', { role: 'option', 'aria-selected': String(o.value === view.feeToken) },
     h('button', { type: 'button', class: o.value === view.feeToken ? 'lp-picker-item active' : 'lp-picker-item', 'data-value': o.value, onclick: () => choose(o.value) },
       o.value === 'all' ? h('span', { class: 'logo xs lp-picker-all' }, icon('coins')) : logo(o.logo, o.label, 'xs'),
@@ -930,9 +1102,10 @@ function tokenPicker(store, options) {
     const shown = options.filter((o) => !q || o.value === 'all' || o.label.toLowerCase().includes(q));
     list.replaceChildren(...shown.map(item), ...(shown.length <= 1 && q ? [h('li', { class: 'muted small lp-picker-none' }, 'No token matches.')] : []));
   };
+  /** @param {number} step */
   const move = (step) => {
-    const items = [...list.querySelectorAll('.lp-picker-item')];
-    const at = items.indexOf(document.activeElement);
+    const items = /** @type {HTMLButtonElement[]} */ ([...list.querySelectorAll('.lp-picker-item')]);
+    const at = items.indexOf(/** @type {HTMLButtonElement} */ (document.activeElement));
     items[Math.max(0, Math.min(items.length - 1, at + step))]?.focus();
   };
   const search = h('input', {
@@ -942,25 +1115,25 @@ function tokenPicker(store, options) {
     'aria-label': 'Search tokens',
     value: picker.query,
     autocomplete: 'off',
-    oninput: (e) => {
-      picker.query = e.currentTarget.value;
+    oninput: (/** @type {Event} */ e) => {
+      picker.query = /** @type {HTMLInputElement} */ (e.currentTarget).value;
       fill();
     },
-    onkeydown: (e) => {
+    onkeydown: (/** @type {KeyboardEvent} */ e) => {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        list.querySelector('.lp-picker-item')?.focus();
+        /** @type {HTMLButtonElement | null} */ (list.querySelector('.lp-picker-item'))?.focus();
       } else if (e.key === 'Enter') {
         e.preventDefault();
-        const first = [...list.querySelectorAll('.lp-picker-item')].find((b) => b.dataset.value !== 'all' || !picker.query.trim());
-        if (first) choose(first.dataset.value);
+        const first = /** @type {HTMLButtonElement[]} */ ([...list.querySelectorAll('.lp-picker-item')]).find((b) => b.dataset.value !== 'all' || !picker.query.trim());
+        if (first) choose(/** @type {string} */ (first.dataset.value));
       }
     },
   });
   fill();
   const wrap = h('div', {
     class: picker.open ? 'lp-picker open' : 'lp-picker',
-    onkeydown: (e) => {
+    onkeydown: (/** @type {KeyboardEvent} */ e) => {
       if (e.key === 'Escape' && picker.open) {
         e.stopPropagation();
         closePicker(store);
@@ -979,7 +1152,7 @@ function tokenPicker(store, options) {
         if (picker.open) return closePicker(store);
         picker.open = true;
         pickerOutside = (e) => {
-          if (!e.target.closest?.('.lp-picker')) closePicker(store);
+          if (!/** @type {Element} */ (e.target).closest?.('.lp-picker')) closePicker(store);
         };
         document.addEventListener('pointerdown', pickerOutside, true);
         store.refresh();
@@ -994,9 +1167,10 @@ function tokenPicker(store, options) {
 
 // A re-render while the picker is open builds a new search field; this gives it the focus once the page is on
 // screen, unless the focus was elsewhere on the page.
+/** @param {HTMLElement} root */
 function keepPickerFocus(root) {
   if (!picker.open) return;
-  const input = root.querySelector('.lp-picker-search');
+  const input = /** @type {HTMLInputElement | null} */ (root.querySelector('.lp-picker-search'));
   const active = document.activeElement;
   if (!input || (active && active !== document.body && !active.closest?.('.lp-picker'))) return;
   queueMicrotask(() => {
@@ -1008,14 +1182,19 @@ function keepPickerFocus(root) {
 }
 
 const COLLECT_TITLE = 'The fees in this collect, without the liquidity it paid out, at the token prices of that day.';
+/** @param {number} n @param {string} word */
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+/** @type {Record<string, string>} */
 const SOURCE_NAMES = { chain: 'From the chain', etherscan: 'From Etherscan', auto: 'Seen by the board', manual: 'Logged by hand' };
+/** @param {CollectEntry} c */
 const sourceOf = (c) => (Object.hasOwn(SOURCE_NAMES, c.source) ? c.source : 'auto');
 // The tokens of a collection: its symbols, or the pair's for one logged by hand.
-const tokensOf = (c) => [...new Set(c.sym0 ? [c.sym0, c.sym1] : String(c.pair ?? '').split('/').map((t) => t.trim()).filter(Boolean))];
+/** @param {CollectEntry} c */
+const tokensOf = (c) => [...new Set(c.sym0 ? /** @type {string[]} */ ([c.sym0, c.sym1]) : String(c.pair ?? '').split('/').map((t) => t.trim()).filter(Boolean))];
 
 // What each column of the log sorts by, and the direction it starts in.
+/** @type {Record<string, { value: (c: CollectEntry) => string | number | null, dir: number }>} */
 const FEE_SORTS = {
   date: { value: (c) => c.at, dir: -1 },
   chain: { value: (c) => c.chain || null, dir: 1 },
@@ -1026,18 +1205,23 @@ const FEE_SORTS = {
 };
 
 // Rows without the value sorted on go last; ties fall back to the newest first.
+/** @param {CollectEntry[]} list @param {string} key @param {number} dir */
 function sortCollects(list, key, dir) {
   const read = FEE_SORTS[key].value;
-  const cmp = (a, b) => (typeof a === 'string' ? a.localeCompare(b) : a < b ? -1 : a > b ? 1 : 0);
+  // Both values come from the same sort, so they are of one kind.
+  /** @param {string | number} a @param {string | number} b */
+  const cmp = (a, b) => (typeof a === 'string' ? a.localeCompare(/** @type {string} */ (b)) : a < /** @type {number} */ (b) ? -1 : a > /** @type {number} */ (b) ? 1 : 0);
   return list.sort((x, y) => {
     const a = read(x);
     const b = read(y);
     const missing = (a == null ? 1 : 0) - (b == null ? 1 : 0);
     if (missing) return missing;
-    return (a == null ? 0 : dir * cmp(a, b)) || y.at.localeCompare(x.at);
+    // Here b is set too: a missing one returned above.
+    return (a == null ? 0 : dir * cmp(a, /** @type {string | number} */ (b))) || y.at.localeCompare(x.at);
   });
 }
 
+/** @param {Store} store @param {string} key @param {string} label @param {Record<string, string>} [attrs] */
 function feeSortHead(store, key, label, attrs = {}) {
   const on = view.feeSort === key;
   return h('th', { ...attrs, 'aria-sort': on ? (view.feeDir > 0 ? 'ascending' : 'descending') : null },
@@ -1053,6 +1237,7 @@ function feeSortHead(store, key, label, attrs = {}) {
 }
 
 // A token's logo from the collections that hold it, for the token picker.
+/** @param {CollectEntry[]} list @param {string} sym */
 function tokenLogoIn(list, sym) {
   for (const c of list) {
     if (c.sym0 === sym || c.sym1 === sym) {
@@ -1064,24 +1249,29 @@ function tokenLogoIn(list, sym) {
 }
 
 // The chain, token and source filters, each read from the log so only choices with collections show.
+/** @param {Store} store @param {CollectEntry[]} inRange */
 function feeFilters(store, inRange) {
+  /** @param {(c: CollectEntry) => boolean} pred */
   const count = (pred) => inRange.filter(pred).length;
+  /** @param {boolean} active @param {string} label @param {number} n @param {() => void} onclick @param {string | null} [logoSrc] */
   const chip = (active, label, n, onclick, logoSrc = null) => h('button', {
     type: 'button',
     class: active ? 'lp-chip chain active' : 'lp-chip chain',
     'aria-pressed': String(active),
     onclick,
   }, logoSrc ? logo(logoSrc, label, 'xs') : null, label, h('span', { class: 'chip-count' }, n));
+  /** @param {'feeChain' | 'feeToken' | 'feeSource'} key @param {string} value */
   const set = (key, value) => () => {
     view[key] = value;
     store.refresh();
   };
-  const chains = [...new Set(inRange.map((c) => c.chain).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const chains = [...new Set(/** @type {string[]} */ (inRange.map((c) => c.chain).filter(Boolean)))].sort((a, b) => a.localeCompare(b));
   const tokens = [...new Set(inRange.flatMap(tokensOf))].sort((a, b) => a.localeCompare(b));
   const sources = Object.keys(SOURCE_NAMES).filter((k) => inRange.some((c) => sourceOf(c) === k));
+  /** @param {'feeChain' | 'feeToken' | 'feeSource'} key @param {string} label @param {[string, string][]} options */
   const select = (key, label, options) => h('select', {
     'aria-label': label,
-    onchange: (e) => set(key, e.currentTarget.value)(),
+    onchange: (/** @type {Event} */ e) => set(key, /** @type {HTMLSelectElement} */ (e.currentTarget).value)(),
   }, options.map(([value, text]) => h('option', { value, selected: view[key] === value }, text)));
   return h('div', { class: 'row lp-filters' },
     chains.length > 1 ? [
@@ -1092,18 +1282,21 @@ function feeFilters(store, inRange) {
       { value: 'all', label: 'All tokens', count: inRange.length, logo: null },
       ...tokens.map((t) => ({ value: t, label: t, count: count((c) => tokensOf(c).includes(t)), logo: tokenLogoIn(inRange, t) })),
     ]) : null,
-    sources.length > 1 ? select('feeSource', 'Source', [['all', 'All sources'], ...sources.map((k) => [k, `${SOURCE_NAMES[k]} (${count((c) => sourceOf(c) === k)})`])]) : null);
+    sources.length > 1 ? select('feeSource', 'Source', [['all', 'All sources'], ...sources.map((k) => /** @type {[string, string]} */ ([k, `${SOURCE_NAMES[k]} (${count((c) => sourceOf(c) === k)})`]))]) : null);
 }
 
 // A share as a percent that only reads 100% when the search is complete.
+/** @param {number} x */
 const coveragePct = (x) => (x >= 1 ? '100%' : `${Math.min(99.9, Math.floor(x * 1000) / 10)}%`);
 const COVERAGE_TITLE = 'How far the search for collect events has got, over every position shown, open and closed. A position counts in full once its search reached the transaction that opened it, or once Etherscan read every transaction of its wallet. Until then, the share of blocks searched back. Each load searches further.';
 
 // How sure the log is to hold every collect: the search coverage, for all chains and per chain.
+/** @param {Store} store */
 function coverageCard(store) {
   const cov = collectCoverage(store);
   if (!cov.total) return null;
   const busy = searching.size > 0 || loading;
+  /** @param {number} x */
   const meter = (x) => h('div', { class: 'meter', role: 'presentation' }, h('span', { style: { width: `${x * 100}%` } }));
   const status = busy ? 'Searching…' : cov.pct >= 1 ? 'Every collect found' : 'Searches further on each load';
   // Collapsed by default to a one-line recap; the per-chain detail opens on demand.
@@ -1121,6 +1314,7 @@ function coverageCard(store) {
     h('span', { class: 'muted small lp-coverage-recap' }, view.coverageOpen ? status : `${cov.done}/${cov.total} positions · ${status}`),
     h('span', { class: 'sort-mark' }, icon(view.coverageOpen ? 'chevron-up' : 'chevron-down')));
   // What each chain is searching now: one line per position read at the same time.
+  /** @param {number} chainId */
   const now = (chainId) => activityLines(chainId).map((text) => h('p', { class: 'muted small lp-coverage-now' }, text));
   if (!view.coverageOpen) {
     return h('section', { class: 'card lp-coverage collapsed', title: COVERAGE_TITLE },
@@ -1155,6 +1349,7 @@ function coverageCard(store) {
 // ---- Fees collected insights: outlook, running total, pace, breakdown and calendar ----
 
 // When a bucket ends, in ms, so an estimate can be read at the end of each future bucket.
+/** @param {string} key @param {string} group */
 function bucketEnd(key, group) {
   if (group === 'month') {
     const d = new Date(`${key}-01T00:00`);
@@ -1163,25 +1358,32 @@ function bucketEnd(key, group) {
   const d = new Date(`${key}T00:00`);
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + (group === 'week' ? 7 : 1)).getTime();
 }
+/** @param {CollectEntry[]} list */
 const sumUsd = (list) => list.reduce((s, c) => s + (c.usd ?? 0), 0);
+/** @param {CollectEntry[]} list @param {number} from @param {number} to */
 const sumBetween = (list, from, to) => sumUsd(list.filter((c) => {
   const t = Date.parse(c.at);
   return t >= from && t < to;
 }));
+/** @param {number} now @param {number} before */
 const signedChange = (now, before) => (before > 0 ? signedPct((now / before - 1) * 100) : now > 0 ? 'New' : '—');
 // The round totals worth a note, from $100 up.
+/** @param {number} total */
 function nextMilestone(total) {
   for (let base = 100; base < 1e12; base *= 10) {
     for (const m of [1, 2.5, 5]) if (base * m > total) return base * m;
   }
   return null;
 }
+/** @param {number} ms */
 const shortDate = (ms) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: new Date(ms).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
 
 // The outlook tiles: how this range compares with the one before, what the month and year should end on, the
 // next round total, and how often fees get collected.
+/** @param {FeeCtx} ctx */
 function feeOutlook(ctx) {
   const { list, pool, start, end, from, nowMs, stat } = ctx;
+  /** @type {HTMLElement[]} */
   const tiles = [];
   if (from !== null) {
     const len = end - start;
@@ -1202,7 +1404,8 @@ function feeOutlook(ctx) {
   const lifetime = sumUsd(pool);
   // A round milestone in the shown currency, kept in USD like the rest.
   const k = shownRate() ?? 1;
-  const goal = nextMilestone(lifetime * k) / k;
+  // null only past 1e12, which a fee log does not reach.
+  const goal = /** @type {number} */ (nextMilestone(lifetime * k)) / k;
   if (goal) {
     const days = rate30 > 0 ? (goal - lifetime) / rate30 : null;
     tiles.push(stat(`Next ${cash(goal)}`, days === null ? '—' : days < 1 ? 'Today' : `~${plural(Math.ceil(days), 'day')}`,
@@ -1219,16 +1422,19 @@ function feeOutlook(ctx) {
   }
   const priced = list.filter((c) => c.usd != null);
   if (priced.length) {
-    const largest = priced.reduce((a, c) => (a.usd >= c.usd ? a : c));
-    tiles.push(stat('Average collect', cash(sumUsd(priced) / priced.length), `Largest ${cash(largest.usd)} on ${shortDate(Date.parse(largest.at))}`));
+    // Every entry here has a value.
+    const largest = priced.reduce((a, c) => (/** @type {number} */ (a.usd) >= /** @type {number} */ (c.usd) ? a : c));
+    tiles.push(stat('Average collect', cash(sumUsd(priced) / priced.length), `Largest ${cash(/** @type {number} */ (largest.usd))} on ${shortDate(Date.parse(largest.at))}`));
   }
   return h('div', { class: 'lp-stats' }, tiles);
 }
 
 // The running total over the range, with a dashed estimate past today at the range's own pace.
+/** @param {FeeCtx} ctx */
 function cumulativeChart(ctx) {
   const { list, start, end, to, perDay, nowMs, group } = ctx;
   const keys = bucketsBetween(new Date(start), new Date(end - 1), group);
+  /** @type {Map<string, number>} */
   const sums = new Map();
   for (const c of list) {
     const k = bucketOf(new Date(c.at), group);
@@ -1239,6 +1445,7 @@ function cumulativeChart(ctx) {
   const total = run;
   // Only a range that runs to now looks ahead: about a third of its length, at least a few buckets.
   const ahead = to === null && perDay > 0 && keys.length ? Math.max(3, Math.ceil(keys.length / 3)) : 0;
+  /** @type {string[]} */
   const future = [];
   if (ahead) {
     const last = keys[keys.length - 1];
@@ -1252,6 +1459,7 @@ function cumulativeChart(ctx) {
   const all = [...keys, ...future];
   // The estimate starts on the last real point, so the two lines join.
   const estimate = all.map((k, i) => (i < keys.length - 1 ? null : i === keys.length - 1 ? total : total + perDay * ((bucketEnd(k, group) - nowMs) / DAY_MS)));
+  /** @type {import('../chart.js').LineSeries[]} */
   const series = [{ name: 'Collected', color: 'var(--accent)', values: [...actual, ...future.map(() => null)], area: true }];
   if (ahead) series.push({ name: 'Estimate', color: 'var(--income)', values: estimate, dashed: true });
   const chart = lineChart(all.map((k) => bucketLabel(k, group)), series, {
@@ -1260,17 +1468,20 @@ function cumulativeChart(ctx) {
       h('span', { class: 'muted' }, bucketName(all[i], group)),
       i < keys.length
         ? [h('strong', null, cash(actual[i])), h('span', { class: 'muted' }, `+${cash(sums.get(all[i]) ?? 0)} this ${group}`)]
-        : [h('strong', null, cash(estimate[i])), h('span', { class: 'muted' }, 'Estimate at this range\'s pace')],
+        : [h('strong', null, cash(/** @type {number} */ (estimate[i]))), h('span', { class: 'muted' }, 'Estimate at this range\'s pace')],
     ],
   });
-  const note = ahead ? `About ${cash(estimate[estimate.length - 1])} by the end of ${bucketName(future[future.length - 1], group)}` : cash(total);
+  // The estimate is set from the last real point on.
+  const note = ahead ? `About ${cash(/** @type {number} */ (estimate[estimate.length - 1]))} by the end of ${bucketName(future[future.length - 1], group)}` : cash(total);
   return panel('Running total', note, chart, legend(series));
 }
 
 // The pace of fees per day: a short and a long rolling average, so a speed-up or slow-down shows early.
+/** @param {FeeCtx} ctx */
 function paceChart(ctx) {
   const { pool, end, spanDays } = ctx;
   const shown = Math.min(365, Math.max(30, Math.round(spanDays)));
+  /** @type {Map<string, number>} */
   const daily = new Map();
   for (const c of pool) {
     const k = localDay(new Date(c.at));
@@ -1279,6 +1490,7 @@ function paceChart(ctx) {
   // 29 days before the first shown day, so the 30-day average is whole from the start.
   const keys = bucketsBetween(new Date(end - (shown + 29) * DAY_MS), new Date(end - 1), 'day');
   const vals = keys.map((k) => daily.get(k) ?? 0);
+  /** @param {number} n */
   const rolling = (n) => vals.map((_, i) => (i < n - 1 ? null : vals.slice(i - n + 1, i + 1).reduce((s, v) => s + v, 0) / n));
   const r7 = rolling(7).slice(29);
   const r30 = rolling(30).slice(29);
@@ -1312,23 +1524,27 @@ function paceChart(ctx) {
 const FEE_SPLITS = [['position', 'Position'], ['chain', 'Chain'], ['token', 'Token'], ['source', 'Source']];
 // A collection's USD value split between its tokens: by their value at the position's current prices when the
 // amounts and prices are known, else all to the only token collected, else evenly. amount is null when not logged.
+/** @param {CollectEntry} c */
 function tokenShares(c) {
   const usd = c.usd ?? 0;
   if (c.a0 != null && c.sym0) {
     const row = state.rows.find((r) => r.ref === c.ref);
     const v0 = row?.p0 != null ? c.a0 * row.p0 : null;
-    const v1 = row?.p1 != null ? c.a1 * row.p1 : null;
+    // An entry with amounts has both.
+    const v1 = row?.p1 != null ? /** @type {number} */ (c.a1) * row.p1 : null;
     const w0 = v0 != null && v1 != null && v0 + v1 > 0 ? v0 / (v0 + v1) : !c.a1 ? 1 : !c.a0 ? 0 : 0.5;
-    return [{ sym: c.sym0, usd: usd * w0, amount: c.a0 }, { sym: c.sym1, usd: usd * (1 - w0), amount: c.a1 }];
+    return [{ sym: c.sym0, usd: usd * w0, amount: c.a0 }, { sym: /** @type {string} */ (c.sym1), usd: usd * (1 - w0), amount: c.a1 }];
   }
   const syms = tokensOf(c);
   return syms.map((sym) => ({ sym, usd: usd / syms.length, amount: null }));
 }
 
 // Where the range's fees came from: each position, chain or source with its share, the largest first.
+/** @param {Store} store @param {FeeCtx} ctx */
 function breakdown(store, ctx) {
   const { list } = ctx;
   const split = view.feeSplit ?? 'position';
+  /** @type {Map<string, FeeGroup>} */
   const groups = new Map();
   for (const c of split === 'token' ? [] : list) {
     const [key, label] = split === 'chain' ? [c.chain || '', c.chain || 'No chain']
@@ -1367,15 +1583,17 @@ function breakdown(store, ctx) {
       store.refresh();
     },
   }, label)));
+  /** @param {FeeGroup} g */
   const name = (g) => {
     if (split === 'token' && g.key) return h('span', { class: 'lp-token' }, logo(tokenLogoIn(list, g.key), g.label, 'xs'), g.label);
     if (split === 'chain' && g.key) return h('span', { class: 'chain-chip' }, logo(CHAINS.find((x) => x.name === g.key)?.logo, g.label, 'xs'), g.label);
     if (split === 'position' && g.sample?.ref) {
       return h('span', { class: 'lp-pos' }, positionDot(g.sample),
-        h('button', { type: 'button', class: 'link-btn', title: 'See this position', onclick: () => openDetail(store, g.sample.ref) }, g.label));
+        h('button', { type: 'button', class: 'link-btn', title: 'See this position', onclick: () => openDetail(store, /** @type {string} */ (g.sample?.ref)) }, g.label));
     }
     return h('span', null, g.label);
   };
+  /** @param {number} usd */
   const share = (usd) => (total > 0 ? pct(usd / total) : '—');
   const lead = rows[0];
   return h('section', { class: 'card stack lp-panel' },
@@ -1392,8 +1610,10 @@ function breakdown(store, ctx) {
 
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 // Each day of the last 26 weeks as a square, darker for more fees: streaks and quiet spells at a glance.
+/** @param {FeeCtx} ctx */
 function feeCalendar(ctx) {
   const { pool, nowMs } = ctx;
+  /** @type {Map<string, { usd: number, n: number }>} */
   const daily = new Map();
   for (const c of pool) {
     const k = localDay(new Date(c.at));
@@ -1408,6 +1628,7 @@ function feeCalendar(ctx) {
   const sorted = shown.filter((v) => v > 0).sort((a, b) => a - b);
   if (!sorted.length) return panel('Last 26 weeks', null, h('p', { class: 'muted small' }, 'No collects in the last 26 weeks.'));
   const q = [0.25, 0.5, 0.75].map((p) => sorted[Math.floor(p * (sorted.length - 1))]);
+  /** @param {number} v */
   const level = (v) => (v <= 0 ? 0 : v <= q[0] ? 1 : v <= q[1] ? 2 : v <= q[2] ? 3 : 4);
   const byWeekday = WEEKDAYS.map(() => 0);
   keys.forEach((k, i) => { byWeekday[(new Date(`${k}T00:00`).getDay() + 6) % 7] += shown[i]; });
@@ -1430,6 +1651,7 @@ function feeCalendar(ctx) {
       h('span', { class: 'fee-cal-key', 'aria-hidden': 'true' }, 'Less', [0, 1, 2, 3, 4].map((l) => h('span', { class: `fee-cal-day l${l}` })), 'More')));
 }
 
+/** @param {Store} store @param {FeeCtx} ctx */
 function feeInsights(store, ctx) {
   return [
     h('section', { class: 'stack' }, h('h3', null, 'Outlook'), feeOutlook(ctx)),
@@ -1438,14 +1660,16 @@ function feeInsights(store, ctx) {
   ];
 }
 
+/** @param {Store} store */
 function feesView(store) {
   const all = [...collectedOf(store)].sort((a, b) => b.at.localeCompare(a.at));
   const nowMs = Date.now();
-  const [todayStart] = feeRangeBounds('today', nowMs);
+  const [todayStart] = /** @type {[number, null]} */ (feeRangeBounds('today', nowMs));
   const anyToday = all.some((c) => Date.parse(c.at) >= todayStart);
-  const [yesterdayStart] = feeRangeBounds('yesterday', nowMs);
+  const [yesterdayStart] = /** @type {[number, number]} */ (feeRangeBounds('yesterday', nowMs));
   const anyYesterday = all.some((c) => Date.parse(c.at) >= yesterdayStart && Date.parse(c.at) < todayStart);
   // Today and Yesterday only show when they have collects, or when picked.
+  /** @type {Record<string, boolean>} */
   const shown = { today: anyToday, yesterday: anyYesterday };
   // With no range picked, open on Today when something was collected today, else on 7 days.
   if (view.feeAuto) view.feeRange = anyToday ? 'today' : '7';
@@ -1455,6 +1679,7 @@ function feesView(store) {
   if (!inRange.some((c) => c.chain === view.feeChain)) view.feeChain = 'all';
   if (!inRange.some((c) => tokensOf(c).includes(view.feeToken))) view.feeToken = 'all';
   if (!inRange.some((c) => sourceOf(c) === view.feeSource)) view.feeSource = 'all';
+  /** @param {CollectEntry} c */
   const matches = (c) => (view.feeChain === 'all' || c.chain === view.feeChain)
     && (view.feeToken === 'all' || tokensOf(c).includes(view.feeToken))
     && (view.feeSource === 'all' || sourceOf(c) === view.feeSource);
@@ -1472,8 +1697,10 @@ function feesView(store) {
   const spanDays = Math.max(1, (end - start) / DAY_MS);
   const perDay = total / spanDays;
 
+  /** @type {Stat} */
   const stat = (label, value, hint = null) => h('div', { class: 'card lp-stat' },
     h('span', { class: 'muted' }, label), h('strong', null, value), hint ? h('span', { class: 'muted small' }, hint) : null);
+  /** @param {[string, string][]} items @param {string} current @param {(key: string) => void} set */
   const pills = (items, current, set) => h('div', { class: 'row lp-filters' }, items.map(([key, label]) =>
     h('button', {
       type: 'button',
@@ -1485,9 +1712,12 @@ function feesView(store) {
       },
     }, label)));
 
+  /** @type {Child} */
   let chart = null;
   if (list.length) {
+    /** @type {Map<string, number>} */
     const sums = new Map();
+    /** @type {Map<string, CollectEntry[]>} */
     const groups = new Map();
     for (const c of list) {
       const key = bucketOf(new Date(c.at), view.feeGroup);
@@ -1525,13 +1755,13 @@ function feesView(store) {
             ? h('div', { class: 'lp-pos' },
                 positionDot(c),
                 c.ref
-                  ? h('button', { type: 'button', class: 'link-btn', title: 'See this position', onclick: () => openDetail(store, c.ref) }, c.pair)
+                  ? h('button', { type: 'button', class: 'link-btn', title: 'See this position', onclick: () => openDetail(store, /** @type {string} */ (c.ref)) }, c.pair)
                   : h('strong', null, c.pair))
             : h('span', { class: 'muted' }, '—'),
           h('div', { class: 'muted small' }, [c.tokenId ? `#${c.tokenId}` : '', c.note].filter(Boolean).join(' · '))),
         h('td', { class: 'small' }, tokenCell(c)),
         h('td', { class: 'small muted', title: c.tx ?? null }, SOURCE_NAMES[sourceOf(c)]),
-        h('td', { class: 'num', title: { auto: 'The unclaimed fees at the read before the collect. Fees earned after that read are not counted.', chain: COLLECT_TITLE, etherscan: COLLECT_TITLE }[c.source] ?? null }, usdOrDash(c.usd ?? null)),
+        h('td', { class: 'num', title: /** @type {Record<string, string>} */ ({ auto: 'The unclaimed fees at the read before the collect. Fees earned after that read are not counted.', chain: COLLECT_TITLE, etherscan: COLLECT_TITLE })[c.source] ?? null }, usdOrDash(c.usd ?? null)),
         h('td', null, h('button', {
           type: 'button',
           class: 'icon-btn',
@@ -1542,7 +1772,7 @@ function feesView(store) {
 
   return h('div', { class: 'stack-lg' },
     h('div', { class: 'row between' },
-      pills(FEE_RANGE_ORDER.filter((k) => (shown[k] ?? true) || view.feeRange === k).map((k) => [k, FEE_RANGES[k][1]]), view.feeRange, (k) => { view.feeRange = k; view.feeAuto = false; view.feeGroup = defaultFeeGroup(k); }),
+      pills(FEE_RANGE_ORDER.filter((k) => (shown[k] ?? true) || view.feeRange === k).map((k) => /** @type {[string, string]} */ ([k, FEE_RANGES[k][1]])), view.feeRange, (k) => { view.feeRange = k; view.feeAuto = false; view.feeGroup = defaultFeeGroup(k); }),
       view.logging ? null : h('button', {
         type: 'button',
         class: 'btn-small',
@@ -1562,7 +1792,7 @@ function feesView(store) {
       stat('Per year', cash(perDay * 365))),
     coverageCard(store),
     Object.keys(store.get(COLLECTION)?.etherscanErrors ?? {}).length
-      ? notice({ tone: 'info', text: `Etherscan could not be read for ${Object.entries(store.get(COLLECTION).etherscanErrors).map(([name, text]) => `${name} (${text})`).join(', ')}. Collects there come from the node only.` })
+      ? notice({ tone: 'info', text: `Etherscan could not be read for ${Object.entries(/** @type {Record<string, string>} */ (store.get(COLLECTION).etherscanErrors)).map(([name, text]) => `${name} (${text})`).join(', ')}. Collects there come from the node only.` })
       : null,
     unpriced ? h('p', { class: 'muted small' }, `${plural(unpriced, 'collection')} without a USD value (prices were unavailable) ${unpriced === 1 ? 'is' : 'are'} left out of the totals.`) : null,
     list.length
@@ -1582,6 +1812,7 @@ function feesView(store) {
 
 // The detail page plays its entrance motion once when it opens, not on each redraw while it is shown.
 let detailEnter = false;
+/** @param {Store} store @param {string} ref */
 function openDetail(store, ref) {
   view.detailFrom = view.tab === 'fees' ? 'fees' : 'positions';
   view.detail = ref;
@@ -1590,16 +1821,22 @@ function openDetail(store, ref) {
   store.refresh();
   window.scrollTo({ top: 0 });
 }
+/** @param {Store} store */
 function closeDetail(store) {
   view.detail = null;
   view.tab = view.detailFrom ?? view.tab;
   store.refresh();
 }
 
+/** @param {Store} store @param {number} chainId @param {string} kind @param {string | null | undefined} id */
 const explorerLink = (store, chainId, kind, id) => (/^0x[0-9a-fA-F]{40}$/.test(id ?? '') ? explorerUrl(chainById(store.get('settings'), chainId), kind, id) : null);
 
 // The row for a position: as read now, or from any saved read, so a position whose wallet was removed still
 // shows its range and holdings, marked as from that read.
+/**
+ * @param {Store} store @param {string} ref
+ * @returns {PositionRow | null}
+ */
 function detailRow(store, ref) {
   const now = state.rows.find((r) => r.ref === ref);
   if (now) return now;
@@ -1614,6 +1851,7 @@ const HOUR = 3600;
 
 // What a position earned over the last secs seconds, from the hours saved for fee APR, at today's prices.
 // covered: the seconds those hours span, so a part-covered window is said as such.
+/** @param {Store} store @param {Row} r @param {number} secs */
 function earnedOver(store, r, secs) {
   const hours = store.get(COLLECTION)?.earned?.[r.ref];
   if (!hours || r.p0 == null || r.p1 == null) return null;
@@ -1629,13 +1867,16 @@ function earnedOver(store, r, secs) {
   }
   if (!n) return null;
   const covered = n * HOUR;
-  return { usd, covered, apr: r.value > 0 ? (usd / r.value) * (YEAR_MS / (covered * 1000)) : null };
+  // null > 0 is false.
+  return { usd, covered, apr: /** @type {number} */ (r.value) > 0 ? (usd / /** @type {number} */ (r.value)) * (YEAR_MS / (covered * 1000)) : null };
 }
 
 // What a position earned per day over the last 30 days, from the saved hours, at today's prices.
+/** @param {Store} store @param {Row} r */
 function earnedChart(store, r) {
   const hours = store.get(COLLECTION)?.earned?.[r.ref];
   if (!hours || r.p0 == null || r.p1 == null) return null;
+  /** @type {Map<string, { a0: number, a1: number, hours: number }>} */
   const days = new Map();
   const since = Date.now() - 30 * DAY_MS;
   for (const [hour, [h0, h1]] of Object.entries(hours)) {
@@ -1648,7 +1889,9 @@ function earnedChart(store, r) {
   if (!days.size) return null;
   const first = [...days.keys()].sort()[0];
   const keys = bucketsBetween(new Date(`${first}T00:00`), new Date(), 'day');
-  const usd = (d) => (d ? d.a0 * r.p0 + d.a1 * r.p1 : 0);
+  /** @param {{ a0: number, a1: number } | undefined} d */
+  // Both prices were checked above.
+  const usd = (d) => (d ? d.a0 * /** @type {number} */ (r.p0) + d.a1 * /** @type {number} */ (r.p1) : 0);
   const total = [...days.values()].reduce((s, d) => s + usd(d), 0);
   const chart = barChart(keys.map((k) => bucketLabel(k, 'day')), [{ name: 'Earned', color: 'var(--income)', values: keys.map((k) => usd(days.get(k))) }], {
     format: (v) => cash(v),
@@ -1667,6 +1910,7 @@ function earnedChart(store, r) {
 }
 
 // A section card with a title, an optional note on the right, and its content.
+/** @param {string} title @param {Child} note @param {...Child} children */
 function panel(title, note, ...children) {
   return h('section', { class: 'card stack lp-panel' },
     h('div', { class: 'lp-panel-head' }, h('h3', null, title), note ? h('span', { class: 'muted small' }, note) : null),
@@ -1674,11 +1918,14 @@ function panel(title, note, ...children) {
 }
 
 // How far the price moves, as a percent, to reach a price.
+/** @param {number} from @param {number} to */
 const moveTo = (from, to) => (from > 0 && to > 0 && Number.isFinite(to) ? (to / from - 1) * 100 : null);
+/** @param {number | null} x */
 const signedPct = (x) => (x == null ? '—' : `${x > 0 ? '+' : ''}${Math.abs(x) >= 100 ? x.toFixed(0) : x.toFixed(1)}%`);
 
 // The range on a price scale wider than it, so the price shows where it sits even out of range. Log scale:
 // prices move in ratios.
+/** @param {PositionRow} r @param {Side} p */
 function rangeScale(r, p) {
   const lo = Math.log(p.min);
   const hi = Math.log(p.max);
@@ -1686,6 +1933,7 @@ function rangeScale(r, p) {
   const pad = Math.max((hi - lo) * 0.45, 0.02);
   const from = Math.min(lo - pad, cur - pad / 2);
   const to = Math.max(hi + pad, cur + pad / 2);
+  /** @param {number} x */
   const at = (x) => ((x - from) / (to - from)) * 100;
   const kind = r.closed ? 'closed' : r.inRange ? 'in' : 'out';
   return h('div', { class: `rv rv-${kind}`, role: 'img', 'aria-label': `Range ${price(p.min)} to ${price(p.max)} ${p.unit}, price now ${price(p.current)}` },
@@ -1701,9 +1949,11 @@ function rangeScale(r, p) {
 }
 
 // The price range: the scale, the bounds, the room to each edge, the width and the ticks.
+/** @param {Store} store @param {Row} r */
 function detailRange(store, r) {
   const flip = isFlipped(store, r);
   const p = sideOf(r, flip);
+  /** @param {string} note */
   const head = (note) => h('div', { class: 'lp-panel-head' },
     h('h3', null, 'Price range'),
     h('span', { class: 'row muted small' }, note, r.full ? null : flipButton(store, r, flip)));
@@ -1724,6 +1974,7 @@ function detailRange(store, r) {
       : p.current < p.min
         ? `Out of range, below. The price needs ${signedPct(down)} to reach it again.`
         : `Out of range, above. The price needs ${signedPct(up)} to reach it again.`;
+  /** @param {string} label @param {string} value @param {string} hint @param {string} [cls] */
   const box = (label, value, hint, cls = '') => h('div', { class: `mini ${cls}` }, h('span', { class: 'muted small' }, label), h('strong', null, value), h('span', { class: 'muted small' }, hint));
   return h('section', { class: 'card stack lp-panel' },
     head(`${p.unit} per ${p.base}`),
@@ -1739,8 +1990,10 @@ function detailRange(store, r) {
 }
 
 // What the position holds: each token's amount, value and share, then the unclaimed fees.
+/** @param {Row} r */
 function detailHoldings(r) {
-  const total = r.value > 0 ? r.value : null;
+  const total = /** @type {number} */ (r.value) > 0 ? r.value : null; // null > 0 is false
+  /** @param {string} addr @param {string} sym @param {number} n @param {number | null} px @param {number | null} [share] */
   const line = (addr, sym, n, px, share = null) => h('li', null,
     h('span', { class: 'lp-token' }, logo(tokenLogoOf(r, addr), sym, 'xs'), h('strong', null, sym)),
     h('span', { class: 'num' }, amount(n)),
@@ -1750,8 +2003,9 @@ function detailHoldings(r) {
   const fees = typeof r.fee0 === 'number';
   return panel('Holdings', total ? cash(total) : null,
     h('ul', { class: 'lp-holdings' },
-      line(r.addr0, r.sym0, r.a0, r.p0, total ? (r.a0 * r.p0) / total : null),
-      line(r.addr1, r.sym1, r.a1, r.p1, total ? (r.a1 * r.p1) / total : null)),
+      // A value means both prices are known.
+      line(r.addr0, r.sym0, r.a0, r.p0, total ? (r.a0 * /** @type {number} */ (r.p0)) / total : null),
+      line(r.addr1, r.sym1, r.a1, r.p1, total ? (r.a1 * /** @type {number} */ (r.p1)) / total : null)),
     h('div', { class: 'lp-panel-head' }, h('h3', null, 'Unclaimed fees'), h('span', { class: 'muted small' }, usdOrDash(r.fees))),
     fees
       ? h('ul', { class: 'lp-holdings' }, line(r.addr0, r.sym0, r.fee0, r.p0), line(r.addr1, r.sym1, r.fee1, r.p1))
@@ -1759,8 +2013,9 @@ function detailHoldings(r) {
 }
 
 // Fees earned over the last day, week and month, from the saved hours, with the yearly rate each makes.
+/** @param {Store} store @param {Row} r */
 function detailEarnings(store, r) {
-  const rows = [['24 h', 86400], ['7 days', 7 * 86400], ['30 days', 30 * 86400]].map(([label, secs]) => [label, secs, earnedOver(store, r, secs)]);
+  const rows = /** @type {[string, number][]} */ ([['24 h', 86400], ['7 days', 7 * 86400], ['30 days', 30 * 86400]]).map(([label, secs]) => /** @type {const} */ ([label, secs, earnedOver(store, r, secs)]));
   if (!rows.some(([, , e]) => e)) return null;
   return panel('Earnings', 'From the swaps, at today\'s prices',
     h('table', { class: 'mon-table lp-earn' },
@@ -1773,12 +2028,15 @@ function detailEarnings(store, r) {
 }
 
 // The facts: chain, numbers, addresses with explorer links, and how fresh the read is.
+/** @param {Store} store @param {Row} r */
 function detailFacts(store, r) {
   const d = store.get(COLLECTION) ?? {};
+  /** @param {string} kind @param {string} id @param {string} [label] */
   const address = (kind, id, label = shortAddress(id)) => h('span', { class: 'row lp-addr' },
     copyable(id, { label }),
     explorerLink(store, r.chainId, kind, id) ? h('a', { href: explorerLink(store, r.chainId, kind, id), target: '_blank', rel: 'noopener', class: 'icon-btn', title: 'Open in the block explorer', 'aria-label': `Open ${label} in the block explorer` }, icon('link')) : null);
   const share = searchShare(r, d, etherscanKey(store.get('settings')));
+  /** @type {[string, Child][]} */
   const facts = [
     ['Chain', h('span', { class: 'chain-chip' }, logo(chainOf(r.chainId)?.logo, r.chain, 'xs'), r.chain)],
     ['Protocol', `Uniswap ${r.version} · ${r.feePct}% fee tier`],
@@ -1798,6 +2056,7 @@ function detailFacts(store, r) {
 }
 
 // The position's collections, newest first, with their total.
+/** @param {CollectEntry[]} collects */
 function detailCollections(collects) {
   const total = collects.reduce((s, c) => s + (c.usd ?? 0), 0);
   return panel('Collections', collects.length ? `${plural(collects.length, 'collection')} · ${cash(total)}` : null,
@@ -1813,6 +2072,7 @@ function detailCollections(collects) {
 }
 
 // Everything the board knows about one position. One no longer read anywhere shows what the fee log holds.
+/** @param {Store} store @param {string} ref */
 function detailView(store, ref) {
   const raw = detailRow(store, ref);
   const r = raw ? aprOf(store)(raw) : null;
@@ -1825,9 +2085,11 @@ function detailView(store, ref) {
       notice({ tone: 'info', text: loading ? 'Reading the positions…' : 'This position is not among those read, and the fee log has nothing for it.' }));
   }
   const chain = r ? chainOf(r.chainId) : CHAINS.find((x) => x.name === known.chain);
-  const syms = r ? [r.sym0, r.sym1] : tokensOf(known);
+  // With no row, known is the newest collection.
+  const syms = r ? [r.sym0, r.sym1] : tokensOf(/** @type {CollectEntry} */ (known));
   const collectedUsd = collects.reduce((s, c) => s + (c.usd ?? 0), 0);
   const win = WINDOWS[view.window][1];
+  /** @param {string} label @param {Child} value @param {string | null} [hint] @param {string | null} [title] */
   const stat = (label, value, hint = null, title = null) => h('div', { class: 'card lp-stat', title },
     h('span', { class: 'muted' }, label), h('strong', null, value), hint ? h('span', { class: 'muted small' }, hint) : null);
   const earned = r ? earnedChart(store, r) : null;
@@ -1870,8 +2132,8 @@ function detailView(store, ref) {
       ? h('label', { class: 'inline lp-sort', title: 'The time fee APR is read over' }, 'APR window',
           h('select', {
             'aria-label': 'Fee APR window',
-            onchange: (e) => {
-              view.window = e.target.value;
+            onchange: (/** @type {Event} */ e) => {
+              view.window = /** @type {HTMLSelectElement} */ (e.target).value;
               store.refresh();
               loadAprs(store);
             },
@@ -1891,10 +2153,13 @@ const FEES_SUBTITLE = 'Fees collected from your positions: read from the chain, 
 
 // The DeFi section's views: a summary of the rest, the LP positions, the fees collected from them, the wallets'
 // balances, and Aave. Sub-tabs, as in Monitoring and Tools.
+/** @type {[string, string, IconName][]} */
 const TABS = [['summary', 'Summary', 'activity'], ['positions', 'LP Positions', 'droplet'], ['fees', 'LP Fees Collected', 'coins'], ['wallets', 'Wallets', 'wallet'], ['lending', 'Lending / Borrowing', 'landmark']];
 // Tabs drawn by their own module, not by the LP views: their title and how to draw them.
+/** @type {Record<string, [string, (store: Store, ui: DefiUi) => DefiTab]>} */
 const OWN_TABS = { summary: ['Summary', summaryTab], wallets: ['Wallets', walletsTab], lending: ['Lending / Borrowing', lendingTab] };
 
+/** @param {Store} store */
 function tabs(store) {
   return h('nav', { class: 'sub-tabs lp-tabs', role: 'tablist', 'aria-label': 'DeFi view' },
     TABS.map(([key, label, iconName]) =>
@@ -1910,14 +2175,17 @@ function tabs(store) {
       }, icon(iconName), label)));
 }
 
+/** @param {HTMLElement} root @param {Store} store */
 function showDetail(root, store) {
   if (detailEnter) root.classList.add('enter');
   detailEnter = false;
-  root.replaceChildren(detailView(store, view.detail));
+  // Called only while a position is open.
+  root.replaceChildren(detailView(store, /** @type {string} */ (view.detail)));
 }
 
 // The page shows what the runners saved. Only a folder they never read is asked for at once; otherwise their own
 // schedule keeps it fresh.
+/** @param {Store} store */
 function ensureRows(store) {
   bound = store;
   if (!loading && !state.at && !askedAt) {
@@ -1927,6 +2195,10 @@ function ensureRows(store) {
 }
 
 // The LP totals for the Summary tab: open positions only, as in the LP view. null when there is nothing to read.
+/**
+ * @param {Store} store
+ * @returns {LpSummary | null}
+ */
 function lpSummary(store) {
   const cfg = store.get('settings').uniswap ?? {};
   const wallets = (cfg.wallets ?? []).filter((w) => isAddress(w.address));
@@ -1949,9 +2221,11 @@ function lpSummary(store) {
 }
 
 // A tab drawn by its own module, inside the section's header, tab bar and currency switch.
+/** @param {HTMLElement} root @param {Store} store */
 function drawOwnTab(root, store) {
   askLogos(store);
   askRate(store);
+  /** @type {DefiUi} */
   const ui = {
     cash,
     logo,
@@ -1979,6 +2253,7 @@ function drawOwnTab(root, store) {
     body));
 }
 
+/** @param {HTMLElement} root @param {Store} store */
 function draw(root, store) {
   bound = store;
   if (Object.hasOwn(OWN_TABS, view.tab) && !view.detail) {
@@ -2031,7 +2306,7 @@ function draw(root, store) {
   const closedRows = inChain.filter((r) => r.closed);
   const showClosed = view.filter === 'closed';
   const inRange = byChain.filter((r) => r.inRange).length;
-  const pick = { in: byChain.filter((r) => r.inRange), out: byChain.filter((r) => !r.inRange), closed: closedRows }[view.filter] ?? byChain;
+  const pick = /** @type {Record<string, PositionRow[]>} */ ({ in: byChain.filter((r) => r.inRange), out: byChain.filter((r) => !r.inRange), closed: closedRows })[view.filter] ?? byChain;
   const withApr = aprOf(store);
   const shown = sortRows(pick.map(withApr), view.sort, view.dir);
   const totalValue = byChain.reduce((s, r) => s + (r.value ?? 0), 0);
@@ -2040,7 +2315,9 @@ function draw(root, store) {
   const totalFeesKnown = byChain.some((r) => r.fees !== null);
 
   // Totals count from the old number to the new one when it changes, as each chain lands or a filter changes.
+  /** @type {(() => void)[]} */
   const counters = [];
+  /** @param {HTMLElement} el @param {boolean} known @param {number} value @param {'value' | 'fees'} key */
   const total = (el, known, value, key) => {
     if (!known) return;
     const from = shownTotals[key];
@@ -2053,6 +2330,7 @@ function draw(root, store) {
   total(valueEl, totalValueKnown, totalValue, 'value');
   total(feesEl, totalFeesKnown, totalFees, 'fees');
 
+  /** @param {string} key @param {string} label @param {number} count */
   const chip = (key, label, count) => h('button', {
     type: 'button',
     class: view.filter === key ? 'lp-chip active' : 'lp-chip',
@@ -2062,6 +2340,7 @@ function draw(root, store) {
     },
   }, key === 'all' ? null : h('span', { class: `pos-dot ${key}`, 'aria-hidden': 'true' }), label, h('span', { class: 'chip-count' }, count));
 
+  /** @param {number | 'all'} key @param {string} label @param {string | null} logoSrc @param {number} count */
   const chainChip = (key, label, logoSrc, count) => h('button', {
     type: 'button',
     class: view.chain === key ? 'lp-chip chain active' : 'lp-chip chain',
@@ -2077,6 +2356,7 @@ function draw(root, store) {
     ? `Could not read ${state.stale.map((x) => `${x.name} (last read ${ago(x.at)})`).join(', ')}. Those positions are from the last read and may be out of date.`
     : '';
 
+  /** @type {Child} */
   let body;
   if (firstRead) {
     body = h('div', { class: 'lp-grid' }, [0, 1, 2].map((i) => skeletonCard(i)));
@@ -2154,8 +2434,8 @@ function draw(root, store) {
       h('label', { class: 'inline lp-sort', title: 'The time fee APR is read over' }, 'APR',
         h('select', {
           'aria-label': 'Fee APR window',
-          onchange: (e) => {
-            view.window = e.target.value;
+          onchange: (/** @type {Event} */ e) => {
+            view.window = /** @type {HTMLSelectElement} */ (e.target).value;
             store.refresh();
             loadAprs(store);
           },
@@ -2163,13 +2443,13 @@ function draw(root, store) {
       h('label', { class: 'inline lp-sort' }, 'Sort',
         h('select', {
           'aria-label': 'Sort positions',
-          onchange: (e) => {
-            [view.sort, view.dir] = parseSort(e.target.value);
+          onchange: (/** @type {Event} */ e) => {
+            [view.sort, view.dir] = parseSort(/** @type {HTMLSelectElement} */ (e.target).value);
             store.refresh();
           },
         }, sortOptions())),
       h('div', { class: 'segmented lp-layout', role: 'group', 'aria-label': 'View' },
-        [['cards', 'Cards', 'cards'], ['list', 'List', 'list']].map(([key, label, iconName]) =>
+        /** @type {[string, string, IconName][]} */ ([['cards', 'Cards', 'cards'], ['list', 'List', 'list']]).map(([key, label, iconName]) =>
           h('button', {
             type: 'button',
             class: view.layout === key ? 'seg active' : 'seg',
@@ -2219,6 +2499,7 @@ export default {
     pos: view.detail ?? '',
     from: view.detail && view.detailFrom === 'fees' ? 'fees' : '',
   }),
+  /** @param {Record<string, string>} [p] */
   restore: (p = {}) => {
     view.currency = CURRENCIES.includes(p.cur) ? p.cur : 'USD';
     view.filter = ['in', 'out', 'closed'].includes(p.filter) ? p.filter : 'all';
