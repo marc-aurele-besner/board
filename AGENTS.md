@@ -22,7 +22,8 @@ oauth.html            where Google's sign-in comes back; hands the code to the b
 css/style.css         design tokens (light and dark) and all styles
 js/app.js             shell: folder connection, router, top nav, theme toggle
 js/storage.js         File System Access API wrapper; remembers the folder in IndexedDB
-js/store.js           in-memory state; debounced, serialized saves; subscriptions
+js/store.js           in-memory state; debounced, serialized saves merged with what other tabs saved; disk sync; subscriptions
+js/merge.js           three-way merge of a collection (last read, this tab, on disk), item by item by id
 js/keep-fields.js     keeps unsubmitted fields across re-renders; holds background re-renders while typing
 js/ui.js              h() DOM helper, icon(), ids, dates, money formatting
 js/modules/index.js   registry of sections (the nav is built from this list)

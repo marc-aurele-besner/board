@@ -81,7 +81,7 @@ Every file has a `schemaVersion` field. Files are plain JSON and can be edited b
 | `recipes.json` | `{ recipes: [{id, title, status: 'idea'\|'testing'\|'final', tags, ingredients, steps, notes, images, source, scans, versions: [{id, date, changes, rating, notes}], created}] }` |
 | `finance.json` | `{ entries: [{id, date, type: 'income'\|'expense', amount, category, note, created}], categories: [], budgets: { <category>: {amount, currency} } }`. A budget is per month and shows in the category breakdown when the period is one month. A category that goes over is listed on Home and announced once under the bell. |
 
-Writes are debounced (about 300 ms) and serialized. The status pill in the top bar shows *Saving…*, *Saved* or *Save failed*.
+Writes are debounced (about 300 ms) and serialized. The status pill in the top bar shows *Saving…*, *Saved* or *Save failed*. The board can be open in several tabs or browsers on the same folder: before writing a file, a tab merges in what another one saved to it (item by item, by `id`; when both changed the same field, the latest save wins), and every few seconds, and when it comes back into view, it reads the files again. A change not yet on disk is saved when the tab is hidden, and the browser asks before a reload or close would drop it. Nothing is kept in the browser's storage but the folder's handle.
 
 The currency is set in `js/ui.js` (`CURRENCY`).
 
@@ -129,7 +129,8 @@ index.html            entry point
 css/style.css         design tokens (light and dark) and layout
 js/app.js             shell: folder connection, router, top nav
 js/storage.js         File System Access API wrapper (read/write JSON, remember folder)
-js/store.js           in-memory state, debounced saves, subscriptions
+js/store.js           in-memory state, debounced saves merged with other tabs' saves, subscriptions
+js/merge.js           three-way merge of a collection: last read, this tab, on disk
 js/ui.js              h() DOM helper, ids, dates, money formatting
 js/modules/index.js   registry of sections (the nav is built from this list)
 js/modules/*.js       one file per section
