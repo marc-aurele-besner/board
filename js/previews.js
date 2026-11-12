@@ -1,3 +1,4 @@
+// @ts-check
 // Preview deployments of pull requests. Repos on Vercel or Netlify get a bot comment on each PR with the link to the
 // PR's preview, edited as each push deploys again. The runners (tools/jobs/previews.js) read those comments for the
 // PRs of open tasks and recent Cron runs into github.json `previews`:
@@ -6,6 +7,10 @@
 import { h, icon, statusOf } from './ui.js';
 import { GITHUB, issueComments } from './github.js';
 import { runJob } from './runners.js';
+/** @import { DataStore, Store, CronRunStep, PrPreviews, PreviewItem } from '../types/data' */
+/** @typedef {{ repo: string, number: number }} PrRef */
+// A comment of the GitHub API, as far as it is read here.
+/** @typedef {{ updated_at?: string, user?: { login?: string } | null, body?: string | null }} PrComment */
 
 const MIN = 60000;
 // How long a PR waits between two reads: soon while a preview builds or no bot has commented yet, rarely once ready.
@@ -19,8 +24,13 @@ const KEPT = 14 * 24 * 60 * MIN;
 // Reads per run, so a long list does not spend the GitHub rate limit at once.
 const PER_RUN = 30;
 
+/**
+ * @param {string} repo
+ * @param {number} number
+ */
 export const previewKey = (repo, number) => `${String(repo).toLowerCase()}#${number}`;
 
+/** @param {string} text */
 const stateOf = (text) => {
   const t = String(text).toLowerCase();
   if (/ready|success/.test(t)) return 'ready';
@@ -32,12 +42,16 @@ const stateOf = (text) => {
 };
 
 // Markdown and HTML out of a table cell: "**app**" and "[app](…)" read "app".
+/** @param {string} cell */
 const plain = (cell) => cell.replace(/<[^>]+>/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`]/g, '').trim();
+/** @param {string} line */
 const cellsOf = (line) => line.trim().replace(/^\||\|$/g, '').split('|');
 
 // Vercel's comment is a table with one row per Vercel project: | **app** | ✅ Ready ([Inspect](…)) | [Visit Preview](…) | …
 const VERCEL_URL = /https?:\/\/[\w.-]+\.vercel\.app\b[^\s)|\]]*/;
+/** @param {string} body */
 function parseVercel(body) {
+  /** @type {PreviewItem[]} */
   const items = [];
   for (const line of body.split('\n')) {
     if (!line.trim().startsWith('|')) continue;
@@ -57,6 +71,10 @@ function parseVercel(body) {
 
 // Netlify's comment is one per site: "Deploy Preview for *site* ready!", then a table with a "Deploy Preview" row.
 const NETLIFY_URL = /https?:\/\/deploy-preview-\d+--[\w-]+\.netlify\.app\b[^\s)|\]]*/;
+/**
+ * @param {string} body
+ * @returns {PreviewItem[]}
+ */
 function parseNetlify(body) {
   const head = body.match(/Deploy Preview for \*?([^*\n]+?)\*?\s+(ready|processing|building|failed|canceled|cancelled|errored)/i);
   const row = body.split('\n').find((l) => l.includes('|') && /Deploy Preview/i.test(l) && /https?:\/\//.test(l));
@@ -66,7 +84,9 @@ function parseNetlify(body) {
 }
 
 // The previews in a PR's comments: the newest word of each bot on each of its projects.
+/** @param {PrComment[]} comments */
 export function previewsFromComments(comments) {
+  /** @type {Map<string, PreviewItem>} */
   const found = new Map();
   const sorted = [...comments].sort((a, b) => String(a.updated_at ?? '').localeCompare(String(b.updated_at ?? '')));
   for (const c of sorted) {
@@ -78,20 +98,37 @@ export function previewsFromComments(comments) {
   return [...found.values()].filter((i) => i.state !== 'ignored');
 }
 
+/**
+ * @param {string} a
+ * @param {string} b
+ */
 const sameRepo = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+/**
+ * @template {PrRef} P
+ * @param {P[]} prs
+ */
 const uniquePrs = (prs) => prs.filter((p, i) => p?.repo && p.number && prs.findIndex((q) => q?.repo && sameRepo(q.repo, p.repo) && q.number === p.number) === i);
 
 // The PRs worth reading: those of tasks still open, and of Cron runs from the last few days.
+/**
+ * @param {DataStore} store
+ * @param {number} [at]
+ */
 export function trackedPrs(store, at = Date.now()) {
   const tasks = store.get('todos').items.filter((t) => statusOf(t) !== 'done').flatMap((t) => t.prs ?? []);
   const runs = (store.get('cron')?.runs ?? [])
     .filter((r) => at - Date.parse(r.at) < RUNS_WITHIN)
     .flatMap((r) => [...r.steps, ...(r.current ? [r.current] : [])])
-    .flatMap((s) => s.prs?.length ? s.prs : s.pr ? [s.pr] : []);
+    // The run's current terminal has neither field; stepRecord() in js/cron.js writes `pr` and never `prs`.
+    .flatMap((/** @type {Partial<CronRunStep>} */ s) => s.prs?.length ? s.prs : s.pr ? [s.pr] : []);
   return uniquePrs([...tasks, ...runs]).map((p) => ({ repo: p.repo, number: p.number }));
 }
 
 // Whether a PR is due a read, from what the last one found.
+/**
+ * @param {PrPreviews | undefined} entry
+ * @param {number} at
+ */
 function due(entry, at) {
   if (!entry?.at) return true;
   const since = at - entry.at;
@@ -103,18 +140,28 @@ function due(entry, at) {
   return since >= (age < 60 * MIN ? AGAIN_BUILDING : age < 24 * 60 * MIN ? AGAIN_QUIET : AGAIN_QUIET_LONG);
 }
 
+/**
+ * @param {DataStore} store
+ * @param {number} [at]
+ */
 export const duePrs = (store, at = Date.now()) => {
   const saved = store.get(GITHUB)?.previews ?? {};
   return trackedPrs(store, at).filter((p) => due(saved[previewKey(p.repo, p.number)], at)).slice(0, PER_RUN);
 };
 
 // Reads the PRs' comments into github.json. A failed read keeps what was found before. Runners only.
+/**
+ * @param {DataStore} target
+ * @param {PrRef[]} prs
+ * @param {number} [at]
+ */
 export async function readPreviews(target, prs, at = Date.now()) {
   const found = await Promise.all(prs.map(async (p) => {
+    /** @typedef {[PrRef, Pick<PrPreviews, 'items' | 'error'>]} Found */
     try {
-      return [p, { items: previewsFromComments(await issueComments(p.repo, p.number)), error: null }];
+      return /** @type {Found} */ ([p, { items: previewsFromComments(await issueComments(p.repo, p.number)), error: null }]);
     } catch (err) {
-      return [p, { error: err.message }];
+      return /** @type {Found} */ ([p, { error: /** @type {Error} */ (err).message }]);
     }
   }));
   const keep = new Set(trackedPrs(target, at).map((p) => previewKey(p.repo, p.number)));
@@ -132,13 +179,23 @@ export async function readPreviews(target, prs, at = Date.now()) {
 }
 
 // The previews of these PRs, from github.json.
+/**
+ * @template {PrRef} P
+ * @param {DataStore} store
+ * @param {P[]} prs
+ */
 export function previewsOf(store, prs) {
   const saved = store.get(GITHUB)?.previews ?? {};
   return uniquePrs(prs).flatMap((p) => (saved[previewKey(p.repo, p.number)]?.items ?? []).map((i) => ({ ...i, pr: p })));
 }
 
+/** @type {Set<string>} */
 const asked = new Set();
 // PRs github.json has never read are asked of the runners once, so a new PR does not wait for the next run.
+/**
+ * @param {Store} store
+ * @param {PrRef[]} prs
+ */
 function askMissing(store, prs) {
   const saved = store.get(GITHUB)?.previews ?? {};
   const fresh = uniquePrs(prs).filter((p) => !saved[previewKey(p.repo, p.number)] && !asked.has(previewKey(p.repo, p.number)));
@@ -147,10 +204,17 @@ function askMissing(store, prs) {
   runJob('previews', { prs: fresh.map((p) => ({ repo: p.repo, number: p.number })) }).then(() => store.sync()).catch(() => {});
 }
 
+/** @type {Record<string, string>} */
 const PROVIDER = { vercel: 'Vercel', netlify: 'Netlify' };
+/** @type {Record<string, string>} */
 const STATE_TEXT = { building: 'building', failed: 'failed', canceled: 'canceled' };
 
 // Links to the previews of these PRs, styled with `className` (a task's chips or a Cron run's).
+/**
+ * @param {Store} store
+ * @param {PrRef[]} prs
+ * @param {string} className
+ */
 export function previewChips(store, prs, className) {
   askMissing(store, prs);
   const items = previewsOf(store, prs);
