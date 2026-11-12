@@ -419,11 +419,12 @@ function openIssueDialog(store, item, repos) {
   paint();
 }
 
-// A task's issues and PRs as links (#12, opens in a new tab), then a button to see them all or add one.
+// A task's issues and PRs as links (#12, opens in a new tab), shown beside its title where they have room.
 // A Dev session started on the task adds the ones it opens.
-function issueControl(store, item, repos) {
+function linkChips(item) {
   const issues = issuesOf(item);
   const prs = prsOf(item);
+  if (!issues.length && !prs.length) return null;
   const chip = (l, pr) => h('a', {
     href: l.url,
     target: '_blank',
@@ -432,17 +433,19 @@ function issueControl(store, item, repos) {
     title: `${pr ? 'Pull request' : 'Issue'} ${linkTitle(l)}`,
     'aria-label': `Open ${pr ? 'pull request' : 'issue'} ${l.repo} #${l.number}`,
   }, icon(pr ? 'pull-request' : 'repo'), `#${l.number}`);
-  const any = issues.length + prs.length > 0;
-  return h('span', { class: 'task-link-chips' },
-    issues.map((l) => chip(l, false)),
-    prs.map((l) => chip(l, true)),
-    h('button', {
-      type: 'button',
-      class: 'icon-btn',
-      title: any ? 'Issues and PRs: link more, or unlink' : 'Create or link a GitHub issue or PR',
-      'aria-label': any ? 'Manage GitHub issues and PRs' : 'Create or link a GitHub issue or PR',
-      onclick: () => openIssueDialog(store, item, repos),
-    }, icon(any ? 'plus' : 'repo')));
+  return h('span', { class: 'task-link-chips' }, issues.map((l) => chip(l, false)), prs.map((l) => chip(l, true)));
+}
+
+// One button in the actions to see a task's issues and PRs, link more, or create one.
+function issueControl(store, item, repos) {
+  const any = issuesOf(item).length + prsOf(item).length > 0;
+  return h('button', {
+    type: 'button',
+    class: 'icon-btn',
+    title: any ? 'Issues and PRs: link more, or unlink' : 'Create or link a GitHub issue or PR',
+    'aria-label': any ? 'Manage GitHub issues and PRs' : 'Create or link a GitHub issue or PR',
+    onclick: () => openIssueDialog(store, item, repos),
+  }, icon(any ? 'link' : 'repo'));
 }
 
 // A task as Markdown: a checklist line with its status, project and deadline, then its description indented, then
@@ -777,6 +780,7 @@ function todoRow(store, item, ctx) {
         }),
         dueChip(item),
         autoBadge(item),
+        linkChips(item),
         item.inbox ? h('span', { class: 'muted small' }, `needs ${missingFor(item)}`) : null,
         item.inbox
           ? h('button', {
