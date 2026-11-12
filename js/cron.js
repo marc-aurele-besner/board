@@ -834,6 +834,8 @@ export function projectVars(project) {
     org: project.github?.org || (repos[0] ?? '').split('/')[0] || '',
     directory: project.localPath ?? '',
     labels: project.labels ?? [],
+    npmOrg: project.npm?.org ?? '',
+    packages: project.npm?.packages ?? [],
   };
 }
 
