@@ -688,7 +688,8 @@ export function scheduleLabel(s) {
 // --- Variables ---
 // {{input}}, {{date}}, {{flow}} and {{task}} as before; {{step2}} is the output of step 2, and a path after a name
 // ({{step2.items[0].title}}, {{input.title}}) reads into that output when it is JSON, or into what the step made.
-const VAR = /\{\{\s*([A-Za-z_]\w*)((?:\.[\w-]+|\[\d+\])*)\s*\}\}/g;
+// A key that is not a plain word goes in quotes: {{step1["Open tasks"]}}.
+const VAR = /\{\{\s*([A-Za-z_]\w*)((?:\.[\w-]+|\[\d+\]|\["[^"\]]*"\])*)\s*\}\}/g;
 
 // A model often wraps JSON in a code fence; anything else that is not JSON stays text.
 export function parseData(text) {
@@ -705,9 +706,9 @@ const asText = (v) => (v == null ? '' : typeof v === 'string' ? v : JSON.stringi
 
 function walk(value, path) {
   let v = value;
-  for (const [, key, index] of path.matchAll(/\.([\w-]+)|\[(\d+)\]/g)) {
+  for (const [, key, index, quoted] of path.matchAll(/\.([\w-]+)|\[(\d+)\]|\["([^"\]]*)"\]/g)) {
     if (v == null || typeof v !== 'object') return undefined;
-    v = v[key ?? Number(index)];
+    v = v[key ?? quoted ?? Number(index)];
   }
   return v;
 }
@@ -738,6 +739,10 @@ function varsFor(flow, ctx) {
   });
   return vars;
 }
+
+// The path to one key, in the form a variable reads it.
+export const pathTo = (path, key) =>
+  (typeof key === 'number' ? `${path}[${key}]` : /^[\w-]+$/.test(key) ? `${path}.${key}` : /^[^"\]]*$/.test(key) ? `${path}["${key}"]` : null);
 
 // The variables as one JSON tree for the editor: a key's path is what a click on it puts in a field.
 export function varsTree(vars) {

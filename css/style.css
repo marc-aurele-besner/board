@@ -1882,6 +1882,26 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .cron-runs > li { padding: 8px 0; border-bottom: 1px solid var(--border); }
 .cron-runs > li:last-child { border-bottom: none; }
 .cron-run-steps { margin: 8px 0 0; padding-left: 0; list-style: none; display: grid; gap: 10px; }
+/* Variables under a {{…}} field, and a step's test data as JSON trees. */
+.cron-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cron-vars { display: flex; flex-wrap: wrap; gap: 4px; }
+.cron-var { min-height: 0; padding: 2px 8px; border-radius: 999px; font-family: var(--mono, ui-monospace, monospace); font-size: 0.75rem; color: var(--muted); background: var(--surface-2); border: 1px solid transparent; }
+.cron-var:hover { color: var(--accent); border-color: var(--accent); }
+.cron-test { padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.cron-test-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+@media (max-width: 720px) { .cron-test-grid { grid-template-columns: minmax(0, 1fr); } }
+.json-tree { max-height: 360px; overflow: auto; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-family: var(--mono, ui-monospace, monospace); font-size: 0.8rem; }
+.json-tree ul { list-style: none; margin: 0; padding-left: 16px; }
+.json-node > summary { cursor: pointer; }
+.json-leaf { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.json-key { min-height: 0; padding: 0 2px; border: none; background: none; font: inherit; color: var(--syn-keyword); }
+button.json-key { cursor: pointer; border-radius: 4px; }
+button.json-key:hover { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+.json-leaf .json-key::after { content: ':'; color: var(--muted); }
+.json-value { overflow-wrap: anywhere; white-space: pre-wrap; }
+.json-string { color: var(--syn-string); }
+.json-number { color: var(--syn-number); }
+.json-boolean, .json-null { color: var(--syn-function); }
 @media (max-width: 900px) { .cron-layout { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 720px) {
   .flow-canvas { flex-direction: column; align-items: stretch; padding: 12px; }
