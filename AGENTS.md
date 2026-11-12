@@ -55,6 +55,7 @@ js/task-links.js      a task's GitHub issues and PRs; finds the links a Dev sess
 js/images.js          which pasted or dropped files are images claude reads
 js/task-images.js     a task's images: kept in the data folder, shown on the task, saved through the runner for claude
 js/task-worktrees.js  the worktrees Dev sessions made for tasks; removed through the runner once their tasks are done
+js/dev-usage.js       what a task's claude session used (model, effort, tokens, cost), kept in usage.json `dev`
 js/capture.js         parseTask(), parseMoney() and makeTask(): one place for a task's shape
 js/palette.js         the Cmd/Ctrl+K search palette: jump, or capture a task, a Money entry or a recipe link
 js/search.js          what the full search page (modules/search.js, hidden) looks through, grouped by kind
@@ -68,6 +69,7 @@ tools/log.js          terminal lines prefixed with each runner's name
 tools/serve.js        local static server with no-cache headers; no dependencies
 tools/relays.js       local relays for Bing's and Resend's APIs (Inbox), which send no CORS header
 tools/terminal.js     the Dev section's runner: terminal sessions that outlive the page (output and the list of open terminals kept on disk), typed keys, read-only file reads, git for Source control, removing a done task's worktree, saving images for claude; localhost only
+tools/usage.js        reads Claude Code's transcripts for the runner: a task worktree's models, tokens, cost and effort
 ```
 
 ## Conventions
