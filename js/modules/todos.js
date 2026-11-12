@@ -7,6 +7,7 @@ import { editText, pickChip, pickButton, pickMulti, pill } from '../inline.js';
 import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
 import { openDialog } from '../modal.js';
 import { issuesOf, prsOf, moveToReview } from '../task-links.js';
+import { previewChips } from '../previews.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startClaudeSession, openSession, runnerOf } from './dev.js';
 import { sessionStatus } from '../terminal.js';
@@ -480,8 +481,8 @@ function openIssueDialog(store, item, repos) {
 }
 
 // A task's issues and PRs as links (#12, opens in a new tab), shown beside its title where they have room.
-// A Dev session started on the task adds the ones it opens.
-function linkChips(item) {
+// A Dev session started on the task adds the ones it opens. A PR's Vercel or Netlify preview follows it.
+function linkChips(store, item) {
   const issues = issuesOf(item);
   const prs = prsOf(item);
   if (!issues.length && !prs.length) return null;
@@ -493,7 +494,7 @@ function linkChips(item) {
     title: `${pr ? 'Pull request' : 'Issue'} ${linkTitle(l)}`,
     'aria-label': `Open ${pr ? 'pull request' : 'issue'} ${l.repo} #${l.number}`,
   }, icon(pr ? 'pull-request' : 'repo'), `#${l.number}`);
-  return h('span', { class: 'task-link-chips' }, issues.map((l) => chip(l, false)), prs.map((l) => chip(l, true)));
+  return h('span', { class: 'task-link-chips' }, issues.map((l) => chip(l, false)), prs.map((l) => chip(l, true)), previewChips(store, prs, 'issue-link'));
 }
 
 // One button in the actions to see a task's issues and PRs, link more, or create one.
@@ -893,7 +894,7 @@ function todoRow(store, item, ctx) {
         }),
         dueChip(item),
         autoBadge(item),
-        linkChips(item),
+        linkChips(store, item),
         item.inbox ? h('span', { class: 'muted small' }, `needs ${missingFor(item)}`) : null,
         item.inbox
           ? h('button', {
