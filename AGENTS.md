@@ -81,7 +81,7 @@ package.json          scripts only (start, dev, serve, terminal); no dependencie
 tools/start.js        one command for the board: starts serve.js, terminal.js and worker.js together
 tools/log.js          terminal lines prefixed with each runner's name
 tools/serve.js        local static server with no-cache headers; no dependencies
-tools/terminal.js     the Dev section's runner: terminal sessions that outlive the page (output and the list of open terminals kept on disk), typed keys, read-only file reads, git for Source control, listing worktrees and removing one (a done task's, or any from Dev's Worktrees panel), saving images for claude; localhost only
+tools/terminal.js     the Dev section's runner: terminal sessions that outlive the page (output and the list of open terminals kept on disk), typed keys, read-only file reads, git for Source control, listing worktrees and removing one (a done task's, or any from Dev's Worktrees panel), ending a done claude with /exit and answering its worktree question, saving images for claude; localhost only
 tools/worker.js       the runners: one worker that runs the background jobs on a schedule and writes into the data folder; localhost API on 8420
 tools/worker/store.js the store for Node (get, update, save over node:fs), merged with what the tabs write through js/merge.js
 tools/worker/schedule.js  intervals, no overlap, timeouts, backoff, and the runners.json heartbeat
