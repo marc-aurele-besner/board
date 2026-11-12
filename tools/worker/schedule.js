@@ -69,7 +69,7 @@ export function createScheduler({ jobs, log }) {
       .then((result = {}) => {
         l.failures = 0;
         l.state = { lastRunAt: iso(started), lastOkAt: iso(Date.now()), durationMs: Date.now() - started, ok: true, error: null, ...result };
-        const said = Object.entries(result).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${k} ${v}`).join(', ');
+        const said = Object.entries(result).filter(([, v]) => (typeof v === 'number' || typeof v === 'string') && v !== '').map(([k, v]) => `${k} ${v}`).join(', ');
         log.info(`${job.id} ok in ${Date.now() - started} ms${said ? ` (${said})` : ''}`);
         return { ok: true, error: null, ...result };
       })
@@ -126,6 +126,7 @@ export function createScheduler({ jobs, log }) {
       return run(job, { force: true, ...options });
     },
     status: () => ({ ...heartbeat(), folder: store?.dir ?? null }),
+    store: () => store,
     stop() {
       clearInterval(tickTimer);
       clearInterval(beatTimer);
