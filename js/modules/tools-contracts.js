@@ -1,3 +1,4 @@
+// @ts-check
 // Tools → Contracts: call a saved contract's view functions through the chain's node, and send its other functions
 // as transactions through the browser wallet.
 import { h, icon, empty, notice, copyable } from '../ui.js';
@@ -5,30 +6,42 @@ import { chainById, explorerUrl } from '../chains.js';
 import { readsOf, writesOf, parseInput, parseUnits, show, signature, isPayable } from '../abi.js';
 import { contractsOf, readFunction, sendFunction, waitForReceipt, wallets, walletAccount, connectedWallet, connectWallet, disconnectWallet, onWalletChange } from '../contracts.js';
 import { logo } from './positions.js';
+/** @import { Store, Settings, Contract, AbiItem } from '../../types/data' */
+/** @import { AbiValue } from '../../types/abi' */
+/** @import { Eip6963ProviderInfo } from '../../types/wallet' */
+/** @import { BoardChain } from '../chains.js' */
 
 // contract: the one shown. results: "contractId:signature" -> { busy, ok, value | error | hash, receipt }.
 // inputs: what was typed in each function's fields when it was last run, so a failed call keeps them.
 // picking: the wallet list is open, when several wallets are installed.
+/** @typedef {{ busy?: boolean, ok?: boolean, value?: AbiValue[], error?: string, hash?: string, note?: string }} FnResult */
+/** @typedef {HTMLFormElement & { elements: HTMLFormControlsCollection & Record<string, HTMLInputElement | undefined> }} FnForm a function's form: its fields by name */
+/** @type {{ contract: string, results: Record<string, FnResult>, inputs: Record<string, Record<string, string>>, walletError: string, picking: boolean }} */
 const view = { contract: '', results: {}, inputs: {}, walletError: '', picking: false };
 
-const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
-const keyOf = (c, fn) => `${c.id}:${signature(fn)}`;
+const short = (/** @type {string} */ a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+const keyOf = (/** @type {Contract} */ c, /** @type {AbiItem} */ fn) => `${c.id}:${signature(fn)}`;
 
 // Keeps a function's typed fields, then reads them as arguments.
+/** @param {string} key @param {FnForm} form */
 function remember(key, form) {
-  view.inputs[key] = Object.fromEntries([...form.elements].filter((el) => el.name).map((el) => [el.name, el.value]));
+  // Its controls are inputs and buttons, which all have a name and a value.
+  view.inputs[key] = Object.fromEntries([.../** @type {Iterable<HTMLInputElement | HTMLButtonElement>} */ (form.elements)].filter((el) => el.name).map((el) => [el.name, el.value]));
 }
 
+/** @param {Store} store @param {string} key @param {FnResult} result */
 function setResult(store, key, result) {
   view.results[key] = result;
   store.refresh();
 }
 
 // The inputs of a function, read from its form. Throws with the first field that does not parse.
+/** @param {FnForm} form @param {AbiItem} fn */
 function argsOf(form, fn) {
   return (fn.inputs ?? []).map((p, i) => parseInput(p, form.elements[`arg-${i}`]?.value));
 }
 
+/** @param {Store} store @param {Settings} settings @param {Contract} c @param {AbiItem} fn @param {FnForm} form */
 async function call(store, settings, c, fn, form) {
   const key = keyOf(c, fn);
   remember(key, form);
@@ -36,17 +49,18 @@ async function call(store, settings, c, fn, form) {
   try {
     args = argsOf(form, fn);
   } catch (err) {
-    return setResult(store, key, { ok: false, error: err.message });
+    return setResult(store, key, { ok: false, error: /** @type {Error} */ (err).message });
   }
   setResult(store, key, { busy: true });
   try {
     const value = await readFunction(settings, c, fn, args);
     setResult(store, key, { ok: true, value });
   } catch (err) {
-    setResult(store, key, { ok: false, error: err.message });
+    setResult(store, key, { ok: false, error: /** @type {Error} */ (err).message });
   }
 }
 
+/** @param {Store} store @param {Settings} settings @param {Contract} c @param {AbiItem} fn @param {FnForm} form */
 async function send(store, settings, c, fn, form) {
   const key = keyOf(c, fn);
   remember(key, form);
@@ -56,7 +70,7 @@ async function send(store, settings, c, fn, form) {
     args = argsOf(form, fn);
     if (isPayable(fn)) value = parseUnits(form.elements.value?.value);
   } catch (err) {
-    return setResult(store, key, { ok: false, error: err.message });
+    return setResult(store, key, { ok: false, error: /** @type {Error} */ (err).message });
   }
   setResult(store, key, { busy: true, note: 'Confirm in your wallet…' });
   try {
@@ -65,11 +79,13 @@ async function send(store, settings, c, fn, form) {
     const receipt = await waitForReceipt(settings, c, hash);
     setResult(store, key, receipt ? { ok: receipt.ok, hash, note: receipt.ok ? `Confirmed in block ${receipt.block.toLocaleString()}.` : `Reverted in block ${receipt.block.toLocaleString()}.` } : { ok: true, hash, note: 'Sent. Not landed after five minutes; check the explorer.' });
   } catch (err) {
-    setResult(store, key, { ok: false, error: err?.code === 4001 ? 'Rejected in the wallet.' : err.message });
+    // A wallet's refusal carries an EIP-1193 code.
+    setResult(store, key, { ok: false, error: /** @type {{ code?: number } | undefined} */ (err)?.code === 4001 ? 'Rejected in the wallet.' : /** @type {Error} */ (err).message });
   }
 }
 
 // One labelled value per output; a single unnamed output shows bare.
+/** @param {AbiItem} fn @param {AbiValue[]} value */
 function outputView(fn, value) {
   const outs = fn.outputs ?? [];
   if (outs.length === 1 && !outs[0].name) return h('code', { class: 'fn-value' }, show(value[0]));
@@ -79,6 +95,7 @@ function outputView(fn, value) {
   ]));
 }
 
+/** @param {BoardChain | null} chain @param {AbiItem} fn @param {FnResult | undefined} r */
 function resultView(chain, fn, r) {
   if (!r) return null;
   const tx = r.hash ? explorerUrl(chain, 'tx', r.hash) : null;
@@ -89,6 +106,7 @@ function resultView(chain, fn, r) {
     r.hash ? h('span', { class: 'small' }, r.note, ' ', tx ? h('a', { href: tx, target: '_blank', rel: 'noopener' }, short(r.hash)) : copyable(r.hash, { label: short(r.hash) })) : null);
 }
 
+/** @param {Store} store @param {Settings} settings @param {Contract} c @param {BoardChain | null} chain @param {AbiItem} fn @param {boolean} write */
 function fnCard(store, settings, c, chain, fn, write) {
   const key = keyOf(c, fn);
   const r = view.results[key];
@@ -102,7 +120,7 @@ function fnCard(store, settings, c, chain, fn, write) {
       h('span', { class: 'muted small' }, `(${inputs.map((p) => `${p.type}${p.name ? ` ${p.name}` : ''}`).join(', ')})`, outs ? ` → ${outs}` : '', payable ? ' · payable' : '')),
     h('form', {
       class: 'stack fn-form',
-      onsubmit: (e) => {
+      onsubmit: (/** @type {SubmitEvent & { currentTarget: FnForm }} */ e) => {
         e.preventDefault();
         (write ? send : call)(store, settings, c, fn, e.currentTarget);
       },
@@ -119,6 +137,7 @@ function fnCard(store, settings, c, chain, fn, write) {
 // Wallet extensions announce themselves after the page loads, and an account can change in the wallet, so the
 // tab redraws on either while its writes are shown.
 let watching = false;
+/** @param {Store} store */
 function watchWallets(store) {
   if (watching) return;
   watching = true;
@@ -127,18 +146,19 @@ function watchWallets(store) {
   });
 }
 
+/** @param {Store} store @param {BoardChain | null} chain */
 function walletBar(store, chain) {
   watchWallets(store);
   const list = wallets();
   if (!list.length) return notice({ tone: 'info', text: 'Writes need a browser wallet, such as MetaMask, Rabby, Coinbase Wallet or Brave Wallet. Reads work without one.' });
   const account = walletAccount();
-  const connect = async (uuid) => {
+  const connect = async (/** @type {string} */ uuid) => {
     view.picking = false;
     try {
       await connectWallet(uuid);
       view.walletError = '';
     } catch (err) {
-      view.walletError = err?.code === 4001 ? 'Connection rejected in the wallet.' : err.message;
+      view.walletError = /** @type {{ code?: number } | undefined} */ (err)?.code === 4001 ? 'Connection rejected in the wallet.' : /** @type {Error} */ (err).message;
     }
     store.refresh();
   };
@@ -156,7 +176,7 @@ function walletBar(store, chain) {
     h('div', { class: 'row wallet-connect' },
       info ? logo(info.icon, info.name, 'xs') : icon('wallet'),
       account
-        ? h('span', { class: 'small' }, `${info.name} `, copyable(account, { label: short(account) }), ` · writes are sent on ${chain?.name ?? 'the contract\'s chain'}, and the wallet asks before each one.`)
+        ? h('span', { class: 'small' }, `${/** @type {Eip6963ProviderInfo} */ (info).name} `, copyable(account, { label: short(account) }), ` · writes are sent on ${chain?.name ?? 'the contract\'s chain'}, and the wallet asks before each one.`)
         : h('span', { class: 'small muted' }, 'Connect a wallet to send writes.'),
       account
         ? h('button', { type: 'button', class: 'btn-small', onclick: disconnect }, 'Disconnect')
@@ -167,6 +187,7 @@ function walletBar(store, chain) {
       : null);
 }
 
+/** @param {Store} store */
 export function contractsTab(store) {
   const settings = store.get('settings');
   const list = contractsOf(settings);
@@ -181,7 +202,7 @@ export function contractsTab(store) {
   const writes = writesOf(c.abi ?? []);
   const url = explorerUrl(chain, 'address', c.address);
   const readAll = () => {
-    for (const form of document.querySelectorAll('.fn-reads .fn-form')) if (!form.querySelector('input')) form.requestSubmit();
+    for (const form of /** @type {NodeListOf<HTMLFormElement>} */ (document.querySelectorAll('.fn-reads .fn-form'))) if (!form.querySelector('input')) form.requestSubmit();
   };
 
   return h('div', { class: 'stack-lg' },
@@ -226,6 +247,6 @@ export function contractsTab(store) {
 }
 
 export const contractsSerialize = () => view.contract;
-export const contractsRestore = (id) => {
+export const contractsRestore = (/** @type {string | undefined} */ id) => {
   view.contract = id || '';
 };

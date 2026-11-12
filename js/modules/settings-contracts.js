@@ -1,3 +1,4 @@
+// @ts-check
 // Settings → Smart contracts: the contracts Tools reads and writes and Monitoring follows, each with its chain,
 // address and ABI.
 import { h, icon, notice, copyable, uid } from '../ui.js';
@@ -7,35 +8,39 @@ import { contractsOf, etherscanKey, fetchAbi } from '../contracts.js';
 import { logo } from './positions.js';
 import { projectIcon } from './projects.js';
 import { pickChip } from '../inline.js';
+/** @import { Store, Settings, Contract, AbiItem } from '../../types/data' */
 
 const COLLECTION = 'settings';
 // editing: the contract in the form ('' for a new one, null when the form is closed). busy: an ABI fetch running.
 // draft: what the form holds, kept here because a redraw (a pick, an error, a fetch) would otherwise reset it.
-const contractsView = { editing: null, message: '', ok: null, busy: false, draft: {} };
-const draftOf = (c) => ({ label: c?.label ?? '', address: c?.address ?? '', chainId: c?.chainId ?? 1, projectId: c?.projectId ?? '', abi: c?.abi?.length ? JSON.stringify(c.abi, null, 2) : '' });
-const keep = (key) => (e) => {
+/** @typedef {{ label: string, address: string, chainId: number, projectId: string, abi: string }} ContractDraft */
+/** @type {{ editing: string | null, message: string, ok: boolean | null, busy: boolean, draft: ContractDraft }} */
+const contractsView = { editing: null, message: '', ok: null, busy: false, draft: /** @type {ContractDraft} */ ({}) }; // edit() fills it before the form opens
+const draftOf = (/** @type {Contract | undefined} */ c) => ({ label: c?.label ?? '', address: c?.address ?? '', chainId: c?.chainId ?? 1, projectId: c?.projectId ?? '', abi: c?.abi?.length ? JSON.stringify(c.abi, null, 2) : '' });
+const keep = (/** @type {'label' | 'address' | 'abi'} */ key) => (/** @type {Event & { currentTarget: HTMLInputElement | HTMLTextAreaElement }} */ e) => {
   contractsView.draft[key] = e.currentTarget.value;
 };
 
-const say = (store, ok, message) => {
+const say = (/** @type {Store} */ store, /** @type {boolean | null} */ ok, /** @type {string} */ message) => {
   Object.assign(contractsView, { ok, message });
   store.refresh();
 };
 
-const counts = (abi) => {
-  const parts = [[readsOf(abi).length, 'read'], [writesOf(abi).length, 'write'], [eventsOf(abi).length, 'event']]
+const counts = (/** @type {AbiItem[]} */ abi) => {
+  const parts = /** @type {[number, string][]} */ ([[readsOf(abi).length, 'read'], [writesOf(abi).length, 'write'], [eventsOf(abi).length, 'event']])
     .filter(([n]) => n)
     .map(([n, what]) => `${n} ${what}${n === 1 ? '' : 's'}`);
   return parts.length ? parts.join(' · ') : 'No ABI';
 };
 
+/** @param {Store} store @param {Settings} settings */
 function contractForm(store, settings) {
   const editing = contractsOf(settings).find((c) => c.id === contractsView.editing) ?? null;
   const draft = contractsView.draft;
   const chains = allChains(settings);
   const projects = store.get('projects').projects ?? [];
 
-  const save = (e) => {
+  const save = (/** @type {SubmitEvent} */ e) => {
     e.preventDefault();
     const label = draft.label.trim();
     const address = draft.address.trim();
@@ -43,12 +48,13 @@ function contractForm(store, settings) {
     const abiText = draft.abi.trim();
     if (!label) return say(store, false, 'Give the contract a name.');
     if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return say(store, false, 'That is not a contract address. It starts with 0x and has 40 hex characters.');
+    /** @type {AbiItem[]} */
     let abi = [];
     if (abiText) {
       try {
         abi = parseAbi(abiText);
       } catch (err) {
-        return say(store, false, `The ABI is not valid JSON: ${err.message}`);
+        return say(store, false, `The ABI is not valid JSON: ${/** @type {Error} */ (err).message}`);
       }
     }
     const dupe = contractsOf(settings).find((c) => c.id !== editing?.id && c.chainId === chainId && c.address.toLowerCase() === address.toLowerCase());
@@ -75,7 +81,7 @@ function contractForm(store, settings) {
       say(store, true, `ABI fetched: ${counts(abi)}. Save to keep it.`);
     } catch (err) {
       contractsView.busy = false;
-      say(store, false, err.message);
+      say(store, false, /** @type {Error} */ (err).message);
     }
   };
 
@@ -116,19 +122,20 @@ function contractForm(store, settings) {
       } }, 'Cancel')));
 }
 
+/** @param {Store} store */
 export function contractsCard(store) {
   const settings = store.get(COLLECTION);
   const list = contractsOf(settings);
   const projects = new Map((store.get('projects').projects ?? []).map((p) => [p.id, p.name]));
 
-  const remove = (c) => {
+  const remove = (/** @type {Contract} */ c) => {
     store.update(COLLECTION, (d) => {
       d.contracts = contractsOf(d).filter((x) => x.id !== c.id);
     });
     if (contractsView.editing === c.id) contractsView.editing = null;
     say(store, true, `${c.label} removed.`);
   };
-  const edit = (id) => {
+  const edit = (/** @type {string} */ id) => {
     const c = list.find((x) => x.id === id);
     Object.assign(contractsView, { editing: id, draft: draftOf(c) });
     say(store, null, '');
