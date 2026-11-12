@@ -23,7 +23,7 @@ const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 const SESSIONS_KEY = 'board:dev-sessions';
 
 // View state: the workspace, the sessions, the one shown, and what the runner said about itself.
-const view = { workspace: 'board', sessions: [], active: '', wanted: 0, info: null, infoError: '', checking: false, count: 0, pending: null, queued: null, restored: false };
+const view = { workspace: 'board', sessions: [], active: '', wanted: 0, info: null, infoError: '', checking: false, count: 0, pending: null, queued: null, opening: null, restored: false };
 let currentStore = null;
 
 export const runnerOf = (store) => store.get(COLLECTION).runner || TERMINAL_RUNNER;
@@ -109,12 +109,12 @@ function showWanted() {
   saveSessions();
 }
 
-function newSession(store, cwd = rootPath(store, view.workspace), { tasks = [], prompt = '' } = {}) {
+function newSession(store, cwd = rootPath(store, view.workspace), { id, tasks = [], prompt = '' } = {}) {
   if (view.sessions.length >= maxSessions()) {
     toast(`${maxSessions()} terminals are open. Close one first.`);
     return null;
   }
-  const s = makeSession({ cwd, tasks, prompt });
+  const s = makeSession({ id, cwd, tasks, prompt });
   view.active = s.id;
   saveSessions();
   if (view.info) attach(store, s);
@@ -431,21 +431,47 @@ export const DEFAULT_DEV_COMMAND = 'claude --dangerously-skip-permissions --work
 // Opens Dev with a new terminal that runs claude on a prompt, in the project's folder when it has one.
 // The command waits for the runner to answer, so it also works when Dev was not open yet.
 // Issue and PR links the session prints are added to the tasks in `taskIds`.
+// Returns the terminal's session id, so the tasks can find it again (openSession).
 export function startClaudeSession({ prompt, projectId = '', taskIds = [] }) {
-  view.queued = { prompt, projectId, taskIds };
+  const id = uid();
+  view.queued = { id, prompt, projectId, taskIds };
+  showDev();
+  return id;
+}
+
+// Opens Dev on a terminal session a task started. One this page does not list (closed here, or started in another
+// browser) is listed again while the runner still has it.
+export function openSession({ id, cwd = '', taskIds = [] }) {
+  view.opening = { id, cwd, taskIds };
+  showDev();
+}
+
+function showDev() {
   if (location.hash.startsWith('#/dev')) currentStore?.refresh();
   else location.hash = '#/dev';
 }
 
+function showOpening(store) {
+  const { id, cwd, taskIds } = view.opening;
+  view.opening = null;
+  let s = view.sessions.find((x) => x.id === id);
+  if (!s) {
+    s = makeSession({ id, cwd, tasks: taskIds });
+    if (view.info) attach(store, s);
+  }
+  view.active = s.id;
+  saveSessions();
+}
+
 function startQueued(store) {
-  const { prompt, projectId, taskIds } = view.queued;
+  const { id, prompt, projectId, taskIds } = view.queued;
   const project = store.get('projects').projects.find((p) => p.id === projectId);
   if (project?.localPath) {
     view.workspace = `p:${project.id}`;
     setRoot(filesCtx(store), rootPath(store, view.workspace));
   }
   view.queued = null;
-  const s = newSession(store, undefined, { tasks: taskIds, prompt });
+  const s = newSession(store, undefined, { id, tasks: taskIds, prompt });
   if (!s) return;
   // Runs once the terminal is on the page, so it starts at the size it is shown.
   // `--` ends the options, so a flag with an optional value (--worktree [name]) cannot take the prompt.
@@ -658,6 +684,7 @@ function draw(root, store) {
   currentStore = store;
   if (!view.restored) restoreSessions();
   if (view.wanted) showWanted();
+  if (view.opening) showOpening(store);
   if (!view.info && !view.infoError && !view.checking) checkRunner(store);
   if (view.pending) {
     view.workspace = view.pending;
