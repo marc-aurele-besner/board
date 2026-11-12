@@ -1,21 +1,23 @@
 // Cron: recurring flows that gather board data, ask an AI model, and turn the answer into a task, a notification or work for claude in Dev.
 // The editor draws a flow as a chain of nodes, like a workflow canvas; the inspector below edits the selected node.
-import { h, icon, empty, notice, now, uid } from '../ui.js';
+import { h, icon, empty, notice, now, uid, todayISO } from '../ui.js';
 import { projectTree, projectIcon } from './projects.js';
 import { pickChip } from '../inline.js';
 import { modelChip } from '../model-picker.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import {
-  COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, DEV_MODES, TEMPLATES, daysOf,
+  COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, TEMPLATES, devRunOptions, devRunValue, devCommandPreview, daysOf,
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, makeSource, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
+  testStep, testsOf, isTesting, clearTests, varsTree, pathTo, remapStepRefs, parseData,
 } from '../cron.js';
 import { modelForTask } from './settings.js';
 
 // View state: the tab, the open flow, the selected node ('trigger' or a step id), the Runs tab's filter and the
 // flow list's project filter ('' for all, NO_PROJECT for flows without one).
-const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', project: '' };
+// field and cursor: the {{…}} field last focused and where its cursor was, for the variable chips and the test data.
+const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', project: '', field: '', cursor: null };
 const NO_PROJECT = 'none';
 const TABS = [['flows', 'Flows'], ['runs', 'Runs'], ['templates', 'Templates']];
 const SUBTITLES = {
@@ -259,7 +261,8 @@ function stepSummary(store, flow, step) {
   if (step.type === 'dev') {
     const id = withFlowProject(flow, step).projectId;
     const where = id ? projectName(store, id) : 'Task’s project or board';
-    return `${step.mode === 'command' ? step.command || 'Enter a command' : 'claude'} · ${where}`;
+    const label = Object.fromEntries(devRunOptions(store))[devRunValue(step)] ?? 'Removed preset';
+    return `${step.mode === 'command' ? step.command || 'Enter a command' : label} · ${where}`;
   }
   return step.text || 'Notification';
 }
@@ -289,7 +292,11 @@ function insertStep(store, flow, index) {
         onclick: () => {
           dialog.close();
           const step = makeStep(type);
-          updateFlow(store, flow.id, (f) => f.steps.splice(index, 0, step));
+          updateFlow(store, flow.id, (f) => {
+            remapStepRefs(f.steps, (n) => (n > index ? n + 1 : n));
+            f.steps.splice(index, 0, step);
+          });
+          clearTests(flow.id);
           view.node = step.id;
           store.refresh();
         },
@@ -305,8 +312,9 @@ const link = (store, flow, index) =>
 
 function canvas(store, flow) {
   const last = lastRunOf(store, flow.id);
+  const tested = testsOf(flow.id);
   const statusOfStep = (id) => {
-    const s = last?.steps.find((x) => x.stepId === id);
+    const s = tested.get(id) ?? last?.steps.find((x) => x.stepId === id);
     return s ? (s.ok ? 'ok' : 'bad') : '';
   };
   const parts = [node(store, flow, { id: 'trigger', iconName: 'clock', kind: 'trigger', title: 'Schedule', sub: scheduleLabel(flow.schedule) })];
@@ -322,6 +330,79 @@ function canvas(store, flow) {
 // --- Inspector ---
 
 const field = (label, control, hint) => h('label', null, label, control, hint ? h('span', { class: 'muted small' }, hint) : null);
+
+// --- Variables in fields ---
+// A field that takes {{…}} remembers the cursor, so a variable chip or a key in the test data goes in where it is.
+// Saving goes through the field's change handler; the re-render keeps its focus and cursor (keep-fields).
+
+// Puts `{{name}}` in the field at its cursor (or its end, when it never had focus) and saves it.
+function insertVar(key, name) {
+  const el = document.querySelector(`[data-var-field="${CSS.escape(key)}"]`);
+  if (!el) return false;
+  const token = `{{${name}}}`;
+  const at = view.cursor?.key === key ? view.cursor : { start: el.value.length, end: el.value.length };
+  el.focus();
+  el.setRangeText(token, Math.min(at.start, el.value.length), Math.min(at.end, el.value.length), 'end');
+  view.cursor = { key, start: el.selectionEnd, end: el.selectionEnd };
+  el.dispatchEvent(new Event('change'));
+  return true;
+}
+
+// Chips and tree keys keep the field's focus: a click that blurred it would save and re-render first, losing the click.
+const keepFocus = (e) => e.preventDefault();
+
+// The variables a step can use: the usual ones, then every earlier step by number.
+function varNames(flow, index, extra = []) {
+  return [
+    ['input', 'The previous step’s output'],
+    ['date', 'The day of the run'],
+    ['flow', 'The flow’s name'],
+    ...extra,
+    ...flow.steps.slice(0, index).map((s, i) => [`step${i + 1}`, `Output of step ${i + 1}, ${typeOf(s.type)[1]}`]),
+  ];
+}
+
+// A field that takes variables, with its variables under it as chips.
+function varField(label, control, key, names, hint) {
+  control.dataset.varField = key;
+  const remember = () => {
+    view.cursor = { key, start: control.selectionStart ?? control.value.length, end: control.selectionEnd ?? control.value.length };
+    view.field = key;
+  };
+  for (const ev of ['focus', 'keyup', 'mouseup', 'select']) control.addEventListener(ev, remember);
+  return h('div', { class: 'cron-col' },
+    field(label, control, hint),
+    h('div', { class: 'cron-vars', role: 'group', 'aria-label': `Variables for ${label}` },
+      names.map(([name, title]) => h('button', {
+        type: 'button', class: 'cron-var', title, onmousedown: keepFocus, onclick: () => insertVar(key, name),
+      }, `{{${name}}}`))));
+}
+
+// A JSON value as a folding tree. A key's click gives its variable path to `pick`; with no path it is not clickable.
+function jsonTree(value, path, pick, depth = 0) {
+  const keyButton = (label) => (path && pick
+    ? h('button', { type: 'button', class: 'json-key', title: `{{${path}}}`, onmousedown: keepFocus, onclick: () => pick(path) }, label)
+    : h('span', { class: 'json-key' }, label));
+  return (label) => {
+    if (value !== null && typeof value === 'object') {
+      const entries = Array.isArray(value) ? value.map((v, i) => [i, v]) : Object.entries(value);
+      return h('details', { class: 'json-node', open: depth < 2 },
+        h('summary', null, keyButton(label), h('span', { class: 'muted small' }, Array.isArray(value) ? ` [${entries.length}]` : ` {${entries.length}}`)),
+        h('ul', null, entries.map(([k, v]) => h('li', null, jsonTree(v, path ? pathTo(path, k) : null, pick, depth + 1)(String(k))))));
+    }
+    const text = typeof value === 'string' ? JSON.stringify(value.length > 300 ? `${value.slice(0, 300)}…` : value) : String(value);
+    return h('div', { class: 'json-leaf' }, keyButton(label), h('span', { class: `json-value json-${value === null ? 'null' : typeof value}` }, text));
+  };
+}
+
+// The tree of everything a step can read, picking into the field last focused.
+function inputTree(vars) {
+  const tree = varsTree(vars);
+  const pick = (path) => {
+    if (!view.field || !insertVar(view.field, path)) toast('Click in a field first, then on the key to add.');
+  };
+  return h('div', { class: 'json-tree' }, Object.entries(tree).map(([k, v]) => jsonTree(v, k, pick)(k)));
+}
 
 function select(value, options, onchange, attrs = {}) {
   return h('select', { ...attrs, value: String(value ?? ''), onchange: (e) => onchange(e.target.value) },
@@ -533,13 +614,14 @@ function gatherForm(store, flow, step) {
 
 function stepForm(store, flow, step) {
   const set = (patch) => updateFlow(store, flow.id, (f) => Object.assign(f.steps.find((x) => x.id === step.id) ?? {}, patch));
-  const vars = h('p', { class: 'muted small' }, 'Use {{input}} for the previous step’s output, {{date}} for today and {{flow}} for the flow’s name.');
+  const names = varNames(flow, flow.steps.indexOf(step));
+  const key = (name) => `${step.id}:${name}`;
   if (step.type === 'gather') return gatherForm(store, flow, step);
   if (step.type === 'ai') {
     return h('div', { class: 'stack' },
-      field('Prompt', h('textarea', { rows: 6, class: 'mono-text', onchange: (e) => set({ prompt: e.target.value }) }, step.prompt)),
-      vars,
-      field('System instructions (optional)', h('textarea', { rows: 2, onchange: (e) => set({ system: e.target.value }) }, step.system ?? '')),
+      varField('Prompt', h('textarea', { rows: 6, class: 'mono-text', onchange: (e) => set({ prompt: e.target.value }) }, step.prompt), key('prompt'), names,
+        'Ask for JSON to pick its parts in later steps, such as {{step2.title}}.'),
+      varField('System instructions (optional)', h('textarea', { rows: 2, onchange: (e) => set({ system: e.target.value }) }, step.system ?? ''), key('system'), names),
       h('div', { class: 'row' },
         h('span', { class: 'muted small' }, 'Model'),
         modelChip({ value: step.model, nullable: true, nullLabel: `Default (${modelForTask(store, AI_TASK) || 'not set'})`, onPick: (model) => set({ model: model ?? '' }) })),
@@ -547,8 +629,8 @@ function stepForm(store, flow, step) {
   }
   if (step.type === 'task') {
     return h('div', { class: 'stack' },
-      field('Task title', h('input', { value: step.title, autocomplete: 'off', onchange: (e) => set({ title: e.target.value }) }), 'The first line is used. The full input becomes the description.'),
-      vars,
+      varField('Task title', h('input', { value: step.title, autocomplete: 'off', onchange: (e) => set({ title: e.target.value }) }), key('title'), names,
+        'The first line is used. The full input becomes the description.'),
       h('div', { class: 'row cron-fields' },
         field('Project', stepProjectPick(store, flow, step.projectId, (projectId) => set({ projectId }), { none: 'Personal' })),
         field('Priority', select(step.priority, [['none', 'No priority'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], (priority) => set({ priority }))),
@@ -567,28 +649,43 @@ function stepForm(store, flow, step) {
     const own = withFlowProject(flow, step).projectId;
     const folders = projectsOf(store).filter((p) => p.localPath || p.id === own);
     const hasTask = flow.steps.slice(0, flow.steps.indexOf(step)).some((s) => s.type === 'task');
+    const options = devRunOptions(store);
+    const value = devRunValue(step);
+    // A preset removed in Settings still shows as chosen, so the step does not silently change what it runs.
+    if (!options.some(([v]) => v === value)) options.splice(1, 0, [value, 'Removed preset']);
+    const run = (v) => {
+      if (v.startsWith('preset:')) return set({ mode: 'preset', preset: v.slice(7) });
+      // A custom command starts from what the step ran until now, so it only needs the change.
+      if (v === 'custom' && !String(step.devCommand ?? '').trim()) return set({ mode: v, devCommand: devCommandPreview(store, flow, { ...step, mode: 'claude' }) });
+      return set({ mode: v });
+    };
+    const preview = claude && step.mode !== 'custom' ? devCommandPreview(store, flow, step) : '';
+    const devNames = varNames(flow, flow.steps.indexOf(step), [['task', 'The task made above: its title and description']]);
     return h('div', { class: 'stack' },
       h('div', { class: 'row cron-fields' },
-        field('Run', select(step.mode, DEV_MODES, (mode) => set({ mode }))),
+        field('Run', select(value, options, run)),
         field('Folder', stepProjectPick(store, flow, step.projectId, (projectId) => set({ projectId }), {
           none: 'The task’s project, else this board',
           list: folders, name: (p) => (p.localPath ? p.name : `${p.name} (no local folder)`),
         }), 'Projects show here once they have a local folder.')),
+      step.mode === 'custom'
+        ? field('Dev command', h('input', { value: step.devCommand ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (e) => set({ devCommand: e.target.value }) }),
+            'The Dev prompt is passed to it as its last word. A bare --worktree gets a name, as from a task.')
+        : null,
+      preview ? h('code', { class: 'muted small' }, preview) : null,
       claude
-        ? field('Prompt for claude', h('textarea', { rows: 6, class: 'mono-text', onchange: (e) => set({ prompt: e.target.value }) }, step.prompt ?? ''))
-        : field('Command', h('input', { value: step.command ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, placeholder: 'npm run build', onchange: (e) => set({ command: e.target.value }) }),
+        ? varField('Dev prompt', h('textarea', { rows: 6, class: 'mono-text', onchange: (e) => set({ prompt: e.target.value }) }, step.prompt ?? ''), key('prompt'), devNames)
+        : varField('Command', h('input', { value: step.command ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, placeholder: 'npm run build', onchange: (e) => set({ command: e.target.value }) }), key('command'), devNames,
             'Each {{…}} goes in as one quoted word, so text from a model never runs as a command.'),
-      h('p', { class: 'muted small' }, 'Use {{input}} for the previous step’s output, {{task}} for the task made above (its title and description), {{date}} and {{flow}}.'),
       h('p', { class: 'muted small' },
-        claude ? 'claude starts with the project’s Dev command, in a worktree of its own. ' : '',
+        claude ? 'The command starts in the folder, in a worktree of its own when it asks for one. ' : '',
         hasTask
           ? 'The task made above goes with it, as from its Dev button: it moves to In progress, and the issues and PRs the terminal prints are added to it. '
           : 'Put a “Create task” step before this one to follow the work from a task. ',
         'The run does not wait for the terminal: it shows in Dev, and needs the runner that bun start starts.'));
   }
   return h('div', { class: 'stack' },
-    field('Message', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, step.text)),
-    vars,
+    varField('Message', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, step.text), key('text'), names),
     h('p', { class: 'muted small' }, 'Sent to the bell, and to Telegram when Settings › Notifications says so for Cron flows.'));
 }
 
@@ -597,8 +694,77 @@ function moveStep(store, flow, id, by) {
     const i = f.steps.findIndex((s) => s.id === id);
     const j = i + by;
     if (i < 0 || j < 0 || j >= f.steps.length) return;
+    remapStepRefs(f.steps, (n) => (n === i + 1 ? j + 1 : n === j + 1 ? i + 1 : n));
     [f.steps[i], f.steps[j]] = [f.steps[j], f.steps[i]];
   });
+  // The tested data names steps by their old numbers.
+  clearTests(flow.id);
+}
+
+// A test that fails on an earlier step leaves this one without data, so it says where it stopped.
+function runTest(store, flow, stepId) {
+  testStep(store, flow.id, stepId).then((r) => {
+    if (r && !r.ok) toast(`Test failed: ${r.output}`);
+  });
+}
+
+// What a step could read before it was tested: earlier test data, else the last run's outputs.
+function knownVars(store, flow, index) {
+  const tested = testsOf(flow.id);
+  const last = lastRunOf(store, flow.id);
+  const vars = { input: '', date: todayISO(), flow: flow.name, $data: {} };
+  flow.steps.slice(0, index).forEach((s, i) => {
+    const t = tested.get(s.id);
+    const r = t?.ok ? t : last?.steps.find((x) => x.stepId === s.id && x.ok);
+    const output = r?.output ?? '';
+    const data = t?.ok ? t.data : parseData(output) ?? output;
+    vars[`step${i + 1}`] = output;
+    vars.$data[`step${i + 1}`] = data;
+    vars.input = output;
+    vars.$data.input = data;
+  });
+  return vars;
+}
+
+// The step's test, as n8n shows a node: what it read and what it gave, as JSON. A key in the input goes into the
+// field last focused; a key in the output copies its variable, for the steps after this one.
+function testPanel(store, flow, step, index) {
+  const result = testsOf(flow.id).get(step.id);
+  const vars = result?.vars ?? knownVars(store, flow, index);
+  const copy = (path) => navigator.clipboard.writeText(`{{${path}}}`).then(() => toast(`Copied {{${path}}}`), () => toast('Could not copy'));
+  const next = flow.steps[index + 1];
+  const outTree = result
+    ? h('div', { class: 'json-tree' }, result.ok
+      ? jsonTree(result.data, `step${index + 1}`, copy)(`step${index + 1}`)
+      : h('pre', { class: 'error' }, result.output))
+    : h('p', { class: 'muted small' }, 'Test the step to see what it gives.');
+  return h('section', { class: 'cron-test stack' },
+    h('div', { class: 'row between' },
+      h('strong', null, 'Test data'),
+      h('div', { class: 'row' },
+        result ? h('span', { class: `pill tone-${result.ok ? 'done' : 'high'}` }, result.ok ? `Tested · ${result.ms} ms` : 'Failed') : null,
+        result?.ok && next
+          ? h('button', {
+              type: 'button',
+              class: 'btn-link small',
+              disabled: isRunning(flow.id),
+              onclick: () => {
+                view.node = next.id;
+                runTest(store, flow, next.id);
+              },
+            }, 'Test the next step')
+          : null,
+        testsOf(flow.id).size
+          ? h('button', { type: 'button', class: 'btn-link small', onclick: () => { clearTests(flow.id); store.refresh(); } }, 'Clear test data')
+          : null)),
+    result?.note ? h('p', { class: 'muted small' }, result.note) : null,
+    h('div', { class: 'cron-test-grid' },
+      h('div', { class: 'cron-col' },
+        h('span', { class: 'muted small' }, 'Input · click a key to add it at the cursor'),
+        inputTree(vars)),
+      h('div', { class: 'cron-col' },
+        h('span', { class: 'muted small' }, 'Output · click a key to copy it for a later step'),
+        outTree)));
 }
 
 function inspector(store, flow) {
@@ -615,6 +781,13 @@ function inspector(store, flow) {
     h('header', { class: 'row between' },
       h('div', { class: 'row' }, h('span', { class: `flow-node-icon kind-${step.type}` }, icon(iconName)), h('h3', null, `${index + 1}. ${label}`)),
       h('div', { class: 'row' },
+        h('button', {
+          type: 'button',
+          class: 'btn-small',
+          disabled: isRunning(flow.id),
+          title: 'Runs the steps before this one that have no test data yet, then this one. Creates no task, sends no notification and starts no terminal.',
+          onclick: () => runTest(store, flow, step.id),
+        }, icon('play'), isTesting(flow.id) ? 'Testing…' : 'Test step'),
         h('button', { type: 'button', class: 'icon-btn', title: 'Move earlier', 'aria-label': 'Move earlier', disabled: index === 0, onclick: () => moveStep(store, flow, step.id, -1) }, icon('chevron-left')),
         h('button', { type: 'button', class: 'icon-btn', title: 'Move later', 'aria-label': 'Move later', disabled: index === flow.steps.length - 1, onclick: () => moveStep(store, flow, step.id, 1) }, icon('chevron-right')),
         h('button', {
@@ -625,12 +798,15 @@ function inspector(store, flow) {
           onclick: () => {
             updateFlow(store, flow.id, (f) => {
               f.steps = f.steps.filter((s) => s.id !== step.id);
+              remapStepRefs(f.steps, (n) => (n === index + 1 ? null : n > index + 1 ? n - 1 : n));
             });
+            clearTests(flow.id);
             view.node = 'trigger';
             store.refresh();
           },
         }, icon('trash')))),
     stepForm(store, flow, step),
+    testPanel(store, flow, step, index),
     output
       ? h('details', { class: 'cron-output', open: !output.ok },
           h('summary', null, output.ok ? `Output of the last run (${output.ms} ms)` : 'Last run failed here'),
