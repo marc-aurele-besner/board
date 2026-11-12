@@ -301,7 +301,7 @@ export function makeStep(type) {
   const base = { id: uid(), type };
   if (type === 'gather') return { ...base, sources: [makeSource()], append: false };
   if (type === 'ai') return { ...base, prompt: 'Summarize this in five bullet points:\n\n{{input}}', system: '', model: '' };
-  if (type === 'task') return { ...base, title: '{{flow}} · {{date}}', description: '{{input}}', projectId: '', priority: 'none', due: '' };
+  if (type === 'task') return { ...base, title: '{{flow}} · {{date}}', description: '{{input}}', projectId: '', priority: 'none', status: 'todo', category: '', due: '' };
   if (type === 'stop') return { ...base, when: 'nothing', text: '' };
   if (type === 'profile') return { ...base, projectId: '', onEdited: 'merge' };
   if (type === 'format') return { ...base, mode: 'text', text: '{{input}}', items: '{{input}}', itemText: '- {{item}}', separator: 'line', fields: [makeField()] };
@@ -2058,7 +2058,9 @@ async function runStep(store, flow, step, input, ctx) {
     const due = step.due === 'today' ? todayISO() : step.due === 'tomorrow' ? new Date(Date.now() + 24 * 60 * MINUTE).toISOString().slice(0, 10) : '';
     const projectId = withFlowProject(flow, step).projectId || null;
     const description = fill(step.description ?? '{{input}}', vars).trim();
-    ctx.data = { title, description, projectId, priority: step.priority || 'none', due };
+    const status = step.status || 'todo';
+    const category = step.category || '';
+    ctx.data = { title, description, projectId, priority: step.priority || 'none', status, category, due };
     // A test of the whole flow makes the task for real, so the Dev step after it can work on it.
     if (ctx.dry && !ctx.live) {
       ctx.note = `Test run: would create the task “${title}”${due ? ` due ${due}` : ''}.`;
@@ -2069,6 +2071,8 @@ async function runStep(store, flow, step, input, ctx) {
       description,
       projectId,
       priority: step.priority || 'none',
+      status,
+      category,
       due,
       auto: 'cron',
       autoRef: flow.id,
