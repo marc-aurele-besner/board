@@ -1939,6 +1939,18 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .flow-add { position: relative; display: grid; place-items: center; width: 24px; height: 24px; min-height: 0; padding: 0; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); color: var(--muted); }
 .flow-add:hover { color: var(--accent); border-color: var(--accent); }
 .flow-add .icon { width: 13px; height: 13px; }
+.flow-palette { display: flex; flex-direction: column; gap: 6px; }
+.flow-palette-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.flow-palette-item { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; border-radius: 10px; font-weight: 500; font-size: 0.85rem; cursor: grab; }
+.flow-palette-item:hover { border-color: var(--accent); }
+.flow-palette-item .flow-node-icon { width: 26px; height: 26px; border-radius: 7px; }
+.flow-palette-item .flow-node-icon .icon { width: 14px; height: 14px; }
+.flow-node[draggable="true"] { cursor: grab; }
+.cron-editor.dragging .flow-add { border-color: var(--accent); color: var(--accent); transform: scale(1.25); }
+.flow-link.drop .flow-add { background: var(--accent); color: var(--surface); transform: scale(1.5); }
+.flow-node-pipe { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); font-size: 0.75rem; }
+.flow-node-pipe .icon { width: 11px; height: 11px; }
+.flow-hint { margin: 0 0 0 8px; }
 .cron-output summary, .cron-runs summary { cursor: pointer; }
 .cron-output pre, .cron-run-steps pre { margin: 6px 0 0; padding: 10px; max-height: 260px; overflow: auto; border-radius: 8px; background: var(--surface-2); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; }
 .cron-runs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }

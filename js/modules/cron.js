@@ -11,7 +11,7 @@ import {
   COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, PROFILE_EDITED, profileEditedMode, TEMPLATES, devRunOptions, devRunValue, devCommandPreview, daysOf,
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, templateFromFlow, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
-  testStep, testsOf, isTesting, clearTests, useDevStarter, varsTree, pathTo, remapStepRefs, parseData, projectVars, runState, devWaits, DEV_WAIT_MINUTES,
+  testStep, testsOf, isTesting, clearTests, useDevStarter, varsTree, pathTo, parseData, INPUT_NONE, reorderSteps, projectVars, runState, devWaits, DEV_WAIT_MINUTES,
 } from '../cron.js';
 import { modelForTask } from '../models.js';
 import { openSession, runnerOf, liveSession, onSessionPaint, exitText, terminalView, terminalBackground, startDevSession } from './dev.js';
@@ -199,13 +199,23 @@ function flowList(store, all, flows) {
               onclick: () => duplicateFlow(store, f),
             }, icon('copy')));
         }))
-      : empty('No flow yet. Start from a template or a blank flow.'));
+      : empty('No flow yet. Build one from scratch, or start from a template.'),
+    h('button', { type: 'button', class: 'btn-link small', onclick: () => openTemplates(store) }, icon('bookmark'), 'Start from a template'));
 }
 
+// A new flow starts empty, on its schedule node, with every node there is in the palette above its canvas.
 function openNewFlow(store) {
+  view.tab = 'flows';
+  const flow = makeFlow();
+  // A flow made while the list shows one project starts in it.
+  if (view.project && view.project !== NO_PROJECT) flow.projectId = view.project;
+  addFlow(store, flow);
+}
+
+const openTemplates = (store) => {
   view.tab = 'templates';
   store.refresh();
-}
+};
 
 // --- Templates tab ---
 
@@ -345,10 +355,15 @@ function stepSummary(store, flow, step) {
   return step.text || 'Notification';
 }
 
-function node(store, flow, { id, iconName, kind, title, sub, status }) {
+// A step's node can be dragged onto a + to move it there; the schedule node stays first.
+function node(store, flow, { id, iconName, kind, title, sub, status, pipe = '' }) {
+  const step = id !== 'trigger';
   return h('button', {
     type: 'button',
     class: `flow-node${view.node === id ? ' selected' : ''}${status ? ` ${status}` : ''}`,
+    draggable: step ? 'true' : null,
+    ondragstart: step ? (e) => startDrag(e, `move:${id}`) : null,
+    ondragend: step ? endDrag : null,
     onclick: () => {
       view.node = id;
       store.refresh();
@@ -357,7 +372,86 @@ function node(store, flow, { id, iconName, kind, title, sub, status }) {
     h('span', { class: `flow-node-icon kind-${kind}` }, icon(iconName)),
     h('span', { class: 'flow-node-text' },
       h('span', { class: 'flow-node-kind' }, title),
-      h('span', { class: 'flow-node-sub' }, sub)));
+      h('span', { class: 'flow-node-sub' }, sub),
+      pipe ? h('span', { class: 'flow-node-pipe' }, icon('arrow-right'), pipe) : null));
+}
+
+// --- Building a flow: adding, moving and piping nodes ---
+
+const DRAG_TYPE = 'application/x-cron-node';
+const startDrag = (e, what) => {
+  e.dataTransfer.setData(DRAG_TYPE, what);
+  e.dataTransfer.effectAllowed = 'copyMove';
+  e.currentTarget.closest('.cron-editor')?.classList.add('dragging');
+};
+const endDrag = (e) => e.currentTarget.closest('.cron-editor')?.classList.remove('dragging');
+
+function addStepAt(store, flow, index, type) {
+  const step = makeStep(type);
+  updateFlow(store, flow.id, (f) => reorderSteps(f, [...f.steps.slice(0, index), step, ...f.steps.slice(index)]));
+  clearTests(store, flow.id);
+  view.node = step.id;
+  store.refresh();
+}
+
+// Moves a step so that it lands at `index` of the list as it is now (the position of a + on the canvas).
+function moveStepTo(store, flow, id, index) {
+  const i = flow.steps.findIndex((s) => s.id === id);
+  const at = index > i ? index - 1 : index;
+  if (i < 0 || at === i) return;
+  updateFlow(store, flow.id, (f) => {
+    const from = f.steps.findIndex((s) => s.id === id);
+    if (from < 0) return;
+    const rest = f.steps.filter((s) => s.id !== id);
+    reorderSteps(f, [...rest.slice(0, at), f.steps[from], ...rest.slice(at)]);
+  });
+  // The tested data names steps by their old numbers.
+  clearTests(store, flow.id);
+}
+
+// Every node there is, always in view: a click adds one after the selected node, a drag puts it on any +.
+function nodePalette(store, flow) {
+  const selected = flow.steps.findIndex((s) => s.id === view.node);
+  return h('div', { class: 'flow-palette' },
+    h('span', { class: 'muted small' }, 'Nodes · click one to add it after the selected node, or drag it onto a +'),
+    h('div', { class: 'flow-palette-list', role: 'list', 'aria-label': 'Nodes you can add' },
+      STEP_TYPES.map(([type, label, iconName, about]) => h('button', {
+        type: 'button',
+        class: 'flow-palette-item',
+        role: 'listitem',
+        draggable: 'true',
+        title: about,
+        ondragstart: (e) => startDrag(e, `new:${type}`),
+        ondragend: endDrag,
+        onclick: () => addStepAt(store, flow, selected + 1, type),
+      }, h('span', { class: `flow-node-icon kind-${type}` }, icon(iconName)), label))));
+}
+
+// What a step reads as {{input}}: the step before it, any earlier step, or nothing.
+function inputPick(store, flow, step, index) {
+  if (index === 0) return null;
+  const options = [
+    ['', `The step before (${index}. ${typeOf(flow.steps[index - 1].type)[1]})`],
+    ...flow.steps.slice(0, index - 1).map((s, i) => [s.id, `${i + 1}. ${typeOf(s.type)[1]}`]),
+    [INPUT_NONE, 'Nothing'],
+  ];
+  return field('Input from', select(step.from ?? '', options, (from) => {
+    updateFlow(store, flow.id, (f) => {
+      const s = f.steps.find((x) => x.id === step.id);
+      if (!s) return;
+      if (from) s.from = from;
+      else delete s.from;
+    });
+    clearTests(store, flow.id);
+  }), 'What {{input}} holds. Pick an earlier step to branch from it; every {{stepN}} stays readable either way.');
+}
+
+// The badge on a node whose input is not the step just before it.
+function pipeLabel(flow, step) {
+  if (!step.from) return '';
+  if (step.from === INPUT_NONE) return 'No input';
+  const n = flow.steps.findIndex((s) => s.id === step.from);
+  return n < 0 ? '' : `Input from ${n + 1}`;
 }
 
 function insertStep(store, flow, index) {
@@ -369,14 +463,7 @@ function insertStep(store, flow, index) {
         class: 'cron-template row',
         onclick: () => {
           dialog.close();
-          const step = makeStep(type);
-          updateFlow(store, flow.id, (f) => {
-            remapStepRefs(f.steps, (n) => (n > index ? n + 1 : n));
-            f.steps.splice(index, 0, step);
-          });
-          clearTests(store, flow.id);
-          view.node = step.id;
-          store.refresh();
+          addStepAt(store, flow, index, type);
         },
       },
         h('span', { class: `flow-node-icon kind-${type}` }, icon(iconName)),
@@ -384,8 +471,26 @@ function insertStep(store, flow, index) {
   });
 }
 
+// A + takes a node dropped on it: a new one from the palette, or a step moved from elsewhere on the canvas.
 const link = (store, flow, index) =>
-  h('div', { class: 'flow-link' },
+  h('div', {
+    class: 'flow-link',
+    ondragover: (e) => {
+      if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
+      e.preventDefault();
+      e.currentTarget.classList.add('drop');
+    },
+    ondragleave: (e) => e.currentTarget.classList.remove('drop'),
+    ondrop: (e) => {
+      const what = e.dataTransfer.getData(DRAG_TYPE);
+      if (!what) return;
+      e.preventDefault();
+      e.currentTarget.classList.remove('drop');
+      const [kind, value] = what.split(':');
+      if (kind === 'new') addStepAt(store, flow, index, value);
+      else moveStepTo(store, flow, value, index);
+    },
+  },
     h('button', { type: 'button', class: 'flow-add', title: 'Add a step here', 'aria-label': 'Add a step here', onclick: () => insertStep(store, flow, index) }, icon('plus')));
 
 function canvas(store, flow) {
@@ -399,13 +504,14 @@ function canvas(store, flow) {
   flow.steps.forEach((s, i) => {
     const [, label, iconName] = typeOf(s.type);
     parts.push(link(store, flow, i));
-    parts.push(node(store, flow, { id: s.id, iconName, kind: s.type, title: `${i + 1}. ${label}`, sub: stepSummary(store, flow, s), status: statusOfStep(s.id) }));
+    parts.push(node(store, flow, { id: s.id, iconName, kind: s.type, title: `${i + 1}. ${label}`, sub: stepSummary(store, flow, s), status: statusOfStep(s.id), pipe: pipeLabel(flow, s) }));
   });
   parts.push(link(store, flow, flow.steps.length));
   const wires = document.createElementNS(SVG_NS, 'svg');
   wires.setAttribute('class', 'flow-wires');
   wires.setAttribute('aria-hidden', 'true');
-  const el = h('div', { class: `flow-canvas${isRunning(flow.id) ? ' running' : ''}`, role: 'list', 'aria-label': 'Flow steps' }, wires, parts);
+  const hint = flow.steps.length ? null : h('p', { class: 'muted small flow-hint' }, 'Add the first node from the list above, or drop one on +.');
+  const el = h('div', { class: `flow-canvas${isRunning(flow.id) ? ' running' : ''}`, role: 'list', 'aria-label': 'Flow steps' }, wires, parts, hint);
   new ResizeObserver(() => drawWires(el, wires, parts)).observe(el);
   return el;
 }
@@ -869,15 +975,10 @@ function stepForm(store, flow, step) {
 }
 
 function moveStep(store, flow, id, by) {
-  updateFlow(store, flow.id, (f) => {
-    const i = f.steps.findIndex((s) => s.id === id);
-    const j = i + by;
-    if (i < 0 || j < 0 || j >= f.steps.length) return;
-    remapStepRefs(f.steps, (n) => (n === i + 1 ? j + 1 : n === j + 1 ? i + 1 : n));
-    [f.steps[i], f.steps[j]] = [f.steps[j], f.steps[i]];
-  });
-  // The tested data names steps by their old numbers.
-  clearTests(store, flow.id);
+  const i = flow.steps.findIndex((s) => s.id === id);
+  const j = i + by;
+  if (i < 0 || j < 0 || j >= flow.steps.length) return;
+  moveStepTo(store, flow, id, by > 0 ? j + 1 : j);
 }
 
 // A test that fails on an earlier step leaves this one without data, so it says where it stopped.
@@ -899,6 +1000,7 @@ function knownVars(store, flow, index) {
     vars.project = project.name;
     vars.$data.project = project;
   }
+  const outs = new Map();
   flow.steps.slice(0, index).forEach((s, i) => {
     const t = tested.get(s.id);
     const r = t?.ok ? t : last?.steps.find((x) => x.stepId === s.id && x.ok);
@@ -906,9 +1008,14 @@ function knownVars(store, flow, index) {
     const data = t?.ok ? t.data : parseData(output) ?? output;
     vars[`step${i + 1}`] = output;
     vars.$data[`step${i + 1}`] = data;
-    vars.input = output;
-    vars.$data.input = data;
+    outs.set(s.id, { output, data });
   });
+  const from = step?.from ?? '';
+  const piped = from === INPUT_NONE ? null : from ? outs.get(from) : [...outs.values()].at(-1);
+  if (piped) {
+    vars.input = piped.output;
+    vars.$data.input = piped.data;
+  }
   return vars;
 }
 
@@ -994,15 +1101,13 @@ function inspector(store, flow) {
           title: 'Remove step',
           'aria-label': 'Remove step',
           onclick: () => {
-            updateFlow(store, flow.id, (f) => {
-              f.steps = f.steps.filter((s) => s.id !== step.id);
-              remapStepRefs(f.steps, (n) => (n === index + 1 ? null : n > index + 1 ? n - 1 : n));
-            });
+            updateFlow(store, flow.id, (f) => reorderSteps(f, f.steps.filter((s) => s.id !== step.id)));
             clearTests(store, flow.id);
             view.node = 'trigger';
             store.refresh();
           },
         }, icon('trash')))),
+    inputPick(store, flow, step, index),
     stepForm(store, flow, step),
     testPanel(store, flow, step, index),
     output
@@ -1356,6 +1461,7 @@ function editor(store, flow) {
       h('div', { class: 'row cron-fields' },
         field('Project', projectPick(store, flowProjectId(flow), 'No project', (projectId) => setFlowProject(store, flow, projectId)),
           'Data, task and Dev steps use it, unless a step chooses another.')),
+      nodePalette(store, flow),
       canvas(store, flow),
       h('p', { class: 'muted small' }, `Last run: ${timeOf(flow.lastRun)}${flow.enabled ? ` · next: ${timeOf(nextRun(flow)?.toISOString())}` : ''}`)),
     inspector(store, flow),
@@ -1372,7 +1478,9 @@ function flowsTab(store) {
   return h('div', { class: 'cron-layout' },
     flowList(store, all, flows),
     flow ? editor(store, flow) : h('div', { class: 'card stack' }, empty('Create a flow to schedule AI work, such as a morning plan from your open tasks.'),
-      h('div', null, h('button', { type: 'button', class: 'primary', onclick: () => openNewFlow(store) }, icon('plus'), 'New flow'))));
+      h('div', { class: 'row' },
+        h('button', { type: 'button', class: 'primary', onclick: () => openNewFlow(store) }, icon('plus'), 'New flow'),
+        h('button', { type: 'button', class: 'btn-link', onclick: () => openTemplates(store) }, 'Start from a template'))));
 }
 
 function draw(root, store) {
