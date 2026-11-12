@@ -74,10 +74,13 @@ export function addTaskLinks(store, taskIds, links) {
 // Claude is done with the tasks: those still in progress wait for review. A task moved elsewhere meanwhile is
 // left where it was put.
 export function moveToReview(store, taskIds) {
+  const moving = (task) => taskIds.includes(task.id) && statusOf(task) === 'doing';
+  // Nothing to move: no save and no re-render.
+  if (!store.get(COLLECTION).items.some(moving)) return;
   const moved = [];
   store.update(COLLECTION, (d) => {
     for (const task of d.items) {
-      if (!taskIds.includes(task.id) || statusOf(task) !== 'doing') continue;
+      if (!moving(task)) continue;
       task.status = 'review';
       delete task.done;
       moved.push(task.text);
