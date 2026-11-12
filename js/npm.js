@@ -133,36 +133,58 @@ export async function readNpm(target, { orgs = [], packages = [] }) {
 
 // --- The board's side ---
 
+// Keys are 'org:<name>' or a package name. A render asks for each row, so the asks of one render go as one run.
 const asking = new Set();
-// Asks the runners for what npm.json lacks, then reads the file again.
-function ask({ orgs = [], packages = [] }, onChange) {
-  const freshOrgs = orgs.filter((o) => !asking.has(`org:${o}`));
-  const freshPackages = packages.filter((p) => !asking.has(p));
-  if (!freshOrgs.length && !freshPackages.length) return;
-  const keys = [...freshOrgs.map((o) => `org:${o}`), ...freshPackages];
-  keys.forEach((k) => asking.add(k));
-  runJob('npm', { orgs: freshOrgs, packages: freshPackages })
-    .then(() => store?.sync())
-    .catch(() => {})
-    .finally(() => {
-      keys.forEach((k) => asking.delete(k));
-      onChange?.();
-    });
+const queued = new Set();
+// When the runners could not be asked: the error, kept a minute so a re-render does not ask again at once.
+const failed = new Map();
+const FAILED_MS = 60000;
+let flushing = null;
+
+function ask(keys, onChange) {
+  for (const k of keys) if (!asking.has(k)) queued.add(k);
+  if (!queued.size || flushing) return;
+  flushing = Promise.resolve().then(() => {
+    const batch = [...queued];
+    queued.clear();
+    flushing = null;
+    batch.forEach((k) => asking.add(k));
+    const orgs = batch.filter((k) => k.startsWith('org:')).map((k) => k.slice(4));
+    const packages = batch.filter((k) => !k.startsWith('org:'));
+    runJob('npm', { orgs, packages })
+      .then(() => store?.sync())
+      .catch((err) => batch.forEach((k) => failed.set(k, { error: err.message, at: Date.now() })))
+      .finally(() => {
+        batch.forEach((k) => asking.delete(k));
+        onChange?.();
+      });
+  });
 }
 
 // An entry is { status: 'ok' | 'loading' | 'error', ... }, from npm.json. One the file lacks is asked of the runners.
-function statsOf(entry, request, onChange) {
+function statsOf(entry, key, onChange) {
   if (entry?.at) return { status: 'ok', ...entry };
   if (entry?.error) return { status: 'error', error: entry.error };
-  ask(request, onChange);
+  const miss = failed.get(key);
+  if (miss && Date.now() - miss.at < FAILED_MS) return { status: 'error', error: miss.error };
+  ask([key], onChange);
   return { status: 'loading' };
 }
 
-export const packageStats = (name, onChange) => statsOf(file().packages?.[name], { packages: [name] }, onChange);
-export const orgStats = (org, onChange) => statsOf(file().orgs?.[org], { orgs: [org] }, onChange);
+export const packageStats = (name, onChange) => statsOf(file().packages?.[name], name, onChange);
+export const orgStats = (org, onChange) => statsOf(file().orgs?.[org], `org:${org}`, onChange);
+
+const keysOf = (p) => {
+  const { org, packages } = npmOf(p);
+  return [...(org ? [`org:${org}`] : []), ...packages];
+};
+
+// True while the runners read any of the project's org and packages.
+export const npmBusy = (p) => keysOf(p).some((k) => asking.has(k) || queued.has(k));
 
 // Reads a project's org and packages again now.
 export function refreshNpm(p, onChange) {
-  const { org } = npmOf(p);
-  ask({ orgs: org ? [org] : [], packages: npmOf(p).packages }, onChange);
+  const keys = keysOf(p);
+  keys.forEach((k) => failed.delete(k));
+  ask(keys, onChange);
 }
