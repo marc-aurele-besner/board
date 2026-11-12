@@ -1,3 +1,4 @@
+// @ts-check
 import { h, icon, money, empty, notice } from '../ui.js';
 import { openDialog } from '../modal.js';
 import { barChart, legend } from '../chart.js';
@@ -11,11 +12,17 @@ import { contractsActivityTab, contractsActivitySerialize, contractsActivityRest
 import { usageRecords, sumUsage, modelName, modelsByUse, fmtDuration, tokensOf } from '../dev-usage.js';
 import { sessionStatus } from '../terminal.js';
 import { runnerOf } from '../dev-core.js';
+/** @import { AiCallMeta, AiMessage, DevUsage, Store, UsageEntry } from '../../types/data' */
+/** @import { RunnerStatus } from '../../types/terminal' */
+/** @import { Child } from '../../types/ui' */
+/** @import { MonitoringView, PeriodBucket, PeriodWindow } from '../../types/monitoring' */
+/** @import { RepoActivity } from '../github.js' */
 
 const COLLECTION = 'usage';
 const DAY = 86400000;
 const HOUR = 3600000;
 const TABS = [['ai', 'AI usage'], ['github', 'GitHub activity'], ['analytics', 'Web analytics'], ['search', 'Search'], ['contracts', 'Contracts'], ['runners', 'Board runners']];
+/** @type {Record<string, string>} */
 const SUBTITLES = {
   ai: 'AI calls made by the board, and what the claude sessions Dev ran for tasks used.',
   github: 'Commits, pull requests and issues across the repos linked to your projects.',
@@ -29,20 +36,25 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // View state: the sub-tab and the period. The period applies to every chart and number on the page.
 // `site` and `engine` belong to the two website tabs: the project shown, and Google or Bing.
+/** @type {MonitoringView} */
 const view = { tab: 'ai', period: '7', site: '', engine: 'google' };
 // Prices per model (USD per token), used to estimate calls that had no reported cost.
+/** @type {{ status: string, map: Map<string, { prompt: number, completion: number }> }} */
 const prices = { status: 'idle', map: new Map() };
 // GitHub activity for the linked repos over the period. Reloaded when the period changes.
+/** @type {{ key: string, scheduled: string, status: string, data: Record<string, RepoActivity>, errors: Record<string, string> }} */
 const gh = { key: '', scheduled: '', status: 'idle', data: {}, errors: {} };
 
 // --- Periods: local-time buckets (hours for one day, days otherwise) ---
 
+/** @param {string} period @returns {PeriodWindow} */
 function periodWindow(period) {
   const now = new Date();
   const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   if (period === 'today' || period === 'yesterday') {
     const dayStart = period === 'today' ? today0 : new Date(today0.getFullYear(), today0.getMonth(), today0.getDate() - 1);
     const dayEnd = period === 'today' ? now : today0;
+    /** @type {PeriodBucket[]} */
     const items = [];
     for (let hr = 0; hr < 24; hr++) {
       const s = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate(), hr).getTime();
@@ -52,6 +64,7 @@ function periodWindow(period) {
     return { start: dayStart.getTime(), end: dayEnd.getTime(), items, hourly: true };
   }
   const days = Number(period);
+  /** @type {PeriodBucket[]} */
   const items = [];
   for (let i = days - 1; i >= 0; i--) {
     const s = new Date(today0.getFullYear(), today0.getMonth(), today0.getDate() - i);
@@ -61,22 +74,24 @@ function periodWindow(period) {
   return { start: items[0].start, end: items[items.length - 1].end, items, hourly: false };
 }
 
-const inWindow = (ms, w) => ms !== null && ms >= w.start && ms < w.end;
-const bucketOf = (ms, w) => w.items.findIndex((b) => ms >= b.start && ms < b.end);
-const parseTime = (iso) => (iso ? Date.parse(iso) : null);
-const median = (list) => {
+const inWindow = (/** @type {number | null} */ ms, /** @type {PeriodWindow} */ w) => ms !== null && ms >= w.start && ms < w.end;
+// A null time is in no bucket.
+const bucketOf = (/** @type {number | null | undefined} */ ms, /** @type {PeriodWindow} */ w) => w.items.findIndex((b) => /** @type {number} */ (ms) >= b.start && /** @type {number} */ (ms) < b.end);
+const parseTime = (/** @type {string | null | undefined} */ iso) => (iso ? Date.parse(iso) : null);
+const median = (/** @type {number[]} */ list) => {
   if (!list.length) return null;
   const sorted = [...list].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
-const hoursLabel = (hours) => {
+const hoursLabel = (/** @type {number | null} */ hours) => {
   if (hours === null) return '—';
   if (hours < 1) return `${Math.round(hours * 60)} min`;
   if (hours < 48) return `${hours.toFixed(1)} h`;
   return `${(hours / 24).toFixed(1)} days`;
 };
 
+/** @param {string} label @param {Child} value @param {Child} [hint] */
 export function stat(label, value, hint) {
   return h('div', { class: 'card stat' },
     h('span', { class: 'muted small' }, label),
@@ -86,11 +101,12 @@ export function stat(label, value, hint) {
 
 // --- AI usage ---
 
-const usd = (n) => money(n, 'USD');
-const usdPrecise = (n) => (n < 0.01 ? `$${n.toFixed(4)}` : usd(n));
-const fmtTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
+const usd = (/** @type {number} */ n) => money(n, 'USD');
+const usdPrecise = (/** @type {number} */ n) => (n < 0.01 ? `$${n.toFixed(4)}` : usd(n));
+const fmtTokens = (/** @type {number} */ n) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
 
 // A call's cost: the reported one, or an estimate from the model's price. Null when neither is known.
+/** @param {UsageEntry} e @returns {{ value: number, estimated: boolean } | null} */
 function costOf(e) {
   if (e.cost !== null && e.cost !== undefined) return { value: e.cost, estimated: false };
   const p = prices.map.get(e.model);
@@ -98,6 +114,7 @@ function costOf(e) {
   return { value: e.promptTokens * p.prompt + e.completionTokens * p.completion, estimated: true };
 }
 
+/** @param {Store} store */
 function loadPrices(store) {
   if (prices.status === 'loading' || prices.status === 'ok') return;
   prices.status = 'loading';
@@ -113,6 +130,7 @@ function loadPrices(store) {
     .finally(() => store.refresh());
 }
 
+/** @param {string} title @param {CallGroup[]} rows @param {string} label */
 function groupTable(title, rows, label) {
   return h('section', { class: 'card stack' },
     h('h3', null, title),
@@ -126,7 +144,10 @@ function groupTable(title, rows, label) {
       : empty('No calls in this period.'));
 }
 
+/** @typedef {{ label: string, calls: number, tokens: number, cost: number | null, priced: number, estimated: boolean }} CallGroup */
+/** @param {UsageEntry[]} entries @param {(e: UsageEntry) => string} keyOf @param {(e: UsageEntry) => string} labelOf @returns {CallGroup[]} */
 function groupCalls(entries, keyOf, labelOf) {
+  /** @type {Map<string, { label: string, calls: number, tokens: number, cost: number, priced: number, estimated: boolean }>} */
   const map = new Map();
   for (const e of entries) {
     const key = keyOf(e);
@@ -147,6 +168,7 @@ function groupCalls(entries, keyOf, labelOf) {
 }
 
 // Features send their data as compact JSON; indent it so it can be read.
+/** @param {string} text */
 function pretty(text) {
   if (!/^\s*[[{]/.test(text)) return text;
   try {
@@ -157,6 +179,7 @@ function pretty(text) {
 }
 
 // One message's content as text. Parts that are not text (images, files) show as a short placeholder.
+/** @param {AiMessage['content']} content */
 function contentText(content) {
   if (typeof content === 'string') return pretty(content);
   if (!Array.isArray(content)) return JSON.stringify(content, null, 2);
@@ -168,28 +191,30 @@ function contentText(content) {
   }).join('\n\n');
 }
 
+/** @param {HTMLElement} btn @param {string} text */
 async function copyText(btn, text) {
   try {
     await navigator.clipboard.writeText(text);
-    btn.lastChild.textContent = 'Copied';
+    /** @type {ChildNode} */ (btn.lastChild).textContent = 'Copied';
   } catch {
     // Clipboard blocked: select the text so Cmd/Ctrl+C still works.
-    getSelection()?.selectAllChildren(btn.closest('.call-block').querySelector('pre'));
+    getSelection()?.selectAllChildren(/** @type {HTMLPreElement} */ (/** @type {HTMLElement} */ (btn.closest('.call-block')).querySelector('pre')));
   }
 }
 
-const block = (title, text) =>
+const block = (/** @type {string} */ title, /** @type {string} */ text) =>
   h('section', { class: 'call-block' },
     h('header', { class: 'row' },
       h('strong', { class: 'grow' }, title),
-      h('button', { type: 'button', class: 'btn-small', onclick: (e) => copyText(e.currentTarget, text) }, icon('copy'), h('span', null, 'Copy'))),
+      h('button', { type: 'button', class: 'btn-small', onclick: (/** @type {MouseEvent} */ e) => copyText(/** @type {HTMLElement} */ (e.currentTarget), text) }, icon('copy'), h('span', null, 'Copy'))),
     h('pre', { class: 'call-pre' }, text || '(empty)'));
 
 // The call's details: what was sent, what came back, and how.
+/** @param {UsageEntry} e @param {string} task */
 function showCall(e, task) {
   const c = costOf(e);
-  const m = e.meta ?? {};
-  const facts = [
+  const m = /** @type {Partial<AiCallMeta>} */ (e.meta ?? {});
+  const facts = /** @type {[string, string][]} */ ([
     ['Time', new Date(e.at).toLocaleString()],
     ['Task', task],
     ['Model asked', e.model],
@@ -205,7 +230,7 @@ function showCall(e, task) {
     m.status ? ['HTTP status', String(m.status)] : null,
     m.finishReason ? ['Finish reason', m.finishReason] : null,
     m.generationId ? ['Generation id', m.generationId] : null,
-  ].filter(Boolean);
+  ].filter(Boolean));
   const messages = Array.isArray(e.input) ? e.input : [];
   openDialog({
     title: `${task} · ${new Date(e.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`,
@@ -225,11 +250,12 @@ function showCall(e, task) {
   });
 }
 
+/** @param {Store} store @param {PeriodWindow} w */
 function aiTab(store, w) {
   const all = store.get(COLLECTION).entries;
   const entries = all.filter((e) => inWindow(parseTime(e.at), w));
   const tasks = new Map((store.get('settings').models?.tasks ?? []).map((t) => [t.id, t.name]));
-  const taskName = (id) => tasks.get(id) ?? id;
+  const taskName = (/** @type {string} */ id) => tasks.get(id) ?? id;
 
   const costs = w.items.map(() => 0);
   const calls = w.items.map(() => 0);
@@ -289,12 +315,15 @@ function aiTab(store, w) {
 // What each Dev session's terminal is doing, asked of the command runner while the AI tab is shown, so the sessions
 // still running stand out from the finished ones. Working or waiting for you counts as in progress.
 const LIVE_POLL_MS = 5000;
+/** @type {{ status: Record<string, RunnerStatus>, ids: string[], timer: number | 'asking' }} */
 const live = { status: {}, ids: [], timer: 0 };
+/** @type {Record<string, string>} */
 const LIVE_STATES = { working: 'Working', waiting: 'Waiting for you' };
 const aiShown = () => location.hash.startsWith('#/monitoring') && view.tab === 'ai';
 const runnersShown = () => location.hash.startsWith('#/monitoring') && view.tab === 'runners';
 
 // Asks for `ids` now and every few seconds while the AI tab is shown; the page draws again only when a state changed.
+/** @param {Store} store @param {string[]} ids */
 function pollLive(store, ids) {
   live.ids = ids;
   if (live.timer || !ids.length) return;
@@ -316,6 +345,7 @@ function pollLive(store, ids) {
 }
 
 // A session counts in the period its last reply falls in.
+/** @param {Store} store @param {PeriodWindow} w */
 function devSessions(store, w) {
   const records = usageRecords(store).filter((r) => inWindow(r.end ?? null, w));
   const tasks = store.get('todos').items;
@@ -329,23 +359,23 @@ function devSessions(store, w) {
     extra[b] += x;
     included[b] += r.cost - x;
   }
-  const round = (v) => Number(v.toFixed(4));
+  const round = (/** @type {number} */ v) => Number(v.toFixed(4));
   const series = [
     { name: 'Included in plan', color: 'var(--accent)', values: included.map(round) },
     { name: 'Extra, billed', color: 'var(--warn)', values: extra.map(round) },
   ];
   const models = modelsByUse(sum).map((id) => ({ id, ...sum.models[id], tokens: tokensOf(sum.models[id]) }));
   // The terminal session of a record: its own, or one of its tasks' (records saved before they named it).
-  const sessionOf = (r) => r.session || tasks.find((t) => r.taskIds?.includes(t.id) && t.devSession)?.devSession || '';
+  const sessionOf = (/** @type {DevUsage} */ r) => r.session || tasks.find((t) => r.taskIds?.includes(t.id) && t.devSession)?.devSession || '';
   pollLive(store, [...new Set(records.map(sessionOf).filter(Boolean))]);
   const rows = records.map((r) => {
     const one = sumUsage([r]);
     const named = tasks.filter((t) => r.taskIds?.includes(t.id)).map((t) => t.text);
     const state = live.status[sessionOf(r)]?.state;
-    return { label: named.join(', ') || r.name, name: r.name, one, end: r.end, state: LIVE_STATES[state] ? state : '' };
+    return { label: named.join(', ') || r.name, name: r.name, one, end: r.end, state: LIVE_STATES[/** @type {string} */ (state)] ? state : '' };
   });
   const running = rows.filter((r) => r.state).length;
-  const costCell = (v, partial) => (v === null ? '—' : `${partial ? '≥ ' : ''}${usdPrecise(v)}`);
+  const costCell = /** @param {number | null} v @param {boolean} [partial] */ (v, partial) => (v === null ? '—' : `${partial ? '≥ ' : ''}${usdPrecise(v)}`);
   return h('section', { class: 'card stack' },
     h('h3', null, 'Dev sessions'),
     h('p', { class: 'muted small' }, 'What the claude sessions started from tasks used, read from Claude Code\'s transcripts while the board and its runner are open. Costs are at API prices, as Claude Code counts them, and known once claude quits. Included is what the Claude plan covers; Extra is billed beyond it: replies after the plan\'s limit switched to extra usage, sessions without a plan login, and Bedrock or Vertex models.'),
@@ -377,7 +407,7 @@ function devSessions(store, w) {
             { label: 'Extra', num: true, value: (r) => r.one.extraCost, format: (v) => costCell(v) },
             { label: 'Time', num: true, value: (r) => r.one.duration, format: fmtDuration },
             { label: 'Last reply', num: true, value: (r) => r.end, format: (v) => new Date(v).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) },
-          ], rows.sort((a, b) => b.end - a.end), (r) => (r.state ? `dev-live dev-${r.state}` : '')),
+          ], rows.sort((a, b) => /** @type {number} */ (b.end) - /** @type {number} */ (a.end)), (r) => (r.state ? `dev-live dev-${r.state}` : '')),
         ]
       : empty('No Dev sessions in this period. Start claude on a task with its Dev button and its usage shows here.'));
 }
@@ -385,6 +415,7 @@ function devSessions(store, w) {
 // --- GitHub activity ---
 
 // Loads commits, pull requests and issues of every linked repo for the period. Results that arrive for an old period are ignored.
+/** @param {Store} store @param {string[]} repos @param {string} sinceIso @param {string} key */
 function loadGh(store, repos, sinceIso, key) {
   gh.key = key;
   gh.scheduled = '';
@@ -401,7 +432,7 @@ function loadGh(store, repos, sinceIso, key) {
       .then((d) => {
         if (gh.key === key) gh.data[repo] = d;
       })
-      .catch((err) => {
+      .catch((/** @type {Error} */ err) => {
         if (gh.key === key) gh.errors[repo] = err.message;
       })
       .finally(() => {
@@ -415,10 +446,15 @@ function loadGh(store, repos, sinceIso, key) {
 }
 
 // The numbers for the period, computed from what was loaded.
+/** @param {PeriodWindow} w */
 function activity(w) {
+  /** @type {(RepoActivity['commits'][number] & { repo: string })[]} */
   const commits = [];
+  /** @type {(RepoActivity['pulls'][number] & { repo: string })[]} */
   const prs = [];
+  /** @type {(RepoActivity['issues'][number] & { repo: string })[]} */
   const issues = [];
+  /** @type {Record<string, { repo: string, commits: number, merged: number, issuesClosed: number, openPrs: number, openIssues: number }>} */
   const perRepo = {};
   for (const [repo, d] of Object.entries(gh.data)) {
     perRepo[repo] = { repo, commits: 0, merged: 0, issuesClosed: 0, openPrs: 0, openIssues: 0 };
@@ -432,17 +468,18 @@ function activity(w) {
   const closedUnmerged = prs.filter((p) => !p.merged && inWindow(parseTime(p.closed), w));
   const openedPrs = prs.filter((p) => inWindow(parseTime(p.created), w));
   const openPrs = prs.filter((p) => p.state === 'open');
-  const stalePrs = openPrs.filter((p) => now - parseTime(p.updated) > 14 * DAY);
+  const stalePrs = openPrs.filter((p) => now - /** @type {number} */ (parseTime(p.updated)) > 14 * DAY);
   const issuesOpened = issues.filter((i) => inWindow(parseTime(i.created), w));
   const issuesClosed = issues.filter((i) => inWindow(parseTime(i.closed), w));
   const openIssues = issues.filter((i) => i.state === 'open');
-  const mergeHours = mergedIn.map((p) => (parseTime(p.merged) - parseTime(p.created)) / HOUR).filter((x) => x >= 0);
-  const closeHours = issuesClosed.map((i) => (parseTime(i.closed) - parseTime(i.created)) / HOUR).filter((x) => x >= 0);
+  const mergeHours = mergedIn.map((p) => (/** @type {number} */ (parseTime(p.merged)) - /** @type {number} */ (parseTime(p.created))) / HOUR).filter((x) => x >= 0);
+  const closeHours = issuesClosed.map((i) => (/** @type {number} */ (parseTime(i.closed)) - /** @type {number} */ (parseTime(i.created))) / HOUR).filter((x) => x >= 0);
 
+  /** @type {Map<string, number>} */
   const authors = new Map();
   for (const c of commitsIn) authors.set(c.author, (authors.get(c.author) ?? 0) + 1);
   const weekdays = WEEKDAYS.map(() => 0);
-  for (const c of commitsIn) weekdays[new Date(parseTime(c.at)).getDay()] += 1;
+  for (const c of commitsIn) weekdays[new Date(/** @type {number} */ (parseTime(c.at))).getDay()] += 1;
 
   for (const c of commitsIn) if (perRepo[c.repo]) perRepo[c.repo].commits += 1;
   for (const p of mergedIn) if (perRepo[p.repo]) perRepo[p.repo].merged += 1;
@@ -462,7 +499,7 @@ function activity(w) {
     if (b >= 0) openedBuckets[b] += 1;
   });
   [...mergedIn, ...closedUnmerged, ...issuesClosed].forEach((x) => {
-    const b = bucketOf(parseTime(x.merged ?? x.closed), w);
+    const b = bucketOf(parseTime(/** @type {{ merged?: string | null, closed: string | null }} */ (x).merged ?? x.closed), w);
     if (b >= 0) closedBuckets[b] += 1;
   });
 
@@ -497,6 +534,7 @@ function activity(w) {
   };
 }
 
+/** @param {Store} store @param {PeriodWindow} w */
 function githubTab(store, w) {
   const projects = store.get('projects').projects;
   const repos = [...new Set(projects.flatMap((p) => p.github.repos))];
@@ -584,12 +622,14 @@ function githubTab(store, w) {
         : empty('Nothing loaded yet.')));
 }
 
+/** @param {number} n @param {string} label */
 function miniStat(n, label) {
   return h('div', { class: 'mini' }, h('strong', null, String(n)), h('span', { class: 'muted small' }, label));
 }
 
 // --- Page ---
 
+/** @param {HTMLElement} root @param {Store} store */
 function draw(root, store) {
   if (prices.status === 'idle') setTimeout(() => loadPrices(store), 0);
   const w = periodWindow(view.period);
@@ -657,7 +697,7 @@ export default {
       contract: view.tab === 'contracts' ? contractsActivitySerialize() : '',
     };
   },
-  restore: (p = {}) => {
+  restore: (/** @type {Record<string, string>} */ p = {}) => {
     view.tab = TABS.some(([k]) => k === p.tab) ? p.tab : 'ai';
     view.site = p.site || '';
     view.engine = p.engine === 'bing' ? 'bing' : 'google';
