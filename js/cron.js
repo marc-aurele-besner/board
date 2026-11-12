@@ -299,63 +299,226 @@ const atTime = (d, time) => {
   return x;
 };
 
+// Flows saved before "weekly" took several days still read; the editor shows them as chosen days.
 export const REPEATS = [
   ['interval', 'Every few minutes or hours'],
   ['daily', 'Every day'],
-  ['days', 'On chosen days'],
-  ['weekly', 'Every week'],
-  ['monthly', 'Every month'],
+  ['days', 'On chosen days of the week'],
+  ['monthly', 'On chosen days of the month'],
+  ['custom', 'Custom (cron expression)'],
 ];
 
 export const SHORT_DAYS = WEEKDAYS.map((d) => d.slice(0, 3));
+export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+export const SHORT_MONTHS = MONTHS.map((m) => m.slice(0, 3));
 const validDay = (d) => Number.isInteger(d) && d >= 0 && d <= 6;
+export const validTime = (t) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(t ?? ''));
+const uniqueSorted = (list) => [...new Set(list)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
 // The weekdays a slot may fall on, or null for every day. A bad value falls back, so the day search always ends.
 export function daysOf(s) {
   if (s.every === 'weekly') return [validDay(Number(s.weekday)) ? Number(s.weekday) : 1];
   if (s.every !== 'days') return null;
   const days = (Array.isArray(s.days) ? s.days : []).map(Number).filter(validDay);
-  return days.length ? days : [1, 2, 3, 4, 5];
+  return days.length ? uniqueSorted(days) : [1, 2, 3, 4, 5];
 }
 
-// A month's slot. A day past the month's end (31 in April) falls on its last day.
-const monthDay = (s) => Math.min(31, Math.max(1, Number(s.day) || 1));
-function monthSlot(year, month, s) {
-  const last = new Date(year, month + 1, 0).getDate();
-  return atTime(new Date(year, month, Math.min(monthDay(s), last)), s.time);
+// The times of day a slot falls at. Flows saved with a single `time` keep it.
+export function timesOf(s) {
+  const list = (Array.isArray(s.times) && s.times.length ? s.times : [s.time]).filter(validTime);
+  return list.length ? uniqueSorted(list) : ['08:00'];
 }
 
-// The latest slot at or before `at`. For an interval there is no fixed slot, so the next run follows the last one.
-function lastSlot(s, at) {
+// The days of the month a monthly flow runs on. Flows saved with a single `day` keep it.
+export function monthDaysOf(s) {
+  const list = (Array.isArray(s.monthDays) && s.monthDays.length ? s.monthDays : [s.day])
+    .map(Number).filter((d) => Number.isInteger(d) && d >= 1 && d <= 31);
+  return list.length ? uniqueSorted(list) : [1];
+}
+
+// The months (0 to 11) a monthly flow runs in. Empty means all of them.
+export function monthsOf(s) {
+  const list = (Array.isArray(s.months) ? s.months : []).map(Number).filter((m) => Number.isInteger(m) && m >= 0 && m <= 11);
+  return list.length ? uniqueSorted(list) : MONTHS.map((_, i) => i);
+}
+
+// --- Cron expressions: minute, hour, day of the month, month, day of the week ---
+
+const CRON_FIELDS = [
+  { name: 'minute', min: 0, max: 59 },
+  { name: 'hour', min: 0, max: 23 },
+  { name: 'day of the month', min: 1, max: 31 },
+  { name: 'month', min: 1, max: 12, names: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'] },
+  { name: 'day of the week', min: 0, max: 7, names: ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] },
+];
+const CRON_MACROS = {
+  '@yearly': '0 0 1 1 *', '@annually': '0 0 1 1 *', '@monthly': '0 0 1 * *', '@weekly': '0 0 * * 0',
+  '@daily': '0 0 * * *', '@midnight': '0 0 * * *', '@hourly': '0 * * * *',
+};
+
+function cronField(text, { name, min, max, names }) {
+  const values = new Set();
+  const value = (v) => {
+    const i = names ? names.indexOf(v) : -1;
+    const n = i >= 0 ? i + min : /^\d+$/.test(v) ? Number(v) : NaN;
+    if (!(n >= min && n <= max)) throw new Error(`“${v}” is not a valid ${name} (${min}–${max}).`);
+    return n;
+  };
+  for (const part of text.split(',')) {
+    const m = part.match(/^(\*|[a-z0-9]+(?:-[a-z0-9]+)?)(?:\/(\d+))?$/);
+    if (!m) throw new Error(`“${part}” is not a valid ${name}.`);
+    let lo = min;
+    let hi = max;
+    if (m[1] !== '*') {
+      const [a, b] = m[1].split('-');
+      lo = value(a);
+      hi = b !== undefined ? value(b) : m[2] ? max : lo;
+    }
+    if (lo > hi) throw new Error(`“${part}” runs backwards; write the smaller ${name} first.`);
+    const step = m[2] ? Number(m[2]) : 1;
+    if (step < 1) throw new Error(`“${part}” needs a step of at least 1.`);
+    for (let v = lo; v <= hi; v += step) values.add(v);
+  }
+  return values;
+}
+
+// Throws with a readable message when the expression is not valid.
+export function parseCron(expr) {
+  const text = String(expr ?? '').trim().toLowerCase();
+  const parts = (CRON_MACROS[text] ?? text).split(/\s+/).filter(Boolean);
+  if (parts.length !== 5) throw new Error('A cron expression has five fields: minute, hour, day of the month, month and day of the week.');
+  const [minutes, hours, dom, months, dow] = parts.map((p, i) => cronField(p, CRON_FIELDS[i]));
+  if (dow.has(7)) dow.add(0);
+  // As in classic cron: when both day fields are restricted, a day matching either one runs.
+  return { minutes, hours, dom, months, dow, either: !parts[2].startsWith('*') && !parts[4].startsWith('*') };
+}
+
+export function cronError(expr) {
+  try {
+    parseCron(expr);
+    return '';
+  } catch (err) {
+    return err.message;
+  }
+}
+
+// A cron expression for the schedule as it is, so switching to Custom starts from what the flow already does.
+export function cronOf(s) {
+  if (s.every === 'custom') return String(s.cron ?? '').trim() || '0 8 * * *';
+  if (s.every === 'interval') {
+    const m = Math.max(5, Number(s.minutes) || 60);
+    if (m < 60 && 60 % m === 0) return `*/${m} * * * *`;
+    if (m % 60 === 0 && m <= 24 * 60) return `0 ${m === 60 ? '*' : `*/${m / 60}`} * * *`;
+    return '0 8 * * *';
+  }
+  const times = timesOf(s).map((t) => t.split(':').map(Number));
+  // Cron crosses every minute with every hour, so several times only fit when they share their minutes.
+  const minute = times[0][1];
+  const hours = times.every(([, mm]) => mm === minute) ? times.map(([hh]) => hh) : [times[0][0]];
   if (s.every === 'monthly') {
-    const t = monthSlot(at.getFullYear(), at.getMonth(), s);
-    return t > at ? monthSlot(at.getFullYear(), at.getMonth() - 1, s) : t;
+    const months = monthsOf(s);
+    return `${minute} ${hours.join(',')} ${monthDaysOf(s).join(',')} ${months.length === 12 ? '*' : months.map((x) => x + 1).join(',')} *`;
   }
   const days = daysOf(s);
-  const t = atTime(at, s.time);
-  if (t > at) t.setDate(t.getDate() - 1);
-  if (days) while (!days.includes(t.getDay())) t.setDate(t.getDate() - 1);
-  return t;
+  return `${minute} ${hours.join(',')} * * ${days ? days.join(',') : '*'}`;
 }
 
-// The first slot after `at`.
-function nextSlot(s, at) {
-  if (s.every === 'monthly') {
-    const t = monthSlot(at.getFullYear(), at.getMonth(), s);
-    return t > at ? t : monthSlot(at.getFullYear(), at.getMonth() + 1, s);
-  }
-  const days = daysOf(s);
-  const t = atTime(at, s.time);
-  if (t <= at) t.setDate(t.getDate() + 1);
-  if (days) while (!days.includes(t.getDay())) t.setDate(t.getDate() + 1);
-  return t;
-}
+// --- Slots ---
 
-// An interval flow's active hours. A From later than To wraps past midnight (22:00 to 06:00).
 const minutesOf = (time) => {
   const [hh, mm] = String(time || '00:00').split(':').map(Number);
   return (hh || 0) * 60 + (mm || 0);
 };
+
+// A fixed schedule as the days it runs on and the minutes of the day it runs at, or null when it has none.
+function planOf(s) {
+  if (s.every === 'custom') {
+    let c;
+    try {
+      c = parseCron(s.cron);
+    } catch {
+      return null;
+    }
+    const times = [];
+    for (const hh of [...c.hours].sort((a, b) => a - b)) for (const mm of [...c.minutes].sort((a, b) => a - b)) times.push(hh * 60 + mm);
+    return {
+      times,
+      day: (d) => {
+        if (!c.months.has(d.getMonth() + 1)) return false;
+        const a = c.dom.has(d.getDate());
+        const b = c.dow.has(d.getDay());
+        return c.either ? a || b : a && b;
+      },
+    };
+  }
+  const times = timesOf(s).map(minutesOf);
+  if (s.every === 'monthly') {
+    const days = monthDaysOf(s);
+    const months = monthsOf(s);
+    return {
+      times,
+      // A day past the month's end (31 in April) falls on its last day.
+      day: (d) => {
+        if (!months.includes(d.getMonth())) return false;
+        const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+        const n = d.getDate();
+        return days.includes(n) || (n === last && days.some((x) => x > last));
+      },
+    };
+  }
+  const days = daysOf(s);
+  return { times, day: (d) => !days || days.includes(d.getDay()) };
+}
+
+// Long enough to reach a 29 February; an expression that never matches (30 February) gives no slot.
+const SEARCH_DAYS = 366 * 8;
+const withMinutes = (d, m) => {
+  const x = new Date(d);
+  x.setHours(Math.floor(m / 60), m % 60, 0, 0);
+  return x;
+};
+
+// The latest slot at or before `at`, or null. An interval has no fixed slot, so its next run follows the last one.
+function lastSlot(s, at) {
+  const plan = planOf(s);
+  if (!plan?.times.length) return null;
+  const d = new Date(at);
+  d.setHours(0, 0, 0, 0);
+  for (let i = 0; i < SEARCH_DAYS; i++, d.setDate(d.getDate() - 1)) {
+    if (!plan.day(d)) continue;
+    for (let j = plan.times.length - 1; j >= 0; j--) {
+      const t = withMinutes(d, plan.times[j]);
+      if (t <= at) return t;
+    }
+  }
+  return null;
+}
+
+// The first slot after `at`, or null.
+function nextSlot(s, at) {
+  const plan = planOf(s);
+  if (!plan?.times.length) return null;
+  const d = new Date(at);
+  d.setHours(0, 0, 0, 0);
+  for (let i = 0; i < SEARCH_DAYS; i++, d.setDate(d.getDate() + 1)) {
+    if (!plan.day(d)) continue;
+    for (const m of plan.times) {
+      const t = withMinutes(d, m);
+      if (t > at) return t;
+    }
+  }
+  return null;
+}
+
+// The next few slots of a fixed schedule, to preview a custom expression.
+export function upcomingSlots(s, count = 3, at = new Date()) {
+  const out = [];
+  let t = at;
+  while (out.length < count && (t = nextSlot(s, t))) out.push(t);
+  return out;
+}
+
+// An interval flow's active hours. A From later than To wraps past midnight (22:00 to 06:00).
 const hasWindow = (s) => Boolean(s.from && s.to && s.from !== s.to);
 function inWindow(s, at) {
   if (!hasWindow(s)) return true;
@@ -376,6 +539,7 @@ const sinceOf = (f) => Math.max(Date.parse(f.lastRun) || 0, Date.parse(f.enabled
 
 const intervalMs = (s) => Math.max(5, Number(s.minutes) || 60) * MINUTE;
 
+// The next run, or null when the schedule never matches (an invalid or impossible cron expression).
 export function nextRun(flow, at = new Date()) {
   const s = flow.schedule;
   if (s.every === 'interval') {
@@ -391,14 +555,18 @@ export function isDue(flow, at = new Date()) {
   const since = sinceOf(flow);
   const s = flow.schedule;
   if (s.every === 'interval') return at.getTime() - since >= intervalMs(s) && inWindow(s, at);
-  return lastSlot(s, at).getTime() > since;
+  const last = lastSlot(s, at);
+  return Boolean(last) && last.getTime() > since;
 }
 
+const listLabel = (items) => (items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
+
 function daysLabel(days) {
-  const key = [...days].sort().join('');
+  const key = days.join('');
   if (key === '12345') return 'Weekdays';
   if (key === '06') return 'Weekends';
   if (key === '0123456') return 'Every day';
+  if (days.length === 1) return `${WEEKDAYS[days[0]]}s`;
   // Monday first.
   return [...days].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((d) => SHORT_DAYS[d]).join(', ');
 }
@@ -409,10 +577,21 @@ export function scheduleLabel(s) {
     const every = m % 60 === 0 ? `Every ${m / 60 === 1 ? 'hour' : `${m / 60} hours`}` : `Every ${m} minutes`;
     return hasWindow(s) ? `${every}, ${s.from}–${s.to}` : every;
   }
-  if (s.every === 'weekly') return `${WEEKDAYS[daysOf(s)[0]]}s at ${s.time}`;
-  if (s.every === 'days') return `${daysLabel(daysOf(s))} at ${s.time}`;
-  if (s.every === 'monthly') return `Monthly on day ${monthDay(s)} at ${s.time}`;
-  return `Daily at ${s.time}`;
+  if (s.every === 'custom') return `Cron ${String(s.cron ?? '').trim() || '(empty)'}`;
+  const at = `at ${listLabel(timesOf(s))}`;
+  if (s.every === 'weekly' || s.every === 'days') return `${daysLabel(daysOf(s))} ${at}`;
+  if (s.every === 'monthly') {
+    const days = monthDaysOf(s);
+    const months = monthsOf(s);
+    const on = `on day${days.length > 1 ? 's' : ''} ${listLabel(days.map(String))}`;
+    if (months.length === 12) return `Monthly ${on} ${at}`;
+    // Most of the year reads shorter as the months it skips.
+    const skipped = SHORT_MONTHS.filter((_, i) => !months.includes(i));
+    return months.length > 6
+      ? `Monthly except ${listLabel(skipped)}, ${on} ${at}`
+      : `${months.map((m) => SHORT_MONTHS[m]).join(', ')} ${on} ${at}`;
+  }
+  return `Daily ${at}`;
 }
 
 // --- Steps ---

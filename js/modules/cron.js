@@ -6,7 +6,8 @@ import { modelChip } from '../model-picker.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import {
-  COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, REPEATS, STOP_WHEN, DEV_MODES, TEMPLATES, daysOf,
+  COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, DEV_MODES, TEMPLATES, daysOf,
+  timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, flowFromTemplate, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
 } from '../cron.js';
 import { modelForTask } from './settings.js';
@@ -283,44 +284,110 @@ function select(value, options, onchange, attrs = {}) {
     options.map(([v, l]) => h('option', { value: String(v) }, l)));
 }
 
+const chip = (label, on, onclick, title) =>
+  h('button', { type: 'button', class: on ? 'cron-day on' : 'cron-day', 'aria-pressed': String(on), title, onclick }, label);
+const toggled = (list, v) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
+const shortcut = (label, onclick) => h('button', { type: 'button', class: 'btn-link small', onclick }, label);
+
+// A time an hour after the last one that is not taken yet, for "Add a time".
+function freeTime(times) {
+  const [hh, mm] = times.at(-1).split(':').map(Number);
+  for (let i = 1; i < 24; i++) {
+    const t = `${String((hh + i) % 24).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    if (!times.includes(t)) return t;
+  }
+  return times.at(-1);
+}
+
+function timesField(s, set) {
+  const times = timesOf(s);
+  const save = (list) => {
+    const next = [...new Set(list.filter(validTime))].sort();
+    if (next.length) set({ times: next, time: next[0] });
+  };
+  return h('div', { class: 'cron-days', role: 'group', 'aria-label': 'Times' },
+    h('span', { class: 'muted small' }, 'At'),
+    times.map((t, i) => h('span', { class: 'cron-time' },
+      h('input', { type: 'time', value: t, 'aria-label': `Time ${i + 1}`, onchange: (e) => save(times.map((x, j) => (j === i ? e.target.value : x))) }),
+      times.length > 1
+        ? h('button', { type: 'button', class: 'icon-btn', title: 'Remove this time', 'aria-label': `Remove ${t}`, onclick: () => save(times.filter((_, j) => j !== i)) }, icon('x'))
+        : null)),
+    shortcut('Add a time', () => save([...times, freeTime(times)])));
+}
+
+// Live check of the expression while typing; the flow saves it on change, so typing never re-renders the form.
+function cronHint(expr) {
+  const err = cronError(expr);
+  if (err) return h('span', { class: 'cron-error' }, err);
+  const next = upcomingSlots({ every: 'custom', cron: expr }, 3);
+  if (!next.length) return h('span', { class: 'cron-error' }, 'This expression never matches a date.');
+  return h('span', null, `Next: ${next.map((d) => timeOf(d.toISOString())).join(' · ')}`);
+}
+
 function triggerForm(store, flow) {
   const s = flow.schedule;
   const set = (patch) => updateFlow(store, flow.id, (f) => Object.assign(f.schedule, patch));
-  const days = daysOf({ ...s, every: 'days' });
-  const toggleDay = (d) => {
-    const next = days.includes(d) ? days.filter((x) => x !== d) : [...days, d];
-    if (next.length) set({ days: next });
+  // Flows saved as "weekly" (one day) edit as chosen days.
+  const every = s.every === 'weekly' ? 'days' : s.every;
+  const repeat = (next) => {
+    if (next === 'custom' && !String(s.cron ?? '').trim()) set({ every: next, cron: cronOf(s) });
+    else if (next === 'days' && s.every === 'weekly') set({ every: next, days: daysOf(s) });
+    else set({ every: next });
   };
+  const days = daysOf({ ...s, every: s.every === 'weekly' ? 'weekly' : 'days' });
+  const setDays = (list) => list.length && set({ every: 'days', days: list });
+  const monthDays = monthDaysOf(s);
+  const months = (s.months ?? []).length ? monthsOf(s) : [];
+  const hint = h('p', { class: 'muted small' }, every === 'custom' ? cronHint(s.cron ?? '') : null);
   return h('div', { class: 'stack' },
     h('div', { class: 'row cron-fields' },
-      field('Repeat', select(s.every, REPEATS, (every) => set({ every }))),
-      s.every === 'interval'
+      field('Repeat', select(every, REPEATS, repeat)),
+      every === 'interval'
         ? field('Minutes between runs', h('input', { type: 'number', min: 5, step: 5, value: String(s.minutes ?? 60), onchange: (e) => set({ minutes: Math.max(5, Number(e.target.value) || 60) }) }))
         : null,
-      s.every === 'weekly' ? field('Day', select(s.weekday, WEEKDAYS.map((d, i) => [i, d]), (v) => set({ weekday: Number(v) }))) : null,
-      s.every === 'monthly'
-        ? field('Day of the month', h('input', { type: 'number', min: 1, max: 31, value: String(s.day ?? 1), onchange: (e) => set({ day: Math.min(31, Math.max(1, Number(e.target.value) || 1)) }) }), 'A day the month lacks runs on its last day.')
-        : null,
-      s.every !== 'interval' ? field('Time', h('input', { type: 'time', value: s.time, onchange: (e) => set({ time: e.target.value || '08:00' }) })) : null),
-    s.every === 'days'
-      ? h('div', { class: 'cron-days', role: 'group', 'aria-label': 'Days' },
-          [1, 2, 3, 4, 5, 6, 0].map((d) => h('button', {
-            type: 'button',
-            class: days.includes(d) ? 'cron-day on' : 'cron-day',
-            'aria-pressed': String(days.includes(d)),
-            title: WEEKDAYS[d],
-            onclick: () => toggleDay(d),
-          }, SHORT_DAYS[d])),
-          h('button', { type: 'button', class: 'btn-link small', onclick: () => set({ days: [1, 2, 3, 4, 5] }) }, 'Weekdays'),
-          h('button', { type: 'button', class: 'btn-link small', onclick: () => set({ days: [0, 6] }) }, 'Weekends'))
+      every === 'custom'
+        ? field('Cron expression', h('input', {
+            class: 'mono-text', value: s.cron ?? '', autocomplete: 'off', spellcheck: 'false', placeholder: '0 9 * * 1-5',
+            oninput: (e) => hint.replaceChildren(cronHint(e.target.value)),
+            onchange: (e) => set({ cron: e.target.value.trim().replace(/\s+/g, ' ') }),
+          }))
+        : null),
+    every === 'days'
+      ? h('div', { class: 'cron-days', role: 'group', 'aria-label': 'Days of the week' },
+          [1, 2, 3, 4, 5, 6, 0].map((d) => chip(SHORT_DAYS[d], days.includes(d), () => setDays(toggled(days, d)), WEEKDAYS[d])),
+          shortcut('Weekdays', () => setDays([1, 2, 3, 4, 5])),
+          shortcut('Weekends', () => setDays([0, 6])),
+          shortcut('Every day', () => setDays([0, 1, 2, 3, 4, 5, 6])))
       : null,
-    s.every === 'interval'
+    every === 'monthly'
+      ? h('div', { class: 'stack' },
+          h('div', { class: 'cron-days cron-month', role: 'group', 'aria-label': 'Days of the month' },
+            Array.from({ length: 31 }, (_, i) => i + 1).map((d) => chip(String(d), monthDays.includes(d), () => {
+              const next = toggled(monthDays, d);
+              if (next.length) set({ monthDays: next, day: Math.min(...next) });
+            }, `Day ${d}`))),
+          h('span', { class: 'muted small' }, 'A day the month lacks runs on its last day.'),
+          h('div', { class: 'cron-days', role: 'group', 'aria-label': 'Months' },
+            SHORT_MONTHS.map((m, i) => chip(m, !months.length || months.includes(i), () => {
+              const next = toggled(months.length ? months : MONTHS.map((_, j) => j), i);
+              if (next.length) set({ months: next.length === 12 ? [] : next });
+            }, MONTHS[i])),
+            shortcut('Every month', () => set({ months: [] }))))
+      : null,
+    every !== 'interval' && every !== 'custom' ? timesField(s, set) : null,
+    every === 'interval'
       ? h('div', { class: 'row cron-fields' },
           field('Active from', h('input', { type: 'time', value: s.from ?? '', onchange: (e) => set({ from: e.target.value }) })),
           field('Until', h('input', { type: 'time', value: s.to ?? '', onchange: (e) => set({ to: e.target.value }) }), 'Leave both empty to run around the clock.'))
       : null,
+    every === 'custom'
+      ? h('p', { class: 'muted small' },
+          'Five fields: minute, hour, day of the month, month, day of the week. Use * for any, lists (1,15), ranges (9-17), steps (*/15) and names (mon-fri, jan). ',
+          '@hourly, @daily, @weekly and @monthly work too. When both day fields are set, a day matching either one runs.')
+      : null,
+    hint,
     h('p', { class: 'muted small' },
-      flow.enabled ? `Next run: ${timeOf(nextRun(flow).toISOString())}. ` : 'The flow is paused. ',
+      flow.enabled ? `Next run: ${timeOf(nextRun(flow)?.toISOString())}. ` : 'The flow is paused. ',
       'Flows run only while the board is open; a run missed while it was closed happens once when you open it.'));
 }
 
@@ -524,7 +591,7 @@ function editor(store, flow) {
           h('button', { type: 'button', class: 'icon-btn', title: 'Duplicate flow', 'aria-label': 'Duplicate flow', onclick: () => duplicateFlow(store, flow) }, icon('copy')),
           h('button', { type: 'button', class: 'icon-btn', title: 'Delete flow', 'aria-label': 'Delete flow', onclick: () => deleteFlow(store, flow) }, icon('trash')))),
       canvas(store, flow),
-      h('p', { class: 'muted small' }, `Last run: ${timeOf(flow.lastRun)}${flow.enabled ? ` · next: ${timeOf(nextRun(flow).toISOString())}` : ''}`)),
+      h('p', { class: 'muted small' }, `Last run: ${timeOf(flow.lastRun)}${flow.enabled ? ` · next: ${timeOf(nextRun(flow)?.toISOString())}` : ''}`)),
     inspector(store, flow),
     runList(store, flow));
 }

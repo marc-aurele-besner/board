@@ -1841,6 +1841,11 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .cron-days { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .cron-day { min-width: 44px; padding: 6px 10px; border-radius: 999px; font-weight: 500; }
 .cron-day.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, var(--surface)); color: var(--text); }
+.cron-month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); max-width: 380px; }
+.cron-month .cron-day { min-width: 0; padding: 6px 0; text-align: center; justify-content: center; }
+.cron-time { display: inline-flex; align-items: center; gap: 2px; }
+.cron-time input { width: auto; }
+.cron-error { color: var(--danger); }
 .mono-text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
 .flow-canvas { display: flex; align-items: center; flex-wrap: wrap; row-gap: 14px; padding: 18px; border-radius: var(--radius); overflow: hidden;
   background-color: var(--surface-2); background-image: radial-gradient(color-mix(in srgb, var(--muted) 35%, transparent) 1px, transparent 1px); background-size: 16px 16px; }
