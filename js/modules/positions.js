@@ -6,7 +6,7 @@ import { setupBanner } from '../integrations.js';
 import { positionFields, positionError } from '../position-input.js';
 import { poolsChanged } from '../automations.js';
 import { insightsPanel } from '../pool-insights.js';
-import { readPositions, poolState, tokenMeta, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey, nodeUrls } from '../uniswap.js';
+import { readPositions, poolState, tokenMeta, isAddressSymbol, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey, nodeUrls } from '../uniswap.js';
 import { chainById, explorerUrl, etherscanKey } from '../chains.js';
 import { walletsTab, walletsView } from './defi-wallets.js';
 import { lendingTab, lendingView } from './defi-lending.js';
@@ -291,7 +291,8 @@ async function readV3(chain, node, wallets, cfg) {
 // ones read for this chain (savedPrices).
 async function toRows(chain, node, items, savedPrices) {
   const tokens = [...new Set(items.flatMap((x) => [x.position.token0, x.position.token1]))];
-  await Promise.all(tokens.filter((t) => !tokenInfo.has(tokenKey(chain, t))).map(async (t) => tokenInfo.set(tokenKey(chain, t), await tokenMeta(node, t, chain))));
+  // A symbol that could not be read is asked for again, rather than showing the address for good.
+  await Promise.all(tokens.filter((t) => !tokenInfo.has(tokenKey(chain, t)) || tokenInfo.get(tokenKey(chain, t)).guessed).map(async (t) => tokenInfo.set(tokenKey(chain, t), await tokenMeta(node, t, chain))));
   let prices = {};
   let pricesAt = null;
   let fresh = null;
@@ -404,6 +405,7 @@ async function load(store, { again = false } = {}) {
             const found = collectsOf(d.cache?.[key], done.rows, Date.now())
               .filter((f) => !(d.collected ?? []).some((c) => c.tx && c.ref === f.ref && coversCollect(f, Date.parse(c.at))));
             if (found.length) d.collected = [...(d.collected ?? []), ...found];
+            fixSymbols(d, chain, done.rows);
             d.cache = { ...d.cache, [key]: { at: Date.now(), rows: done.rows } };
             d.fees = nextBaselines(d.fees, done.rows, Date.now());
             if (done.prices) d.prices = { ...d.prices, [chain.id]: { at: Date.now(), usd: { ...d.prices?.[chain.id]?.usd, ...done.prices } } };
@@ -422,6 +424,7 @@ async function load(store, { again = false } = {}) {
         part('v3', () => readV3(chain, node, wallets, cfg)),
         chain.v4 ? part('v4', () => readV4(chain, node, wallets, cfg, saved.scan?.[chain.id] ?? {})) : null,
       ]);
+      await fixLeftSymbols(store, chain, node);
       state.pending = state.pending.filter((name) => name !== chain.name);
       publish();
     }));
@@ -627,6 +630,53 @@ function mergeCollects(d, found) {
     else if (levelOf(f) > levelOf(list[i])) list[i] = f;
   }
   d.collected = list.filter((c) => !(c.source === 'auto' && list.some((x) => x.tx && x.ref === c.ref && coversCollect(c, Date.parse(x.at)))));
+}
+
+// Fee log entries saved while a token's symbol could not be read show its address. Puts the symbol back from this
+// chain's rows and the symbols read since, and rebuilds the pair name from it.
+function fixSymbols(d, chain, rows = []) {
+  const known = new Map();
+  for (const r of rows) {
+    if (!isAddressSymbol(r.sym0)) known.set(String(r.addr0).toLowerCase(), r.sym0);
+    if (!isAddressSymbol(r.sym1)) known.set(String(r.addr1).toLowerCase(), r.sym1);
+  }
+  for (const [key, m] of tokenInfo) {
+    const [id, addr] = key.split(':');
+    if (Number(id) === chain.id && !m.guessed) known.set(addr.toLowerCase(), m.symbol);
+  }
+  const byRef = new Map(rows.map((r) => [r.ref, r]));
+  let changed = false;
+  d.collected = (d.collected ?? []).map((c) => {
+    if (c.chainId !== chain.id) return c;
+    const s0 = isAddressSymbol(c.sym0) && c.addr0 ? known.get(c.addr0.toLowerCase()) : null;
+    const s1 = isAddressSymbol(c.sym1) && c.addr1 ? known.get(c.addr1.toLowerCase()) : null;
+    // An entry logged by hand keeps only the pair name: its position's row gives the symbols.
+    const row = byRef.get(c.ref);
+    const pairFix = !c.sym0 && row && String(c.pair ?? '').split('/').some((t) => isAddressSymbol(t.trim())) && !/0x/i.test(row.pair) ? row.pair : null;
+    if (!s0 && !s1 && !pairFix) return c;
+    changed = true;
+    if (pairFix) return { ...c, pair: pairFix };
+    const sym0 = s0 ?? c.sym0;
+    const sym1 = s1 ?? c.sym1;
+    return { ...c, sym0, sym1, pair: `${sym0} / ${sym1}` };
+  });
+  return changed;
+}
+
+// The fee log's tokens still shown as an address once a chain is read, such as those of a position no longer
+// held: their symbols are read from the node, or the token list.
+async function fixLeftSymbols(store, chain, node) {
+  const left = new Set();
+  for (const c of collectedOf(store)) {
+    if (c.chainId !== chain.id) continue;
+    if (isAddressSymbol(c.sym0) && c.addr0) left.add(c.addr0);
+    if (isAddressSymbol(c.sym1) && c.addr1) left.add(c.addr1);
+  }
+  const ask = [...left].filter((a) => !tokenInfo.has(tokenKey(chain, a)) || tokenInfo.get(tokenKey(chain, a)).guessed);
+  if (!left.size) return;
+  await Promise.all(ask.map(async (a) => tokenInfo.set(tokenKey(chain, a), await tokenMeta(node, a, chain))));
+  const d = structuredClone(store.get(COLLECTION) ?? {});
+  if (fixSymbols(d, chain)) store.update(COLLECTION, (x) => { x.collected = d.collected; });
 }
 
 // What a row needs for reading its collect transactions.

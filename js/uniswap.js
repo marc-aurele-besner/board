@@ -314,15 +314,31 @@ export async function poolState(chain, node, p) {
 }
 
 // A token's symbol and decimals. Falls back to the short address when the token does not answer.
+// A node that is busy can drop the call, so it is tried twice, then the token list is asked. A symbol neither
+// gives is the short address, marked guessed so the caller asks again on the next read.
 export async function tokenMeta(node, address, chain) {
   if (isNative(address)) return { symbol: chain.native.symbol, decimals: 18 };
-  try {
-    const [sym, dec] = await Promise.all([rpcCall(node, address, SEL.symbol), rpcCall(node, address, SEL.decimals)]);
-    return { symbol: decodeString(sym) || shortAddress(address), decimals: Number(big(words(dec)[0])) || 18 };
-  } catch {
-    return { symbol: shortAddress(address), decimals: 18 };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const [sym, dec] = await Promise.all([rpcCall(node, address, SEL.symbol), rpcCall(node, address, SEL.decimals)]);
+      const symbol = decodeString(sym);
+      if (symbol) return { symbol, decimals: Number(big(words(dec)[0])) || 18 };
+      break; // the contract answers but has no symbol: asking again will not help
+    } catch {}
   }
+  const listed = await listedToken(chain.id, address);
+  if (listed?.symbol) return { symbol: listed.symbol, decimals: Number(listed.decimals) || 18 };
+  return { symbol: shortAddress(address), decimals: 18, guessed: true };
 }
+
+// A token as the token list has it, or null.
+export async function listedToken(chainId, address) {
+  const want = String(address).toLowerCase();
+  return (await tokenList()).find((t) => t.chainId === chainId && t.address.toLowerCase() === want) ?? null;
+}
+
+// Whether a symbol is only a short address, written when the token's symbol could not be read.
+export const isAddressSymbol = (sym) => /^0x[0-9a-f]{4}…[0-9a-f]{4}$/i.test(String(sym ?? ''));
 
 // USD price of each token address on a chain, keyed by lowercase address, from DefiLlama: one request for all of
 // them, where CoinGecko's free tier now takes one address per request. Tokens it does not know are left out.
