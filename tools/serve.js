@@ -1,5 +1,7 @@
+// @ts-check
 // Static server for the board, with no dependencies: `bun run serve` (or `node tools/serve.js`). PORT changes the port.
 // Every response says `no-cache`, so the browser revalidates each module on reload and runs the code just edited.
+/** @import { IncomingMessage, ServerResponse } from 'node:http' */
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
@@ -9,6 +11,7 @@ import { logger } from './log.js';
 const PORT = Number(process.env.PORT) || 8000;
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const log = logger('board');
+/** @type {Record<string, string>} */
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -23,18 +26,20 @@ const TYPES = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
+// req.url is set on every request a server receives, hence the casts.
+/** @param {IncomingMessage} req @param {ServerResponse} res */
 async function serve(req, res) {
   // A reload fetches every module, so only page loads and failures are logged.
   const started = performance.now();
   res.on('finish', () => {
-    const page = /^\/(index\.html)?$/.test(new URL(req.url, 'http://board').pathname);
-    if (page || res.statusCode >= 400) log.request(req.method, new URL(req.url, 'http://board').pathname, res.statusCode, performance.now() - started);
+    const page = /^\/(index\.html)?$/.test(new URL(/** @type {string} */ (req.url), 'http://board').pathname);
+    if (page || res.statusCode >= 400) log.request(req.method, new URL(/** @type {string} */ (req.url), 'http://board').pathname, res.statusCode, performance.now() - started);
   });
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405).end();
     return;
   }
-  let path = normalize(join(ROOT, decodeURIComponent(new URL(req.url, 'http://board').pathname)));
+  let path = normalize(join(ROOT, decodeURIComponent(new URL(/** @type {string} */ (req.url), 'http://board').pathname)));
   // Never serve anything outside the repo folder, or its git data.
   if (!(path + sep).startsWith(ROOT) || path.split(sep).includes('.git')) {
     res.writeHead(404).end('Not found');
@@ -61,7 +66,7 @@ let waiting = ADDRESSES.length;
 const ready = () => --waiting === 0 && log.info(`Board at http://localhost:${PORT}`);
 for (const address of ADDRESSES) {
   createServer(serve)
-    .on('error', (err) => {
+    .on('error', (/** @type {NodeJS.ErrnoException} */ err) => {
       // A machine without IPv6 has no ::1; IPv4 alone is then the whole of localhost.
       if (address === '::1' && err.code === 'EADDRNOTAVAIL') return ready();
       log.error(err.code === 'EADDRINUSE' ? `Port ${PORT} is in use on ${address}. Stop the other server or pick another port with PORT=<port>.` : err.message);
