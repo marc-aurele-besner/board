@@ -15,6 +15,11 @@ export const JOBS = [
   { id: 'dev-usage', label: 'Dev usage', every: 1, description: 'Reads what each task’s claude session used from Claude Code’s transcripts.' },
   { id: 'worktrees', label: 'Done-task worktrees', every: 5, description: 'Removes the worktree a Dev session made once its tasks are done. Also runs as soon as a task changes.' },
   { id: 'cron', label: 'Cron flows', every: 1, description: 'Starts the Cron flows that are due. A flow missed while the runners were stopped runs once.' },
+  { id: 'defi-positions', label: 'DeFi positions', every: 5, description: 'Reads the Uniswap v3 and v4 positions, their pools and token prices, and fee APR from the pools’ swaps.' },
+  { id: 'defi-history', label: 'DeFi fee history', every: 15, description: 'Searches each position’s history a step further for the fees it collected, from the node and Etherscan.' },
+  { id: 'defi-wallets', label: 'DeFi wallets', every: 5, description: 'Reads native and token balances of the wallets on every enabled chain.' },
+  { id: 'defi-lending', label: 'DeFi lending', every: 5, description: 'Reads Aave v3 supply, debt and health factor, and warns when a health factor gets low.' },
+  { id: 'defi-snapshots', label: 'DeFi snapshots', every: 60, description: 'Keeps one hourly entry of wallet, position and lending values in defi-snapshots.json.' },
 ];
 
 export const WORKER_URL = 'http://127.0.0.1:8420';

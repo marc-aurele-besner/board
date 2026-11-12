@@ -12,5 +12,6 @@ import fx from './fx.js';
 import devUsage from './dev-usage.js';
 import worktrees from './worktrees.js';
 import cron from './cron.js';
+import defi from './defi.js';
 
-export const jobs = [google, gmail, resend, calendar, monitoring, telegram, github, webstats, fx, devUsage, worktrees, cron];
+export const jobs = [google, gmail, resend, calendar, monitoring, telegram, github, webstats, fx, devUsage, worktrees, cron, ...defi];

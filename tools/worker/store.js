@@ -26,7 +26,8 @@ export const DEFAULTS = {
   fx: { days: {} },
   cron: { flows: [], runs: [], templates: [], tests: {} },
   dev: { history: [], runner: '', presets: [] },
-  pools: { cache: {} },
+  pools: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [], history: {}, hidden: [], etherscan: {}, balances: {}, tokens: [], hiddenTokens: [], lending: {} },
+  'defi-snapshots': { entries: [] },
 };
 
 export function createNodeStore(dir, { log } = {}) {

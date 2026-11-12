@@ -16,12 +16,13 @@ export const RULES = [
   ['crawl', 'Site hidden from search', 'Create a high-priority task when robots.txt blocks Google or Bing from the whole site.', false],
   ['recurring', 'Recurring bill due', 'Create a task before a recurring expense in Money is due.', true],
   ['pools', 'Position out of range', 'Create a task when a liquidity position leaves its price range.', false],
+  ['lending', 'Aave health factor low', 'Create a high-priority task when an Aave account’s health factor falls below the level set. The account is liquidated below 1.', 'factor'],
 ];
-const RULE_DEFAULTS = { domain: { on: true, days: 30 }, ssl: { on: true, days: 14 }, health: { on: true }, email: { on: false }, crawl: { on: true }, recurring: { on: false, days: 3 }, pools: { on: false } };
+const RULE_DEFAULTS = { domain: { on: true, days: 30 }, ssl: { on: true, days: 14 }, health: { on: true }, email: { on: false }, crawl: { on: true }, recurring: { on: false, days: 3 }, pools: { on: false }, lending: { on: true, factor: 1.2 } };
 export const ruleOf = (store, key) => ({ ...RULE_DEFAULTS[key], ...(store.get('settings').automations?.[key] ?? {}) });
 
 // What each source is called on a task's "Auto" flag.
-export const AUTO_SOURCES = { domain: 'the domain check', ssl: 'the SSL check', health: 'the website health check', email: 'the DNS check', crawl: 'the crawl files check', recurring: 'a recurring bill', pools: 'Liquidity Pools', telegram: 'a Telegram message', cron: 'a Cron flow' };
+export const AUTO_SOURCES = { domain: 'the domain check', ssl: 'the SSL check', health: 'the website health check', email: 'the DNS check', crawl: 'the crawl files check', recurring: 'a recurring bill', pools: 'Liquidity Pools', lending: 'Aave lending', telegram: 'a Telegram message', cron: 'a Cron flow' };
 
 // `every`: minutes between automatic checks. `providers`: the status pages followed in Provider status, and `status` their last answer.
 export const TOOLS_DEFAULTS = { sites: {}, every: 60, providers: [], status: {} };
@@ -93,6 +94,19 @@ export function poolsChanged(store, rows) {
     if (ruleOf(store, 'pools').on) {
       makeAuto(store, { kind: 'pools', ref, priority: 'medium', text: `Rebalance ${r.pair} on ${r.chain}`, why: 'the position left its price range.' });
     }
+  }
+}
+
+// Announces an Aave account whose health factor fell below the level set in Automations, once per account and day,
+// and makes a task when the rule is on. The runners call it after each lending read.
+export function lendingChanged(store, rows) {
+  const { on, factor } = ruleOf(store, 'lending');
+  for (const r of rows.filter((x) => x.health != null && x.health < factor)) {
+    const chain = r.chainName ?? `chain ${r.chainId}`;
+    const who = `${r.wallet.slice(0, 6)}…${r.wallet.slice(-4)}`;
+    const ref = `${r.chainId}:${r.wallet}`;
+    notify(store, { kind: 'lending', text: `Aave on ${chain}: ${who}’s health factor is ${r.health.toFixed(2)}, below ${factor}.`, href: '#/positions?tab=lending', key: `lending:${ref}:${todayISO()}` });
+    if (on) makeAuto(store, { kind: 'lending', ref, text: `Raise the Aave health factor of ${who} on ${chain}`, why: `its health factor fell to ${r.health.toFixed(2)}, below ${factor}.` });
   }
 }
 

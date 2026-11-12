@@ -600,15 +600,19 @@ export function automationsCard(store) {
   const open = store.get('todos').items.filter((t) => t.auto && t.auto !== 'telegram' && statusOf(t) !== 'done').length;
   return h('section', { class: 'card panel' },
     head('Automations', 'The board can create tasks by itself. An automated task shows an “Auto” flag, says why it exists in its description, and is listed under Tasks › Automated. A rule never creates a second task while its first one is still open.'),
-    h('ul', { class: 'rule-list' }, RULES.map(([key, title, text, hasDays]) => {
+    h('ul', { class: 'rule-list' }, RULES.map(([key, title, text, setting]) => {
       const rule = ruleOf(store, key);
       return h('li', null,
         h('div', { class: 'grow' }, h('strong', null, title), h('div', { class: 'muted small' }, text)),
-        hasDays
+        setting === true
           ? h('label', { class: 'row rule-days' },
               h('input', { type: 'number', min: '1', max: '120', value: String(rule.days), 'aria-label': `${title}: days before`, onchange: (e) => setRule(key, { days: Math.min(120, Math.max(1, Number(e.target.value) || 1)) }) }),
               h('span', { class: 'muted small' }, 'days before'))
-          : null,
+          : setting === 'factor'
+            ? h('label', { class: 'row rule-days' },
+                h('span', { class: 'muted small' }, 'below'),
+                h('input', { type: 'number', min: '1', max: '5', step: '0.05', value: String(rule.factor), 'aria-label': `${title}: health factor`, onchange: (e) => setRule(key, { factor: Math.min(5, Math.max(1, Number(e.target.value) || 1.2)) }) }))
+            : null,
         h('input', { type: 'checkbox', checked: rule.on, 'aria-label': `${title}: on`, onchange: (e) => setRule(key, { on: e.target.checked }) }));
     })),
     h('p', { class: 'muted small' }, `${open} automated task${open === 1 ? ' is' : 's are'} open now. Site checks run in the runners (Settings → Runners → Monitoring) and show in `, h('a', { href: '#/tools' }, 'Tools'), '.'));

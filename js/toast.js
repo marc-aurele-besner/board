@@ -4,6 +4,8 @@ import { h } from './ui.js';
 let box = null;
 
 export function toast(text, { undo = null } = {}) {
+  // The runners load shared modules that toast (a PR link added to a task by a Cron step); there is no page there.
+  if (typeof document === 'undefined') return;
   if (!box) {
     box = h('div', { class: 'toasts', 'aria-live': 'polite' });
     document.body.append(box);

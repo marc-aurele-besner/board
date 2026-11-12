@@ -5,14 +5,14 @@ import { toast } from '../toast.js';
 import { setupBanner } from '../integrations.js';
 import { positionFields, positionError } from '../position-input.js';
 import { insightsPanel } from '../pool-insights.js';
-import { WINDOWS, refOf, shortAddress, baselineOf, coversCollect, collectKey, levelOf, mergeCollects, cachedRows, enabledChains, openPositions, readAllPositions, readAprs, readingAprs, readHistory, searchingChains, knownTokens } from '../defi/positions-read.js';
+import { WINDOWS, refOf, shortAddress, baselineOf, coversCollect, collectKey, levelOf, mergeCollects, cachedRows, enabledChains, openPositions, knownTokens } from '../defi/positions-read.js';
+import { runJob, jobState } from '../runners.js';
 import { readPositions, poolState, tokenMeta, isAddressSymbol, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, tokenList, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey, nodeUrls } from '../uniswap.js';
 import { chainById, explorerUrl, etherscanKey } from '../chains.js';
 import { walletsTab, walletsView } from './defi-wallets.js';
 import { lendingTab, lendingView } from './defi-lending.js';
 import { summaryTab } from './defi-summary.js';
 
-const STALE_MS = 10 * 60 * 1000;
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 // The fee counter, used where swaps cannot be read, needs some time between two reads, or a few cents of fees
 // turn into a wild yearly rate.
@@ -33,9 +33,11 @@ let readAgain = false; // a position was added during a read, so read once more 
 let loadError = '';
 let askedAt = 0; // when this tab last started a read, so a stale page asks once, not on every redraw
 let bound = null; // the store of the page drawn last, for the state below
-const activity = new Map(); // chainId -> (lane -> text): what each chain's collect search is doing
-const searching = { has: (id) => searchingChains().includes(id), get size() { return searchingChains().length; } };
-const aprBusy = () => readingAprs();
+const activity = new Map(); // what the page shows of a search's progress: the runners report none
+// The collect search runs in the runners; it is running while their job is, or while this tab waits on it.
+const historyRunning = () => historyAsking || Boolean(jobState('defi-history')?.running);
+const searching = { has: () => historyRunning(), get size() { return historyRunning() ? 1 : 0; } };
+const aprBusy = () => aprAsking;
 
 // The last read as the page shows it: rows from pools.json, and the read's state.
 const readOf = () => bound?.get(COLLECTION)?.read ?? {};
@@ -88,7 +90,7 @@ const state = {
     return readOf().shallow ?? [];
   },
   get pending() {
-    return loading ? readOf().pending ?? [] : [];
+    return loading || jobState('defi-positions')?.running ? readOf().pending ?? [] : [];
   },
 };
 let logoMap = new Map(); // "chainId:token address" -> logo URL, from the token list
@@ -174,7 +176,8 @@ function ago(at) {
 export { openPositions };
 export const outOfRange = (store) => openPositions(store).filter((r) => !r.inRange);
 
-// Reads every enabled chain, then fee APR and the collect search. The rows show as each part is saved.
+// The runners read the chains (tools/jobs/defi.js) every few minutes and save what they find in pools.json; the page
+// only draws it. Refresh, a new APR window and Search further ask them to read now.
 // again: a read already running reads once more when it ends, as it took the settings before the change.
 async function load(store, { again = false } = {}) {
   if (loading) {
@@ -186,7 +189,8 @@ async function load(store, { again = false } = {}) {
   askedAt = Date.now();
   store.refresh();
   try {
-    await readAllPositions(store);
+    await runJob('defi-positions', { window: view.window });
+    await store.sync();
   } catch (err) {
     loadError = err.message;
   } finally {
@@ -197,31 +201,39 @@ async function load(store, { again = false } = {}) {
     readAgain = false;
     return load(store);
   }
-  if (!loadError) {
-    loadAprs(store);
-    loadHistory(store);
-  }
 }
 
-// Fee APR over the chosen window, from each pool's swaps in it.
+let aprAsking = false;
+// Fee APR over the chosen window. The window is saved, so the runners keep reading it.
 function loadAprs(store) {
-  readAprs(store, state.rows, view.window).finally(() => store.refresh());
+  if (store.get(COLLECTION).aprWindow !== view.window) store.update(COLLECTION, (d) => { d.aprWindow = view.window; });
+  if (aprAsking || store.get(COLLECTION).aprs && Object.keys(store.get(COLLECTION).aprs).some((k) => k.startsWith(`${view.window}|`))) return;
+  aprAsking = true;
+  runJob('defi-positions', { window: view.window, aprOnly: true })
+    .then(() => store.sync())
+    .catch(() => {})
+    .finally(() => {
+      aprAsking = false;
+      store.refresh();
+    });
   store.refresh();
 }
 
-// One search pass for collects, or of one chain (`only`, the Search further button).
+let historyAsking = false;
+// One search pass for collects, or of one chain (`only`, the Search further button), in the runners.
 function loadHistory(store, only = null) {
-  const say = (chainId, text, lane) => {
-    if (!activity.has(chainId)) activity.set(chainId, new Map());
-    if (lane === '*') activity.delete(chainId);
-    else if (text == null) activity.get(chainId).delete(lane);
-    else activity.get(chainId).set(lane, text);
-    store.refresh();
-  };
-  readHistory(store, state.rows, { only, say }).finally(() => store.refresh());
+  if (historyAsking) return;
+  historyAsking = true;
+  runJob('defi-history', only === null ? {} : { chainId: only })
+    .then(() => store.sync())
+    .catch((err) => toast(err.message))
+    .finally(() => {
+      historyAsking = false;
+      store.refresh();
+    });
   store.refresh();
 }
-const activityLines = (chainId) => [...(activity.get(chainId)?.values() ?? [])];
+const activityLines = () => [];
 
 // How far the search for collects has got, per position, from 0 to 1. A position is covered in full once its
 // event search reached its opening, or once Etherscan read every transaction of its wallet. Until then, the
@@ -1904,10 +1916,11 @@ function showDetail(root, store) {
   root.replaceChildren(detailView(store, view.detail));
 }
 
-// The page shows what the last read saved; it reads again when that is stale.
+// The page shows what the runners saved. Only a folder they never read is asked for at once; otherwise their own
+// schedule keeps it fresh.
 function ensureRows(store) {
   bound = store;
-  if (!loading && Date.now() - Math.max(state.at, askedAt) > STALE_MS) {
+  if (!loading && !state.at && !askedAt) {
     askedAt = Date.now();
     setTimeout(() => load(store), 0);
   }
@@ -2181,6 +2194,8 @@ export default {
   collection: COLLECTION,
   defaults: { cache: {}, prices: {}, scan: {}, fees: {}, earned: {}, collected: [], history: {}, hidden: [], etherscan: {}, flip: {}, insights: [], balances: {}, tokens: [], hiddenTokens: [], lending: {} },
   render: draw,
+  // Redrawn when a DeFi job's outcome changes.
+  readsRunners: true,
   serialize: () => ({
     cur: view.currency === 'USD' ? '' : view.currency,
     filter: view.filter === 'all' ? '' : view.filter,

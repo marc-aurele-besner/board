@@ -4,10 +4,11 @@ import { h, icon, refreshIcon, notice, copyable } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { CHAINS, chainSettings, isAddress, tokenMeta } from '../uniswap.js';
 import { tokenRef } from '../balances.js';
-import { readWallets, savedChainRows, walletsOf, enabledChains } from '../defi/wallets-read.js';
+import { savedChainRows, walletsOf, enabledChains } from '../defi/wallets-read.js';
+import { runJob } from '../runners.js';
+import { toast } from '../toast.js';
 
 const COLLECTION = 'pools';
-const STALE_MS = 10 * 60 * 1000;
 const DUST_USD = 1; // balances worth less are hidden while "Hide small balances" is on
 
 // View state. chain: a chain id or 'all'. wallet: a lowercase address or 'all'. adding: the add token form is open.
@@ -38,14 +39,18 @@ const hiddenOf = (store) => new Set(store.get(COLLECTION)?.hiddenTokens ?? []);
 const shortAddress = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const amountText = (n) => (n >= 1e6 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toLocaleString(undefined, { maximumFractionDigits: 4 }) : n.toPrecision(4));
 
-// Reads every chain; each lands on screen as soon as it is saved.
+// Asks the runners to read every chain now (tools/jobs/defi.js); each lands on screen as soon as they save it.
 export async function load(store) {
   if (loading) return;
   loading = true;
   askedAt = Date.now();
   store.refresh();
   try {
-    await readWallets(store);
+    await runJob('defi-wallets');
+    await store.sync();
+  } catch (err) {
+    // Their last error also shows in Settings → Runners.
+    toast(err.message);
   } finally {
     loading = false;
     store.refresh();
@@ -196,7 +201,8 @@ function balanceTable(store, rows, ui, multiWallet) {
 // The rows to show, from the last read saved; read again when stale.
 function currentRows(store, chains, wallets) {
   bound = store;
-  if (!loading && Date.now() - Math.max(state.at, askedAt) > STALE_MS) {
+  // The runners keep it fresh; only a folder they never read is asked for at once.
+  if (!loading && !state.at && !askedAt) {
     askedAt = Date.now();
     setTimeout(() => load(store), 0);
   }

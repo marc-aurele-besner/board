@@ -3,11 +3,12 @@
 import { h, icon, refreshIcon, notice } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { CHAINS, chainSettings, isAddress } from '../uniswap.js';
-import { readAllLending, aaveChains } from '../defi/lending-read.js';
+import { aaveChains } from '../defi/lending-read.js';
+import { runJob } from '../runners.js';
+import { toast } from '../toast.js';
 import { savedChainRows, walletsOf } from '../defi/wallets-read.js';
 
 const COLLECTION = 'pools';
-const STALE_MS = 5 * 60 * 1000;
 // Health factor bands: liquidation starts below 1.
 const RISK = 1.1;
 const WATCH = 1.5;
@@ -40,14 +41,18 @@ const amountText = (n) => (n >= 1e6 ? n.toLocaleString(undefined, { maximumFract
 const healthTone = (hf) => (hf == null ? 'safe' : hf < RISK ? 'risk' : hf < WATCH ? 'watch' : 'safe');
 const healthText = (hf) => (hf == null ? '∞' : hf >= 100 ? '>100' : hf.toFixed(2));
 
-// Reads every chain; each lands on screen as soon as it is saved.
+// Asks the runners to read every chain now (tools/jobs/defi.js); each lands on screen as soon as they save it.
 export async function load(store) {
   if (loading) return;
   loading = true;
   askedAt = Date.now();
   store.refresh();
   try {
-    await readAllLending(store);
+    await runJob('defi-lending');
+    await store.sync();
+  } catch (err) {
+    // Their last error also shows in Settings → Runners.
+    toast(err.message);
   } finally {
     loading = false;
     store.refresh();
@@ -115,7 +120,8 @@ function accountCard(r, ui, i) {
 // The rows to show, from the last read saved; read again when stale.
 function currentRows(store, chains, wallets) {
   bound = store;
-  if (!loading && Date.now() - Math.max(state.at, askedAt) > STALE_MS) {
+  // The runners keep it fresh; only a folder they never read is asked for at once.
+  if (!loading && !state.at && !askedAt) {
     askedAt = Date.now();
     setTimeout(() => load(store), 0);
   }
