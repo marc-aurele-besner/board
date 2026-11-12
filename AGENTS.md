@@ -52,7 +52,7 @@ js/resend.js          the Inbox's Resend reads: email lists per project key (run
 js/google.js          every Google sign-in, kept in google.json; the sign-in popup and account pictures
 js/google-core.js     Google tokens without the DOM: live access tokens, googleFetch; only the runners renew a token
 js/gmail.js           the Inbox's Gmail reads: one sign-in per account, its email list, and one email's body
-js/gcal.js            Calendar's Google reads: one sign-in per account, its calendar list, and the events of a range
+js/gcal.js            Calendar's Google reads: one sign-in per account, its calendar list; events read by the runners into calendar.json
 js/background.js      timers for the above; started once the data folder is open
 js/runner-jobs.js     the jobs the runners do, with their labels and default intervals (shared by the worker and Settings)
 js/runners.js         the board's side of the runners: their heartbeat in runners.json, Run now, their data folder's path
@@ -82,6 +82,7 @@ tools/worker/schedule.js  intervals, no overlap, timeouts, backoff, and the runn
 tools/worker/http.js  the worker's localhost API: status, Run now, data folder
 tools/jobs/*.js       one file per job: { id, timeout, delay, setup(store), run(ctx) }; listed in tools/jobs/index.js
 tools/jobs/gmail.js, resend.js  read new mail into inbox.json; resend.js also answers GET /resend/email/<id> and POST /resend/check
+tools/jobs/calendar.js  reads every shown calendar's window into calendar.json, or a range Calendar asks for
 tools/jobs/google.js  renews Google access tokens; a tab that finds one expired asks it through POST /run/google
 tools/check-imports.js  loads every worker module under plain Node, to catch a missing import or a DOM call at load time
 tools/check-merge.js  the worker and a tab change two fields of one file; both must survive
