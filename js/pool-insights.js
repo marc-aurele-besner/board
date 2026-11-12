@@ -1,3 +1,4 @@
+// @ts-check
 // AI insights on the Liquidity Pools tab: a read of the open positions, in range and out, with what to adjust.
 // The last few reads are saved in the pools collection, so they can be opened again after a reload.
 import { h, icon, money, notice, uid } from './ui.js';
@@ -5,15 +6,26 @@ import { ask, parseJson } from './ai.js';
 import { systemPrompt } from './prompts.js';
 import { setupBanner, hasOpenRouter } from './integrations.js';
 import { CHAINS } from './uniswap.js';
+/** @import { Store, PoolInsightItem, PoolInsightPosition, PoolInsightRun } from '../types/data' */
+/** @import { PositionRow } from '../types/defi' */
+/** @import { Child } from '../types/ui' */
+/**
+ * @typedef {PositionRow & { apr?: number | null }} InsightRow
+ * @typedef {{ min: number, max: number, current: number, marker: number | null, unit: string, base: string }} Side
+ * @typedef {{ logo: (src: string | null | undefined, label: string, cls?: string) => HTMLElement, tokens: (pos: PoolInsightPosition, live: InsightRow | undefined) => (string | null)[] }} Look
+ * @typedef {{ sym0: string, sym1: string }} Pair
+ */
 
 const COLLECTION = 'pools';
 const KEEP = 5;
 
 // status and error: the read in progress. run: the saved read shown, by id ('' for the newest).
 // action, range, chain: the filters on the read shown. hidden: the panel folded by the user.
+/** @type {{ status: string, error: string, run: string, action: string, range: string, chain: string, hidden: boolean }} */
 const insight = { status: 'idle', error: '', run: '', action: 'all', range: 'all', chain: 'all', hidden: false };
 
 // The actions the model may pick, most urgent first; the list is shown in this order.
+/** @type {Record<string, [string, string]>} */
 const ACTIONS = {
   withdraw: ['Withdraw', 'bad'],
   recenter: ['Re-center', 'act'],
@@ -27,16 +39,24 @@ const ORDER = Object.keys(ACTIONS);
 // Within this share of the range from an edge, an in-range position counts as near the edge.
 const EDGE = 10;
 
+/** @param {{ ref: string }[]} rows */
 const keyOf = (rows) => rows.map((r) => r.ref).sort().join(',');
-const round = (n, digits = 4) => (Number.isFinite(n) ? Number(n.toPrecision(digits)) : null);
+/** @param {number | null} n */
+const round = (n, digits = 4) => (Number.isFinite(n) ? Number(/** @type {number} */ (n).toPrecision(digits)) : null);
+/** @param {number} n */
 const pctOf = (n) => (Number.isFinite(n) ? round(n * 100, 3) : null);
+/** @param {number} n */
 const priceText = (n) => (!Number.isFinite(n) ? '∞' : n >= 1000 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toFixed(2) : n.toPrecision(4));
+/** @param {InsightRow} r */
 const nearEdge = (r) => r.inRange && !r.full && r.marker !== null && (r.marker < EDGE || r.marker > 100 - EDGE);
+/** @param {number} at */
 const whenText = (at) => new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+/** @param {Store} store */
 const runsOf = (store) => store.get(COLLECTION)?.insights ?? [];
 
 // The facts the model reads for one position, with prices in the pair's base as the board shows it
 // (side: the min, max, current, marker, unit and base after a flip). Distances are worked out here.
+/** @param {InsightRow} r @param {Side} side */
 function factsOf(r, side) {
   const below = !r.inRange && side.current < side.min;
   return {
@@ -67,6 +87,11 @@ function factsOf(r, side) {
 }
 
 // What a saved read keeps of a position, so it still shows once the position changed or closed.
+/**
+ * @param {InsightRow} r
+ * @param {Side} side
+ * @returns {PoolInsightPosition}
+ */
 function snapshotOf(r, side) {
   return {
     pair: r.pair, chain: r.chain, feePct: r.feePct, tokenId: r.tokenId, url: r.url ?? '', inRange: r.inRange, full: r.full,
@@ -76,9 +101,15 @@ function snapshotOf(r, side) {
 }
 
 // Keeps only what the board can show: known ids and actions, and a range with min below max.
+/**
+ * @param {any} data any: the model's JSON reply, checked field by field here
+ * @param {InsightRow[]} rows
+ * @returns {{ summary: string, items: Omit<PoolInsightItem, 'pos'>[] }}
+ */
 function cleanReply(data, rows) {
   const known = new Set(rows.map((r) => r.ref));
-  const items = (Array.isArray(data?.positions) ? data.positions : [])
+  // What the model sent for a position; id and action are checked by the first filter.
+  const items = /** @type {{ id: string, action: string, headline?: unknown, reason?: unknown, range?: { min?: unknown, max?: unknown } }[]} */ (Array.isArray(data?.positions) ? data.positions : [])
     .filter((p) => known.has(p?.id) && Object.hasOwn(ACTIONS, p.action))
     // One entry per position: the first the model gave.
     .filter((p, i, list) => list.findIndex((q) => q.id === p.id) === i)
@@ -96,6 +127,7 @@ function cleanReply(data, rows) {
   return { summary: String(data?.summary ?? '').slice(0, 1200), items };
 }
 
+/** @param {Store} store @param {InsightRow[]} rows @param {(r: InsightRow) => Side} sideOf */
 async function run(store, rows, sideOf) {
   insight.status = 'loading';
   insight.error = '';
@@ -105,7 +137,7 @@ async function run(store, rows, sideOf) {
     const sides = new Map(rows.map((r) => [r.ref, sideOf(r)]));
     const reply = await ask(store, 'task-pools', [
       { role: 'system', content: systemPrompt(store, 'pools') },
-      { role: 'user', content: JSON.stringify({ positions: rows.map((r) => factsOf(r, sides.get(r.ref))) }) },
+      { role: 'user', content: JSON.stringify({ positions: rows.map((r) => factsOf(r, /** @type {Side} */ (sides.get(r.ref)))) }) },
     ]);
     const { summary, items } = cleanReply(parseJson(reply), rows);
     if (!items.length && !summary) throw new Error('The model returned nothing usable. Try again or pick another model in Settings.');
@@ -115,7 +147,7 @@ async function run(store, rows, sideOf) {
       at: Date.now(),
       key: keyOf(rows),
       summary,
-      items: items.map((it) => ({ ...it, pos: snapshotOf(byRef.get(it.ref), sides.get(it.ref)) })),
+      items: items.map((it) => ({ ...it, pos: snapshotOf(/** @type {InsightRow} */ (byRef.get(it.ref)), /** @type {Side} */ (sides.get(it.ref))) })),
     };
     Object.assign(insight, { status: 'idle', run: '', action: 'all', range: 'all', chain: 'all' });
     store.update(COLLECTION, (d) => {
@@ -123,24 +155,27 @@ async function run(store, rows, sideOf) {
     });
   } catch (err) {
     insight.status = 'error';
-    insight.error = err.message;
+    insight.error = /** @type {Error} */ (err).message;
     store.refresh();
   }
 }
 
 // A saved range in the base the pair is shown in now; a read from before a flip is turned over.
+/** @param {PoolInsightPosition} pos @param {boolean} flipped @param {{ min: number, max: number, current?: number }} range */
 function inBase(pos, flipped, range) {
   const unit = flipped ? pos.sym0 : pos.sym1;
   if (unit === pos.unit || !range) return { ...range, unit: pos.unit, base: pos.base };
   return {
     min: range.max == null || !Number.isFinite(range.max) ? 0 : 1 / range.max,
     max: range.min > 0 ? 1 / range.min : Infinity,
-    current: range.current > 0 ? 1 / range.current : null,
+    // A suggested range has no current price, and undefined > 0 is false.
+    current: /** @type {number} */ (range.current) > 0 ? 1 / /** @type {number} */ (range.current) : null,
     unit: pos.base,
     base: pos.unit,
   };
 }
 
+/** @param {PoolInsightItem} it @param {InsightRow | undefined} live @param {boolean} flipped @param {Look} look */
 function item(it, live, flipped, look) {
   const [label, tone] = ACTIONS[it.action];
   const pos = it.pos;
@@ -169,10 +204,13 @@ function item(it, live, flipped, look) {
 }
 
 // The same status dot the positions list shows: green in range, red out of range.
+/** @param {string} kind */
 const dot = (kind) => h('span', { class: `pos-dot ${kind}`, 'aria-hidden': 'true' });
 
 // The chips over a read's list: by action, by range status, and by chain when there are several.
+/** @param {Store} store @param {PoolInsightItem[]} items @param {Look} look */
 function filters(store, items, look) {
+  /** @param {'action' | 'range' | 'chain'} key @param {string} value @param {string} label @param {number} n @param {Child} [lead] */
   const chip = (key, value, label, n, lead = null) => h('button', {
     type: 'button',
     class: `lp-chip${key === 'chain' ? ' chain' : ''}${insight[key] === value ? ' active' : ''}`,
@@ -182,6 +220,7 @@ function filters(store, items, look) {
       store.refresh();
     },
   }, lead, label, h('span', { class: 'chip-count' }, n));
+  /** @param {(it: PoolInsightItem) => boolean} pred */
   const count = (pred) => items.filter(pred).length;
   const actions = ORDER.filter((a) => items.some((it) => it.action === a));
   const chains = [...new Set(items.map((it) => it.pos.chain))].sort((a, b) => a.localeCompare(b));
@@ -198,6 +237,7 @@ function filters(store, items, look) {
 }
 
 // The saved reads as tabs, newest first, each named by its date and time.
+/** @param {Store} store @param {PoolInsightRun[]} runs @param {PoolInsightRun} shown */
 function tabs(store, runs, shown) {
   if (runs.length < 2) return null;
   return h('div', { class: 'segmented insight-tabs', role: 'tablist', 'aria-label': 'Saved insights' },
@@ -214,6 +254,7 @@ function tabs(store, runs, shown) {
     }, whenText(r.at))));
 }
 
+/** @param {Store} store @param {InsightRow[]} rows @param {PoolInsightRun} shown @param {(pos: Pair) => boolean} isFlipped @param {Look} look */
 function runView(store, rows, shown, isFlipped, look) {
   const live = new Map(rows.map((r) => [r.ref, r]));
   const latest = runsOf(store)[0]?.id === shown.id;
@@ -239,6 +280,11 @@ function runView(store, rows, shown, isFlipped, look) {
 // rows: the open positions on screen (closed ones left out), with fee APR when it is known.
 // sideOf(r): the row's prices in the base the board shows. isFlipped(pair): whether a pair is shown flipped.
 // cash(n): formats a USD amount in the currency the page shows.
+/**
+ * @param {Store} store
+ * @param {InsightRow[]} rows
+ * @param {{ sideOf: (r: InsightRow) => Side, isFlipped: (pos: Pair) => boolean, logo: Look['logo'], tokenLogos: Look['tokens'], cash?: (n: number) => string }} options
+ */
 export function insightsPanel(store, rows, { sideOf, isFlipped, logo, tokenLogos, cash = (n) => money(n, 'USD') }) {
   if (!rows.length) return null;
   const out = rows.filter((r) => !r.inRange);
@@ -265,7 +311,8 @@ export function insightsPanel(store, rows, { sideOf, isFlipped, logo, tokenLogos
         type: 'button',
         class: 'btn-small',
         onclick: () => {
-          insight.hidden = open;
+          // open is false or truthy, and hidden is only tested for truth.
+          insight.hidden = /** @type {boolean} */ (open);
           if (insight.status === 'error') insight.status = 'idle';
           store.refresh();
         },
