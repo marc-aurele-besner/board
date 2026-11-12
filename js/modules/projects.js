@@ -8,6 +8,7 @@ import { editText, pickChip } from '../inline.js';
 import { colorPicker } from '../color-picker.js';
 import { siteIcon, clearFaviconCache } from '../favicon.js';
 import { fetchRepoOverview } from '../github.js';
+import { npmOf, normalizeNpmOrg, normalizePackage, packageStats, orgStats, refreshNpm, npmBusy, projectPackages, packageLink, orgUrl, ORG_PACKAGES_READ } from '../npm.js';
 import { makeTask } from '../capture.js';
 import { withoutLabel } from '../task-labels.js';
 import { connectedGmailOf } from '../gmail.js';
@@ -235,6 +236,22 @@ function updateProject(store, id, patch) {
     const owner = patch.repos !== undefined && !org && repos.length ? repos[0].split('/')[0] : org;
     const { org: _org, repos: _repos, ...rest } = patch;
     patch = { ...rest, github: { org: owner, repos } };
+  }
+  if (patch.npmOrg !== undefined || patch.npmPackages !== undefined) {
+    const npm = npmOf(current);
+    const org = patch.npmOrg !== undefined ? normalizeNpmOrg(patch.npmOrg) : npm.org;
+    if (org === null) return flashError(store, 'npm org must be a name, @name or an npmjs.com/org/<name> URL.');
+    let packages = npm.packages;
+    if (patch.npmPackages !== undefined) {
+      packages = [];
+      for (const line of splitLines(patch.npmPackages)) {
+        const name = normalizePackage(line);
+        if (!name) return flashError(store, `"${line}" is not an npm package. Use a name, @scope/name or an npmjs.com URL.`);
+        if (!packages.includes(name)) packages.push(name);
+      }
+    }
+    const { npmOrg: _org, npmPackages: _packages, ...rest } = patch;
+    patch = { ...rest, npm: { org, packages } };
   }
   if (patch.localPath !== undefined) {
     const localPath = cleanLocalPath(patch.localPath);
@@ -500,6 +517,49 @@ function repoTable(store, p) {
           },
         }, refreshIcon(s.status === 'loading'))));
     })));
+}
+
+const fmtCount = (n) => (n == null ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
+
+// The project's npm packages: those it lists, then its org's, each with its latest version, last publish and
+// weekly downloads, read by the runners into npm.json.
+function npmTable(store, p) {
+  const { org } = npmOf(p);
+  const orgState = org ? orgStats(org, onRepoChange) : null;
+  const names = projectPackages(p);
+  const shown = names.slice(0, npmOf(p).packages.length + ORG_PACKAGES_READ);
+  const rows = shown.map((name) => [name, packageStats(name, onRepoChange)]);
+  const loading = npmBusy(p) || orgState?.status === 'loading' || rows.some(([, s]) => s.status === 'loading');
+  return h('section', { class: 'stack' },
+    h('div', { class: 'row' },
+      h('h3', { class: 'grow' }, 'npm packages'),
+      orgState?.status === 'error' ? h('span', { class: 'muted small' }, `${org}: ${orgState.error}`) : null,
+      h('button', {
+        type: 'button',
+        class: 'icon-btn',
+        title: 'Read again from npm',
+        'aria-label': 'Refresh npm packages',
+        disabled: loading,
+        'aria-busy': loading ? 'true' : null,
+        onclick: () => {
+          refreshNpm(p, onRepoChange);
+          store.refresh();
+        },
+      }, refreshIcon(loading))),
+    rows.length
+      ? h('table', { class: 'repo-table' },
+          h('thead', null, h('tr', null,
+            h('th', null, 'Package'), h('th', null, 'Latest'), h('th', null, 'Published'), h('th', { class: 'num' }, 'Weekly'))),
+          h('tbody', null, rows.map(([name, s]) => {
+            const ok = s.status === 'ok';
+            return h('tr', null,
+              h('td', null, packageLink(name), ok && s.deprecated ? ' ' : null, ok && s.deprecated ? h('span', { class: 'pill tone-high' }, 'deprecated') : null),
+              h('td', { class: s.status === 'ok' ? null : 'muted' }, ok ? s.version : s.status === 'loading' ? 'Loading…' : s.error),
+              h('td', { class: 'muted' }, ok && s.modified ? s.modified.slice(0, 10) : ''),
+              h('td', { class: 'num' }, ok ? fmtCount(s.weekly) : '—'));
+          })))
+      : h('p', { class: 'muted small' }, orgState?.status === 'loading' ? 'Reading the org’s packages…' : 'No packages found.'),
+    names.length > shown.length ? h('p', { class: 'muted small' }, `${names.length - shown.length} more in ${org} are not shown.`) : null);
 }
 
 // "Triage with AI" (task 5): what needs attention across a project's repos.
@@ -1006,6 +1066,25 @@ function projectView(store, p, items, categories) {
           allowEmpty: true,
           className: 'pp-lines',
           onSave: (repos) => updateProject(store, p.id, { repos }),
+        })),
+      h('section', { class: 'pp-block' },
+        h('h3', null, 'npm organization'),
+        editText({
+          value: npmOf(p).org,
+          placeholder: 'my-org, or an npm user',
+          allowEmpty: true,
+          onSave: (npmOrg) => updateProject(store, p.id, { npmOrg }),
+        }),
+        npmOf(p).org ? h('a', { href: orgUrl(npmOf(p).org), target: '_blank', rel: 'noopener', class: 'muted small' }, `npmjs.com/~${npmOf(p).org}`) : null),
+      h('section', { class: 'pp-block' },
+        h('h3', null, 'npm packages'),
+        editText({
+          value: npmOf(p).packages.join('\n'),
+          placeholder: 'One per line: my-package or @scope/my-package',
+          multiline: true,
+          allowEmpty: true,
+          className: 'pp-lines',
+          onSave: (npmPackages) => updateProject(store, p.id, { npmPackages }),
         }))),
 
     h('div', { class: 'pp-stats' },
@@ -1017,6 +1096,7 @@ function projectView(store, p, items, categories) {
     projectTasks(store, p, items),
 
     p.github.repos.length ? repoTable(store, p) : null,
+    npmOf(p).org || npmOf(p).packages.length ? npmTable(store, p) : null,
     profileBlock(store, p),
     overviewBlock(store, p),
     triageBlock(store, p));
