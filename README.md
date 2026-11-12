@@ -99,8 +99,8 @@ Nothing runs on a server. Automatic work runs either in an open board tab or in 
 
 | Feature | Service | What is sent |
 | --- | --- | --- |
-| Website health | the project's own website | a plain request for its home page |
-| Domain expiry | `rdap.org` (the registries' lookup protocol) | the domain name |
+| Website health | the project's own website, from the runners (every check), or the browser (a check run by hand) | a plain request for its home page |
+| Domain expiry | `rdap.org` (the registries' lookup protocol); like the SSL, DNS and status lookups below, from the runners once a day, or the browser when run by hand | the domain name |
 | SSL expiry | `api.certspotter.com`, then `crt.sh` (public certificate logs) | the host name |
 | DNS and email | `cloudflare-dns.com` (DNS over HTTPS) | the domain name, the site's host and `www`, and the `_dmarc`, MTA-STS, TLS reporting, BIMI and common DKIM names under it |
 | Provider status | each followed status page (Statuspage's public `/api/v2/summary.json` and `/api/v2/incidents.json`) | nothing but the request itself |

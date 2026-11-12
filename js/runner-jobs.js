@@ -7,6 +7,7 @@ export const JOBS = [
   { id: 'gmail', label: 'Gmail', every: 2, description: 'Reads new mail of every connected Gmail account into the Inbox.' },
   { id: 'resend', label: 'Resend', every: 5, description: 'Reads the emails each project sends and receives through Resend.' },
   { id: 'calendar', label: 'Calendar', every: 10, description: 'Reads every shown calendar from the start of last month to three months ahead.' },
+  { id: 'monitoring', label: 'Monitoring', every: 5, description: 'Deadlines, budgets, site checks (health on the Tools interval, the rest daily), status pages and the automation rules.' },
 ];
 
 export const WORKER_URL = 'http://127.0.0.1:8420';

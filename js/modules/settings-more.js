@@ -615,5 +615,5 @@ export function automationsCard(store) {
           : null,
         h('input', { type: 'checkbox', checked: rule.on, 'aria-label': `${title}: on`, onchange: (e) => setRule(key, { on: e.target.checked }) }));
     })),
-    h('p', { class: 'muted small' }, `${open} automated task${open === 1 ? ' is' : 's are'} open now. Site checks run from `, h('a', { href: '#/tools' }, 'Tools'), ' while the board is open.'));
+    h('p', { class: 'muted small' }, `${open} automated task${open === 1 ? ' is' : 's are'} open now. Site checks run in the runners (Settings → Runners → Monitoring) and show in `, h('a', { href: '#/tools' }, 'Tools'), '.'));
 }
