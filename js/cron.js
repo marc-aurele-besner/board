@@ -1748,6 +1748,7 @@ const OUTPUT_KEPT = 4000;
  * What the runner's git view of a folder holds, as far as it is read here (tools/terminal.js).
  * @typedef {object} RawOutcome
  * @property {string} [output]
+ * @property {string} [screen]
  * @property {string} [reply]
  * @property {string[]} [written]
  * @property {boolean} [repo]
@@ -1777,6 +1778,8 @@ async function devOutcome(store, { session, path, prompt, task, json }) {
     raw.error = /** @type {Error} */ (err).message;
   }
   const text = plainOutput(raw.output ?? '').replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  // The screen as it was drawn reads cleanly; an older runner sends only the raw output, read as plain text.
+  const screen = raw.screen == null ? text : raw.screen.replace(/[ \t]+\n/g, '\n').trim();
   const answer = (raw.reply ?? '').trim();
   const known = new Set(findGithubLinks(prompt).map((l) => l.url.toLowerCase()));
   const links = [...new Map(findGithubLinks(`${text}\n${answer}`).map((l) => [l.url.toLowerCase(), l])).values()].filter((l) => !known.has(l.url.toLowerCase()));
@@ -1807,9 +1810,9 @@ async function devOutcome(store, { session, path, prompt, task, json }) {
       issues: links.filter((l) => l.kind === 'issue').map(pick),
       answer,
       written: raw.written ?? [],
-      output: text.slice(-OUTPUT_KEPT),
+      output: screen.slice(-OUTPUT_KEPT),
       // The answer as claude wrote it, unwrapped by the terminal; the output when there is none.
-      ...(json ? { json: lastJson(answer) ?? lastJson(text) ?? null } : {}),
+      ...(json ? { json: lastJson(answer) ?? lastJson(screen) ?? null } : {}),
       ...(raw.error ? { error: raw.error } : {}),
     },
   };
