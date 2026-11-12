@@ -1,3 +1,4 @@
+// @ts-check
 import { h, uid, now, todayISO, money, empty, icon, notice, progress, CURRENCIES } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { ask, parseJson } from '../ai.js';
@@ -10,6 +11,8 @@ import { projectIcon } from './projects.js';
 import { barChart, legend } from '../chart.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
+/** @import { Store, FinanceEntry, Recurring, AiContentPart } from '../../types/data' */
+/** @import { PickOption } from '../inline.js' */
 
 
 const COLLECTION = 'finance';
@@ -37,37 +40,48 @@ const view = { currency: DEFAULT_CURRENCY, range: 'month', group: 'day', kind: '
 // A bill is read into charges (the line items), a currency and a bill total. Only the charges become entries.
 // taxes: tax lines printed on the document as totals (GST, QST, ...), not attached to one charge.
 // original: the bill file itself, kept with the entries so it can be opened later.
+/**
+ * @typedef {{ key: string, date: string, note: string, amount: number, tax: number, category: string, projectId: string | null }} BillLine
+ * @typedef {{ key: string, note: string, amount: number, projectId?: string | null }} BillTax
+ * @typedef {{ name: string, type: string, blob?: Blob, file?: string, dataUrl?: string }} Original a bill's file: being read (blob) or saved (file, or dataUrl in older bills)
+ * @typedef {{ status: string, items: BillLine[], taxes: BillTax[], total: number | null, date: string, currency: string, vendor: string, error: string, fileName: string, stage: string, original: Original | null }} BillRead
+ */
+/** @type {BillRead} */
 const receipt = { status: 'idle', items: [], taxes: [], total: null, date: '', currency: DEFAULT_CURRENCY, vendor: '', error: '', fileName: '', stage: '', original: null };
 // Spending review (task 6): the text for the period it was asked for.
 const spend = { range: '', status: 'idle', text: '' };
 // Rates: days asked for, days still loading, and days that failed with the reason.
+/** @type {{ requested: Set<string>, pending: number, failed: Map<string, string> }} */
 const fx = { requested: new Set(), pending: 0, failed: new Map() };
+/** @type {string[]} */
 let shownDays = []; // days whose rates the page needs
 
 // --- Dates ---
 
-const pad = (n) => String(n).padStart(2, '0');
-const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const parseYmd = (s) => {
+const pad = (/** @type {number} */ n) => String(n).padStart(2, '0');
+const ymd = (/** @type {Date} */ d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const parseYmd = (/** @type {string} */ s) => {
   const [y, m, d] = s.split('-').map(Number);
   return new Date(y, m - 1, d);
 };
-const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
-const round2 = (n) => Math.round(n * 100) / 100;
+const startOfDay = (/** @type {Date} */ d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const addDays = (/** @type {Date} */ d, /** @type {number} */ n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const round2 = (/** @type {number} */ n) => Math.round(n * 100) / 100;
 // Categories are saved with a capital first letter, so "hosting" and "Hosting" are the same category.
-const capitalize = (s) => {
+const capitalize = (/** @type {unknown} */ s) => {
   const t = String(s ?? '').trim();
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : '';
 };
-const formValues = (form) => Object.fromEntries(new FormData(form));
-const entryCurrency = (e) => e.currency ?? DEFAULT_CURRENCY;
+// The forms here have text fields only, so every value is a string.
+const formValues = (/** @type {HTMLFormElement} */ form) => /** @type {Record<string, string>} */ (Object.fromEntries(new FormData(form)));
+const entryCurrency = (/** @type {FinanceEntry} */ e) => e.currency ?? DEFAULT_CURRENCY;
 // An entry's amount in the shown currency, at the rate of the entry's own day. null when that rate is not known yet.
-const shownAmount = (e) => convert(e.amount, entryCurrency(e), view.currency, knownRate(e.date));
+const shownAmount = (/** @type {FinanceEntry} */ e) => convert(e.amount, entryCurrency(e), view.currency, knownRate(e.date));
 
-const monthKeyOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
-const isMonthKey = (range) => /^\d{4}-\d{2}$/.test(range);
+const monthKeyOf = (/** @type {Date} */ d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+const isMonthKey = (/** @type {string} */ range) => /^\d{4}-\d{2}$/.test(range);
 // The month a range covers, when it covers exactly one: this month, last month, or a picked month. Otherwise null.
+/** @param {string} range */
 function shownMonth(range) {
   const today = new Date();
   if (range === 'month') return monthKeyOf(today);
@@ -75,6 +89,7 @@ function shownMonth(range) {
   return isMonthKey(range) ? range : null;
 }
 // The range one month before or after the shown one. The current month is always the 'month' range.
+/** @param {string} range @param {number} delta */
 function stepMonth(range, delta) {
   const [y, m] = (shownMonth(range) ?? monthKeyOf(new Date())).split('-').map(Number);
   const next = monthKeyOf(new Date(y, m - 1 + delta, 1));
@@ -82,6 +97,7 @@ function stepMonth(range, delta) {
 }
 
 // The period as dates: from (inclusive) to (exclusive).
+/** @param {string} range @param {FinanceEntry[]} entries */
 function windowFor(range, entries) {
   const today = startOfDay(new Date());
   const tomorrow = addDays(today, 1);
@@ -102,6 +118,7 @@ function windowFor(range, entries) {
 }
 
 // The key of the chart bucket a day falls into, for the chosen grouping.
+/** @param {Date} date @param {string} group */
 function bucketKey(date, group) {
   if (group === 'day') return ymd(date);
   if (group === 'week') return ymd(addDays(date, -((date.getDay() + 6) % 7))); // weeks start on Monday
@@ -109,6 +126,7 @@ function bucketKey(date, group) {
   return String(date.getFullYear());
 }
 
+/** @param {string} key @param {string} group */
 function bucketLabel(key, group) {
   if (group === 'day' || group === 'week') {
     const d = parseYmd(key);
@@ -122,7 +140,9 @@ function bucketLabel(key, group) {
 }
 
 // Every bucket between the two dates, in order, so empty periods still show as empty bars.
+/** @param {Date} from @param {Date} to @param {string} group */
 function bucketKeys(from, to, group) {
+  /** @type {string[]} */
   const keys = [];
   for (let d = from; d < to; d = addDays(d, 1)) {
     const k = bucketKey(d, group);
@@ -133,6 +153,11 @@ function bucketKeys(from, to, group) {
 
 // --- Entries ---
 
+/**
+ * @typedef {{ date: string, type?: string, amount: number, tax?: number, billId?: string, currency: string, category?: string,
+ *   note?: string, projectId?: string | null, source?: string }} NewEntry
+ */
+/** @param {Store} store @param {NewEntry[]} list */
 export function addEntries(store, list) {
   store.update(COLLECTION, (d) => {
     for (const e of list) {
@@ -156,6 +181,7 @@ export function addEntries(store, list) {
   });
 }
 
+/** @param {Store} store @param {Record<string, string>} v the form's values */
 function addEntry(store, v) {
   const amount = round2(Number(v.amount));
   if (!(amount > 0)) return;
@@ -171,17 +197,19 @@ function addEntry(store, v) {
 }
 
 // Every change to an entry goes through here, so a new category is remembered too.
+/** @param {Store} store @param {string} id @param {Partial<FinanceEntry>} patch */
 function updateEntry(store, id, patch) {
   store.update(COLLECTION, (d) => {
     const e = d.entries.find((x) => x.id === id);
     if (!e) return;
     if (patch.category !== undefined) patch = { ...patch, category: capitalize(patch.category) || patch.category };
     Object.assign(e, patch);
-    if (patch.category && !d.categories.some((c) => c.toLowerCase() === patch.category.toLowerCase())) d.categories.push(patch.category);
+    if (patch.category && !d.categories.some((c) => c.toLowerCase() === /** @type {string} */ (patch.category).toLowerCase())) d.categories.push(patch.category);
   });
 }
 
 // Deleting is immediate, with a few seconds to take it back.
+/** @param {Store} store @param {string} id */
 function removeEntry(store, id) {
   const removed = store.get(COLLECTION).entries.find((e) => e.id === id);
   if (!removed) return;
@@ -195,15 +223,16 @@ function removeEntry(store, id) {
 // --- Exchange rates, one per day ---
 
 // Asks for the rates of the given days that are not known yet. Long spans are fetched in one request.
+/** @param {Store} store @param {string[]} dayList */
 function scheduleRates(store, dayList) {
   const missing = [...new Set(dayList)].filter((d) => knownRate(d) === null && !fx.requested.has(d)).sort();
   if (!missing.length) return;
   for (const d of missing) fx.requested.add(d);
   fx.pending += missing.length;
   store.refresh();
-  const span = (Date.parse(missing.at(-1)) - Date.parse(missing[0])) / DAY;
+  const span = (Date.parse(/** @type {string} */ (missing.at(-1))) - Date.parse(missing[0])) / DAY;
   const work = span <= 400
-    ? fetchRateRange(missing[0], missing.at(-1))
+    ? fetchRateRange(missing[0], /** @type {string} */ (missing.at(-1)))
     : Promise.all(missing.map((d) => fetchDayRate(d)));
   work
     .then(() => {
@@ -221,6 +250,7 @@ function scheduleRates(store, dayList) {
 }
 
 // Forgets the failed days and asks for them again.
+/** @param {Store} store */
 function retryRates(store) {
   for (const d of fx.failed.keys()) fx.requested.delete(d);
   fx.failed.clear();
@@ -229,6 +259,7 @@ function retryRates(store) {
 }
 
 // The line under the header: the state of the rates, or the banner that sets them up.
+/** @param {Store} store */
 function fxBanner(store) {
   const manual = manualRate();
   if (manual !== null) {
@@ -254,6 +285,7 @@ function fxBanner(store) {
 
 // The message parts for a dropped file. A PDF with a text layer is sent as text (any model can read it);
 // a scanned PDF or an image is sent as images (needs a model that reads images).
+/** @param {File} file @param {(stage: string) => void} say @returns {Promise<AiContentPart[]>} */
 async function documentContent(file, say) {
   const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
   if (isPdf) {
@@ -275,14 +307,15 @@ async function documentContent(file, say) {
   return [{ type: 'text', text: 'Here is the bill or screenshot.' }, { type: 'image_url', image_url: { url } }];
 }
 
-const readAsDataUrl = (file) =>
-  new Promise((resolve, reject) => {
+const readAsDataUrl = (/** @type {Blob} */ file) =>
+  /** @type {Promise<string>} */ (new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
+    reader.onload = () => resolve(/** @type {string} */ (reader.result)); // readAsDataURL gives a string
     reader.onerror = () => reject(new Error('Could not read that file.'));
     reader.readAsDataURL(file);
-  });
+  }));
 
+/** @param {Store} store @param {File} file @param {string[]} categories */
 async function readReceipt(store, file, categories) {
   receipt.status = 'loading';
   receipt.error = '';
@@ -290,7 +323,7 @@ async function readReceipt(store, file, categories) {
   receipt.items = [];
   receipt.total = null;
   // Each step updates the loading bar's label, so the wait shows what is happening.
-  const say = (stage) => {
+  const say = (/** @type {string} */ stage) => {
     receipt.stage = stage;
     store.refresh();
   };
@@ -313,10 +346,11 @@ async function readReceipt(store, file, categories) {
     receipt.total = Number.isFinite(Number(doc.total)) ? round2(Math.abs(Number(doc.total))) : null;
     receipt.date = documentDate;
     receipt.taxes = (doc.taxes ?? [])
-      .map((t) => ({ key: uid(), note: String(t.name ?? 'Tax').trim() || 'Tax', amount: round2(Math.abs(Number(t.amount))) }))
-      .filter((t) => t.amount > 0);
+      .map((/** @type {{ name?: string, amount?: unknown }} */ t) => ({ key: uid(), note: String(t.name ?? 'Tax').trim() || 'Tax', amount: round2(Math.abs(Number(t.amount))) }))
+      .filter((/** @type {BillTax} */ t) => t.amount > 0);
     receipt.items = (doc.items ?? [])
-      .map((x) => ({
+      // The model's JSON: DATE.test() turns away a date that is missing or not a date.
+      .map((/** @type {{ date: string, description?: string, amount?: unknown, tax?: unknown, category?: string }} */ x) => ({
         key: uid(),
         date: DATE.test(x.date) ? x.date : documentDate,
         note: String(x.description ?? '').trim(),
@@ -325,7 +359,7 @@ async function readReceipt(store, file, categories) {
         category: String(x.category ?? '').trim() || 'Uncategorized',
         projectId: null,
       }))
-      .filter((x) => x.amount > 0);
+      .filter((/** @type {BillLine} */ x) => x.amount > 0);
     // A tax is counted once. When the document prints its taxes as totals and those add up to the bill total,
     // the taxes on the lines are the same money, so they are dropped. Without that, the lines keep their taxes.
     const netSum = round2(receipt.items.reduce((s, x) => s + x.amount, 0));
@@ -341,12 +375,13 @@ async function readReceipt(store, file, categories) {
     if (!receipt.items.length) receipt.error = 'No charges were found in that file.';
   } catch (err) {
     receipt.status = 'error';
-    receipt.error = err.message;
+    receipt.error = /** @type {Error} */ (err).message;
   }
   store.refresh();
 }
 
 // The check at the top of the review: do the charges add up to the bill total?
+/** @param {number} itemsTotal */
 function totalCheck(itemsTotal) {
   const cur = receipt.currency;
   if (receipt.total === null) {
@@ -364,17 +399,19 @@ function totalCheck(itemsTotal) {
 
 // The original bill is kept as a file in the data folder (bills/), and the bill links to it.
 // Bills saved before that kept a copy inside the JSON; those still open.
+/** @param {Store} store @param {Original} original */
 async function addBill(store, original) {
   const id = uid();
   const safeName = original.name.replace(/[^\w.-]+/g, '_');
   const file = original.blob ? await store.files.write(`bills/${id}-${safeName}`, original.blob) : '';
   store.update(COLLECTION, (d) => {
-    d.bills.push({ id, name: original.name, type: original.type, file, dataUrl: file ? '' : original.dataUrl, created: now() });
+    d.bills.push({ id, name: original.name, type: original.type, file, dataUrl: file ? '' : /** @type {string} */ (original.dataUrl), created: now() });
   });
   return id;
 }
 
 // Opens an original bill: an image, or a PDF shown in a frame. It is read from the data folder when it is a file.
+/** @param {Store} store @param {Original} original */
 async function showOriginal(store, original) {
   let url = original.dataUrl || '';
   if (original.file) url = URL.createObjectURL(await store.files.read(original.file));
@@ -387,12 +424,14 @@ async function showOriginal(store, original) {
   openDialog({ title: original.name, wide: true, body });
 }
 
+/** @param {Store} store @param {string} billId */
 function showBill(store, billId) {
   const bill = store.get(COLLECTION).bills.find((b) => b.id === billId);
   if (bill) showOriginal(store, bill);
 }
 
 // The review of a bill: each charge with its net amount, its tax and the total, then the document-level taxes.
+/** @param {Store} store */
 function receiptPanel(store) {
   if (receipt.status === 'idle') return null;
   if (receipt.status === 'loading') {
@@ -460,13 +499,13 @@ function receiptPanel(store) {
           h('select', {
             value: cur,
             'aria-label': 'Bill currency',
-            onchange: (e) => {
+            onchange: (/** @type {Event & { target: HTMLSelectElement }} */ e) => {
               receipt.currency = e.target.value;
               store.refresh();
             },
           }, CURRENCIES.map((c) => h('option', { value: c }, c)))),
         receipt.original
-          ? h('button', { type: 'button', class: 'btn-small', onclick: () => showOriginal(store, receipt.original) }, 'View original')
+          ? h('button', { type: 'button', class: 'btn-small', onclick: () => showOriginal(store, /** @type {Original} */ (receipt.original)) }, 'View original')
           : null,
         h('button', { type: 'button', class: 'btn-small primary', onclick: addAll }, `Add ${receipt.items.length + receipt.taxes.length} lines`),
         h('button', {
@@ -601,13 +640,14 @@ function receiptPanel(store) {
       h('span', { class: 'strong' }, `Total ${money(grandTotal, cur)}`)));
 }
 
+/** @param {Store} store @param {string[]} categories */
 function dropZone(store, categories) {
   const input = h('input', {
     type: 'file',
     accept: 'image/*,application/pdf',
     class: 'sr-only',
     'aria-label': 'Choose a bill or screenshot',
-    onchange: (e) => {
+    onchange: (/** @type {Event & { target: HTMLInputElement }} */ e) => {
       const file = e.target.files?.[0];
       e.target.value = '';
       if (file) readReceipt(store, file, categories);
@@ -621,18 +661,18 @@ function dropZone(store, categories) {
       tabindex: '0',
       'aria-label': 'Drop a bill or screenshot here, or click to choose one',
       onclick: () => input.click(),
-      onkeydown: (e) => {
+      onkeydown: (/** @type {KeyboardEvent} */ e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           input.click();
         }
       },
-      ondragover: (e) => {
+      ondragover: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
         e.preventDefault();
         e.currentTarget.classList.add('over');
       },
-      ondragleave: (e) => e.currentTarget.classList.remove('over'),
-      ondrop: (e) => {
+      ondragleave: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => e.currentTarget.classList.remove('over'),
+      ondrop: (/** @type {DragEvent & { currentTarget: HTMLElement, dataTransfer: DataTransfer }} */ e) => {
         e.preventDefault();
         e.currentTarget.classList.remove('over');
         const file = e.dataTransfer.files?.[0];
@@ -646,11 +686,13 @@ function dropZone(store, categories) {
 
 // --- Spending review (AI) ---
 
+/** @param {Store} store @param {string} range @param {FinanceEntry[]} periodEntries */
 async function reviewSpending(store, range, periodEntries) {
   spend.range = range;
   spend.status = 'loading';
   store.refresh();
   try {
+    /** @type {Record<string, number>} */
     const byCategory = {};
     for (const e of periodEntries) {
       const key = `${e.type}:${e.category}`;
@@ -675,11 +717,12 @@ async function reviewSpending(store, range, periodEntries) {
     spend.status = 'ok';
   } catch (err) {
     spend.status = 'error';
-    spend.text = err.message;
+    spend.text = /** @type {Error} */ (err).message;
   }
   store.refresh();
 }
 
+/** @param {Store} store @param {string} range @param {FinanceEntry[]} periodEntries */
 function spendingBlock(store, range, periodEntries) {
   const button = h('button', {
     type: 'button',
@@ -696,20 +739,23 @@ function spendingBlock(store, range, periodEntries) {
 
 // --- Entries: one line per bill (its charges open underneath), one line per entry otherwise ---
 
+/** @type {Set<string>} */
 const openBills = new Set(); // ids of the bills whose charges are shown
 
 // Sets fields on every charge of a bill at once: the bill's category or project.
+/** @param {Store} store @param {string} billId @param {Partial<FinanceEntry>} patch */
 function updateBill(store, billId, patch) {
   if (patch.category !== undefined) patch = { ...patch, category: capitalize(patch.category) || patch.category };
   store.update(COLLECTION, (d) => {
     for (const e of d.entries) {
       if (e.billId === billId) Object.assign(e, patch);
     }
-    if (patch.category && !d.categories.some((c) => c.toLowerCase() === patch.category.toLowerCase())) d.categories.push(patch.category);
+    if (patch.category && !d.categories.some((c) => c.toLowerCase() === /** @type {string} */ (patch.category).toLowerCase())) d.categories.push(patch.category);
   });
 }
 
 // Deletes a bill with all its charges, with a few seconds to take it back. The original file stays in bills/.
+/** @param {Store} store @param {string} billId */
 function removeBill(store, billId) {
   const { entries, bills } = store.get(COLLECTION);
   const charges = entries.filter((e) => e.billId === billId);
@@ -727,6 +773,7 @@ function removeBill(store, billId) {
 }
 
 // Every known category: the saved list plus any an entry uses, so none is missing from the picker.
+/** @param {Store} store */
 function categoryOptions(store) {
   const { entries, categories, categoryColors = {} } = store.get(COLLECTION);
   // The saved list is in the order set in Settings → Labels; names only an entry uses follow, A to Z.
@@ -735,6 +782,7 @@ function categoryOptions(store) {
 }
 
 // Category picker: a searchable list of categories, with “Create” for a new one.
+/** @param {Store} store @param {string | null} value @param {string} placeholder @param {(category: string) => void} onPick */
 function categoryChip(store, value, placeholder, onPick) {
   return pickChip({
     value: value || null,
@@ -748,6 +796,7 @@ function categoryChip(store, value, placeholder, onPick) {
 }
 
 // One entry as a single line. Charges of a bill use the same line, indented.
+/** @param {Store} store @param {FinanceEntry} e @param {PickOption<string>[]} projectOptions @param {string} cur @param {boolean} [child] */
 function entryRow(store, e, projectOptions, cur, child = false) {
   const converted = shownAmount(e);
   const original = entryCurrency(e);
@@ -803,16 +852,17 @@ function entryRow(store, e, projectOptions, cur, child = false) {
 }
 
 // A bill as one line: its total, with its category and project for the whole bill. Expands to its charges.
+/** @param {Store} store @param {FinanceEntry[]} items charges of one bill @param {PickOption<string>[]} projectOptions @param {string} cur */
 function billGroup(store, items, projectOptions, cur) {
   const first = items[0];
-  const billId = first.billId;
+  const billId = /** @type {string} */ (first.billId);
   const open = openBills.has(billId);
   const sameCategory = items.every((i) => i.category === first.category) ? first.category : null;
   const sameProject = items.every((i) => (i.projectId ?? null) === (first.projectId ?? null)) ? (first.projectId ?? null) : undefined;
   const total = items.reduce((s, i) => {
     const v = shownAmount(i);
     return v === null || s === null ? null : s + v;
-  }, 0);
+  }, /** @type {number | null} */ (0));
   const tax = round2(items.reduce((s, i) => s + (i.tax || 0), 0));
 
   const head = h('div', { class: 'entry-row group-head' },
@@ -858,6 +908,7 @@ function billGroup(store, items, projectOptions, cur) {
     open ? h('ul', { class: 'entry-children' }, items.map((i) => entryRow(store, i, projectOptions, cur, true))) : null);
 }
 
+/** @param {Store} store @param {FinanceEntry[]} inPeriod @param {PickOption<string>[]} projectOptions @param {string} cur */
 function entriesSection(store, inPeriod, projectOptions, cur) {
   const list = h('div');
   const count = h('span', { class: 'muted small' });
@@ -865,7 +916,9 @@ function entriesSection(store, inPeriod, projectOptions, cur) {
   const fill = () => {
     const q = view.query.trim().toLowerCase();
     const shown = q ? inPeriod.filter((e) => `${e.note ?? ''} ${e.category ?? ''} ${e.source ?? ''}`.toLowerCase().includes(q)) : inPeriod;
+    /** @type {({ single: FinanceEntry, items?: undefined } | { single?: undefined, items: FinanceEntry[] })[]} */
     const rows = [];
+    /** @type {Map<string, { items: FinanceEntry[] }>} */
     const groups = new Map();
     for (const e of shown) {
       if (!e.billId) {
@@ -873,11 +926,12 @@ function entriesSection(store, inPeriod, projectOptions, cur) {
         continue;
       }
       if (!groups.has(e.billId)) {
+        /** @type {{ items: FinanceEntry[] }} */
         const group = { items: [] };
         groups.set(e.billId, group);
         rows.push(group);
       }
-      groups.get(e.billId).items.push(e);
+      /** @type {{ items: FinanceEntry[] }} */ (groups.get(e.billId)).items.push(e);
     }
     count.textContent = `${shown.length} line${shown.length === 1 ? '' : 's'}`;
     list.replaceChildren(rows.length
@@ -897,7 +951,7 @@ function entriesSection(store, inPeriod, projectOptions, cur) {
       placeholder: 'Search entries by note, category or vendor',
       'aria-label': 'Search entries',
       value: view.query,
-      oninput: (e) => {
+      oninput: (/** @type {Event & { target: HTMLInputElement }} */ e) => {
         view.query = e.target.value;
         fill();
       },
@@ -906,6 +960,7 @@ function entriesSection(store, inPeriod, projectOptions, cur) {
 }
 
 // Labels for the whole bill, set as soon as it is read: vendor, project and category. Each applies to every charge.
+/** @param {Store} store @param {PickOption<string>[]} projectOptions */
 function billLabelRow(store, projectOptions) {
   const items = receipt.items;
   // The bill's project covers its tax lines too: they are saved as entries of the same bill.
@@ -959,8 +1014,10 @@ export { overBudget, nextRecurringDue };
 
 // Adds an entry for every due date up to today that has none yet. Each date is recorded on its expense,
 // so an entry the user deletes is not added again.
+/** @param {Store} store */
 function syncRecurring(store) {
   const today = ymd(startOfDay(new Date()));
+  /** @type {[string, string][]} */
   const missing = [];
   for (const item of store.get(COLLECTION).recurring) {
     const done = new Set(item.generated);
@@ -995,6 +1052,7 @@ function syncRecurring(store) {
 const KIND_OPTIONS = [{ value: 'fixed', label: 'Fixed' }, { value: 'flex', label: 'Flex' }];
 const CADENCE_OPTIONS = [{ value: 'monthly', label: 'Monthly' }, { value: 'yearly', label: 'Yearly' }];
 
+/** @param {Store} store @param {Record<string, string>} values the form's values */
 function addRecurring(store, values) {
   const name = String(values.name ?? '').trim();
   const amount = round2(Number(values.amount));
@@ -1019,17 +1077,19 @@ function addRecurring(store, values) {
   return true;
 }
 
+/** @param {Store} store @param {string} id @param {Partial<Recurring>} patch */
 function updateRecurring(store, id, patch) {
   if (patch.category !== undefined) patch = { ...patch, category: capitalize(patch.category) || 'Uncategorized' };
   store.update(COLLECTION, (d) => {
     const item = d.recurring.find((r) => r.id === id);
     if (!item) return;
     Object.assign(item, patch);
-    if (patch.category && !d.categories.some((c) => c.toLowerCase() === patch.category.toLowerCase())) d.categories.push(patch.category);
+    if (patch.category && !d.categories.some((c) => c.toLowerCase() === /** @type {string} */ (patch.category).toLowerCase())) d.categories.push(patch.category);
   });
 }
 
 // Stops future entries. The entries it already added stay, as one-off lines.
+/** @param {Store} store @param {string} id */
 function removeRecurring(store, id) {
   if (!confirm('Stop this recurring expense? The entries it already added stay in Money.')) return;
   store.update(COLLECTION, (d) => {
@@ -1037,6 +1097,7 @@ function removeRecurring(store, id) {
   });
 }
 
+/** @param {Store} store @param {Recurring} r */
 function recurringRow(store, r) {
   const today = todayISO();
   const next = dueDates(r, ymd(addDays(startOfDay(new Date()), 400))).find((k) => k > today);
@@ -1071,10 +1132,11 @@ function recurringRow(store, r) {
     }, icon('x')));
 }
 
+/** @param {Store} store @param {string} cur */
 function recurringForm(store, cur) {
   return h('form', {
     class: 'stack',
-    onsubmit: (e) => {
+    onsubmit: (/** @type {SubmitEvent & { currentTarget: HTMLFormElement }} */ e) => {
       e.preventDefault();
       if (addRecurring(store, formValues(e.currentTarget))) e.currentTarget.reset();
       store.refresh();
@@ -1097,6 +1159,7 @@ function recurringForm(store, cur) {
 }
 
 // Fixed and flex expenses, each as a monthly amount in the shown currency, then the list to edit.
+/** @param {Store} store @param {string} cur */
 function recurringCard(store, cur) {
   const { recurring } = store.get(COLLECTION);
   const today = todayISO();
@@ -1123,12 +1186,14 @@ function recurringCard(store, cur) {
 // --- Page ---
 
 // One row of a breakdown: its share of the total, filled in the colour of its category when it has one.
+/** @type {(label: string, amount: number, total: number, cur: string, color?: string) => HTMLLIElement} */
 const bar = (label, amount, total, cur, color) =>
   h('li', null,
     h('div', { class: 'row between' }, h('span', null, label), h('span', null, `${money(amount, cur)} · ${total ? Math.round((amount / total) * 100) : 0}%`)),
     h('div', { class: 'bar-track' }, h('div', { class: 'bar-fill', style: color ? { width: `${total ? (amount / total) * 100 : 0}%`, background: color } : { width: `${total ? (amount / total) * 100 : 0}%` } })));
 
 // A monthly budget is saved with the currency it was typed in. An empty or zero value removes it.
+/** @param {Store} store @param {string} category @param {string} text @param {string} currency */
 function setBudget(store, category, text, currency) {
   const amount = round2(Number(text));
   store.update(COLLECTION, (d) => {
@@ -1139,6 +1204,7 @@ function setBudget(store, category, text, currency) {
 }
 
 // A category's spending. When the period is one month, it is measured against the category's budget, which is edited here.
+/** @param {Store} store @param {string} name @param {number} amount @param {number} total @param {string} cur @param {string | undefined} color @param {boolean} monthly */
 function categoryBar(store, name, amount, total, cur, color, monthly) {
   const saved = (store.get(COLLECTION).budgets ?? {})[name];
   const budget = monthly && saved ? convert(saved.amount, saved.currency, cur, knownRate(todayISO())) : null;
@@ -1162,6 +1228,7 @@ function categoryBar(store, name, amount, total, cur, color, monthly) {
       : null);
 }
 
+/** @param {HTMLElement} root @param {Store} store */
 function draw(root, store) {
   const { entries, categories, categoryColors = {} } = store.get(COLLECTION);
   const projects = store.get('projects').projects;
@@ -1173,7 +1240,7 @@ function draw(root, store) {
   setTimeout(() => syncRecurring(store), 0);
   // Fixed or flex: an entry takes the kind of its recurring expense. Other entries are one-off.
   const kindById = new Map(store.get(COLLECTION).recurring.map((r) => [r.id, r.kind]));
-  const kindOf = (e) => (e.recurringId ? kindById.get(e.recurringId) ?? 'one-off' : 'one-off');
+  const kindOf = (/** @type {FinanceEntry} */ e) => (e.recurringId ? kindById.get(e.recurringId) ?? 'one-off' : 'one-off');
 
   const w = windowFor(view.range, entries);
   const fromKey = ymd(w.from);
@@ -1191,7 +1258,9 @@ function draw(root, store) {
   const keys = bucketKeys(w.from, w.to, view.group);
   const incomeByBucket = new Map(keys.map((k) => [k, 0]));
   const expenseByBucket = new Map(keys.map((k) => [k, 0]));
+  /** @type {Map<string, number>} */
   const byCategory = new Map();
+  /** @type {Map<string, number>} */
   const byProject = new Map();
   let income = 0;
   let expense = 0;
@@ -1209,7 +1278,7 @@ function draw(root, store) {
       expense += v;
       expenseByBucket.set(key, (expenseByBucket.get(key) ?? 0) + v);
       byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + v);
-      const name = projectById.get(e.projectId)?.name ?? 'No project';
+      const name = projectById.get(/** @type {string} */ (e.projectId))?.name ?? 'No project'; // null finds none
       byProject.set(name, (byProject.get(name) ?? 0) + v);
     }
   }
@@ -1227,7 +1296,7 @@ function draw(root, store) {
   const month = shownMonth(view.range);
   const monthName = month ? parseYmd(`${month}-01`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : '';
   const rangeLabel = RANGES.find(([k]) => k === view.range)?.[1] ?? monthName;
-  const stepTo = (delta) => () => {
+  const stepTo = (/** @type {number} */ delta) => () => {
     view.range = stepMonth(view.range, delta);
     store.refresh();
   };
@@ -1338,7 +1407,7 @@ function draw(root, store) {
             h('h3', null, 'Add an entry'),
             h('form', {
               class: 'stack',
-              onsubmit: (e) => {
+              onsubmit: (/** @type {SubmitEvent & { currentTarget: HTMLFormElement }} */ e) => {
                 e.preventDefault();
                 addEntry(store, formValues(e.currentTarget));
               },
@@ -1374,7 +1443,7 @@ export default {
   defaults: { entries: [], categories: [], bills: [], categoryColors: {}, recurring: [], budgets: {} },
   render: draw,
   serialize: () => ({ cur: view.currency, range: view.range === 'month' ? '' : view.range, group: view.group === 'day' ? '' : view.group, kind: view.kind === 'all' ? '' : view.kind }),
-  restore: (p = {}) => {
+  restore: (/** @type {Record<string, string>} */ p = {}) => {
     view.currency = CURRENCIES.includes(p.cur) ? p.cur : DEFAULT_CURRENCY;
     view.range = RANGES.some(([k]) => k === p.range) || isMonthKey(p.range ?? '') ? p.range : 'month';
     view.group = GROUPS.some(([k]) => k === p.group) ? p.group : 'day';
