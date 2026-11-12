@@ -1014,6 +1014,10 @@ button.danger { color: var(--danger); }
 .icon-btn.dev-btn.dev-failed { color: var(--danger); }
 .icon-btn.dev-btn.dev-stopped, .icon-btn.dev-btn.dev-idle { color: var(--text); }
 .icon-btn.dev-btn:hover { filter: brightness(1.15); }
+.icon-btn.cron-btn { color: var(--accent); }
+.icon-btn.cron-btn:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+:is(.todo-item, .kanban-card).flash { animation: taskFlash 2.4s ease-out; }
+@keyframes taskFlash { 0%, 40% { box-shadow: 0 0 0 2px var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); } }
 .kanban-card.selected { box-shadow: inset 0 0 0 2px var(--accent); }
 .kanban-title { gap: 8px; align-items: flex-start; flex-wrap: nowrap; }
 .kanban-title .todo-select { margin-top: 3px; flex: none; }
@@ -1834,6 +1838,8 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .cron-dot.on { background: var(--income); }
 .cron-dot.bad { background: var(--danger); }
 .cron-dot.running { background: var(--accent); animation: cronPulse 1s ease-in-out infinite; }
+.cron-dot.warn { background: var(--warn); }
+.cron-dot.off { background: var(--muted); }
 @keyframes cronPulse { 50% { opacity: 0.3; } }
 .cron-name { flex: 1 1 220px; min-width: 0; font-size: 1.1rem; font-weight: 600; }
 .cron-templates { display: grid; gap: 8px; }
@@ -1893,13 +1899,51 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .flow-add .icon { width: 13px; height: 13px; }
 .cron-output summary, .cron-runs summary { cursor: pointer; }
 .cron-output pre, .cron-run-steps pre { margin: 6px 0 0; padding: 10px; max-height: 260px; overflow: auto; border-radius: 8px; background: var(--surface-2); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; }
-.cron-runs { list-style: none; margin: 0; padding: 0; }
-.cron-runs > li { padding: 8px 0; border-bottom: 1px solid var(--border); }
-.cron-runs > li:last-child { border-bottom: none; }
-.cron-run-steps { margin: 8px 0 0; padding-left: 0; list-style: none; display: grid; gap: 10px; }
-/* A Run in Dev step's terminal output: lines as the program drew them, scrolled sideways rather than wrapped. */
+.cron-runs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+/* A run: a header that opens it, what it made as links, then its steps. */
+.cron-run { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.cron-run.focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+.cron-run-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cron-run-toggle { display: flex; align-items: center; gap: 8px; flex: 1 1 260px; min-width: 0; padding: 2px 4px; border: none; background: none; color: var(--text); text-align: left; font-weight: 400; }
+.cron-run-toggle:hover strong { text-decoration: underline; text-underline-offset: 2px; }
+.cron-run-toggle .chevron { display: inline-flex; color: var(--muted); }
+.cron-run-toggle .chevron .icon { width: 16px; height: 16px; }
+.cron-run-name { display: flex; flex-direction: column; min-width: 0; }
+.cron-run-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cron-run-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cron-run-actions { flex: none; gap: 6px; }
+.cron-run-error { margin: 0; overflow-wrap: anywhere; }
+.cron-run-links { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 28px; }
+.run-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 28px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); color: var(--text); font-size: 0.85rem; font-weight: 500; text-decoration: none; }
+a.run-chip:hover, button.run-chip:hover { border-color: var(--accent); }
+.run-chip .icon { width: 14px; height: 14px; flex: none; color: var(--accent); }
+.run-chip.muted .icon { color: var(--muted); }
+.run-chip.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+.run-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 34ch; }
+.run-chip .pill { font-size: 0.72rem; }
+/* What a terminal is doing, in the colours of a task's Dev button. */
+.term-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
+.term-dot.dev-working { background: var(--accent); animation: cronPulse 1.4s ease-in-out infinite; }
+.term-dot.dev-waiting { background: var(--warn); }
+.term-dot.dev-done { background: var(--income); }
+.term-dot.dev-failed { background: var(--danger); }
+.term-dot.dev-loading { background: var(--accent); opacity: 0.5; }
+.cron-run-steps { margin: 0; padding: 4px 0 0 28px; list-style: none; display: grid; gap: 12px; }
+.cron-run-step { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; align-items: start; }
+.cron-run-step:not(:last-child)::before { content: ''; position: absolute; left: 13px; top: 30px; bottom: -12px; width: 2px; background: var(--border); }
+.cron-run-step .flow-node-icon { width: 28px; height: 28px; border-radius: 8px; }
+.cron-run-step .flow-node-icon .icon { width: 15px; height: 15px; }
+.cron-run-step-body { display: grid; gap: 4px; min-width: 0; }
+.cron-run-step-body p { margin: 0; }
+.cron-run-step.bad .flow-node-icon { --c: var(--danger); }
+.cron-run-step.running .flow-node-icon { animation: cronPulse 1.4s ease-in-out infinite; }
+.cron-run-step.skipped { opacity: 0.55; }
+.cron-output-first { overflow-wrap: anywhere; }
+.seg-count { margin-left: 5px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 18%, transparent); font-size: 0.75rem; font-weight: 600; }
+/* A Run in Dev step's terminal, drawn as Dev draws it: lines as the program drew them, scrolled sideways rather than wrapped. */
 .cron-term-view { gap: 6px; margin-top: 6px; }
-.cron-term-view .cron-term { margin: 0; padding: 10px; max-height: 360px; overflow: auto; border-radius: 8px; background: var(--surface-2); white-space: pre; font-family: var(--mono, ui-monospace, monospace); font-size: 0.78rem; line-height: 1.35; }
+.cron-term-bar { gap: 8px; }
+.term-out.term-view { max-height: 420px; min-height: 0; }
 /* Variables under a {{…}} field, and a step's test data as JSON trees. */
 .cron-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .cron-vars { display: flex; flex-wrap: wrap; gap: 4px; }

@@ -1,8 +1,9 @@
 // Cron: recurring flows that gather board data, ask an AI model, and turn the answer into a task, a notification or work for claude in Dev.
 // The editor draws a flow as a chain of nodes, like a workflow canvas; the inspector below edits the selected node.
-import { h, icon, empty, notice, now, uid, todayISO } from '../ui.js';
+import { h, icon, empty, notice, now, uid, todayISO, statusOf } from '../ui.js';
 import { projectTree, projectIcon } from './projects.js';
-import { pickChip } from '../inline.js';
+import { pickChip, pill } from '../inline.js';
+import { taskStatuses, statusLook } from '../task-labels.js';
 import { modelChip } from '../model-picker.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
@@ -10,17 +11,19 @@ import {
   COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, TEMPLATES, devRunOptions, devRunValue, devCommandPreview, daysOf,
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, templateFromFlow, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
-  testStep, testsOf, isTesting, clearTests, varsTree, pathTo, remapStepRefs, parseData, projectVars,
+  testStep, testsOf, isTesting, clearTests, varsTree, pathTo, remapStepRefs, parseData, projectVars, runState, devWaits, DEV_WAIT_MINUTES,
 } from '../cron.js';
 import { modelForTask } from './settings.js';
-import { openSession, runnerOf, liveSession, onSessionPaint, exitText } from './dev.js';
-import { attachSession } from '../terminal.js';
+import { openSession, runnerOf, liveSession, onSessionPaint, exitText, terminalView, terminalBackground } from './dev.js';
+import { attachSession, sessionStatus } from '../terminal.js';
 import { createTerminal } from '../vt.js';
 
 // View state: the tab, the open flow, the selected node ('trigger' or a step id), the Runs tab's filter and the
 // flow list's project filter ('' for all, NO_PROJECT for flows without one).
 // field and cursor: the {{…}} field last focused and where its cursor was, for the variable chips and the test data.
-const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', project: '', field: '', cursor: null, terms: new Set() };
+// terms: the terminals unfolded under runs (seenTerms: those drawn once, so one folded by hand stays folded).
+// openRuns: the runs unfolded; focusRun: the run a link opened (#/cron?tab=runs&run=…), scrolled to once.
+const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', project: '', field: '', cursor: null, terms: new Set(), seenTerms: new Set(), openRuns: new Set(), focusRun: '', scrollTo: '' };
 const NO_PROJECT = 'none';
 const TABS = [['flows', 'Flows'], ['runs', 'Runs'], ['templates', 'Templates']];
 const SUBTITLES = {
@@ -265,38 +268,32 @@ function templatesTab(store) {
 
 // --- Runs tab ---
 
-const RUN_FILTERS = [['all', 'All'], ['error', 'Failed'], ['stopped', 'Stopped'], ['dry', 'Tests']];
+const RUN_FILTERS = [['all', 'All'], ['running', 'Running'], ['error', 'Failed'], ['stopped', 'Stopped'], ['dry', 'Tests']];
+const runMatches = (r, key) => (key === 'all' ? true : key === 'dry' ? r.dry : key === 'error' ? ['error', 'lost'].includes(runState(r)) : runState(r) === key);
 
 function runsTab(store) {
   const { flows, runs } = store.get(COLLECTION);
-  const shown = runs.filter((r) => (view.runs === 'all' ? true : view.runs === 'dry' ? r.dry : r.status === view.runs));
-  const failed = runs.filter((r) => r.status === 'error').length;
+  const shown = runs.filter((r) => runMatches(r, view.runs));
+  watchTerminals(store, sessionsOf(shown));
+  const count = (key) => runs.filter((r) => runMatches(r, key)).length;
   return h('section', { class: 'card stack' },
     h('div', { class: 'row between' },
-      h('p', { class: 'muted small' }, `The last ${runs.length} runs of every flow${failed ? `, ${failed} failed` : ''}. Older runs are dropped.`),
+      h('p', { class: 'muted small' }, `The last ${runs.length} runs of every flow, newest first. Older runs are dropped. Open a run to see each step.`),
       h('div', { class: 'segmented', role: 'group', 'aria-label': 'Show' },
-        RUN_FILTERS.map(([key, label]) => h('button', {
-          type: 'button',
-          class: view.runs === key ? 'seg active' : 'seg',
-          'aria-pressed': String(view.runs === key),
-          onclick: () => {
-            view.runs = key;
-            store.refresh();
-          },
-        }, label)))),
-    shown.length
-      ? h('ul', { class: 'cron-runs' }, shown.map((r) => {
-          const flow = flows.find((f) => f.id === r.flowId) ?? null;
-          return runItem(store, flow, r, {
-            flowName: flow?.name ?? 'Deleted flow',
-            open: flow ? () => {
-              view.tab = 'flows';
-              view.flow = flow.id;
-              view.node = 'trigger';
+        RUN_FILTERS.map(([key, label]) => {
+          const n = key === 'all' ? 0 : count(key);
+          return h('button', {
+            type: 'button',
+            class: view.runs === key ? 'seg active' : 'seg',
+            'aria-pressed': String(view.runs === key),
+            onclick: () => {
+              view.runs = key;
               store.refresh();
-            } : null,
-          });
-        }))
+            },
+          }, label, n ? h('span', { class: 'seg-count' }, String(n)) : null);
+        }))),
+    shown.length
+      ? h('ul', { class: 'cron-runs' }, shown.map((r) => runCard(store, flows.find((f) => f.id === r.flowId) ?? null, r, { showFlow: true })))
       : empty(runs.length ? 'No run matches this filter.' : 'No run yet. Runs of every flow show here.'));
 }
 
@@ -416,6 +413,14 @@ const PROJECT_NAMES = [
   ['project.description', 'The project’s description'],
 ];
 
+// What a Dev step that waits for its terminal passes on, offered as chips to the steps after it.
+const DEV_PARTS = [
+  ['pr.url', 'The pull request the terminal opened'],
+  ['branch', 'The branch it worked on'],
+  ['commit', 'Its last commit'],
+  ['files', 'The files it changed'],
+];
+
 // The variables a step can use: the usual ones, the project's when it has one, then every earlier step by number.
 function varNames(flow, index, extra = [], projectId = withFlowProject(flow, flow.steps[index] ?? {}).projectId) {
   return [
@@ -424,7 +429,10 @@ function varNames(flow, index, extra = [], projectId = withFlowProject(flow, flo
     ['flow', 'The flow’s name'],
     ...(projectId ? PROJECT_NAMES : []),
     ...extra,
-    ...flow.steps.slice(0, index).map((s, i) => [`step${i + 1}`, `Output of step ${i + 1}, ${typeOf(s.type)[1]}`]),
+    ...flow.steps.slice(0, index).flatMap((s, i) => [
+      [`step${i + 1}`, `Output of step ${i + 1}, ${typeOf(s.type)[1]}`],
+      ...(s.type === 'dev' && devWaits(flow, s) ? DEV_PARTS.map(([k, about]) => [`step${i + 1}.${k}`, `${about} (step ${i + 1})`]) : []),
+    ]),
   ];
 }
 
@@ -735,6 +743,8 @@ function stepForm(store, flow, step) {
       return set({ mode: v });
     };
     const preview = claude && step.mode !== 'custom' ? devCommandPreview(store, flow, step) : '';
+    const waits = devWaits(flow, step);
+    const last = flow.steps.at(-1)?.id === step.id;
     const devNames = varNames(flow, flow.steps.indexOf(step), [['task', 'The task made above: its title and description']]);
     return h('div', { class: 'stack' },
       h('div', { class: 'row cron-fields' },
@@ -757,12 +767,27 @@ function stepForm(store, flow, step) {
         ? varField('Dev prompt', h('textarea', { rows: 6, class: 'mono-text', onchange: (e) => set({ prompt: e.target.value }) }, step.prompt ?? ''), key('prompt'), devNames)
         : varField('Command', h('input', { value: step.command ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, placeholder: 'npm run build', onchange: (e) => set({ command: e.target.value }) }), key('command'), devNames,
             'Each {{…}} goes in as one quoted word, so text from a model never runs as a command.'),
+      h('div', { class: 'row cron-fields' },
+        h('label', { class: 'check' },
+          h('input', { type: 'checkbox', checked: waits, onchange: (e) => set({ wait: e.target.checked === !last ? undefined : e.target.checked }) }),
+          ' Wait for the terminal to finish, and pass on what it did'),
+        waits
+          ? field('Wait at most (minutes)', h('input', {
+              type: 'number', min: 1, max: 720, value: String(step.waitMinutes ?? DEV_WAIT_MINUTES),
+              onchange: (e) => set({ waitMinutes: Math.min(720, Math.max(1, Math.round(Number(e.target.value) || DEV_WAIT_MINUTES))) }),
+            }))
+          : null),
+      h('p', { class: 'muted small' },
+        waits
+          ? 'The run waits until the terminal ends, or until claude is done and waits for you. The steps after it then get its branch, last commit, changed files, PR and the end of its output: {{input}} as text, or parts such as {{step' + String(flow.steps.indexOf(step) + 1) + '.pr.url}}, {{step' + String(flow.steps.indexOf(step) + 1) + '.branch}} and {{step' + String(flow.steps.indexOf(step) + 1) + '.files}}. '
+          : 'The run moves on as soon as the terminal starts; it keeps going in Dev. ',
+        last && !waits ? 'Add steps after it, such as another Run in Dev, to build on its work. ' : ''),
       h('p', { class: 'muted small' },
         claude ? 'The command starts in the folder, in a worktree of its own when it asks for one. ' : '',
         hasTask
           ? 'The task made above goes with it, as from its Dev button: it moves to In progress, and the issues and PRs the terminal prints are added to it. '
           : 'Put a “Create task” step before this one to follow the work from a task. ',
-        'The run does not wait for the terminal: it shows in Dev, and needs the runner that bun start starts.'));
+        'Needs the runner that bun start starts.'));
   }
   return h('div', { class: 'stack' },
     varField('Message', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, step.text), key('text'), names),
@@ -829,8 +854,9 @@ function testPanel(store, flow, step, index) {
     h('div', { class: 'row between' },
       h('strong', null, 'Test data'),
       h('div', { class: 'row' },
-        result ? h('span', { class: `pill tone-${result.ok ? 'done' : 'high'}` }, result.ok ? `Tested · ${result.ms} ms` : 'Failed') : null,
-        result?.ok && next
+        result?.pending ? h('span', { class: 'pill tone-doing' }, 'Waiting for the terminal…')
+          : result ? h('span', { class: `pill tone-${result.ok ? 'done' : 'high'}` }, result.ok ? `Tested · ${result.ms} ms` : 'Failed') : null,
+        result?.ok && !result.pending && next
           ? h('button', {
               type: 'button',
               class: 'btn-link small',
@@ -874,7 +900,7 @@ function inspector(store, flow) {
           type: 'button',
           class: 'btn-small',
           disabled: isRunning(flow.id),
-          title: 'Runs the steps before this one that have no test data yet, then this one. Creates no task, sends no notification and starts no terminal.',
+          title: 'Runs the steps before this one that have no test data yet, then this one, as tests: no task, no notification, no terminal.',
           onclick: () => runTest(store, flow, step.id),
         }, icon('play'), isTesting(flow.id) ? 'Testing…' : 'Test step'),
         step.type === 'dev'
@@ -915,12 +941,11 @@ function inspector(store, flow) {
 }
 
 // --- Dev terminals ---
-// What a Run in Dev step's terminal printed. The runner keeps a terminal's output after it ends, until it is closed
-// in Dev, so a run's terminal can be read later. A viewer is made once per terminal and moved into each new page,
-// so its scroll survives re-renders; it reads the runner only while it is on the page. A terminal Dev reads already
-// is shown from Dev's copy.
+// What a Run in Dev step's terminal printed, drawn as Dev draws it (colours, styles, links). The runner keeps a
+// terminal's output after it ends, until it is closed in Dev, so a run's terminal can be read later. A viewer is made
+// once per terminal and moved into each new page, so its scroll survives re-renders; it reads the runner only while
+// it is on the page. A terminal Dev reads already is shown from Dev's copy.
 const viewers = new Map();
-const lineText = (line) => line.cells.map((c) => c?.c ?? ' ').join('').trimEnd();
 
 function drawViewer(v) {
   v.frame = 0;
@@ -928,13 +953,10 @@ function drawViewer(v) {
   const t = live?.term ?? v.term;
   const running = live ? live.running : v.running;
   const exit = live ? live.exit : v.exit;
-  const lines = [...t.history, ...t.screen.slice(0, t.used())].map(lineText);
-  while (lines.length && !lines.at(-1)) lines.pop();
-  const { pre } = v;
-  const atEnd = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
-  pre.textContent = lines.join('\n');
-  pre.hidden = !lines.length;
-  if (atEnd) pre.scrollTop = pre.scrollHeight;
+  v.view.paint(t);
+  v.view.el.hidden = !t.history.length && !t.used();
+  const state = { loading: 'loading', missing: 'gone', offline: 'gone' }[v.state] ?? (running ? 'working' : exit ? (exit.code === 0 ? 'done' : 'failed') : 'idle');
+  v.dot.className = `term-dot dev-${state}`;
   v.status.textContent = {
     loading: 'Reading the terminal…',
     missing: 'The runner no longer has this terminal: it was closed in Dev.',
@@ -967,10 +989,12 @@ function attachViewer(store, v) {
       else if (e.t === 'start') {
         Object.assign(v, { running: true, exit: null });
         if (e.cols) term.resize(e.cols, e.rows);
-        term.note(`$ ${e.command}`, 't-cmd');
+        term.note(`${e.cwd || 'board'} $ ${e.command.replace(/\s*\n\s*/g, ' ↵ ')}`, 't-cmd');
       } else if (e.t === 'out' || e.t === 'err') term.write(e.d);
       else if (e.t === 'exit') {
         Object.assign(v, { running: false, exit: e.stopped ? { stopped: true, ms: e.ms } : { code: e.code, signal: e.signal, ms: e.ms } });
+        term.reset();
+        term.note(exitText(v.exit), v.exit.code === 0 ? 't-meta t-ok' : 't-meta');
       }
       paintSoon();
     },
@@ -984,18 +1008,20 @@ function attachViewer(store, v) {
   paintSoon();
 }
 
-function terminalViewer(store, session, cwd = '') {
+function terminalViewer(store, session, cwd = '', taskIds = []) {
   let v = viewers.get(session);
   if (!v) {
-    v = { session, term: createTerminal({ cols: 120, rows: 32 }), state: 'loading', running: false, exit: null, frame: 0, mirror: false };
+    v = { session, term: createTerminal({ cols: 120, rows: 32, background: terminalBackground }), state: 'loading', running: false, exit: null, frame: 0, mirror: false };
+    v.dot = h('span', { class: 'term-dot' });
     v.status = h('span', { class: 'muted small grow' });
-    v.pre = h('pre', { class: 'cron-term', hidden: true });
+    v.view = terminalView('Run in Dev terminal output');
     v.el = h('div', { class: 'cron-term-view stack' },
-      h('div', { class: 'row' },
+      h('div', { class: 'row cron-term-bar' },
+        v.dot,
         v.status,
-        h('button', { type: 'button', class: 'btn-small', title: 'Open this terminal in Dev, to type in it', onclick: () => openSession({ id: session, cwd }) },
+        h('button', { type: 'button', class: 'btn-small', title: 'Open this terminal in Dev, to type in it', onclick: () => openSession({ id: session, cwd, taskIds }) },
           icon('terminal'), 'Open in Dev')),
-      v.pre);
+      v.view.el);
     viewers.set(session, v);
     attachViewer(store, v);
   }
@@ -1012,8 +1038,11 @@ function sweepViewers() {
 }
 window.addEventListener('hashchange', () => requestAnimationFrame(sweepViewers));
 
-// A terminal folded under a run's step; it is read once opened, and stays open through re-renders.
-function terminalFold(store, session, cwd) {
+// A terminal folded under a run's step; it is read once opened, and stays open through re-renders. `start` opens it
+// the first time it is drawn (a step still running).
+function terminalFold(store, session, cwd, { start = false, taskIds = [] } = {}) {
+  if (start && !view.seenTerms.has(session)) view.terms.add(session);
+  view.seenTerms.add(session);
   const open = view.terms.has(session);
   return h('details', {
     class: 'cron-output',
@@ -1026,45 +1055,197 @@ function terminalFold(store, session, cwd) {
     },
   },
   h('summary', null, 'Terminal output'),
-  open ? terminalViewer(store, session, cwd) : null);
+  open ? terminalViewer(store, session, cwd, taskIds) : null);
 }
+
+// What the terminals of the runs on the page are doing, asked of the runner every few seconds while Cron is shown,
+// so a run's terminal chip says whether claude is still working, as a task's Dev button does.
+const TERM_POLL_MS = 4000;
+const termWatch = { status: {}, timer: 0, ids: [] };
+const TERM_STATES = {
+  working: 'Working',
+  waiting: 'Waiting for you',
+  done: 'Finished',
+  failed: 'Ended with an error',
+  stopped: 'Stopped',
+  idle: 'Nothing running',
+  gone: 'Closed in Dev',
+};
+
+function watchTerminals(store, ids) {
+  termWatch.ids = ids;
+  if (termWatch.timer || !ids.length) return;
+  const poll = async () => {
+    termWatch.timer = 0;
+    if (!location.hash.startsWith('#/cron') || !termWatch.ids.length) return;
+    let status;
+    try {
+      status = await sessionStatus(runnerOf(store), termWatch.ids);
+    } catch {}
+    termWatch.timer ||= setTimeout(poll, TERM_POLL_MS);
+    if (!status || JSON.stringify(status) === JSON.stringify(termWatch.status)) return;
+    termWatch.status = status;
+    store.refresh();
+  };
+  termWatch.timer = setTimeout(poll, 0);
+}
+
+// A terminal's state as the runner last told it: unknown until asked, 'gone' once the runner no longer has it.
+const termState = (session) => (termWatch.status[session]?.state ?? (termWatch.ids.includes(session) && Object.keys(termWatch.status).length ? 'gone' : ''));
 
 // --- Runs ---
 
-const RUN_STATUS = { ok: ['Done', 'done'], stopped: ['Stopped', 'plain'], error: ['Failed', 'high'] };
+// [label, dot class, pill tone]
+const RUN_STATUS = {
+  running: ['Running', 'running', 'doing'],
+  ok: ['Done', 'on', 'done'],
+  stopped: ['Stopped early', 'off', 'plain'],
+  error: ['Failed', 'bad', 'high'],
+  lost: ['Interrupted', 'warn', 'medium'],
+};
 
-// One run, folded: its status and time, and when opened each step's output. On the Runs tab it also names its flow
-// and links to it.
-function runItem(store, flow, r, { flowName = '', open = null } = {}) {
+const duration = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : ms < 3600000 ? `${Math.floor(ms / 60000)} min ${Math.round((ms % 60000) / 1000)} s` : `${Math.floor(ms / 3600000)} h ${Math.round((ms % 3600000) / 60000)} min`);
+
+// The things a run made, gathered from its steps (and the step running now), newest last.
+function runOutcomes(r) {
+  const steps = [...r.steps, ...(r.current ? [r.current] : [])];
+  return {
+    tasks: [...new Set(steps.map((s) => s.taskId).filter(Boolean))],
+    terms: steps.filter((s) => s.session).map((s) => ({ session: s.session, cwd: s.cwd ?? '', terminal: s.terminal, taskId: s.taskId ?? '' })),
+    prs: steps.filter((s) => s.pr?.url).map((s) => s.pr),
+    branches: [...new Set(steps.map((s) => s.branch).filter(Boolean))],
+  };
+}
+
+// Tasks open in their project's list, scrolled to and opened (todos.js reads `task`).
+const taskHref = (t) => `#/todos?${new URLSearchParams({ filter: t.projectId || 'personal', status: 'all', task: t.id })}`;
+
+function taskChip(store, id) {
+  const t = store.get('todos').items.find((x) => x.id === id);
+  if (!t) return h('span', { class: 'run-chip muted', title: 'The task this run made was deleted' }, icon('check-square'), 'Task deleted');
+  const status = taskStatuses(store).find((s) => s.key === statusOf(t));
+  return h('a', { class: 'run-chip', href: taskHref(t), title: `Open the task “${t.text}”` },
+    icon('check-square'),
+    h('span', { class: 'run-chip-text' }, t.text),
+    status ? pill(status.name, statusLook(status)) : null);
+}
+
+function terminalChip(store, term) {
+  const state = termState(term.session);
+  const label = TERM_STATES[state] ?? 'Terminal';
+  const taskIds = term.taskId ? [term.taskId] : [];
+  return h('button', {
+    type: 'button',
+    class: 'run-chip',
+    title: `Dev terminal ${term.terminal ?? ''}: ${label}. Click to open it in Dev.`,
+    onclick: () => openSession({ id: term.session, cwd: term.cwd, taskIds }),
+  }, h('span', { class: `term-dot dev-${state || 'idle'}` }), icon('terminal'), `Terminal ${term.terminal ?? ''}`.trim(), h('span', { class: 'muted small' }, label));
+}
+
+const prChip = (pr) => h('a', { class: 'run-chip', href: pr.url, target: '_blank', rel: 'noopener noreferrer', title: `${pr.repo} #${pr.number}` }, icon('git-pull-request'), `PR #${pr.number}`);
+const branchChip = (name) => h('span', { class: 'run-chip mono', title: 'The branch the Dev step worked on' }, icon('git-branch'), name);
+
+// A step's output: short ones in full, long ones folded under their first line.
+function stepOutput(s) {
+  const text = s.output || '';
+  if (!text) return s.ok ? null : h('pre', { class: 'error' }, '(no message)');
+  const lines = text.split('\n');
+  if (!s.ok || (text.length <= 400 && lines.length <= 6)) return h('pre', { class: s.ok ? '' : 'error' }, text);
+  return h('details', { class: 'cron-output' },
+    h('summary', null, h('span', { class: 'cron-output-first' }, lines.find((l) => l.trim())?.slice(0, 140) ?? 'Output'), h('span', { class: 'muted small' }, ` · ${lines.length} lines`)),
+    h('pre', null, text));
+}
+
+// A run's steps as a timeline: what each did, the step running now, and the steps a stop or a failure skipped.
+function runSteps(store, flow, r, state) {
+  const typeOfStep = (id, saved) => flow?.steps.find((x) => x.id === id)?.type ?? saved ?? '';
   const nameOf = (id) => {
     const i = flow ? flow.steps.findIndex((s) => s.id === id) : -1;
     return i < 0 ? 'Removed step' : `${i + 1}. ${typeOf(flow.steps[i].type)[1]}`;
   };
-  const [label, tone] = RUN_STATUS[r.status] ?? RUN_STATUS.error;
-  return h('li', null, h('details', null,
-    h('summary', { class: 'row' },
-      h('span', { class: `pill tone-${tone}` }, label),
-      r.dry ? h('span', { class: 'pill tone-low' }, 'Test') : null,
-      flowName ? h('strong', null, flowName) : null,
-      h('span', null, timeOf(r.at)),
-      h('span', { class: 'muted small' }, r.dry ? 'test run' : r.manual ? 'run by hand' : 'on schedule'),
-      r.error ? h('span', { class: `${r.status === 'error' ? 'error' : 'muted'} small grow` }, r.error) : null),
-    open ? h('button', { type: 'button', class: 'btn-link small', onclick: open }, 'Open the flow') : null,
-    h('ol', { class: 'cron-run-steps' }, r.steps.map((s) =>
-      h('li', null,
-        h('div', { class: 'row' }, h('strong', null, nameOf(s.stepId)), h('span', { class: 'muted small' }, `${s.ms} ms`)),
-        s.note ? h('p', { class: 'muted small' }, s.note) : null,
-        h('pre', { class: s.ok ? '' : 'error' }, s.output || '(empty)'),
-        s.session ? terminalFold(store, s.session, s.cwd) : null)))));
+  const item = (cls, type, title, meta, body) => h('li', { class: `cron-run-step ${cls}` },
+    h('span', { class: `flow-node-icon kind-${type || 'stop'}` }, icon(typeOf(type)[2])),
+    h('div', { class: 'cron-run-step-body' },
+      h('div', { class: 'row' }, h('strong', null, title), meta),
+      body));
+  const done = r.steps.map((s) => item(s.ok ? 'ok' : 'bad', typeOfStep(s.stepId, s.type), nameOf(s.stepId),
+    h('span', { class: 'muted small' }, duration(s.ms)),
+    [
+      s.note ? h('p', { class: 'muted small' }, s.note) : null,
+      stepOutput(s),
+      s.session ? terminalFold(store, s.session, s.cwd, { taskIds: s.taskId ? [s.taskId] : [] }) : null,
+    ]));
+  const ran = new Set(r.steps.map((s) => s.stepId));
+  const rest = flow ? flow.steps.filter((s) => !ran.has(s.id)) : [];
+  const now = state === 'running' ? rest.find((s) => s.id === r.current?.stepId) ?? rest[0] : null;
+  const later = rest.filter((s) => s !== now).map((s) => item('skipped', s.type, nameOf(s.id),
+    h('span', { class: 'muted small' }, state === 'running' ? 'Waiting' : 'Not run'), null));
+  const current = now
+    ? item('running', now.type, nameOf(now.id), h('span', { class: 'muted small' }, 'Running…'),
+        r.current?.session ? terminalFold(store, r.current.session, r.current.cwd, { start: true, taskIds: r.current.taskId ? [r.current.taskId] : [] }) : null)
+    : null;
+  return h('ol', { class: 'cron-run-steps' }, done, current, later);
 }
+
+// One run: a header that opens it (status dot, flow, time, how it started, how long it took), then what it made
+// (its task, terminals, PR and branch) as links, then, once opened, each step.
+function runCard(store, flow, r, { showFlow = false } = {}) {
+  const state = runState(r);
+  const [label, dot, tone] = RUN_STATUS[state] ?? RUN_STATUS.error;
+  const open = view.openRuns.has(r.id);
+  const toggle = () => {
+    if (open) view.openRuns.delete(r.id);
+    else view.openRuns.add(r.id);
+    store.refresh();
+  };
+  // Runs saved before runs kept their end have no duration.
+  const end = r.ended ? Date.parse(r.ended) : state === 'running' ? Date.now() : NaN;
+  const took = end - Date.parse(r.at);
+  const { tasks, terms, prs, branches } = runOutcomes(r);
+  const links = [...tasks.map((id) => taskChip(store, id)), ...terms.map((t) => terminalChip(store, t)), ...prs.map(prChip), ...branches.map(branchChip)];
+  return h('li', { class: `cron-run${view.focusRun === r.id ? ' focus' : ''}`, 'data-run': r.id },
+    h('div', { class: 'cron-run-head' },
+      h('button', { type: 'button', class: 'cron-run-toggle', 'aria-expanded': String(open), onclick: toggle },
+        h('span', { class: `icon-wrap chevron${open ? ' open' : ''}` }, icon('chevron-down')),
+        h('span', { class: `cron-dot ${dot}`, title: label }),
+        h('span', { class: 'cron-run-name' },
+          showFlow ? h('strong', null, flow?.name ?? 'Deleted flow') : h('strong', null, timeOf(r.at)),
+          h('span', { class: 'muted small cron-run-meta' },
+            [showFlow ? timeOf(r.at) : null, r.dry ? 'Test run' : r.manual ? 'Run by hand' : 'On schedule', took >= 0 ? duration(took) : null].filter(Boolean).join(' · ')))),
+      h('div', { class: 'row cron-run-actions' },
+        h('span', { class: `pill tone-${tone}` }, label),
+        r.dry ? h('span', { class: 'pill tone-low' }, 'Test') : null,
+        showFlow && flow
+          ? h('button', {
+              type: 'button',
+              class: 'icon-btn',
+              title: 'Open the flow',
+              'aria-label': `Open the flow “${flow.name}”`,
+              onclick: () => {
+                view.tab = 'flows';
+                view.flow = flow.id;
+                view.node = 'trigger';
+                store.refresh();
+              },
+            }, icon('arrow-right'))
+          : null)),
+    links.length ? h('div', { class: 'cron-run-links' }, links) : null,
+    r.error ? h('p', { class: `small cron-run-error ${state === 'error' ? 'error' : 'muted'}` }, r.error) : null,
+    state === 'lost' ? h('p', { class: 'muted small' }, 'The board was closed or reloaded while this run was going, so it never finished. A terminal it started may still be running in Dev.') : null,
+    open ? runSteps(store, flow, r, state) : null);
+}
+
+// The terminals of these runs, for the status poll.
+const sessionsOf = (runs) => [...new Set(runs.flatMap((r) => runOutcomes(r).terms.map((t) => t.session)))];
 
 function runList(store, flow) {
   const runs = store.get(COLLECTION).runs.filter((r) => r.flowId === flow.id).slice(0, 10);
+  watchTerminals(store, sessionsOf(runs));
   return h('section', { class: 'card stack' },
     h('h3', null, 'Runs'),
     runs.length
-      ? h('ul', { class: 'cron-runs' }, runs.map((r) => runItem(store, flow, r)))
-      : empty('No run yet. Use “Test run” to try the flow without creating anything.'));
+      ? h('ul', { class: 'cron-runs' }, runs.map((r) => runCard(store, flow, r)))
+      : empty('No run yet. “Test run” tries the whole flow: it makes its tasks and starts its terminals, but sends no notification.'));
 }
 
 // --- Editor ---
@@ -1091,7 +1272,7 @@ function editor(store, flow) {
             type: 'button',
             class: 'btn-small',
             disabled: busy || !flow.steps.length,
-            title: 'Runs every step but creates no task, sends no notification and starts no terminal. AI steps still call the model.',
+            title: 'Tries the whole flow: makes its tasks and starts its Dev terminals as a run would, tied together, but sends no notification and leaves the schedule alone.',
             onclick: () => startRun(store, flow, { dry: true }),
           }, icon('filter'), 'Test run'),
           h('button', { type: 'button', class: 'btn-small primary', disabled: busy || !flow.steps.length, onclick: () => startRun(store, flow) }, icon('play'), busy ? 'Running…' : 'Run now'),
@@ -1141,6 +1322,11 @@ function draw(root, store) {
         }, label))),
       body));
   requestAnimationFrame(sweepViewers);
+  if (view.scrollTo) {
+    const id = view.scrollTo;
+    view.scrollTo = '';
+    requestAnimationFrame(() => root.querySelector(`[data-run="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+  }
 }
 
 export default {
@@ -1156,5 +1342,13 @@ export default {
     view.flow = p.flow || '';
     // A notification links to #/cron?flow=…, with no tab, so it opens the Flows tab.
     view.tab = p.tab || 'flows';
+    // A task made by a run, and a failed run's notification, link to the run: it opens, with every filter cleared.
+    if (p.run) {
+      view.tab = 'runs';
+      view.runs = 'all';
+      view.openRuns.add(p.run);
+      view.focusRun = p.run;
+      view.scrollTo = p.run;
+    }
   },
 };
