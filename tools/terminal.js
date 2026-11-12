@@ -443,7 +443,8 @@ async function gitDiff(params) {
     if (!COMMIT.test(commit)) throw new Error('Not a commit.');
     const [meta, diff] = await Promise.all([
       git(root, ['show', '-s', '--format=%H%x1f%an%x1f%ae%x1f%at%x1f%B', commit]),
-      git(root, ['show', '--format=', '--patch', '-M', '--no-ext-diff', commit]),
+      // A merge shows what it brought into its first parent, as editors show it, not git's empty combined diff.
+      git(root, ['show', '--format=', '--patch', '-M', '--no-ext-diff', '--diff-merges=first-parent', commit]),
     ]);
     const [hash, author, email, at, body] = meta.split('\x1f');
     return { commit: { hash, author, email, at: Number(at) * 1000, message: body.trim() }, diff };
