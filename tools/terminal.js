@@ -1,6 +1,7 @@
 // Local command runner for the Dev section: `bun run terminal` (or `node tools/terminal.js`), or with the board
 // through `bun start`. It runs a command in the user's shell and streams its output back as it comes, and lists
-// folders and reads files for the Dev file explorer (read only), and runs git for Dev's Source Control.
+// folders and reads files for the Dev file explorer (read only), and runs git for Dev's Source Control. It also
+// removes the git worktree a task's session made once the task is completed, and only a clean one.
 // The runner owns each terminal session: a command keeps running when the page reloads or closes, and the session's
 // output is kept (in memory and in TERMINAL_STATE, a folder in the system's temp folder by default) so the page
 // shows it again when it comes back, even after the runner restarted.
@@ -12,7 +13,7 @@ import { execFile, spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { appendFile, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logger } from './log.js';
 
@@ -35,6 +36,7 @@ const KEEP_MS = 30 * 24 * 3600 * 1000;
 const FLUSH_MS = 250;
 const STATE = resolve(process.env.TERMINAL_STATE || join(tmpdir(), 'board-terminal'));
 const SESSION_ID = /^[\w-]{1,64}$/;
+const WORKTREE_NAME = /^[\w.-]{1,64}$/;
 const log = logger('terminal');
 // Running commands by pid: the child, the folder it reports into, and its session.
 const running = new Map();
@@ -318,6 +320,63 @@ async function control(req, res, cors, action) {
     s.disk.then(() => rm(logFile(s.id), { force: true })).catch(() => {});
   }
   res.writeHead(204, cors).end();
+}
+
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+};
+
+// Removes the worktree `claude --worktree <name>` made in the repo at `cwd` (.claude/worktrees/<name>) once its task
+// is completed. The task's session is stopped first, since claude runs inside the worktree. git refuses a worktree
+// with changes or untracked files, so nothing unsaved is lost; its branch is kept.
+// Answers { removed: path }, or { missing: true } when the folder or the worktree is already gone.
+async function removeWorktree(req, res, cors) {
+  const body = await jsonBody(req, res, cors);
+  if (!body) return;
+  const name = String(body.name ?? '');
+  if (!WORKTREE_NAME.test(name)) return res.writeHead(400, cors).end('No worktree name.');
+  const reply = (data) => res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(data));
+  const id = String(body.session ?? '');
+  if (SESSION_ID.test(id)) {
+    const s = await sessionOf(id);
+    stopJob(s.run);
+    for (let waited = 0; s.run && waited < KILL_AFTER_MS + 2000; waited += 100) await new Promise((r) => setTimeout(r, 100));
+  }
+  let dir;
+  try {
+    dir = await folderOf(String(body.cwd ?? ''));
+  } catch {
+    return reply({ missing: true });
+  }
+  let list;
+  try {
+    list = await git(dir, ['worktree', 'list', '--porcelain']);
+  } catch (err) {
+    return res.writeHead(400, cors).end(`Not a git repository: ${err.message}`);
+  }
+  // The first entry is the main checkout, never removed.
+  const entries = list.trim().split(/\n\n+/).slice(1)
+    .map((block) => Object.fromEntries(block.split('\n').map((line) => [line.split(' ')[0], line.slice(line.indexOf(' ') + 1)])));
+  const tree = entries.find((e) => e.worktree && basename(e.worktree) === name && dirname(e.worktree).endsWith(join('.claude', 'worktrees')));
+  if (!tree) return reply({ missing: true });
+  try {
+    // claude locks its worktree while it runs; a lock whose claude has ended is left over.
+    if ('locked' in tree) {
+      const pid = Number(/\bpid (\d+)/.exec(tree.locked)?.[1]);
+      if (pid && alive(pid)) return res.writeHead(409, cors).end(`claude still runs in ${tree.worktree} (pid ${pid}).`);
+      await git(dir, ['worktree', 'unlock', tree.worktree]);
+    }
+    await git(dir, ['worktree', 'remove', tree.worktree]);
+  } catch (err) {
+    return res.writeHead(409, cors).end(err.message);
+  }
+  log.info(`removed worktree ${tree.worktree}`);
+  reply({ removed: tree.worktree });
 }
 
 // Keys typed in the page, sent to a running command's terminal.
@@ -612,6 +671,7 @@ createServer(async (req, res) => {
   }
   if (req.method === 'POST' && path === '/input' && json) return input(req, res, cors);
   if (req.method === 'POST' && ['/stop', '/clear', '/close'].includes(path) && json) return control(req, res, cors, path.slice(1));
+  if (req.method === 'POST' && path === '/worktree/remove' && json) return removeWorktree(req, res, cors);
   res.writeHead(404, cors).end('Not a terminal request.');
 })
   .on('error', (err) => {
