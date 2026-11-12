@@ -3,7 +3,7 @@
 import { h, icon, empty, notice, now, uid, todayISO, statusOf } from '../ui.js';
 import { projectTree, projectIcon } from './projects.js';
 import { pickChip, pickButton, pill } from '../inline.js';
-import { taskStatuses, statusLook } from '../task-labels.js';
+import { taskStatuses, statusLook, statusOptions, taskCategoryNames } from '../task-labels.js';
 import { modelChip } from '../model-picker.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
@@ -1043,6 +1043,14 @@ function inputTree(vars, fold) {
   return treeBox(fold, Object.entries(tree).map(([k, v]) => jsonTree(v, k, pick, 0, fold)(k)));
 }
 
+// The task categories a Create task step can pick; one removed in Settings still shows while the step has it.
+/** @param {Store} store @param {string | undefined} current */
+function taskCategoryOptions(store, current) {
+  const names = taskCategoryNames(store);
+  if (current && !names.includes(current)) names.push(current);
+  return [['', 'No category'], ...names.map((n) => [n, n])];
+}
+
 /**
  * @param {string | number | null | undefined} value
  * @param {string[][]} options
@@ -1369,7 +1377,10 @@ function stepForm(store, flow, step) {
       h('div', { class: 'row cron-fields' },
         field('Project', stepProjectPick(store, flow, step.projectId, (projectId) => set({ projectId }), { none: 'Personal' })),
         field('Priority', select(step.priority, [['none', 'No priority'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], (priority) => set({ priority }))),
-        field('Due', select(step.due, [['', 'No deadline'], ['today', 'Day of the run'], ['tomorrow', 'Day after the run']], (due) => set({ due })))));
+        field('Due', select(step.due, [['', 'No deadline'], ['today', 'Day of the run'], ['tomorrow', 'Day after the run']], (due) => set({ due })))),
+      h('div', { class: 'row cron-fields' },
+        field('Status', select(step.status || 'todo', statusOptions(store, step.status || 'todo').map((o) => [o.value, o.label]), (status) => set({ status }))),
+        field('Category', select(step.category ?? '', taskCategoryOptions(store, step.category), (category) => set({ category })))));
   }
   if (step.type === 'stop') {
     const needsText = step.when === 'contains' || step.when === 'lacks';

@@ -70,6 +70,9 @@ export interface CronStep {
   title?: string;
   description?: string;
   priority?: string;
+  // A status key (missing means 'todo') and a task category's name ('' for none).
+  status?: string;
+  category?: string;
   due?: string;
   // task, profile, dev, old gather; '' follows the flow's project.
   projectId?: string;
