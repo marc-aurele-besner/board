@@ -562,7 +562,7 @@ export function gmailCard(store) {
 
 // --- Data folder ---
 
-const DATA_FILES = ['projects', 'todos', 'recipes', 'finance', 'tools', 'inbox', 'notifications', 'usage', 'settings'];
+const DATA_FILES = ['projects', 'todos', 'recipes', 'finance', 'tools', 'inbox', 'calendar', 'notifications', 'usage', 'settings', 'runners'];
 
 export function dataCard(store) {
   return h('section', { class: 'card panel' },

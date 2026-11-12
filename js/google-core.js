@@ -3,9 +3,8 @@
 // refresh token would fight. The board asks them through `useRenewer`, see js/google.js.
 
 export const GOOGLE = 'google';
-// tokens: { "<gmail|gcal>:<address>" or "web": { refresh, access, expiresAt, scope, at } }; pictures: { <address>: url };
-// events: Calendar's cache.
-export const GOOGLE_DEFAULTS = { tokens: {}, pictures: {}, events: {} };
+// tokens: { "<gmail|gcal>:<address>" or "web": { refresh, access, expiresAt, scope, at } }; pictures: { <address>: url }.
+export const GOOGLE_DEFAULTS = { tokens: {}, pictures: {} };
 
 const TOKEN = 'https://oauth2.googleapis.com/token';
 // An access token is renewed this long before it expires, so a read never starts with one about to lapse.

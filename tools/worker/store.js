@@ -19,6 +19,7 @@ export const DEFAULTS = {
   inbox: { emails: [], syncedAt: '' },
   tools: { sites: {} },
   usage: { entries: [] },
+  calendar: { calendars: {} },
 };
 
 export function createNodeStore(dir, { log } = {}) {
