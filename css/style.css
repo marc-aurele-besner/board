@@ -1857,8 +1857,8 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 /* Cron: flow list beside an editor; the flow is a chain of nodes joined by links */
 .cron-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: var(--gap); align-items: start; }
 .cron-list { display: flex; flex-direction: column; gap: 10px; }
-.cron-flows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.cron-flow-row { display: flex; align-items: center; gap: 6px; }
+.cron-flows { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.cron-flow-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .cron-flow-toggle { flex: none; margin-right: 6px; }
 .cron-flow-copy { flex: none; margin-right: 4px; }
 .icon-btn.cron-flow-copy:hover { color: var(--accent); }
@@ -1867,12 +1867,14 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
   .cron-flow-row:not(:hover):not(:focus-within) .cron-flow-copy { opacity: 0; }
 }
 .cron-list .cron-project-filter { width: 100%; }
-.cron-flow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: none; border-radius: 8px; background: none; text-align: left; color: var(--text); font-weight: 400; }
+.cron-flow { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; padding: 8px 10px; border: none; border-radius: 8px; background: none; text-align: left; color: var(--text); font-weight: 400; }
 .cron-flow:hover { background: var(--surface-2); }
 .cron-flow.active { background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
-.cron-flow .grow { display: flex; flex-direction: column; min-width: 0; }
+.cron-flow .grow { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
 .cron-flow strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cron-flow-meta { display: flex; align-items: center; gap: 5px; min-width: 0; white-space: nowrap; }
+.cron-flow-meta { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.cron-flow-meta > * { flex: none; }
+.cron-flow-meta > .cron-flow-project { flex: 0 1 auto; min-width: 0; }
 .cron-flow-meta .project-icon { width: 14px; height: 14px; }
 .cron-flow-project { overflow: hidden; text-overflow: ellipsis; }
 .cron-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
