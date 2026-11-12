@@ -13,7 +13,7 @@ import { withoutLabel } from '../task-labels.js';
 import { connectedGmailOf } from '../gmail.js';
 import { connectedCalendarsOf } from '../gcal.js';
 import { resendSettings } from '../resend.js';
-import { DEFAULT_DEV_COMMAND, runnerOf } from './dev.js';
+import { DEFAULT_DEV_COMMAND, devPresets, runnerOf } from './dev.js';
 import { pickFolder } from '../folder-picker.js';
 
 const COLLECTION = 'projects';
@@ -825,15 +825,7 @@ function projectView(store, p, items, categories) {
             onclick: () => pickFolder({ base: runnerOf(store), start: p.localPath, onPick: (localPath) => updateProject(store, p.id, { localPath }) }),
           }, icon('folder'), 'Browse')),
         p.localPath ? h('a', { href: `#/dev?project=${p.id}`, class: 'muted small' }, 'Open a terminal here') : null),
-      h('section', { class: 'pp-block' },
-        h('h3', null, 'Dev command'),
-        editText({
-          value: p.devCommand ?? '',
-          placeholder: DEFAULT_DEV_COMMAND,
-          allowEmpty: true,
-          onSave: (devCommand) => updateProject(store, p.id, { devCommand: devCommand.trim() }),
-        }),
-        h('span', { class: 'muted small' }, 'Runs with the task as its prompt when a task goes to Dev. Empty uses the default.')),
+      devCommandBlock(store, p),
       h('section', { class: 'pp-block' },
         h('h3', null, 'Icon'),
         h('div', { class: 'pp-icon-row' },
@@ -875,6 +867,33 @@ function projectView(store, p, items, categories) {
     p.github.repos.length ? repoTable(store, p) : null,
     overviewBlock(store, p),
     triageBlock(store, p));
+}
+
+// The command a task goes to Dev with: a preset from Settings → Dev environment, or the project's own.
+function devCommandBlock(store, p) {
+  const presets = devPresets(store);
+  const preset = presets.find((x) => x.id === p.devPreset);
+  return h('section', { class: 'pp-block' },
+    h('h3', null, 'Dev command'),
+    presets.length
+      ? pickChip({
+          value: preset ? preset.id : null,
+          options: presets.map((x) => ({ value: x.id, label: x.name })),
+          nullable: true,
+          nullLabel: 'Own command',
+          onPick: (devPreset) => updateProject(store, p.id, { devPreset: devPreset ?? '' }),
+        })
+      : null,
+    preset
+      ? h('code', { class: 'muted small' }, preset.command)
+      : editText({
+          value: p.devCommand ?? '',
+          placeholder: DEFAULT_DEV_COMMAND,
+          allowEmpty: true,
+          onSave: (devCommand) => updateProject(store, p.id, { devCommand: devCommand.trim() }),
+        }),
+    h('span', { class: 'muted small' }, 'Runs with the task as its prompt when a task goes to Dev. Empty uses the default. Presets are set in ',
+      h('a', { href: '#/settings?section=dev' }, 'Settings → Dev environment'), '.'));
 }
 
 function categoriesPanel(store, categories, projects) {
