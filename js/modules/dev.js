@@ -254,25 +254,48 @@ function spanStyle(key) {
   return { class: cls || null, style };
 }
 
+// The web addresses printed in a line, by column: plain text, so a program that prints a URL without OSC 8 links too.
+const URL_RE = /https?:\/\/[^\s<>"'`]+/g;
+function lineLinks(line) {
+  // One character per column, so a match's index is its column; a wide or combined character ends a URL.
+  const text = Array.from({ length: line.cells.length }, (_, i) => {
+    const c = line.cells[i]?.c ?? ' ';
+    return c.length === 1 ? c : ' ';
+  }).join('');
+  const hrefs = [];
+  for (const m of text.matchAll(URL_RE)) {
+    // Punctuation that ends a sentence, or a bracket the URL was wrapped in, is not part of it.
+    let url = m[0].replace(/[.,;:!?]+$/, '');
+    while (/[)\]}]$/.test(url) && (url.match(/[([{]/g)?.length ?? 0) < (url.match(/[)\]}]/g)?.length ?? 0)) url = url.slice(0, -1);
+    for (let i = 0; i < url.length; i++) hrefs[m.index + i] = url;
+  }
+  return hrefs;
+}
+
 function lineNode(line, cursorX = -1) {
   const was = drawn.get(line);
   if (was && was.v === line.v && was.cx === cursorX && was.theme === currentTheme().key) return was.el;
   const el = was?.el ?? h('div', { class: 'term-line' });
   const spans = [];
   const end = Math.max(line.cells.length, cursorX + 1);
+  const hrefs = lineLinks(line);
+  const hrefAt = (x) => styleOf(line.cells[x]?.k ?? '').link ?? hrefs[x];
   let x = 0;
   while (x < end) {
     const cursor = x === cursorX;
     const key = line.cells[x]?.k ?? '';
+    const href = hrefAt(x);
     let text = line.cells[x]?.c ?? ' ';
     x++;
-    // Cells of one style make one span; the cursor's cell gets its own.
-    while (!cursor && x < end && x !== cursorX && (line.cells[x]?.k ?? '') === key) {
+    // Cells of one style and link make one span; the cursor's cell gets its own.
+    while (!cursor && x < end && x !== cursorX && (line.cells[x]?.k ?? '') === key && hrefAt(x) === href) {
       text += line.cells[x]?.c ?? ' ';
       x++;
     }
     const attrs = spanStyle(key);
-    spans.push(key || cursor ? h('span', { ...attrs, class: [attrs.class, cursor && 'term-cursor'].filter(Boolean).join(' ') || null }, text) : text);
+    const node = key || cursor ? h('span', { ...attrs, class: [attrs.class, cursor && 'term-cursor'].filter(Boolean).join(' ') || null }, text) : text;
+    // A link opens in a new tab.
+    spans.push(href ? h('a', { class: 'term-link', href, target: '_blank', rel: 'noopener noreferrer', title: href }, node) : node);
   }
   el.replaceChildren(...spans);
   drawn.set(line, { v: line.v, cx: cursorX, theme: currentTheme().key, el });
