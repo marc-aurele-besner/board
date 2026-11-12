@@ -29,7 +29,7 @@ export interface SortColumn<R> {
   label: string;
   num?: boolean;
   clip?: boolean;
-  // any: each column's value has its own type, which its format takes.
-  value(row: R): any;
-  format?: ((value: any, row: R) => Child) | null; // any: as above
+  value(row: R): unknown;
+  // Each column's format takes its own value type: `never` accepts any of them.
+  format?: ((value: never, row: R) => Child) | null;
 }

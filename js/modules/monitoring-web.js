@@ -158,7 +158,7 @@ export function sortTable(key, columns, rows, rowClass = null) {
     });
     tbody.replaceChildren(...list.map((r) => h('tr', { class: rowClass?.(r) || null }, columns.map((c) => {
       const v = c.value(r);
-      return h('td', { class: c.num ? 'num' : c.clip ? 'cell-clip' : null }, c.format ? c.format(v, r) : String(v ?? '—'));
+      return h('td', { class: c.num ? 'num' : c.clip ? 'cell-clip' : null }, c.format ? c.format(/** @type {never} */ (v), r) : String(v ?? '—'));
     }))));
   };
   // Numbers start high to low, text A to Z; a second click flips it.
@@ -171,11 +171,11 @@ export function sortTable(key, columns, rows, rowClass = null) {
   return h('div', { class: 'mon-scroll' }, h('table', { class: 'mon-table' }, h('thead', null, h('tr', null, ths)), tbody));
 }
 
-/** @param {string[]} head @param {unknown[][]} rows @param {(((value: any) => Child) | null)[]} [format] any: each column's format takes its own type */
+/** @param {string[]} head @param {unknown[][]} rows @param {(((value: never) => Child) | null)[]} [format] */
 function table(head, rows, format) {
   if (!rows.length) return empty('Nothing in this period.');
   return sortTable(head.join('|'), head.map((label, i) => ({
-    label, num: i > 0, clip: i === 0, value: (r) => r[i], format: format?.[i] ? (/** @type {unknown} */ v) => /** @type {(value: unknown) => Child} */ (format[i])(v) : null,
+    label, num: i > 0, clip: i === 0, value: (r) => r[i], format: format?.[i] ? (/** @type {never} */ v) => /** @type {(value: never) => Child} */ (format[i])(v) : null,
   })), rows);
 }
 
