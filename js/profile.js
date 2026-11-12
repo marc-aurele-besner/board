@@ -36,7 +36,7 @@ export const hasProfileSources = (project) => Boolean(project.localPath || proje
 
 // The saved profile texts of the given projects, keyed by id, for the prompts of Tidy, Plan my day and Triage.
 // Projects without a profile are left out.
-/** @param {Project[]} projects @param {Iterable<string>} ids */
+/** @param {Project[]} projects @param {Iterable<string | null>} ids */
 export function profilesFor(projects, ids) {
   const wanted = new Set(ids);
   /** @type {Record<string, string>} */
