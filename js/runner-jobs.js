@@ -1,6 +1,8 @@
+// @ts-check
 // The jobs the local worker (tools/worker.js) runs, shared by the worker and Settings → Runners.
 // `every` is the default interval in minutes. settings.json `runners.<id>` holds the user's { every, on }.
 // No DOM here: the worker imports this file under Node.
+/** @import { Settings } from '../types/data' */
 
 export const JOBS = [
   { id: 'google', label: 'Google sign-ins', every: 1, description: 'Renews each Google account’s access token before it expires.' },
@@ -26,9 +28,14 @@ export const JOBS = [
 
 export const WORKER_URL = 'http://127.0.0.1:8420';
 
+/** @param {string} id */
 export const jobOf = (id) => JOBS.find((j) => j.id === id);
 
 // A job's interval and switch, from settings.json. An empty or invalid interval means the default.
+/**
+ * @param {Settings | undefined} settings
+ * @param {string} id
+ */
 export function jobConfig(settings, id) {
   const job = jobOf(id);
   const saved = settings?.runners?.[id] ?? {};
