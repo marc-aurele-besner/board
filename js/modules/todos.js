@@ -1450,7 +1450,8 @@ function draw(root, store) {
 
         tidyPanel(store),
 
-        h('form', {
+        // While tasks are ticked, their actions take the place of the add field, so the list below stays put.
+        batchBar(store, visible, projects, categories) ?? h('form', {
           class: 'quick',
           onsubmit: (e) => {
             e.preventDefault();
@@ -1467,8 +1468,6 @@ function draw(root, store) {
             onpaste: (e) => pasteAsTodo(store, e),
           }),
           h('button', { class: 'primary', type: 'submit' }, 'Add')),
-
-        batchBar(store, visible, projects, categories),
 
         h('div', { class: ['todo-table', view.layout === 'table' ? '' : 'no-columns', showDue ? '' : 'no-due'].filter(Boolean).join(' ') },
           h('div', { class: 'todo-row todo-head' },
