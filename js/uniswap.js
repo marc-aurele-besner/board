@@ -148,13 +148,13 @@ export const isAddress = (/** @type {unknown} */ s) => /^0x[0-9a-fA-F]{40}$/.tes
 
 // The node a chain is read from as saved in Settings, or '' when the default public node is used.
 // Ethereum's node was saved before the chains list existed, so it falls back to that field.
-/** @param {UniswapSettings | undefined} cfg @param {{ id: number }} chain @returns {string} */
+/** @param {Partial<UniswapSettings> | undefined} cfg @param {{ id: number }} chain @returns {string} */
 export function savedNode(cfg, chain) {
   return cfg?.chains?.[chain.id]?.node || (chain.id === 1 ? cfg?.node : '') || '';
 }
 
 // Whether a chain is read, and the node it is read from.
-/** @param {UniswapSettings | undefined} cfg @param {{ id: number, rpc: string }} chain */
+/** @param {Partial<UniswapSettings> | undefined} cfg @param {{ id: number, rpc: string }} chain */
 export function chainSettings(cfg, chain) {
   return { enabled: cfg?.chains?.[chain.id]?.enabled !== false, node: savedNode(cfg, chain) || chain.rpc };
 }
