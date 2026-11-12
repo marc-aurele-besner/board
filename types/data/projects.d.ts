@@ -35,6 +35,8 @@ export interface Project {
   color: string;
   description: string;
   website: string;
+  // An image URL set by hand; wins over the site's icon.
+  iconUrl?: string;
   // Folder on this machine where Dev opens terminals; may start with ~.
   localPath?: string;
   // What Dev runs for a task; '' uses the default.

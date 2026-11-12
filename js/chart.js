@@ -1,10 +1,28 @@
+// @ts-check
 // Plain SVG bar charts with a tooltip. Only numbers and escaped labels go into the markup.
 import { h } from './ui.js';
+/** @import { Child } from '../types/ui' */
 
-const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+/**
+ * A series of the bar chart: one value per label.
+ * @typedef {{ name: string, color: string, values: number[] }} BarSeries
+ */
+/**
+ * A series of the line chart: null leaves a gap.
+ * @typedef {{ name: string, color: string, values: (number | null)[], dashed?: boolean, area?: boolean }} LineSeries
+ */
+/** @typedef {(i: number) => Child} ChartTip */
+
+/** @param {unknown} s */
+const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => /** @type {Record<string, string>} */ ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
 
 // Bars per label. With several series the bars stack; `grouped` puts them side by side instead.
 // tip(i): what to show for label i on hover, focus or tap, as a node or text. Without it, the tooltip lists each series' value.
+/**
+ * @param {string[]} labels
+ * @param {BarSeries[]} series
+ * @param {{ grouped?: boolean, format?: (v: number) => string, tip?: ChartTip | null }} [options]
+ */
 export function barChart(labels, series, { grouped = false, format = (v) => v.toLocaleString(), tip = null } = {}) {
   const MIN_W = Math.max(360, labels.length * (grouped ? 30 : 16));
   // Matches the CSS height, so one SVG unit is one pixel and the axis text keeps its size.
@@ -22,7 +40,7 @@ export function barChart(labels, series, { grouped = false, format = (v) => v.to
   ];
   // About 6px per character at the 10px axis font, plus a gap, so labels never run into each other.
   const labelWidth = Math.max(...labels.map((l) => String(l).length)) * 6 + 10;
-  const draw = (W) => {
+  const draw = (/** @type {number} */ W) => {
     const slot = W / labels.length;
     // Capped, so a few bars in a wide card stay bars rather than blocks.
     const barWidth = grouped ? Math.min(24, Math.max(4, (slot * 0.8) / series.length)) : Math.min(40, Math.max(4, slot * 0.6));
@@ -49,7 +67,7 @@ export function barChart(labels, series, { grouped = false, format = (v) => v.to
   };
   const wrap = h('div', { class: 'chart interactive' });
   wrap.innerHTML = `<svg viewBox="0 0 ${MIN_W} ${H}" role="img" aria-label="Chart">${draw(MIN_W)}</svg>`;
-  const svg = wrap.querySelector('svg');
+  const svg = /** @type {SVGSVGElement} */ (wrap.querySelector('svg'));
   // Drawn at the card's own width, one unit per pixel, so the chart fills the card instead of
   // shrinking to its height. Narrower than MIN_W, it keeps MIN_W and scrolls sideways.
   let drawn = 0;
@@ -69,6 +87,11 @@ export function barChart(labels, series, { grouped = false, format = (v) => v.to
 
 // Lines per label, for running totals and rates. A null value leaves a gap; `dashed` draws a series as a
 // dashed line (an estimate), and `area` shades under it. Hover works as on the bar chart, one point per label.
+/**
+ * @param {string[]} labels
+ * @param {LineSeries[]} series
+ * @param {{ format?: (v: number) => string, tip?: ChartTip | null }} [options]
+ */
 export function lineChart(labels, series, { format = (v) => v.toLocaleString(), tip = null } = {}) {
   const MIN_W = 360;
   const H = 200;
@@ -81,20 +104,22 @@ export function lineChart(labels, series, { format = (v) => v.toLocaleString(), 
     h('span', { class: 'muted' }, labels[i]),
     series.filter((sr) => sr.values[i] != null).map((sr) => h('span', { class: 'tip-row' },
       h('span', null, h('span', { class: 'legend-swatch', style: { background: sr.color } }), ` ${sr.name}`),
-      h('strong', null, format(sr.values[i])))),
+      h('strong', null, format(/** @type {number} */ (sr.values[i]))))),
   ];
   const labelWidth = Math.max(...labels.map((l) => String(l).length)) * 6 + 10;
-  const draw = (W) => {
+  const draw = (/** @type {number} */ W) => {
     const slot = W / labels.length;
-    const xOf = (i) => i * slot + slot / 2;
-    const yOf = (v) => H - PAD - (v / max) * (H - PAD - TOP);
+    const xOf = (/** @type {number} */ i) => i * slot + slot / 2;
+    const yOf = (/** @type {number} */ v) => H - PAD - (v / max) * (H - PAD - TOP);
     const every = Math.max(1, Math.ceil(labelWidth / slot));
     // A light grid at the top value and its half, labelled, since a line has no bar height to compare.
     let body = [max, max / 2].map((v) => `<line x1="0" x2="${W}" y1="${yOf(v).toFixed(1)}" y2="${yOf(v).toFixed(1)}" class="grid"/>`
       + `<text x="2" y="${(yOf(v) - 4).toFixed(1)}" class="axis">${esc(format(v))}</text>`).join('');
     for (const sr of series) {
       // Runs of points without a gap, each drawn as its own path.
+      /** @type {[number, number][][]} */
       const runs = [];
+      /** @type {[number, number][]} */
       let run = [];
       sr.values.forEach((v, i) => {
         if (v == null) {
@@ -128,7 +153,7 @@ export function lineChart(labels, series, { format = (v) => v.toLocaleString(), 
   };
   const wrap = h('div', { class: 'chart interactive line-chart' });
   wrap.innerHTML = `<svg viewBox="0 0 ${MIN_W} ${H}" role="img" aria-label="Chart">${draw(MIN_W)}</svg>`;
-  const svg = wrap.querySelector('svg');
+  const svg = /** @type {SVGSVGElement} */ (wrap.querySelector('svg'));
   let drawn = 0;
   new ResizeObserver(() => {
     const width = Math.floor(wrap.clientWidth);
@@ -145,22 +170,23 @@ export function lineChart(labels, series, { format = (v) => v.toLocaleString(), 
 }
 
 // Hover, tap and arrow keys pick a bar: the others dim and a tooltip shows what tip() says about it.
+/** @param {HTMLElement} wrap @param {number} count @param {number[]} totals @param {ChartTip} tip */
 function hoverable(wrap, count, totals, tip) {
-  const svg = wrap.querySelector('svg');
+  const svg = /** @type {SVGSVGElement} */ (wrap.querySelector('svg'));
   const box = h('div', { class: 'chart-tip', role: 'status', hidden: true });
   wrap.append(box);
   svg.setAttribute('tabindex', '0');
   svg.setAttribute('aria-label', 'Chart. Use the arrow keys to read each bar.');
   let current = -1;
-  const show = (i) => {
+  const show = (/** @type {number} */ i) => {
     if (i < 0 || i >= count) return;
     current = i;
     wrap.classList.add('hovering');
-    for (const el of svg.querySelectorAll('.bar')) el.classList.toggle('hot', Number(el.dataset.i) === i);
+    for (const el of /** @type {NodeListOf<SVGElement>} */ (svg.querySelectorAll('.bar'))) el.classList.toggle('hot', Number(el.dataset.i) === i);
     const content = tip(i);
-    box.replaceChildren(...[content].flat(Infinity).filter((x) => x != null));
+    box.replaceChildren(.../** @type {(Node | string)[]} */ (/** @type {unknown[]} */ ([content]).flat(Infinity).filter((x) => x != null)));
     box.hidden = false;
-    const hit = svg.querySelector(`rect.hit[data-i="${i}"]`).getBoundingClientRect();
+    const hit = /** @type {SVGRectElement} */ (svg.querySelector(`rect.hit[data-i="${i}"]`)).getBoundingClientRect();
     const bars = [...svg.querySelectorAll(`.bar[data-i="${i}"]`)].map((el) => el.getBoundingClientRect().top);
     const outer = wrap.getBoundingClientRect();
     const top = Math.min(hit.bottom, ...bars) - outer.top;
@@ -178,8 +204,8 @@ function hoverable(wrap, count, totals, tip) {
   };
   // A resize redraws the bars, so a shown tooltip would point at bars that are gone.
   wrap.addEventListener('chartredraw', hide);
-  const indexOf = (e) => {
-    const el = e.target.closest?.('rect[data-i]');
+  const indexOf = (/** @type {Event} */ e) => {
+    const el = /** @type {SVGRectElement | null | undefined} */ (/** @type {Element} */ (e.target).closest?.('rect[data-i]'));
     return el ? Number(el.dataset.i) : -1;
   };
   svg.addEventListener('pointermove', (e) => {
@@ -206,6 +232,7 @@ function hoverable(wrap, count, totals, tip) {
   });
 }
 
+/** @param {{ name: string, color: string }[]} series */
 export function legend(series) {
   return h('div', { class: 'legend' }, series.map((sr) =>
     h('span', { class: 'legend-item' }, h('span', { class: 'legend-swatch', style: { background: sr.color } }), sr.name)));

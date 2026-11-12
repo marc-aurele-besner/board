@@ -1,6 +1,8 @@
+// @ts-check
 // Finds a project's icon from its website. The site's own icon files are checked first, largest image wins.
 // If the site has none, a public favicon service is asked. Results are cached per site.
 import { h } from './ui.js';
+/** @import { Project } from '../types/data' */
 
 const PROBE_TIMEOUT_MS = 5000;
 const HIT_TTL_MS = 14 * 86400000;
@@ -16,12 +18,16 @@ const PATHS = [
   '/favicon.ico',
   '/icon.png',
 ];
-const SERVICE = (host) => `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`;
+const SERVICE = (/** @type {string} */ host) => `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`;
 
+/** @typedef {{ url: string | null, at: number }} CacheEntry */
+/** @type {Map<string, CacheEntry>} */
 const memory = new Map(); // site -> { url: string|null, at: number }
+/** @type {Map<string, Promise<string | null>>} */
 const pending = new Map(); // site -> Promise, so one site is searched once at a time
-const storageKey = (site) => `board:favicon:${site}`;
+const storageKey = (/** @type {string} */ site) => `board:favicon:${site}`;
 
+/** @param {string} site @returns {CacheEntry | null} */
 function readCache(site) {
   try {
     return JSON.parse(localStorage.getItem(storageKey(site)) ?? 'null');
@@ -30,6 +36,7 @@ function readCache(site) {
   }
 }
 
+/** @param {string} site @param {CacheEntry} entry */
 function writeCache(site, entry) {
   try {
     localStorage.setItem(storageKey(site), JSON.stringify(entry));
@@ -39,6 +46,7 @@ function writeCache(site, entry) {
 }
 
 // What is known about a site's icon: undefined when unknown or stale, null when none was found, or the URL.
+/** @param {string} site */
 export function cachedFavicon(site) {
   const entry = memory.get(site) ?? readCache(site);
   if (!entry) return undefined;
@@ -48,6 +56,7 @@ export function cachedFavicon(site) {
 }
 
 // Loads an image and reports its width; 0 when it fails or times out. Cross-origin images can be measured this way.
+/** @param {string} url @returns {Promise<number>} */
 function probe(url) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -68,6 +77,7 @@ function probe(url) {
 }
 
 // The site and its other common spelling (with or without www.).
+/** @param {string} site */
 function hostVariants(site) {
   const u = new URL(site);
   const variants = [u.origin];
@@ -77,9 +87,11 @@ function hostVariants(site) {
 }
 
 // The largest icon file the site publishes, or null.
+/** @param {string} site @returns {Promise<string | null>} */
 async function findOwnIcon(site) {
   const candidates = hostVariants(site).flatMap((origin) => PATHS.map((path) => `${origin}${path}`));
   const widths = await Promise.all(candidates.map((url) => probe(url)));
+  /** @type {string | null} */
   let best = null;
   let bestScore = 15; // anything 16px or smaller is not worth showing
   widths.forEach((width, i) => {
@@ -93,6 +105,7 @@ async function findOwnIcon(site) {
 }
 
 // Swaps every placeholder for this site for the found icon (or the colored dot when none was found).
+/** @param {string} site @param {string | null} url */
 function swapPlaceholders(site, url) {
   for (const el of document.querySelectorAll('[data-favicon-site]')) {
     if (el.getAttribute('data-favicon-site') !== site) continue;
@@ -101,8 +114,9 @@ function swapPlaceholders(site, url) {
 }
 
 // Searches a site once: its own icon files first, then the public service. The result is cached and the page is updated.
+/** @param {string} site @returns {Promise<string | null>} */
 export function resolveFavicon(site) {
-  if (pending.has(site)) return pending.get(site);
+  if (pending.has(site)) return /** @type {Promise<string | null>} */ (pending.get(site));
   const search = (async () => {
     let url = await findOwnIcon(site);
     if (!url) {
@@ -120,6 +134,7 @@ export function resolveFavicon(site) {
 }
 
 // Forgets the cached results, so the next render searches again. Used by "Re-run icons".
+/** @param {Iterable<string>} sites */
 export function clearFaviconCache(sites) {
   for (const site of sites) {
     memory.delete(site);
@@ -131,8 +146,9 @@ export function clearFaviconCache(sites) {
   }
 }
 
-const dot = (color) => h('span', { class: 'dot', style: { background: color } });
+const dot = (/** @type {string | null | undefined} */ color) => h('span', { class: 'dot', style: { background: color } });
 
+/** @param {string} url @param {string} className @param {string | null} [color] */
 export function iconImage(url, className, color) {
   return h('img', {
     class: className,
@@ -141,11 +157,12 @@ export function iconImage(url, className, color) {
     loading: 'lazy',
     referrerpolicy: 'no-referrer',
     'data-color': color,
-    onerror: (e) => e.currentTarget.replaceWith(dot(color)),
+    onerror: (/** @type {Event} */ e) => /** @type {HTMLImageElement} */ (e.currentTarget).replaceWith(dot(color)),
   });
 }
 
 // The icon of a project: its own image URL if set, else the site's icon, else the colored dot.
+/** @param {Pick<Project, 'iconUrl' | 'website' | 'color'>} project */
 export function siteIcon({ iconUrl, website, color }, className = 'project-icon') {
   if (iconUrl) return iconImage(iconUrl, className, color);
   if (!website) return dot(color);
