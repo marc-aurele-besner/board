@@ -9,7 +9,7 @@ import { toast } from '../toast.js';
 import {
   COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, DEV_MODES, TEMPLATES, daysOf,
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
-  makeFlow, makeStep, flowFromTemplate, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
+  makeFlow, makeStep, makeSource, sourcesOf, sourceLabel, flowFromTemplate, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
 } from '../cron.js';
 import { modelForTask } from './settings.js';
 
@@ -201,15 +201,12 @@ function runsTab(store) {
 
 function stepSummary(store, step) {
   if (step.type === 'gather') {
-    const label = SOURCES.find(([k]) => k === step.source)?.[1] ?? step.source;
+    const sources = sourcesOf(step);
     const plus = step.append ? '+ ' : '';
-    if (step.source === 'project') return `${plus}${projectsOf(store).find((p) => p.id === step.projectId)?.name ?? 'Choose a project'}`;
-    if (step.source === 'page') {
-      const p = step.projectId ? projectsOf(store).find((x) => x.id === step.projectId) : null;
-      return `${plus}${p ? `${p.name}${step.url ? ` ${step.url}` : ''}` : step.url || (step.projectId ? 'Choose a project' : 'Enter an address')}`;
-    }
-    if (step.source === 'history') return `${plus}Last ${step.count ?? 5} outputs`;
-    return `${plus}${label}`;
+    if (!sources.length) return 'Add a source';
+    const first = sources[0];
+    const one = first.source === 'page' && !first.label && !first.projectId && !first.url ? 'Enter an address' : sourceLabel(store, first);
+    return `${plus}${one}${sources.length > 1 ? ` +${sources.length - 1}` : ''}`;
   }
   if (step.type === 'ai') return step.model || modelForTask(store, AI_TASK) || 'No model set';
   if (step.type === 'task') return step.title || '{{input}}';
@@ -405,37 +402,86 @@ function triggerForm(store, flow) {
       'Flows run only while the board is open; a run missed while it was closed happens once when you open it.'));
 }
 
+const SOURCE_ABOUT = {
+  page: 'Read through the r.jina.ai page reader when the flow runs, as text with its headings and links. Long pages are cut at about 12,000 characters.',
+  history: 'The final output of this flow’s last successful runs (not test runs), so the AI can avoid repeating itself.',
+  flow: 'The final output of that flow’s last successful run (not a test run).',
+  text: null,
+};
+
+// The searchable list of sources, each with its icon.
+const sourcePick = (value, onPick) => pickChip({
+  value,
+  options: SOURCES.map(([v, label, name]) => ({ value: v, label, plainIcon: () => icon(name) })),
+  className: 'field-pick',
+  onPick,
+});
+
+// One source of a data step: what it reads, its settings, and the label that heads its data.
+function sourceCard(store, flow, src, { setSource, remove }) {
+  const set = (patch) => setSource(src.id, patch);
+  const about = src.source in SOURCE_ABOUT ? SOURCE_ABOUT[src.source] : 'Read from your board when the flow runs, as plain text for the next step.';
+  const otherFlows = store.get(COLLECTION).flows.filter((f) => f.id !== flow.id);
+  return h('div', { class: 'cron-source stack' },
+    h('div', { class: 'row cron-fields' },
+      field('Source', sourcePick(src.source, (source) => set({ source }))),
+      src.source === 'project' ? field('Project', projectPick(store, src.projectId, 'Choose…', (projectId) => set({ projectId }))) : null,
+      src.source === 'page' ? field('Project', projectPick(store, src.projectId, 'None: use the link below', (projectId) => set({ projectId }))) : null,
+      src.source === 'history'
+        ? field('How many runs', h('input', { type: 'number', min: 1, max: 20, value: String(src.count ?? 5), onchange: (e) => set({ count: Math.min(20, Math.max(1, Number(e.target.value) || 5)) }) }))
+        : null,
+      src.source === 'flow'
+        ? field('Flow', pickChip({
+            value: src.flowId || null,
+            options: otherFlows.map((f) => ({ value: f.id, label: f.name, plainIcon: () => icon('repeat') })),
+            placeholder: otherFlows.length ? 'Choose…' : 'No other flow',
+            className: 'field-pick',
+            onPick: (flowId) => set({ flowId: flowId ?? '' }),
+          }))
+        : null,
+      remove ? h('button', { type: 'button', class: 'icon-btn', title: 'Remove source', 'aria-label': 'Remove source', onclick: remove }, icon('trash')) : null),
+    src.source === 'page'
+      ? field(src.projectId ? 'Path or link (optional)' : 'Link',
+          h('input', { value: src.url ?? '', autocomplete: 'off', placeholder: src.projectId ? '/blog or https://docs.example.com' : 'example.com/blog', onchange: (e) => set({ url: e.target.value.trim() }) }),
+          src.projectId ? 'Empty reads the project’s website. A path such as /blog reads that page of it; a full link reads any page.' : null)
+      : null,
+    src.source === 'text' ? field('Text', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, src.text ?? '')) : null,
+    field('Label (optional)',
+      h('input', { value: src.label ?? '', autocomplete: 'off', placeholder: sourceLabel(store, { ...src, label: '' }), onchange: (e) => set({ label: e.target.value.trim() }) })),
+    about ? h('p', { class: 'muted small' }, about) : null);
+}
+
+function gatherForm(store, flow, step) {
+  const sources = sourcesOf(step);
+  // Edits move a step saved with one source on the step itself to the list form.
+  const edit = (mutate) => updateFlow(store, flow.id, (f) => {
+    const s = f.steps.find((x) => x.id === step.id);
+    if (!s) return;
+    const list = sourcesOf(s).map((x) => ({ ...x }));
+    for (const k of ['source', 'projectId', 'url', 'text', 'count']) delete s[k];
+    s.sources = mutate(list) ?? list;
+  });
+  const setSource = (id, patch) => edit((list) => list.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  const index = flow.steps.indexOf(step);
+  return h('div', { class: 'stack' },
+    sources.map((src) => sourceCard(store, flow, src, {
+      setSource,
+      remove: sources.length > 1 ? () => edit((list) => list.filter((x) => x.id !== src.id)) : null,
+    })),
+    h('div', null,
+      h('button', { type: 'button', class: 'btn-small', onclick: () => edit((list) => [...list, makeSource('page')]) }, icon('plus'), ' Add a source')),
+    sources.length > 1 ? h('p', { class: 'muted small' }, 'Each source’s data goes under a heading with its label, in this order.') : null,
+    index > 0
+      ? h('label', { class: 'check' },
+          h('input', { type: 'checkbox', checked: Boolean(step.append), onchange: (e) => updateFlow(store, flow.id, (f) => { const s = f.steps.find((x) => x.id === step.id); if (s) s.append = e.target.checked; }) }),
+          ' Add to the previous step’s output instead of replacing it')
+      : null);
+}
+
 function stepForm(store, flow, step) {
   const set = (patch) => updateFlow(store, flow.id, (f) => Object.assign(f.steps.find((x) => x.id === step.id) ?? {}, patch));
   const vars = h('p', { class: 'muted small' }, 'Use {{input}} for the previous step’s output, {{date}} for today and {{flow}} for the flow’s name.');
-  if (step.type === 'gather') {
-    const index = flow.steps.indexOf(step);
-    const about = step.source === 'page'
-      ? 'Read through the r.jina.ai page reader when the flow runs, as text with its headings and links. Long pages are cut at about 12,000 characters.'
-      : step.source === 'history'
-        ? 'The final output of this flow’s last successful runs (not test runs), so the AI can avoid repeating itself.'
-        : step.source === 'text' ? null : 'The data is read from your board when the flow runs, as plain text for the next step.';
-    return h('div', { class: 'stack' },
-      h('div', { class: 'row cron-fields' },
-        field('Source', select(step.source, SOURCES, (source) => set({ source }))),
-        step.source === 'project' ? field('Project', projectPick(store, step.projectId, 'Choose…', (projectId) => set({ projectId }))) : null,
-        step.source === 'page' ? field('Project', projectPick(store, step.projectId, 'None: use the address below', (projectId) => set({ projectId }))) : null,
-        step.source === 'history'
-          ? field('How many runs', h('input', { type: 'number', min: 1, max: 20, value: String(step.count ?? 5), onchange: (e) => set({ count: Math.min(20, Math.max(1, Number(e.target.value) || 5)) }) }))
-          : null),
-      step.source === 'page'
-        ? field(step.projectId ? 'Path on the project’s website (optional)' : 'Address',
-            h('input', { value: step.url ?? '', autocomplete: 'off', placeholder: step.projectId ? '/blog' : 'example.com/blog', onchange: (e) => set({ url: e.target.value.trim() }) }),
-            step.projectId ? 'Empty reads the home page. A path such as /blog reads that page of the site.' : null)
-        : null,
-      step.source === 'text' ? field('Text', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, step.text)) : null,
-      about ? h('p', { class: 'muted small' }, about) : null,
-      index > 0
-        ? h('label', { class: 'check' },
-            h('input', { type: 'checkbox', checked: Boolean(step.append), onchange: (e) => set({ append: e.target.checked }) }),
-            ' Add to the previous step’s output instead of replacing it')
-        : null);
-  }
+  if (step.type === 'gather') return gatherForm(store, flow, step);
   if (step.type === 'ai') {
     return h('div', { class: 'stack' },
       field('Prompt', h('textarea', { rows: 6, class: 'mono-text', onchange: (e) => set({ prompt: e.target.value }) }, step.prompt)),
