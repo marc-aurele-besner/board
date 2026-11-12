@@ -12,18 +12,18 @@ import { readTheme, themedColors } from '../term-colors.js';
 import { explorer, editor, setRoot, hasOpenFiles, baseName } from './dev-files.js';
 import { pickChip } from '../inline.js';
 import { projectIcon } from './projects.js';
-import { linkWatcher } from '../task-links.js';
+import { linkWatcher, moveToReview } from '../task-links.js';
 
 const COLLECTION = 'dev';
 const DEFAULTS = { history: [], runner: '' };
 const HISTORY_MAX = 100;
 const RECENT_SHOWN = 8;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
-// The open terminals (id, number, folder) and the one shown, so a reload attaches to them again.
+// The open terminals (id, number, folder, the tasks handed to claude in it) and the one shown, so a reload attaches to them again.
 const SESSIONS_KEY = 'board:dev-sessions';
 
 // View state: the workspace, the sessions, the one shown, and what the runner said about itself.
-const view = { workspace: 'board', sessions: [], active: '', info: null, infoError: '', checking: false, count: 0, pending: null, queued: null, restored: false };
+const view = { workspace: 'board', sessions: [], active: '', wanted: 0, info: null, infoError: '', checking: false, count: 0, pending: null, queued: null, restored: false };
 let currentStore = null;
 
 export const runnerOf = (store) => store.get(COLLECTION).runner || TERMINAL_RUNNER;
@@ -63,17 +63,19 @@ function themeColor(which) {
 
 function saveSessions() {
   try {
-    localStorage.setItem(SESSIONS_KEY, JSON.stringify({ active: view.active, sessions: view.sessions.map(({ id, n, cwd }) => ({ id, n, cwd })) }));
+    localStorage.setItem(SESSIONS_KEY, JSON.stringify({ active: view.active, sessions: view.sessions.map(({ id, n, cwd, tasks, prompt }) => ({ id, n, cwd, ...(tasks.length ? { tasks, prompt } : {}) })) }));
   } catch {}
 }
 
-function makeSession({ id = uid(), n = ++view.count, cwd = '' }) {
-  const s = { id, n, cwd, running: false, attach: null, replaying: false, pid: 0, exit: null, command: '', browse: -1, stick: true, el: null };
+function makeSession({ id = uid(), n = ++view.count, cwd = '', tasks = [], prompt = '' }) {
+  const s = { id, n, cwd, tasks, prompt, running: false, attach: null, replaying: false, pid: 0, exit: null, command: '', browse: -1, stick: true, el: null };
   s.term = createTerminal({
     // Questions in replayed output were answered long ago; only a live program gets an answer.
     reply: (data) => !s.replaying && s.running && s.pid && sendInput(runnerOf(currentStore), s.pid, { data }),
     background: themeColor,
   });
+  // Issue and PR links the session prints are added to its tasks.
+  if (tasks.length) s.watch = linkWatcher(currentStore, tasks, prompt);
   view.sessions.push(s);
   return s;
 }
@@ -86,18 +88,33 @@ function restoreSessions() {
     saved = JSON.parse(localStorage.getItem(SESSIONS_KEY) ?? 'null');
   } catch {}
   for (const x of saved?.sessions ?? []) {
-    if (typeof x?.id === 'string' && !view.sessions.some((s) => s.id === x.id)) makeSession({ id: x.id, n: Number(x.n) || ++view.count, cwd: String(x.cwd ?? '') });
+    if (typeof x?.id === 'string' && !view.sessions.some((s) => s.id === x.id)) makeSession({
+      id: x.id,
+      n: Number(x.n) || ++view.count,
+      cwd: String(x.cwd ?? ''),
+      tasks: Array.isArray(x.tasks) ? x.tasks.filter((t) => typeof t === 'string') : [],
+      prompt: String(x.prompt ?? ''),
+    });
   }
   view.count = Math.max(view.count, ...view.sessions.map((s) => s.n));
   if (view.sessions.some((s) => s.id === saved?.active)) view.active = saved.active;
 }
 
-function newSession(store, cwd = rootPath(store, view.workspace)) {
+// The terminal the URL names (#/dev?term=<number>) is shown, over the one saved last.
+function showWanted() {
+  const s = view.sessions.find((x) => x.n === view.wanted);
+  view.wanted = 0;
+  if (!s || s.id === view.active) return;
+  view.active = s.id;
+  saveSessions();
+}
+
+function newSession(store, cwd = rootPath(store, view.workspace), { tasks = [], prompt = '' } = {}) {
   if (view.sessions.length >= maxSessions()) {
     toast(`${maxSessions()} terminals are open. Close one first.`);
     return null;
   }
-  const s = makeSession({ cwd });
+  const s = makeSession({ cwd, tasks, prompt });
   view.active = s.id;
   saveSessions();
   if (view.info) attach(store, s);
@@ -170,6 +187,8 @@ function finish(store, s, e) {
   schedulePaint();
   if (s.replaying || !view.sessions.includes(s)) return;
   const command = s.command;
+  // claude quit on its own: the work handed to it is done, so its tasks wait for review.
+  if (s.exit.code === 0 && s.tasks.length) moveToReview(store, s.tasks);
   if (!location.hash.startsWith('#/dev')) toast(`${command.length > 40 ? `${command.slice(0, 40)}…` : command}: ${exitText(s.exit).toLowerCase()}`);
   store.refresh();
 }
@@ -426,9 +445,8 @@ function startQueued(store) {
     setRoot(filesCtx(store), rootPath(store, view.workspace));
   }
   view.queued = null;
-  const s = newSession(store);
+  const s = newSession(store, undefined, { tasks: taskIds, prompt });
   if (!s) return;
-  if (taskIds.length) s.watch = linkWatcher(store, taskIds, prompt);
   // Runs once the terminal is on the page, so it starts at the size it is shown.
   // `--` ends the options, so a flag with an optional value (--worktree [name]) cannot take the prompt.
   const command = project?.devCommand?.trim() || DEFAULT_DEV_COMMAND;
@@ -639,6 +657,7 @@ function draw(root, store) {
   theme = null;
   currentStore = store;
   if (!view.restored) restoreSessions();
+  if (view.wanted) showWanted();
   if (!view.info && !view.infoError && !view.checking) checkRunner(store);
   if (view.pending) {
     view.workspace = view.pending;
@@ -683,9 +702,16 @@ export default {
   collection: COLLECTION,
   defaults: DEFAULTS,
   render: draw,
-  serialize: () => ({}),
+  // The terminal shown is in the URL, so a refresh or a shared link opens it.
+  serialize: () => ({ term: view.sessions.length > 1 ? activeSession()?.n : '' }),
   // #/dev?project=<id> (from a project page) opens that project's folder, with a terminal in it.
   restore: (p = {}) => {
     if (p.project) view.pending = `p:${p.project}`;
+    const n = Number(p.term);
+    if (Number.isInteger(n) && n > 0) {
+      view.wanted = n;
+      // A link or the back button while Dev is open picks the terminal now.
+      if (view.restored) showWanted();
+    }
   },
 };
