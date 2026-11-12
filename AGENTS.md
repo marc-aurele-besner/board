@@ -54,6 +54,7 @@ js/aave.js            Aave v3 supply, debt and health factor of the DeFi wallets
 js/resend.js          the Inbox's Resend reads: email lists per project key (runners), and one email's body (asked of the runners)
 js/google.js          every Google sign-in, kept in google.json; the sign-in popup and account pictures
 js/google-core.js     Google tokens without the DOM: live access tokens, googleFetch; only the runners renew a token
+js/npm.js             a project's npm org and packages: the runners' registry reads into npm.json, and the board's asks for missing ones
 js/gmail.js           the Inbox's Gmail reads: one sign-in per account, its email list, and one email's body
 js/gcal.js            Calendar's Google reads: one sign-in per account, its calendar list; events read by the runners into calendar.json
 js/runner-jobs.js     the jobs the runners do, with their labels and default intervals (shared by the worker and Settings)
@@ -91,7 +92,7 @@ tools/jobs/gmail.js, resend.js  read new mail into inbox.json; resend.js also an
 tools/jobs/calendar.js  reads every shown calendar's window into calendar.json, or a range Calendar asks for
 tools/jobs/monitoring.js  deadlines, budgets, site checks, status pages and the rules that make tasks, every 5 minutes
 tools/jobs/telegram.js  long-polls the bot and turns messages into tasks (a `loop` job: it starts again at once)
-tools/jobs/github.js, webstats.js, fx.js  GitHub counts (github.json), Bing data (webstats.json), exchange rates (fx.json)
+tools/jobs/github.js, npm.js, webstats.js, fx.js  GitHub counts (github.json), npm packages (npm.json), Bing data (webstats.json), exchange rates (fx.json)
 tools/jobs/dev-usage.js, worktrees.js  what claude sessions used; removing done tasks' worktrees through the command runner
 tools/jobs/defi.js    the DeFi jobs (positions, fee history, wallets, lending, hourly snapshots), run one at a time
 tools/jobs/cron.js    starts due Cron flows every minute, and one flow on Run now

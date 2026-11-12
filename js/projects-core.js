@@ -24,6 +24,8 @@ export function makeProject(existingCount, fields = {}) {
     labels: [],
     parentId: null,
     github: { org: '', repos: [] },
+    // An npm org (or user) whose packages are the project's, and single packages; both optional.
+    npm: { org: '', packages: [] },
     // What the project is, saved for the board's AI features (js/profile.js). A missing profile reads as empty.
     profile: { text: '', sources: [], updated: '', edited: false, usageId: '' },
     created: now(),
