@@ -1,5 +1,8 @@
+// @ts-check
 // The search palette (Cmd/Ctrl+K or "/"): jump to a section, a project, a recipe or a task, or capture something new:
 // a task, a Money entry ("-42.50 groceries") or a recipe link.
+/** @import { Store, Module, IconName } from '../types/data' */
+/** @typedef {{ label: string, hint: string, iconName: IconName, run: () => void, more?: boolean }} PaletteItem */
 import { h, icon, statusOf, money, todayISO, CURRENCIES } from './ui.js';
 import { parseTask, parseMoney, makeTask } from './capture.js';
 import { createProject } from './modules/projects.js';
@@ -11,6 +14,7 @@ import { SETTINGS } from './search.js';
 
 const MAX_ROWS = 12;
 
+/** @type {HTMLDivElement | null} */
 let overlay = null;
 
 export function closePalette() {
@@ -18,6 +22,7 @@ export function closePalette() {
   overlay = null;
 }
 
+/** @param {Store} store @param {string} raw */
 function addTask(store, raw) {
   const parsed = parseTask(raw, store.get('projects').projects);
   if (!parsed.text) return;
@@ -27,12 +32,16 @@ function addTask(store, raw) {
   toast(`Added to ${where}`);
 }
 
+/** @param {Store} store @param {Module[]} modules @param {string} query */
 function itemsFor(store, modules, query) {
   const q = query.trim().toLowerCase();
+  /** @type {PaletteItem[]} */
   const out = [];
+  /** @param {string} label @param {string} hint @param {IconName} iconName @param {() => void} run */
   const add = (label, hint, iconName, run) => {
     if (!q || label.toLowerCase().includes(q)) out.push({ label, hint, iconName, run });
   };
+  /** @param {string} hash */
   const go = (hash) => () => {
     location.hash = hash;
   };
@@ -102,12 +111,15 @@ function itemsFor(store, modules, query) {
   return rows;
 }
 
+/** @param {Store} store @param {Module[]} modules */
 export function openPalette(store, modules) {
   if (overlay) return closePalette();
   let active = 0;
+  /** @type {PaletteItem[]} */
   let items = [];
   const input = h('input', { class: 'palette-input', placeholder: 'Search, jump, or type a task: fix the footer #atlas !high friday', 'aria-label': 'Search or jump', autocomplete: 'off' });
   const list = h('ul', { class: 'palette-list', role: 'listbox' });
+  /** @param {PaletteItem | undefined} item */
   const run = (item) => {
     closePalette();
     item?.run();
@@ -139,7 +151,7 @@ export function openPalette(store, modules) {
   });
   overlay = h('div', {
     class: 'palette-overlay',
-    onclick: (e) => {
+    onclick: (/** @type {MouseEvent} */ e) => {
       if (e.target === overlay) closePalette();
     },
   },

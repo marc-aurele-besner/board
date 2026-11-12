@@ -1,6 +1,9 @@
+// @ts-check
 // A project's profile: a short Markdown text saying what the project is, built once from its folder, repos and
 // website and saved on the project, so AI features read it as context instead of guessing. The Cron "Refresh project
 // profile" step calls buildProfile() too; nothing here touches the page.
+/** @import { DataStore, Project } from '../types/data' */
+/** @typedef {{ read: [string, string][], gaps: string[] }} ProfileSources */
 import { ask } from './ai.js';
 import { systemPrompt } from './prompts.js';
 import { uid, now } from './ui.js';
@@ -20,18 +23,23 @@ const MAX_PAGES = 4;
 export const emptyProfile = () => ({ text: '', sources: [], updated: '', edited: false, usageId: '' });
 
 // Data folders saved before profiles existed have none; they read as empty.
+/** @param {Project | null | undefined} project */
 export const profileOf = (project) => ({ ...emptyProfile(), ...(project?.profile ?? {}) });
 
 // The extra pages read besides the website (a blog, docs).
+/** @param {Project} project */
 const pagesOf = (project) => [...new Set([project.website, ...profileOf(project).sources].filter(Boolean))].slice(0, MAX_PAGES);
 
 // True when there is anything to read: a folder, a repo, the website or an extra URL.
+/** @param {Project} project */
 export const hasProfileSources = (project) => Boolean(project.localPath || project.github?.repos?.length || pagesOf(project).length);
 
 // The saved profile texts of the given projects, keyed by id, for the prompts of Tidy, Plan my day and Triage.
 // Projects without a profile are left out.
+/** @param {Project[]} projects @param {Iterable<string>} ids */
 export function profilesFor(projects, ids) {
   const wanted = new Set(ids);
+  /** @type {Record<string, string>} */
   const out = {};
   for (const p of projects) {
     const text = profileOf(p).text.trim();
@@ -41,6 +49,7 @@ export function profilesFor(projects, ids) {
 }
 
 // The text cut after `max` words, keeping its line breaks.
+/** @param {string} text @param {number} max */
 export function clipWords(text, max) {
   const re = /\S+/g;
   let n = 0;
@@ -51,8 +60,10 @@ export function clipWords(text, max) {
   return text;
 }
 
+/** @param {string} text */
 const countWords = (text) => (text.match(/\S+/g) ?? []).length;
 
+/** @type {[string, RegExp, number][]} */
 const DOCS = [
   ['readme', /^readme(\.md|\.markdown|\.txt)?$/i, PAGE_WORDS],
   ['agents', /^agents\.md$/i, DOC_WORDS],
@@ -61,6 +72,7 @@ const DOCS = [
 ];
 
 // package.json says the most through its name, description, scripts and dependency names.
+/** @param {string} text */
 function packageSummary(text) {
   try {
     const pkg = JSON.parse(text);
@@ -77,17 +89,21 @@ function packageSummary(text) {
 }
 
 // The project's folder through the runner: the top-level entries, the docs above, and the last commit subjects.
+/** @param {DataStore} store @param {Project} project @param {[string, string][]} read @param {string[]} gaps */
 async function readLocal(store, project, read, gaps) {
   const base = runnerOf(store);
-  const root = project.localPath.replace(/\/+$/, '');
+  // Only called when the project has a local folder.
+  const root = /** @type {string} */ (project.localPath).replace(/\/+$/, '');
   const [listing, git] = await Promise.allSettled([listFolder(base, root), gitStatus(base, root)]);
   if (listing.status === 'rejected') {
     gaps.push(`The local folder ${root} (${listing.reason.message})`);
     return;
   }
+  /** @type {{ name: string, dir?: boolean }[]} */
   const entries = listing.value.entries ?? [];
   read.push(['Top-level folder', entries.slice(0, 80).map((e) => (e.dir ? `${e.name}/` : e.name)).join('\n')]);
-  const files = DOCS.map(([key, pattern, words]) => [key, entries.find((e) => !e.dir && pattern.test(e.name)), words]).filter(([, e]) => e);
+  // The filter leaves only the docs found.
+  const files = /** @type {[string, { name: string }, number][]} */ (DOCS.map(([key, pattern, words]) => [key, entries.find((e) => !e.dir && pattern.test(e.name)), words]).filter(([, e]) => e));
   const texts = await Promise.allSettled(files.map(([, e]) => readFile(base, `${root}/${e.name}`)));
   texts.forEach((r, i) => {
     const [key, entry, words] = files[i];
@@ -100,10 +116,11 @@ async function readLocal(store, project, read, gaps) {
   });
   if (git.status === 'rejected') gaps.push(`Recent commits (${git.reason.message})`);
   else if (!git.value.repo) gaps.push('Recent commits (the local folder is not a git repository)');
-  else read.push(['Recent commit subjects', (git.value.log ?? []).slice(0, COMMITS).map((c) => `- ${c.subject}`).join('\n') || '(none)']);
+  else read.push(['Recent commit subjects', (git.value.log ?? []).slice(0, COMMITS).map((/** @type {{ subject: string }} */ c) => `- ${c.subject}`).join('\n') || '(none)']);
 }
 
 // Each repo's GitHub details. The README is skipped when the local folder already gave one.
+/** @param {Project} project @param {[string, string][]} read @param {string[]} gaps @param {boolean} haveReadme */
 async function readGithub(project, read, gaps, haveReadme) {
   const repos = project.github.repos.slice(0, MAX_REPOS);
   const results = await Promise.allSettled(repos.map((repo) => fetchRepoOverview(repo)));
@@ -118,7 +135,7 @@ async function readGithub(project, read, gaps, haveReadme) {
       d.description ? `Description: ${d.description}` : '',
       d.topics.length ? `Topics: ${d.topics.join(', ')}` : '',
       d.languages.length ? `Languages: ${d.languages.join(', ')}` : '',
-      d.files.length ? `Files: ${d.files.map((f) => (f.type === 'dir' ? `${f.name}/` : f.name)).join(', ')}` : '',
+      d.files.length ? `Files: ${d.files.map((/** @type {{ name: string, type: string }} */ f) => (f.type === 'dir' ? `${f.name}/` : f.name)).join(', ')}` : '',
       !haveReadme && d.readme ? `README:\n${clipWords(d.readme, PAGE_WORDS)}` : '',
     ].filter(Boolean);
     if (!d.contentAccess) gaps.push(`The README and files of GitHub ${repo} (the token cannot read its contents)`);
@@ -126,6 +143,7 @@ async function readGithub(project, read, gaps, haveReadme) {
   });
 }
 
+/** @param {Project} project @param {[string, string][]} read @param {string[]} gaps */
 async function readPages(project, read, gaps) {
   const urls = pagesOf(project);
   const results = await Promise.allSettled(urls.map((url) => readPageText(url)));
@@ -137,9 +155,13 @@ async function readPages(project, read, gaps) {
 
 // Reads every source the project has. One failing source never stops the others; it is listed in `gaps`.
 // Returns { read: [[title, text]], gaps: [text] }.
+/** @param {DataStore} store @param {Project} project @returns {Promise<ProfileSources>} */
 export async function readProfileSources(store, project) {
+  /** @type {[string, string][]} */
   const local = [];
+  /** @type {[string, string][]} */
   const remote = [];
+  /** @type {string[]} */
   const gaps = [];
   if (!project.localPath) gaps.push('No local folder is set');
   if (!project.github?.repos?.length) gaps.push('No GitHub repository is set');
@@ -155,6 +177,7 @@ export async function readProfileSources(store, project) {
 }
 
 // The user message: the sources in order, each cut to what is left of the total word budget.
+/** @param {Project} project @param {ProfileSources} sources */
 export function profileInput(project, { read, gaps }) {
   let left = TOTAL_WORDS;
   const parts = [`# ${project.name}`, project.description ? `Description: ${project.description}` : ''];
@@ -173,6 +196,7 @@ export function profileInput(project, { read, gaps }) {
 }
 
 // A reply wrapped in a code fence is unwrapped; the profile itself is Markdown.
+/** @param {string} text */
 const unfence = (text) => text.trim().replace(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/i, '$1').trim();
 
 // A profile edited by hand goes to the model as the base, so a rebuild updates it without losing what the user wrote.
@@ -182,6 +206,7 @@ const EDITED_NOTE = 'The current profile below was edited by hand. Keep its word
 // Reads the sources, asks the model once, and saves the profile on the project. Returns the saved profile.
 // onStep(text) tells the caller what is being done, for a busy line. keepEdits: a profile edited by hand is updated
 // from its own text instead of replaced, and stays marked as edited.
+/** @param {DataStore} store @param {Project} project @param {{ onStep?: (text: string) => void, keepEdits?: boolean }} [options] */
 export async function buildProfile(store, project, { onStep = () => {}, keepEdits = false } = {}) {
   if (!hasProfileSources(project)) throw new Error('Add a local folder, a repository or a website to the project first.');
   onStep('Reading README, commits and website…');

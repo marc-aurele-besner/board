@@ -1,4 +1,7 @@
+// @ts-check
 // What the full search page looks through, grouped by kind. The palette shows the first few matches; this is all of them.
+/** @import { Store, Module, IconName } from '../types/data' */
+/** @typedef {{ label: string, hint: string, iconName: IconName, done?: boolean, href?: string, run?: () => void }} SearchResult */
 import { statusOf } from './ui.js';
 import { taskMatcher } from './task-query.js';
 import { openShortcuts } from './shortcuts.js';
@@ -7,20 +10,25 @@ import { statusName } from './task-labels.js';
 export const SETTINGS = [['github', 'GitHub'], ['openrouter', 'OpenRouter'], ['google', 'Google Calendar'], ['wallets', 'Wallets'], ['uniswap', 'Uniswap'], ['telegram', 'Telegram'], ['analytics', 'Google Analytics'], ['search', 'Search consoles'], ['exchange', 'Exchange rates'], ['appearance', 'Appearance'], ['models', 'Models & tasks'], ['categories', 'Labels'], ['notifications', 'Notifications'], ['automations', 'Automations'], ['dev', 'Dev environment'], ['data', 'Data folder']];
 
 // [key, label, icon], in the order the page lists them.
+/** @type {[string, string, IconName][]} */
 export const GROUPS = [['tasks', 'Tasks', 'check-square'], ['projects', 'Projects', 'folder'], ['recipes', 'Recipes', 'chef-hat'], ['sections', 'Sections', 'home'], ['settings', 'Settings', 'settings']];
 
 // Every word has to appear somewhere in the text.
+/** @param {string} q @param {string} text */
 const wordsIn = (q, text) => {
   const haystack = text.toLowerCase();
   return q.split(/\s+/).filter(Boolean).every((w) => haystack.includes(w));
 };
 
 // Returns { tasks: [...], projects: [...], ... }. Each result is { label, hint, iconName, href } or has `run` instead of href.
+/** @param {Store} store @param {Module[]} modules @param {string} query @returns {Record<string, SearchResult[]>} */
 export function searchAll(store, modules, query) {
   const q = query.trim().toLowerCase();
+  /** @type {Record<string, SearchResult[]>} */
   const out = Object.fromEntries(GROUPS.map(([key]) => [key, []]));
   if (!q) return out;
   const projects = store.get('projects').projects;
+  /** @param {string | null} id */
   const projectName = (id) => projects.find((p) => p.id === id)?.name ?? 'Personal';
 
   // Tasks open in their own list, filtered by the same search, so the one found is easy to spot.
@@ -46,6 +54,7 @@ export function searchAll(store, modules, query) {
       out.recipes.push({ label: r.title, hint: (r.tags ?? []).join(', '), iconName: 'chef-hat', href: `#/kitchen?recipe=${r.id}` });
     }
   }
+  /** @param {string} label @param {string} hint @param {IconName} iconName @param {string | (() => void)} target */
   const section = (label, hint, iconName, target) => {
     if (wordsIn(q, label)) out.sections.push({ label, hint, iconName, ...(typeof target === 'function' ? { run: target } : { href: target }) });
   };
