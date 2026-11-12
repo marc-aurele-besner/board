@@ -1208,7 +1208,8 @@ async function runDev(store, flow, step, input, vars, ctx) {
   if (status.state === 'stopped') throw new Error(`${on} was stopped.`);
   const { links, data } = await devOutcome(store, { session: id, path: workPath || cwd, prompt: claude ? prompt : command, task });
   // The PR and issues go to the task even when Dev was not open to see them printed.
-  if (task && links.length) addTaskLinks(store, [task.id], links);
+  // The session has ended or waits for its user by now, so a PR moves the task on to review.
+  if (task && links.length) addTaskLinks(store, [task.id], links, { review: true });
   ctx.data = { ...ctx.data, ...data };
   ctx.note = `${ctx.dry ? 'Test: ran' : 'Ran'} in ${on}; it ${STATE_TEXT[status.state] ?? 'ended'}${data.pr ? `, PR #${data.pr.number}` : ''}.`;
   return outcomeText(data, { terminal: n, where, state: status.state });

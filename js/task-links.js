@@ -1,6 +1,7 @@
 // A task's GitHub issues and pull requests, and the links Dev finds in a terminal's output: when a task is handed
 // to claude and it opens a PR or an issue, the link printed in the terminal is added to the task.
-// A PR means claude is done: the task moves on to review.
+// A PR alone does not mean claude is done (it may still check CI, merge, or wait on a subagent): Tasks moves the task
+// on to review once claude also waits for its user. A caller that knows the session ended passes `review`.
 import { getIssue } from './github.js';
 import { toast } from './toast.js';
 import { statusOf } from './ui.js';
@@ -38,7 +39,7 @@ export const plainOutput = (data) => String(data)
 
 // Adds links to tasks, each only to tasks whose project lists its repo (any repo when the project lists none).
 // Titles are read from GitHub afterwards, when a token can see the repo.
-export function addTaskLinks(store, taskIds, links) {
+export function addTaskLinks(store, taskIds, links, { review = false } = {}) {
   const repos = (task) => store.get('projects').projects.find((p) => p.id === task.projectId)?.github?.repos ?? [];
   const added = [];
   store.update(COLLECTION, (d) => {
@@ -60,7 +61,7 @@ export function addTaskLinks(store, taskIds, links) {
     }
   });
   const prs = added.filter((a) => a.link.kind === 'pr');
-  if (prs.length) moveToReview(store, prs.map((a) => a.task.id));
+  if (review && prs.length) moveToReview(store, prs.map((a) => a.task.id));
   for (const { task, link } of added) {
     toast(`${link.kind === 'pr' ? 'PR' : 'Issue'} #${link.number} added to “${task.text}”`);
     getIssue(link.repo, link.number).then(({ title }) => title && store.update(COLLECTION, (d) => {
