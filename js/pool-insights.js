@@ -1,4 +1,3 @@
-// @ts-check
 // AI insights on the Liquidity Pools tab: a read of the open positions, in range and out, with what to adjust.
 // The last few reads are saved in the pools collection, so they can be opened again after a reload.
 import { h, icon, money, notice, uid } from './ui.js';

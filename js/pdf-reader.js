@@ -1,4 +1,3 @@
-// @ts-check
 // Reads a PDF in the browser with pdf.js. Text is taken when the PDF has a text layer; scanned
 // pages are drawn to images so a vision model can read them.
 const LIB = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';

@@ -1,4 +1,3 @@
-// @ts-check
 // In-memory state for every collection, with debounced, serialized saves to disk.
 // Another tab or browser may have the same folder open, so each save first merges what that one saved, and sync()
 // brings its changes in between saves.

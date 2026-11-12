@@ -1,4 +1,3 @@
-// @ts-check
 // Keyboard shortcuts that work outside a field, and the sheet that lists them ("?").
 import { h } from './ui.js';
 import { openDialog } from './modal.js';

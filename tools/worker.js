@@ -1,4 +1,3 @@
-// @ts-check
 // The runners: one local worker that does the board's background work on a schedule (mail, calendar, DeFi, site
 // checks, Telegram, Cron flows…) and writes the results into the data folder, whether or not a board tab is open.
 // The board only reads and renders those files; its 3 s disk sync brings them into an open tab.

@@ -1,4 +1,3 @@
-// @ts-check
 // Cron flows: a schedule that starts a chain of steps (gather data → AI → task or notification).
 // Each step gets the previous step's output as {{input}}. The runners (tools/jobs/cron.js) run due flows, whether or not the board is open.
 import { uid, now, todayISO, statusOf } from './ui.js';

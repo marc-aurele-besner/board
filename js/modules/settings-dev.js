@@ -1,4 +1,3 @@
-// @ts-check
 // Settings → Dev environment: command presets, then each project's folder and the command its tasks go to Dev
 // with. The same fields as a project's page, in one list, so a preset is picked instead of pasting a command again.
 import { h, icon, notice, uid } from '../ui.js';

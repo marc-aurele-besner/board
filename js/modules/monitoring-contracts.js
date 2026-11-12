@@ -1,4 +1,3 @@
-// @ts-check
 // Monitoring → Contracts: what happened on the smart contracts saved in Settings during the period. Transactions come
 // from Etherscan when a key is set; events come from the chain's node, as far back as it will search.
 import { h, icon, empty, notice, progress, refreshIcon, copyable } from '../ui.js';

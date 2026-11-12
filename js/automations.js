@@ -1,4 +1,3 @@
-// @ts-check
 // Automations: site checks that run on their own, and rules that turn what they find into tasks.
 // A task made by a rule carries `auto` (which rule) and `autoRef` (what it is about), so it is flagged in Tasks
 // and a rule never makes a second task while its first one is still open.
@@ -201,8 +200,8 @@ export async function checkSite(store, project, parts = ['health', 'ssl', 'domai
   const before = siteData(store, project.id);
   const wasUp = before.health ? before.health.status !== 'down' : true;
   store.update('tools', (d) => {
-    // any: each lookup's own shape is copied across by key.
-    const s = /** @type {Site & Record<LookupKey, any>} */ (d.sites[project.id] ??= {});
+    const s = /** @type {Site & Record<LookupKey, any>} */ (d.sites[project.id] ??= {}); // any: each lookup's own shape is copied across by key
+
     // A lookup that failed keeps the last good answer, so one bad moment does not erase a known expiry date.
     for (const key of /** @type {LookupKey[]} */ (['ssl', 'domain', 'meta', 'dns', 'crawl'])) {
       if (!found[key]) continue;

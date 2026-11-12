@@ -1,4 +1,3 @@
-// @ts-check
 // Monitoring → Board runners: the processes `bun start` runs (the static server, the command runner and the worker),
 // and the status of each job the worker runs. Settings → Runners is where the jobs are switched and timed.
 import { h, icon, refreshIcon, empty } from '../ui.js';

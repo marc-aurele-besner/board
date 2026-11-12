@@ -1,4 +1,3 @@
-// @ts-check
 import { h, icon, money, monthKey, todayISO, statusOf, empty, notice } from '../ui.js';
 import { projectIcon, labelsOf, labelColor } from './projects.js';
 import { repoStats } from '../github.js';
@@ -443,8 +442,7 @@ function draw(root, store) {
         githubPanel(store, projects))));
 }
 
-/** @satisfies {import('../../types/data').Module} */
-export default {
+export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'home',
   title: 'Board',
   icon: 'home',
@@ -453,4 +451,4 @@ export default {
   readsRunners: true,
   defaults: {},
   render: draw,
-};
+});

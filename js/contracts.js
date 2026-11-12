@@ -1,4 +1,3 @@
-// @ts-check
 // Smart contracts saved in Settings → Smart contracts: reading them through the chain's node, sending
 // transactions through the browser wallet (the board never holds a key), and reading their recent activity.
 import { rpc, rpcCall, etherscan, nodeUrls } from './uniswap.js';

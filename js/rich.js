@@ -1,4 +1,3 @@
-// @ts-check
 // Shows a description the way Notion does: links become link chips, "- " lines become bullets,
 // and "[ ]" / "[x]" lines become checkboxes. The text itself is never changed; the view is only rendered.
 import { h, icon } from './ui.js';

@@ -1,4 +1,3 @@
-// @ts-check
 import { h, uid, now, todayISO, empty, icon, notice, progress } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { ask, parseJson } from '../ai.js';
@@ -904,8 +903,7 @@ function draw(root, store) {
   root.replaceChildren(selected ? detailPane(store, selected) : gallery(store, recipes));
 }
 
-/** @satisfies {import('../../types/data').Module} */
-export default {
+export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'kitchen',
   title: 'Kitchen',
   icon: 'chef-hat',
@@ -921,4 +919,4 @@ export default {
     view.logOpen = false;
     view.adding = false;
   },
-};
+});

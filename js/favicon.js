@@ -1,4 +1,3 @@
-// @ts-check
 // Finds a project's icon from its website. The site's own icon files are checked first, largest image wins.
 // If the site has none, a public favicon service is asked. Results are cached per site.
 import { h } from './ui.js';

@@ -1,4 +1,3 @@
-// @ts-check
 // Proves the typedefs in types/data/ match real data: each fixture is a sanitized copy of a data folder's file, and
 // assigning it to its type fails the type check when the two drift apart. Never imported by the board.
 /** @import { Collections, WorkerCollections } from './data' */

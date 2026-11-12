@@ -1,4 +1,3 @@
-// @ts-check
 // Local command runner for the Dev section: `bun run terminal` (or `node tools/terminal.js`), or with the board
 // through `bun start`. It runs a command in the user's shell and streams its output back as it comes, and lists
 // folders, reads and searches files for the Dev file explorer and Search (read only), and runs git for Dev's Source Control. It also

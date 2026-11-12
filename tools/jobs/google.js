@@ -1,4 +1,3 @@
-// @ts-check
 // Renews every Google sign-in's access token before it expires, so the board's tabs and the other jobs always find a
 // live one in google.json. Only this job renews: a tab that finds a token expired asks it (POST /run/google { key }).
 // A sign-in Google refuses for good (invalid_grant) is marked removed, and Settings shows "Connect again".

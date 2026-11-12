@@ -1,4 +1,3 @@
-// @ts-check
 // Gives back the git worktree a Dev session made for a task once every task holding it is completed: the command
 // runner stops its session and removes it. Runs when todos.json changes (a task completed in any tab) and every
 // 5 minutes. It asks the runner over HTTP with a local Origin, which the runner requires.

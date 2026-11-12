@@ -1,4 +1,3 @@
-// @ts-check
 // Short messages at the bottom of the screen. One with `undo` offers to take the action back for a few seconds.
 import { h } from './ui.js';
 

@@ -1,4 +1,3 @@
-// @ts-check
 // Liquidity Pools without the DOM: reading Uniswap v3 and v4 positions from each chain's node, their fee APR from
 // the pools' swaps, and the fees they collected (from the node and Etherscan). Everything read is saved in pools.json,
 // which DeFi → Positions renders:

@@ -1,4 +1,3 @@
-// @ts-check
 // Reads every shown calendar into calendar.json: the window from the start of last month to three months ahead, or the
 // range a Calendar page outside it asks for (POST /run/calendar { from, to }).
 /** @import { DataStore } from '../../types/data' */

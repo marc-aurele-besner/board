@@ -1,4 +1,3 @@
-// @ts-check
 // Dev without the DOM: the runner's address, command presets, the command a project's tasks run, and starting a
 // terminal through the command runner. The Dev section and the runners (Cron's Run in Dev step) both use it.
 /** @import { DataStore, Project } from '../types/data' */

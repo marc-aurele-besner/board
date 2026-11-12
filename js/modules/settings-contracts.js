@@ -1,4 +1,3 @@
-// @ts-check
 // Settings → Smart contracts: the contracts Tools reads and writes and Monitoring follows, each with its chain,
 // address and ABI.
 import { h, icon, notice, copyable, uid } from '../ui.js';

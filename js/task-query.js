@@ -1,4 +1,3 @@
-// @ts-check
 // A task search that doubles as a filter. Plain words must all appear in the title, description, category or
 // project name. Tokens narrow further: #project (or #personal), !high, is:doing (or is:open), cat:design, due:today.
 /** @import { Task } from '../types/data' */

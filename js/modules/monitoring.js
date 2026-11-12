@@ -1,4 +1,3 @@
-// @ts-check
 import { h, icon, money, empty, notice } from '../ui.js';
 import { openDialog } from '../modal.js';
 import { barChart, legend } from '../chart.js';
@@ -675,8 +674,7 @@ function draw(root, store) {
       body));
 }
 
-/** @satisfies {import('../../types/data').Module} */
-export default {
+export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'monitoring',
   title: 'Monitoring',
   icon: 'activity',
@@ -704,4 +702,4 @@ export default {
     view.period = PERIODS.some(([k]) => k === p.period) ? p.period : '7';
     contractsActivityRestore(p.contract);
   },
-};
+});

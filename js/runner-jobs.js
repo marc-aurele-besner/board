@@ -1,4 +1,3 @@
-// @ts-check
 // The jobs the local worker (tools/worker.js) runs, shared by the worker and Settings → Runners.
 // `every` is the default interval in minutes. settings.json `runners.<id>` holds the user's { every, on }.
 // No DOM here: the worker imports this file under Node.

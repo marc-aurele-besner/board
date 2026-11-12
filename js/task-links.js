@@ -1,4 +1,3 @@
-// @ts-check
 // A task's GitHub issues and pull requests, and the links Dev finds in a terminal's output: when a task is handed
 // to claude and it opens a PR or an issue, the link printed in the terminal is added to the task.
 // A PR alone does not mean claude is done (it may still check CI, merge, or wait on a subagent): Tasks moves the task

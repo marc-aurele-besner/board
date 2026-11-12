@@ -1,4 +1,3 @@
-// @ts-check
 // Settings → Runners: the local worker that does the background work, its data folder, and each job's switch,
 // interval, last outcome and Run now.
 import { h, icon, refreshIcon, empty } from '../ui.js';

@@ -1,4 +1,3 @@
-// @ts-check
 // DeFi → Wallets without the DOM: native and token balances of the wallets on every enabled chain, saved in
 // pools.json `balances: { <chainId>: { at, rows } }`, the last good read of each chain, and `balancesRead: { at,
 // pending, failed: [{ name, error, at }] }`, the state of the last read. The page and the runners both call it.

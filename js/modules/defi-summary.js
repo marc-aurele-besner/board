@@ -1,4 +1,3 @@
-// @ts-check
 // DeFi → Summary: the first tab. What every other tab holds in one place: total liquidity across wallets, LP
 // positions and Aave, what needs attention, and the main lines of each tab. It reads nothing itself: each tab's
 // module reads (or shows its last saved read) and hands its totals here.

@@ -1,4 +1,3 @@
-// @ts-check
 // What the claude sessions Dev ran for tasks actually used: models, provider, effort, tokens, cost and time, read by
 // the command runner from Claude Code's transcripts (tools/usage.js). Each session's worktree gets a record in
 // usage.json (`dev`, by worktree name) that names its tasks, so the record outlives the task's worktree entry,

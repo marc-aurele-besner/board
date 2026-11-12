@@ -1,4 +1,3 @@
-// @ts-check
 // USD to CAD exchange rates, one per day. Weekends and holidays use the last published rate. A past day's rate
 // never changes, so it is kept for good in fx.json: { days: { "YYYY-MM-DD": { rate, date } }, source }. Several free
 // providers, none needing an account or key, answer the same question: the chosen one is asked first, and the others

@@ -1,4 +1,3 @@
-// @ts-check
 // Small DOM and formatting helpers. No framework.
 /** @import { Child } from '../types/ui' */
 

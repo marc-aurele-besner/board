@@ -1,4 +1,3 @@
-// @ts-check
 // Which model an AI task uses: the one pinned to it in Settings → Models & tasks, else the default. No DOM, so the
 // runners' Cron steps read it too.
 /** @import { DataStore } from '../types/data' */

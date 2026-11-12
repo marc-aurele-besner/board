@@ -1,4 +1,3 @@
-// @ts-check
 // The git worktrees Dev sessions made for tasks (task.worktrees: { name, cwd, session }). Once every task that holds
 // one is completed, the runners ask the command runner to stop its session and remove it, wherever the tasks were
 // completed from.

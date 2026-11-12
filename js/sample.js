@@ -1,4 +1,3 @@
-// @ts-check
 // "Explore with sample data": a data folder that lives in memory, filled with placeholder content.
 // It has the few methods of a real folder handle that storage.js and store.js call, so the rest of the app cannot tell.
 // Nothing is written to disk, and it is gone when the page reloads.

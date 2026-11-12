@@ -1,4 +1,3 @@
-// @ts-check
 // The DeFi reads: Liquidity Pools positions and fee APR, their collect history, wallet balances and Aave accounts,
 // all into pools.json, plus an hourly snapshot into defi-snapshots.json. Public nodes limit bursts, so the four reads
 // run one after another, never side by side: each waits in one queue. A failed read keeps the last good one.

@@ -1,4 +1,3 @@
-// @ts-check
 // The board's side of the runners (tools/worker.js): their heartbeat, read from runners.json in the data folder,
 // and their localhost API for Run now and the data folder's path.
 // runners.json is not a store collection: it changes every 30 s, and the page should not redraw for that. It is read

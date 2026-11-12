@@ -1,4 +1,3 @@
-// @ts-check
 // Tools → Contracts: call a saved contract's view functions through the chain's node, and send its other functions
 // as transactions through the browser wallet.
 import { h, icon, empty, notice, copyable } from '../ui.js';

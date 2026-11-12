@@ -1,4 +1,3 @@
-// @ts-check
 // The worker's localhost API: its status, Run now, and where the data folder is. It answers only the board's pages,
 // with the same checks as the terminal runner: the Origin check keeps other websites out, the Host check keeps out
 // DNS rebinding.

@@ -1,4 +1,3 @@
-// @ts-check
 // Runs each job on its interval and keeps runners.json, the heartbeat the board reads.
 // A job is { id, timeout, delay, loop, quiet, setup(store, { kick }), run(ctx) }; `every` comes from settings.json runners.<id> when set there.
 // A job still running at its next tick is skipped, not queued. A failure doubles the wait, up to 30 minutes, and one

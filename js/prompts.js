@@ -1,4 +1,3 @@
-// @ts-check
 // The system prompts behind every AI feature. Settings → Prompts can replace any of them; an empty override means the default.
 // {{name}} placeholders are filled at call time with values the feature knows (the currency, the categories, ...).
 /** @import { DataStore } from '../types/data' */

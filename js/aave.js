@@ -1,4 +1,3 @@
-// @ts-check
 // Aave v3 lending and borrowing positions of the DeFi wallets, read straight from each chain's node: the account
 // totals and health factor from the Pool, and each asset's supply and debt from Aave's data provider. Read-only.
 import { encodeCall, decodeArgs } from './abi.js';

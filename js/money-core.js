@@ -1,4 +1,3 @@
-// @ts-check
 // Money without the DOM: budgets gone over and recurring due dates. The Money section and the runners'
 // monitoring job (budgets, recurring-bill tasks) both read them.
 import { convert, knownRate, fetchDayRate } from './fx.js';

@@ -1,4 +1,3 @@
-// @ts-check
 import { h, icon, refreshIcon, money, empty, notice, uid, todayISO, copyable, CURRENCIES } from '../ui.js';
 import { knownRate, fetchDayRate } from '../fx.js';
 import { barChart, lineChart, legend } from '../chart.js';
@@ -2466,8 +2465,7 @@ function draw(root, store) {
   keepPickerFocus(root);
 }
 
-/** @satisfies {import('../../types/data').Module} */
-export default {
+export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'positions',
   title: 'Liquidity Pools',
   short: 'DeFi',
@@ -2528,4 +2526,4 @@ export default {
     view.detail = typeof p.pos === 'string' && p.pos ? p.pos : null;
     view.detailFrom = p.from === 'fees' ? 'fees' : 'positions';
   },
-};
+});

@@ -1,4 +1,3 @@
-// @ts-check
 // Reads a line of text as a task: "fix the footer #atlas !high friday", or as a Money entry: "-42.50 groceries".
 // Used by the search palette and by tasks sent through Telegram, so both understand the same words.
 /** @import { Task } from '../types/data' */

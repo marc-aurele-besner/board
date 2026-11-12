@@ -1,4 +1,3 @@
-// @ts-check
 // DeFi → Lending / Borrowing without the DOM: each wallet's Aave v3 supply, debt and health factor on every enabled
 // chain that has Aave, saved in pools.json `lending: { <chainId>: { at, rows } }` and `lendingRead`.
 import { CHAINS, chainSettings } from '../uniswap.js';

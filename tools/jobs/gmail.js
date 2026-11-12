@@ -1,4 +1,3 @@
-// @ts-check
 // Reads every connected Gmail account's new mail into inbox.json. Tokens come from google.json, renewed by the
 // google job. One email's body is still read by the board when it is opened (js/gmail.js readGmail).
 /** @import { Job } from '../../types/runner' */

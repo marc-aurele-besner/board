@@ -1,4 +1,3 @@
-// @ts-check
 // Settings sections for Google Calendar accounts, Telegram, Google Analytics, the search consoles, Resend, Gmail, notifications and automations.
 import { h, icon, empty, notice, statusOf, copyable } from '../ui.js';
 import { editText, pickChip } from '../inline.js';

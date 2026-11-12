@@ -1,4 +1,3 @@
-// @ts-check
 import { h } from './ui.js';
 import { CHAINS, readLink, hasVersion } from './uniswap.js';
 /** @import { Chain } from '../types/uniswap' */

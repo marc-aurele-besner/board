@@ -1,4 +1,3 @@
-// @ts-check
 // Telegram: messages sent to your own bot become tasks, and notifications can be sent back to the same chat.
 // The runners (tools/jobs/telegram.js) listen for new messages all the time; the board only reads them during setup.
 // The token goes only to api.telegram.org.

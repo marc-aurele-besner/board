@@ -1,4 +1,3 @@
-// @ts-check
 // Images pasted or dropped on the board: on a task, or into a Dev terminal for claude to read.
 
 // The kinds claude reads, and the runner saves.

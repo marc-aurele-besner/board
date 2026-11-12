@@ -1,4 +1,3 @@
-// @ts-check
 // Google, read-only, straight from the browser. Every sign-in (Gmail and Calendar per account, Analytics and Search
 // Console together) is kept in google.json in the data folder, with a refresh token, so any browser profile that opens
 // the folder is connected; the runners renew each access token before it expires. Nothing is kept in the browser.

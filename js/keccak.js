@@ -1,4 +1,3 @@
-// @ts-check
 // Keccak-256, the hash Ethereum uses. Uniswap v4 names each pool by the hash of its key, and nothing on chain
 // returns that id from a position, so the board computes it. BigInt lanes: slow, but it hashes a few keys per read.
 

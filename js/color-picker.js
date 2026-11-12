@@ -1,4 +1,3 @@
-// @ts-check
 // A colour picker for labels and projects: a swatch button that opens a popover with a curated palette, a hex
 // field and the system picker for anything else. The popover previews the colour on the item's own pill, so
 // the choice is seen as it will appear.

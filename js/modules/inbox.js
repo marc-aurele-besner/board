@@ -1,4 +1,3 @@
-// @ts-check
 // Inbox: every email sent and received through Resend and Gmail, for every project that has a key or an account.
 // Laid out like a mail client: received mail lands in the Inbox; sent, starred and archived mail have their own folders.
 import { h, icon, refreshIcon, notice, statusOf } from '../ui.js';
@@ -769,8 +768,7 @@ function draw(root, store) {
 /** @param {Store} store */
 export const unreadCount = (store) => store.get(COLLECTION).emails.filter((e) => FOLDERS[0][3](e) && e.unread).length;
 
-/** @satisfies {import('../../types/data').Module} */
-export default {
+export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'inbox',
   title: 'Inbox',
   icon: 'mail',
@@ -797,4 +795,4 @@ export default {
     view.open = p.email || '';
     view.limit = STEP;
   },
-};
+});

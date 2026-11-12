@@ -1,4 +1,3 @@
-// @ts-check
 // The worker and a board tab write the same file: each changes its own field, and both changes must survive.
 // The tab is played the way js/store.js saves: read, change in memory, then merge what is on disk and write.
 // `node tools/check-merge.js`: exits 1 when a change is lost.

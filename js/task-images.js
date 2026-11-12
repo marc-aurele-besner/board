@@ -1,4 +1,3 @@
-// @ts-check
 // A task's images: pasted, dropped or picked, kept in the data folder (tasks/<task id>-<id>.<ext>) and listed on the
 // task as images: [{ path, name, type }]. A Dev session on the task hands them to claude as files it can read.
 /** @import { Store, Task, TaskImage } from '../types/data' */

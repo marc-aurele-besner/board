@@ -1,4 +1,3 @@
-// @ts-check
 // Reads each project's Resend emails into inbox.json. Node is not bound by CORS, so it calls api.resend.com
 // directly; the board asks this job for one email's body and for a key check.
 /** @import { Job } from '../../types/runner' */

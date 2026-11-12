@@ -1,4 +1,3 @@
-// @ts-check
 // Google Calendar, read-only. Like Gmail, each account signs in on its own, so several accounts can be shown side by
 // side. Sign-ins are kept in google.json and renewed by the runners (see js/google-core.js).
 // settings.json keeps gcal: { accounts: [{ email, projectId, labelId, calendars: [{ id, name, color, on, projectId, labelId }] }] }.

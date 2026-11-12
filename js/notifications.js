@@ -1,4 +1,3 @@
-// @ts-check
 // Notifications: one list under the bell for deadlines, automated tasks, site checks, Telegram and pools.
 // They are saved in notifications.json. Each kind can be switched off, or also sent to Telegram, in Settings.
 import { h, icon, empty } from './ui.js';

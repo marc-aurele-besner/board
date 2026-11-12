@@ -1,4 +1,3 @@
-// @ts-check
 // The board's watch round, every 5 minutes: deadlines and budgets announced under the bell, site checks (health on
 // the Tools interval; SSL, domain, DNS and crawl daily), status pages when due, and the rules that turn results into
 // tasks. Tools → Check all now runs it with { parts } (sites) or { providers: true } (status pages).

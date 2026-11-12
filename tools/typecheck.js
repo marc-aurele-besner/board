@@ -1,4 +1,3 @@
-// @ts-check
 // Runs the type check of the browser code (jsconfig.json) and of the runner (tools/jsconfig.json).
 // The runner imports modules from js/, so its program also holds them, but without the DOM types they are checked
 // against in the browser config. Their errors there belong to the browser check, so only errors in tools/ count here.

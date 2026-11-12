@@ -1,4 +1,3 @@
-// @ts-check
 // Projects without the DOM: a project's shape, and finding or creating one by name. Tasks, the palette, Telegram (in
 // the runners too) create a project from a #tag through createProject.
 /** @import { Project, DataStore } from '../types/data' */

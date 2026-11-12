@@ -1,4 +1,3 @@
-// @ts-check
 // npm packages tied to projects: an npm organization (or user) and/or single packages. The runners
 // (tools/jobs/npm.js) read them every hour into npm.json:
 // { orgs: { name: { at, packages: [name], error } }, packages: { name: { at, version, modified, deprecated, weekly, error } } }.

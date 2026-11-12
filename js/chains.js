@@ -1,4 +1,3 @@
-// @ts-check
 // Every chain the board knows: the built-in ones (the chains the LP tab reads) and the ones added in
 // Settings → Blockchains. Built-in nodes stay saved under settings.uniswap.chains, where they were first kept.
 import { CHAINS, chainSettings, savedNode, rpc, nodeUrls } from './uniswap.js';

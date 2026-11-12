@@ -1,4 +1,3 @@
-// @ts-check
 // What the full search page looks through, grouped by kind. The palette shows the first few matches; this is all of them.
 /** @import { Store, Module, IconName } from '../types/data' */
 /** @typedef {{ label: string, hint: string, iconName: IconName, done?: boolean, href?: string, run?: () => void }} SearchResult */

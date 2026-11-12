@@ -1,4 +1,3 @@
-// @ts-check
 // Notion-style inline editing: click a value to edit it where it is shown, no form.
 // Each control calls onSave/onPick with the new value; the store then re-renders the page.
 import { h, icon } from './ui.js';

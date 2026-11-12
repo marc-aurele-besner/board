@@ -1,4 +1,3 @@
-// @ts-check
 // File System Access API wrapper: one folder holds one JSON file per collection.
 // The folder handle is remembered in IndexedDB so the user only re-grants permission.
 

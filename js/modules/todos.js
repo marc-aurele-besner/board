@@ -1,4 +1,3 @@
-// @ts-check
 /** @import { Store, Task, TaskLink, Project, ProjectLabel, IconName } from '../../types/data' */
 /** @import { RunnerStatus } from '../../types/terminal' */
 /** @import { PickOption } from '../inline.js' */
@@ -1759,8 +1758,7 @@ function draw(root, store) {
           listBody))));
 }
 
-/** @satisfies {import('../../types/data').Module} */
-export default {
+export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'todos',
   title: 'Tasks',
   icon: 'check-square',
@@ -1796,4 +1794,4 @@ export default {
         ? { key, dir: dir === 'desc' ? 'desc' : 'asc' }
         : { ...DEFAULT_SORT };
   },
-};
+});

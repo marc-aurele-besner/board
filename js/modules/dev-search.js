@@ -1,4 +1,3 @@
-// @ts-check
 // Dev's Search, as in VS Code or Cursor: the lines holding a text in the workspace's files, grouped by file, with
 // match case, whole word and regular expression toggles, and files to include or exclude. A match opens the file
 // at its line. git grep runs through the runner on this machine; ignored files and claude's worktrees are left out.

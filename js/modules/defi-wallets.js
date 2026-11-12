@@ -1,4 +1,3 @@
-// @ts-check
 // DeFi → Wallets: the native coin and ERC-20 balances of every DeFi wallet, on each chain read for Liquidity Pools.
 // Drawn inside the Liquidity Pools section, which owns the tab bar, the currency switch and pools.json.
 import { h, icon, refreshIcon, notice, copyable } from '../ui.js';

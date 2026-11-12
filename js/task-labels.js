@@ -1,4 +1,3 @@
-// @ts-check
 // Task statuses and category colours, with the names and colours set in Settings → Labels.
 // The seven status keys are fixed: search (is:), the board columns, the sort order and automations rely on them.
 // Only a status's name, colour, place in the pickers and whether pickers offer it can change. todos.json keeps the

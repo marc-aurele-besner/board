@@ -1,4 +1,3 @@
-// @ts-check
 // DeFi → Lending: the Aave v3 positions of every DeFi wallet, per chain: what is supplied and borrowed, at what rate,
 // and how far each account is from liquidation. Drawn inside the Liquidity Pools section, like Wallets.
 import { h, icon, refreshIcon, notice } from '../ui.js';
