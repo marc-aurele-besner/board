@@ -55,8 +55,9 @@ function live(store, r) {
 }
 
 let busy = false;
-// Reads the usage of the live records from the runner and saves what changed. Quiet when the runner is down.
-export async function refreshDevUsage(store) {
+// Reads the usage of the live records and saves what changed. `read` takes [{ name, cwd }] and answers by name; the
+// runners read the transcripts themselves (tools/usage.js), without asking the command runner.
+export async function refreshDevUsage(store, read = (list) => worktreeUsage(runnerOf(store), list)) {
   if (busy) return;
   rememberWorktrees(store, heldWorktrees(store));
   // Records saved before the cost was split into included and extra are read once more for the split.
@@ -66,7 +67,7 @@ export async function refreshDevUsage(store) {
   busy = true;
   try {
     const asked = records.slice(0, BATCH);
-    const found = await worktreeUsage(runnerOf(store), asked.map(({ name, cwd }) => ({ name, cwd })));
+    const found = await read(asked.map(({ name, cwd }) => ({ name, cwd })));
     const changed = Object.entries(found).filter(([name, u]) => FIELDS.some((k) => JSON.stringify(u[k]) !== JSON.stringify(devUsage(store)[name]?.[k])));
     // Transcripts Claude has since deleted can't be split: marked, so they are not asked for again.
     const gone = asked.filter((r) => r.billing === undefined && !found[r.name] && !live(store, r)).map((r) => r.name);
@@ -78,8 +79,6 @@ export async function refreshDevUsage(store) {
       }
       for (const name of gone) if (d.dev?.[name]) d.dev[name].billing = null;
     });
-  } catch {
-    // The runner is not running: the next round asks again.
   } finally {
     busy = false;
   }

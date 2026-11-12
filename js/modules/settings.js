@@ -421,7 +421,7 @@ function exchangeCard(store) {
             : null),
 
         h('h3', null, 'Stored rates'),
-        h('p', { class: 'muted small' }, 'Daily rates are kept in this browser so past days are not fetched again.'),
+        h('p', { class: 'muted small' }, 'Daily rates are kept in fx.json in the data folder, so past days are not fetched again. The runners read them.'),
         h('div', { class: 'svc-actions' },
           h('button', {
             type: 'button',

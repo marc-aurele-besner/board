@@ -231,7 +231,7 @@ export function searchTab(store, view, w) {
   if (!sites.length) return h('div', { class: 'stack-lg' }, engines, empty('No project has a website yet. Add one on a project page.'));
   const p = pickedSite(view, sites);
   const b = dayBuckets(w);
-  const report = (x) => (engine === 'google' ? searchReport(x.website, b.from, b.to) : bingReport(bingKey, x.website, b.from, b.to, settings.bing?.relay));
+  const report = (x) => (engine === 'google' ? searchReport(x.website, b.from, b.to) : bingReport(store, x.website, b.from, b.to));
   if (!p) return searchAll(store, view, sites, engine, engines, b, report);
   const key = `${engine}:${p.id}:${b.from}:${b.to}`;
   const entry = load(store, key, () => report(p));

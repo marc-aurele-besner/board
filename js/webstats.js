@@ -1,12 +1,17 @@
 // Visitors and search numbers for a project's website: Google Analytics, Google Search Console and Bing Webmaster Tools.
 // Each function returns { labels, series..., tables } for one site over a range of days (YYYY-MM-DD, both included).
 import { googleFetch } from './google.js';
+import { runJob, workerCall } from './runners.js';
 
 const GA = 'https://analyticsdata.googleapis.com/v1beta';
 const GSC = 'https://www.googleapis.com/webmasters/v3';
-// Bing sends no CORS header, so requests go through tools/relays.js running on this machine.
-export const BING_RELAY = 'http://127.0.0.1:8417';
-const BING_PATH = '/webmaster/api.svc/json';
+// Bing sends no CORS header, so a web page cannot read its answers. The runners (tools/jobs/webstats.js) read each
+// site's Bing data every 6 hours into webstats.json: { bing: { <website>: { at, traffic, queries, pages, error } } }.
+const BING = 'https://ssl.bing.com/webmaster/api.svc/json';
+export const WEBSTATS = 'webstats';
+export const WEBSTATS_DEFAULTS = { bing: {} };
+// Query and page rows are weekly and pile up; the newest are kept.
+const BING_ROWS = 3000;
 const post = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const num = (v) => Number(v ?? 0);
 
@@ -87,13 +92,12 @@ const bingDate = (value) => {
   return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : '';
 };
 
-async function bing(method, key, website, relay) {
-  const base = (relay || BING_RELAY).replace(/\/+$/, '');
+async function bing(method, key, website) {
   let res;
   try {
-    res = await fetch(`${base}${BING_PATH}/${method}?siteUrl=${encodeURIComponent(website)}&apikey=${encodeURIComponent(key)}`);
+    res = await fetch(`${BING}/${method}?siteUrl=${encodeURIComponent(website)}&apikey=${encodeURIComponent(key)}`);
   } catch {
-    throw new Error(`Could not reach the Bing relay at ${base}. Start it with: bun start`);
+    throw new Error('Could not reach Bing. Check the connection.');
   }
   // Bing answers a bad key with 400 and ErrorCode 3 (InvalidApiKey).
   const body = await res.json().catch(() => null);
@@ -102,17 +106,50 @@ async function bing(method, key, website, relay) {
   return body?.d ?? [];
 }
 
-export const checkBing = async (key, relay) => {
-  const sites = await bing('GetUserSites', key, '', relay);
+// Runners side of Settings' key check.
+export const checkBingKey = async (key) => {
+  const sites = await bing('GetUserSites', key, '');
   return `Connected. ${sites.length} site${sites.length === 1 ? '' : 's'} found.`;
 };
 
-export async function bingReport(key, website, from, to, relay) {
-  const [traffic, queries, pages] = await Promise.all([
-    bing('GetRankAndTrafficStats', key, website, relay),
-    bing('GetQueryStats', key, website, relay),
-    bing('GetPageStats', key, website, relay),
-  ]);
+// Settings → Bing: checks a key through the runners.
+export const checkBing = async (key) => (await workerCall('POST', '/bing/check', { key }, 30000)).text;
+
+const newest = (rows) => [...rows].sort((a, b) => bingDate(b.Date).localeCompare(bingDate(a.Date))).slice(0, BING_ROWS);
+
+// Reads Bing's data for each website into webstats.json. A failed read keeps the last one. Runners only.
+export async function readBing(store, key, websites) {
+  const errors = [];
+  for (const website of websites) {
+    try {
+      const [traffic, queries, pages] = await Promise.all([
+        bing('GetRankAndTrafficStats', key, website),
+        bing('GetQueryStats', key, website),
+        bing('GetPageStats', key, website),
+      ]);
+      store.save(WEBSTATS, (d) => {
+        d.bing = { ...d.bing, [website]: { at: Date.now(), traffic, queries: newest(queries), pages: newest(pages), error: null } };
+      });
+    } catch (err) {
+      errors.push(`${website}: ${err.message}`);
+      store.save(WEBSTATS, (d) => {
+        d.bing = { ...d.bing, [website]: { ...d.bing?.[website], error: err.message } };
+      });
+    }
+  }
+  return errors;
+}
+
+// A site's Bing numbers for a range, from webstats.json. A site the file does not hold yet is asked of the runners.
+export async function bingReport(store, website, from, to) {
+  let raw = store.get(WEBSTATS)?.bing?.[website];
+  if (!raw?.at) {
+    await runJob('webstats', { websites: [website] });
+    await store.sync();
+    raw = store.get(WEBSTATS)?.bing?.[website];
+  }
+  if (!raw?.at) throw new Error(raw?.error || 'Bing has no data for this site yet.');
+  const { traffic = [], queries = [], pages = [] } = raw;
   const days = {};
   for (const r of traffic) {
     const d = bingDate(r.Date);

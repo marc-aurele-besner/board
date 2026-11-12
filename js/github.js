@@ -1,12 +1,20 @@
-// Open issue and PR counts for public GitHub repos, read from the public REST API.
-// Unauthenticated requests are limited to 60 per hour per IP, and each repo costs two
-// requests. Results are cached in memory and in localStorage for 15 minutes.
+// Open issue and PR counts for GitHub repos, read from the REST API. The runners (tools/jobs/github.js) read every
+// project's repos every 15 minutes into github.json: { repos: { "owner/repo": { at, issues, prs, items, error } } },
+// `items` being the newest 30 open issues and PRs. The board reads that file and asks the runners for a repo it lacks.
+// Unauthenticated requests are limited to 60 per hour per IP, and each repo costs three.
 
 import { h, icon } from './ui.js';
+import { runJob } from './runners.js';
 
-const TTL_MS = 15 * 60 * 1000;
+export const GITHUB = 'github';
+export const GITHUB_DEFAULTS = { repos: {} };
+const ITEMS_KEPT = 30;
 const API = 'https://api.github.com';
-const memory = new Map(); // "owner/repo" -> { status: 'loading' | 'ok' | 'error', issues?, prs?, error?, at? }
+let store = null;
+export const useGithubStore = (next) => {
+  store = next;
+};
+const saved = (repo) => store?.get(GITHUB)?.repos?.[repo] ?? null;
 // Tokens from settings: a default token for any repo, and one token per organization. An organization's
 // token is used for its repos (private ones included); the default covers the rest.
 let config = { token: '', orgs: {} };
@@ -43,13 +51,13 @@ export function configure(github) {
     token: github?.token ?? '',
     orgs: Object.fromEntries((github?.orgs ?? []).filter((o) => o.org && o.token).map((o) => [o.org.toLowerCase(), o.token])),
   };
-  memory.clear();
+  // Earlier versions cached the counts in the browser.
   try {
     for (const key of Object.keys(localStorage)) {
       if (key.startsWith('board:gh:')) localStorage.removeItem(key);
     }
   } catch {
-    /* storage blocked */
+    /* storage blocked, or the runners */
   }
 }
 
@@ -61,25 +69,6 @@ export async function checkGithubToken(value) {
   if (!res.ok) throw new Error(res.status === 401 ? 'GitHub rejected this token. Check that it was copied in full and has not expired.' : `GitHub error ${res.status}`);
   const user = await res.json();
   return user.login;
-}
-
-const storageKey = (repo) => `board:gh:${repo}`;
-
-function readStored(repo) {
-  try {
-    const raw = localStorage.getItem(storageKey(repo));
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStored(repo, data) {
-  try {
-    localStorage.setItem(storageKey(repo), JSON.stringify(data));
-  } catch {
-    /* storage blocked: the cache is memory-only */
-  }
 }
 
 function explain(status) {
@@ -106,36 +95,55 @@ async function fetchStats(repo) {
   return { issues: Math.max(0, info.open_issues_count - prs), prs };
 }
 
-// Returns the current entry at once. When it is not cached yet, a fetch starts and
-// `onChange` runs when it finishes.
+// Reads repos into github.json: counts and the newest open items. A failed read keeps the last counts. Runners only.
+export async function readRepos(target, repos) {
+  const found = await Promise.all(repos.map(async (repo) => {
+    try {
+      const [stats, items] = await Promise.all([fetchStats(repo), fetchOpenItems(repo)]);
+      return [repo, { at: Date.now(), ...stats, items: items.slice(0, ITEMS_KEPT), error: null }];
+    } catch (err) {
+      return [repo, { error: err.message, failedAt: Date.now() }];
+    }
+  }));
+  target.save(GITHUB, (d) => {
+    d.repos ??= {};
+    for (const [repo, entry] of found) d.repos[repo] = { ...d.repos[repo], ...entry };
+  });
+  return found.filter(([, e]) => e.error).map(([repo, e]) => `${repo}: ${e.error}`);
+}
+
+const asking = new Set();
+// Asks the runners for repos github.json lacks, then reads the file again.
+function ask(repos, onChange) {
+  const fresh = repos.filter((r) => !asking.has(r));
+  if (!fresh.length) return;
+  fresh.forEach((r) => asking.add(r));
+  runJob('github', { repos: fresh })
+    .then(() => store?.sync())
+    .catch(() => {})
+    .finally(() => {
+      fresh.forEach((r) => asking.delete(r));
+      onChange?.();
+    });
+}
+
+// The repo's entry: { status: 'ok' | 'loading' | 'error', issues?, prs?, error?, at? }, from github.json. A repo the
+// file does not hold yet is asked of the runners, and `onChange` runs once they answered.
 export function repoStats(repo, onChange) {
-  const current = memory.get(repo);
-  if (current) return current;
-
-  const stored = readStored(repo);
-  if (stored && Date.now() - stored.at < TTL_MS) {
-    const entry = { status: 'ok', ...stored };
-    memory.set(repo, entry);
-    return entry;
-  }
-
-  const entry = { status: 'loading' };
-  memory.set(repo, entry);
-  fetchStats(repo)
-    .then((data) => {
-      const at = Date.now();
-      memory.set(repo, { status: 'ok', at, ...data });
-      writeStored(repo, { at, ...data });
-    })
-    .catch((err) => {
-      memory.set(repo, { status: 'error', error: err.message });
-    })
-    .finally(() => onChange?.());
-  return entry;
+  const entry = saved(repo);
+  if (entry?.at) return { status: 'ok', ...entry };
+  if (entry?.error) return { status: 'error', error: entry.error };
+  ask([repo], onChange);
+  return { status: 'loading' };
 }
 
 // The newest open issues and PRs of a repo, for triage. Each entry is { number, title, pr, updated, author, labels }.
+// From github.json when the runners read it; read here otherwise.
 export async function openItems(repo) {
+  return saved(repo)?.items ?? fetchOpenItems(repo);
+}
+
+async function fetchOpenItems(repo) {
   const res = await fetch(`${API}/repos/${repo}/issues?state=open&per_page=30`, { headers: headers(repo) });
   if (!res.ok) throw new Error(explain(res.status));
   const list = await res.json();
@@ -221,15 +229,10 @@ export async function fetchRepoOverview(repo) {
   };
 }
 
-// Drops the cached copy and fetches again.
+// Asks the runners to read the repo again now.
 export function refreshRepo(repo, onChange) {
-  memory.delete(repo);
-  try {
-    localStorage.removeItem(storageKey(repo));
-  } catch {
-    /* ignore */
-  }
-  return repoStats(repo, onChange);
+  ask([repo], onChange);
+  return { status: 'loading', ...(saved(repo) ?? {}) };
 }
 
 // Opens an issue in a repo. Needs a token that can write issues for the repo's owner (Issues: Read and write).

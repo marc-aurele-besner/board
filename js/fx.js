@@ -1,17 +1,67 @@
 // USD to CAD exchange rates, one per day. Weekends and holidays use the last published rate. A past day's rate
-// never changes, so it is cached in the browser for good. Several free providers, none needing an account or
-// key, answer the same question: the chosen one is asked first, and the others take over when it fails.
-const CACHE_PREFIX = 'board:fx:day:';
-const MANUAL_KEY = 'board:fx:manual';
-const PROVIDER_KEY = 'board:fx:provider';
-const FALLBACK_KEY = 'board:fx:fallback'; // 'off' asks only the chosen provider
+// never changes, so it is kept for good in fx.json: { days: { "YYYY-MM-DD": { rate, date } }, source }. Several free
+// providers, none needing an account or key, answer the same question: the chosen one is asked first, and the others
+// take over when it fails. The runners (tools/jobs/fx.js) ask them; the board reads fx.json, and asks the runners for
+// days it does not hold. The choice of provider and a rate typed by hand are in settings.json `fx`.
+import { runJob } from './runners.js';
+
+export const FX = 'fx';
+export const FX_DEFAULTS = { days: {}, source: null };
+// Older versions kept these in the browser; they move to the data folder once.
+const LEGACY = { day: 'board:fx:day:', manual: 'board:fx:manual', provider: 'board:fx:provider', fallback: 'board:fx:fallback' };
 
 const DAY_MS = 86400000;
 const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
 const addDays = (day, n) => iso(Date.parse(day) + n * DAY_MS);
 
-const days = new Map(); // "YYYY-MM-DD" -> { rate, date }
 const inflight = new Map(); // "YYYY-MM-DD" -> Promise
+
+let store = null;
+// Whether this process asks the providers itself (the runners) or asks the runners (the board).
+let direct = false;
+const fxData = () => store?.get(FX) ?? FX_DEFAULTS;
+const settingsOf = () => store?.get('settings').fx ?? {};
+const saveSettings = (patch) => store?.update('settings', (d) => {
+  d.fx = { ...d.fx, ...patch };
+});
+
+// Gives fx.json's store to this module. `direct`: the runners, which fetch rates themselves.
+export function useFxStore(next, { direct: own = false } = {}) {
+  store = next;
+  direct = own;
+  if (!own) moveLegacy();
+}
+
+// Rates, provider and manual rate saved in the browser by earlier versions go to the data folder, then are removed.
+function moveLegacy() {
+  try {
+    moveLegacyKeys();
+  } catch {
+    /* storage blocked: nothing to move */
+  }
+}
+
+function moveLegacyKeys() {
+  const keys = Object.keys(localStorage);
+  const days = {};
+  for (const key of keys.filter((k) => k.startsWith(LEGACY.day))) {
+    try {
+      const entry = JSON.parse(localStorage.getItem(key));
+      if (Number.isFinite(entry?.rate)) days[key.slice(LEGACY.day.length)] = entry;
+    } catch {
+      /* unreadable: dropped */
+    }
+    localStorage.removeItem(key);
+  }
+  if (Object.keys(days).length) store.save(FX, (d) => { d.days = { ...days, ...d.days }; });
+  const patch = {};
+  const manual = Number(localStorage.getItem(LEGACY.manual));
+  if (manual) patch.manual = manual;
+  if (localStorage.getItem(LEGACY.provider)) patch.provider = localStorage.getItem(LEGACY.provider);
+  if (localStorage.getItem(LEGACY.fallback) === 'off') patch.fallback = false;
+  if (Object.keys(patch).length && !store.get('settings').fx) saveSettings(patch);
+  for (const key of [LEGACY.manual, LEGACY.provider, LEGACY.fallback]) localStorage.removeItem(key);
+}
 
 async function getJson(url, name) {
   const res = await fetch(url);
@@ -70,31 +120,14 @@ export const PROVIDERS = [
   },
 ];
 
-function readSetting(key) {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeSetting(key, value) {
-  try {
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, value);
-  } catch {
-    /* storage blocked */
-  }
-}
-
-// The provider asked first, and whether the others are asked when it fails. Saved in this browser.
+// The provider asked first, and whether the others are asked when it fails. Saved in settings.json.
 export function providerId() {
-  const saved = readSetting(PROVIDER_KEY);
+  const saved = settingsOf().provider;
   return PROVIDERS.some((p) => p.id === saved) ? saved : PROVIDERS[0].id;
 }
-export const setProvider = (id) => writeSetting(PROVIDER_KEY, id === PROVIDERS[0].id ? null : id);
-export const fallbackOn = () => readSetting(FALLBACK_KEY) !== 'off';
-export const setFallback = (on) => writeSetting(FALLBACK_KEY, on ? null : 'off');
+export const setProvider = (id) => saveSettings({ provider: id === PROVIDERS[0].id ? null : id });
+export const fallbackOn = () => settingsOf().fallback !== false;
+export const setFallback = (on) => saveSettings({ fallback: on ? null : false });
 
 // The providers in the order they are asked.
 function order() {
@@ -103,7 +136,11 @@ function order() {
 }
 
 // The provider that answered last, shown in Settings.
-export const lastSource = { id: null };
+export const lastSource = {
+  get id() {
+    return fxData().source ?? null;
+  },
+};
 
 // Asks each provider in turn. Rejects with every provider's error when none answers.
 async function ask(from, to, only = null) {
@@ -112,7 +149,7 @@ async function ask(from, to, only = null) {
     try {
       const valid = Object.entries(await p.range(from, to)).filter(([, r]) => Number.isFinite(r) && r > 0);
       if (!valid.length) throw new Error(`${p.name} returned no CAD rate.`);
-      if (!only) lastSource.id = p.id;
+      if (!only) store?.save(FX, (d) => { d.source = p.id; });
       return Object.fromEntries(valid);
     } catch (err) {
       errors.push(err.message);
@@ -129,49 +166,48 @@ export async function testProvider(id) {
   return { rate: rates[date], date };
 }
 
-function readJson(key) {
-  try {
-    return JSON.parse(localStorage.getItem(key) ?? 'null');
-  } catch {
-    return null;
-  }
-}
-
 // A rate typed in by hand. It replaces the daily rates for every day when set.
 export function manualRate() {
-  const v = readJson(MANUAL_KEY);
-  return Number.isFinite(Number(v)) && v ? Number(v) : null;
+  const v = Number(settingsOf().manual);
+  return Number.isFinite(v) && v ? v : null;
 }
 
-export function setManualRate(value) {
-  try {
-    if (value) localStorage.setItem(MANUAL_KEY, JSON.stringify(Number(value)));
-    else localStorage.removeItem(MANUAL_KEY);
-  } catch {
-    /* storage blocked */
-  }
-}
+export const setManualRate = (value) => saveSettings({ manual: value ? Number(value) : null });
 
-// The rate for a day if it is already known (manual, memory or browser cache), else null.
+// The rate for a day if it is already known (manual or fx.json), else null.
 export function knownRate(day) {
   const manual = manualRate();
   if (manual !== null) return manual;
-  if (days.has(day)) return days.get(day).rate;
-  const cached = readJson(CACHE_PREFIX + day);
-  if (cached && Number.isFinite(cached.rate)) {
-    days.set(day, cached);
-    return cached.rate;
-  }
-  return null;
+  const entry = fxData().days?.[day];
+  return entry && Number.isFinite(entry.rate) ? entry.rate : null;
 }
 
-function remember(day, entry) {
-  days.set(day, entry);
-  try {
-    localStorage.setItem(CACHE_PREFIX + day, JSON.stringify(entry));
-  } catch {
-    /* storage blocked: the rate is kept for this page only */
+function remember(entries) {
+  store?.save(FX, (d) => {
+    d.days = { ...d.days, ...entries };
+  });
+}
+
+// The board asks the runners for the days it lacks, then reads fx.json again.
+async function askRunners(from, to) {
+  await runJob('fx', { from, to });
+  await store?.sync();
+}
+
+// Days asked for in the same moment (Money asks for each day it shows) go to the runners as one range.
+let batch = null;
+function askDay(day) {
+  if (!batch) {
+    const current = { days: new Set() };
+    current.promise = Promise.resolve().then(() => {
+      batch = null;
+      const days = [...current.days].sort();
+      return askRunners(days[0], days.at(-1));
+    });
+    batch = current;
   }
+  batch.days.add(day);
+  return batch.promise;
 }
 
 // Fetches the rate for one day. Concurrent requests for the same day share one request.
@@ -180,12 +216,17 @@ export function fetchDayRate(day) {
   if (known !== null) return Promise.resolve(known);
   if (inflight.has(day)) return inflight.get(day);
   // A week back covers weekends and holidays: the day takes the last rate published on or before it.
-  const request = ask(addDays(day, -7), day)
-    .then((rates) => {
-      const last = Object.keys(rates).filter((d) => d <= day).sort().at(-1);
-      if (!last) throw new Error('No rate was published for this day.');
-      remember(day, { rate: rates[last], date: last });
-      return rates[last];
+  const request = (direct
+    ? ask(addDays(day, -7), day).then((rates) => {
+        const last = Object.keys(rates).filter((d) => d <= day).sort().at(-1);
+        if (!last) throw new Error('No rate was published for this day.');
+        remember({ [day]: { rate: rates[last], date: last } });
+      })
+    : askDay(day))
+    .then(() => {
+      const rate = knownRate(day);
+      if (rate === null) throw new Error('No rate was published for this day.');
+      return rate;
     })
     .finally(() => inflight.delete(day));
   inflight.set(day, request);
@@ -195,27 +236,39 @@ export function fetchDayRate(day) {
 // Fetches every day's rate between two dates in one request. Weekends and holidays get the last published
 // rate before them, so every day in the range is known afterwards. Ranges are capped by the caller.
 export async function fetchRateRange(from, to) {
+  if (!direct) return askRunners(from, to);
   // Starts a week early so the first days of the range have a published rate before them.
   const published = await ask(addDays(from, -7), to);
-  for (const [day, rate] of Object.entries(published)) remember(day, { rate, date: day });
+  const entries = {};
   let last = null;
   for (let t = Date.parse(addDays(from, -7)); t <= Date.parse(to); t += DAY_MS) {
     const day = iso(t);
-    if (days.has(day)) last = days.get(day);
-    else if (last) remember(day, { rate: last.rate, date: last.date });
+    if (published[day]) last = { rate: published[day], date: day };
+    if (last) entries[day] = published[day] ? { rate: published[day], date: day } : { ...last };
   }
+  remember(entries);
 }
 
-// Forgets every cached daily rate. Used by Settings when the user asks for a fresh start.
-export function clearCachedRates() {
-  days.clear();
-  try {
-    for (const key of Object.keys(localStorage)) {
-      if (key.startsWith(CACHE_PREFIX)) localStorage.removeItem(key);
-    }
-  } catch {
-    /* storage blocked */
+// Reads the rates of every day from `from` to `to` that fx.json lacks, a year at a time. The runners' job.
+export async function fillRates(from, to) {
+  let missing = [];
+  for (let t = Date.parse(from); t <= Date.parse(to); t += DAY_MS) if (knownRate(iso(t)) === null) missing.push(iso(t));
+  let read = 0;
+  while (missing.length) {
+    const start = missing[0];
+    const end = missing.filter((d) => Date.parse(d) - Date.parse(start) < 365 * DAY_MS).at(-1);
+    await fetchRateRange(start, end);
+    read += 1;
+    missing = missing.filter((d) => d > end);
   }
+  return read;
+}
+
+// Forgets every saved daily rate. Used by Settings when the user asks for a fresh start.
+export function clearCachedRates() {
+  store?.update(FX, (d) => {
+    d.days = {};
+  });
 }
 
 // Converts between USD and CAD with the rate of the day. null when no rate is known.

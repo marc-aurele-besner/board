@@ -1,5 +1,5 @@
 // Runs each job on its interval and keeps runners.json, the heartbeat the board reads.
-// A job is { id, timeout, delay, setup(store), run(ctx) }; `every` comes from settings.json runners.<id> when set there.
+// A job is { id, timeout, delay, loop, quiet, setup(store, { kick }), run(ctx) }; `every` comes from settings.json runners.<id> when set there.
 // A job still running at its next tick is skipped, not queued. A failure doubles the wait, up to 30 minutes, and one
 // success resets it. A Mac that slept finds its jobs overdue on wake and runs each once.
 import { jobConfig } from '../../js/runner-jobs.js';
@@ -51,7 +51,8 @@ export function createScheduler({ jobs, log }) {
   // Runs one job now. `params` comes from a Run now request (a Calendar range, a Cron flow id).
   function run(job, { force = false, params = {} } = {}) {
     const l = live.get(job.id);
-    if (l.running) return l.running;
+    // A run already going covers a plain Run now; one with its own params (a range, some repos) waits its turn.
+    if (l.running) return Object.keys(params).length ? l.running.then(() => run(job, { force, params })) : l.running;
     const started = Date.now();
     const controller = new AbortController();
     const timeout = job.timeout ?? DEFAULT_TIMEOUT_MS;
@@ -114,7 +115,8 @@ export function createScheduler({ jobs, log }) {
       if (!store) return;
       const now = Date.now();
       for (const job of jobs) {
-        job.setup?.(store);
+        // kick(): run the job at its next tick, for a job that watches a file.
+        job.setup?.(store, { kick: () => { live.get(job.id).nextAt = 0; } });
         live.get(job.id).nextAt = now + (job.delay ?? 2000);
       }
       beat();
