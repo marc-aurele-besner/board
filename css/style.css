@@ -2045,8 +2045,6 @@ button.json-key:hover { background: color-mix(in srgb, var(--accent) 15%, transp
   .mail-main { flex-basis: calc(100% - 60px); }
 }
 /* Settings: Resend keys per project */
-.resend-relay { flex-wrap: nowrap; }
-.resend-relay input { flex: 1; min-width: 0; }
 .resend-search { width: min(100%, 260px); }
 .resend-list { list-style: none; margin: 0; padding: 0; }
 .resend-row { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr) 190px; align-items: center; gap: 6px 20px; padding: 10px 4px; border-bottom: 1px solid var(--border); }

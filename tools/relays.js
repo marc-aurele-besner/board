@@ -1,6 +1,6 @@
-// Local relays for the APIs that send no CORS header, so a web page cannot read their answers: Bing Webmaster
-// (search data) and Resend (Inbox). Both run in this one process: `bun run relays` (or `node tools/relays.js`),
-// or with the board through `bun start`. BING_PORT and RESEND_PORT change their ports.
+// Local relay for Bing Webmaster (search data), whose API sends no CORS header, so a web page cannot read its
+// answers. `bun run relays` (or `node tools/relays.js`), or with the board through `bun start`. BING_PORT changes
+// its port. (Resend is read by the runners, tools/jobs/resend.js, which Node's lack of CORS lets call it directly.)
 // Each forwards read-only GET requests to its API only, and answers only pages served from this machine.
 import { createServer } from 'node:http';
 import { logger } from './log.js';
@@ -15,16 +15,6 @@ const RELAYS = [
     allowed: (path) => path.startsWith('/webmaster/api.svc/json/'),
     refused: 'Not a Bing Webmaster API request.',
     headers: () => ({}),
-  },
-  {
-    name: 'Resend',
-    port: Number(process.env.RESEND_PORT) || 8418,
-    upstream: 'https://api.resend.com',
-    // Sent and received emails, as a list or one by id. Nothing that sends or changes anything.
-    allowed: (path) => /^\/emails(\/receiving)?(\/[\w-]+)?$/.test(path),
-    refused: 'Not a Resend email read.',
-    allowHeaders: 'authorization',
-    headers: (req) => ({ authorization: req.headers.authorization ?? '', 'user-agent': 'board-resend-relay' }),
   },
 ];
 
