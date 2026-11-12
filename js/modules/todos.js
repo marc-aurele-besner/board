@@ -701,13 +701,16 @@ function selectBox(store, item, order = []) {
 
 // Shown while tasks are ticked: change them all at once, copy them, or delete them.
 // Each field opens the same searchable, colored picker as a row's chips; picking a value applies it to every ticked task.
-function batchBar(store, visible, projects, categories) {
+// In the table, the bar takes the table's columns when it is wide enough (see .batch-bar.aligned), so each picker sits above its column.
+function batchBar(store, visible, projects, categories, { aligned = false, showDue = true } = {}) {
   const items = store.get(COLLECTION).items.filter((i) => view.selected.has(i.id));
   if (!items.length) return null;
   const ids = items.map((i) => i.id);
   const apply = (patch) => updateItems(store, ids, patch);
   const select = (name, options, onPick) =>
     pickButton({ label: name, title: `Set the ${name.toLowerCase()} of the selected tasks`, options, onPick });
+  // The text hides when the bar follows the table's columns, where only the icon fits.
+  const labelled = (iconName, text) => [icon(iconName), h('span', { class: 'batch-label' }, text)];
   const deadline = h('input', {
     type: 'date',
     class: 'due-picker',
@@ -715,52 +718,77 @@ function batchBar(store, visible, projects, categories) {
     'aria-hidden': 'true',
     onchange: (e) => apply({ due: e.target.value }),
   });
-  const allShown = visible.length > 0 && visible.every((i) => view.selected.has(i.id));
-  return h('div', { class: 'batch-bar', role: 'toolbar', 'aria-label': 'Selected tasks' },
-    // The count doubles as the way out, so clearing never wraps onto a line of its own.
+  const deadlineControl = h('span', { class: 'due-control' },
     h('button', {
       type: 'button',
-      class: 'btn-small batch-count',
-      title: 'Clear the selection',
-      'aria-label': `${items.length} selected, clear the selection`,
+      class: 'btn-small',
+      title: 'Set the deadline of the selected tasks',
       onclick: () => {
-        view.selected.clear();
-        store.refresh();
+        try { deadline.showPicker(); } catch { deadline.focus(); }
       },
-    }, `${items.length} selected`, icon('x')),
-    allShown
-      ? null
-      : h('button', {
+    }, ...(showDue ? [icon('calendar'), 'Deadline'] : labelled('calendar', 'Deadline'))),
+    deadline);
+  const allShown = visible.length > 0 && visible.every((i) => view.selected.has(i.id));
+  const cls = ['batch-bar', aligned ? 'aligned' : '', showDue ? '' : 'no-due'].filter(Boolean).join(' ');
+  return h('div', { class: cls, role: 'toolbar', 'aria-label': 'Selected tasks' },
+    h('div', { class: 'batch-grid' },
+      // Over the handle, checkbox and task columns.
+      h('div', { class: 'batch-cell batch-lead' },
+        // The count doubles as the way out, so clearing never wraps onto a line of its own.
+        h('button', {
           type: 'button',
-          class: 'btn-small',
+          class: 'btn-small batch-count',
+          title: 'Clear the selection',
+          'aria-label': `${items.length} selected, clear the selection`,
           onclick: () => {
-            for (const i of visible) view.selected.add(i.id);
+            view.selected.clear();
             store.refresh();
           },
-        }, `Select all ${visible.length} shown`),
-    h('button', { type: 'button', class: 'btn-small', title: 'Mark the selected tasks done', onclick: () => apply({ status: 'done' }) }, icon('check'), 'Done'),
-    select('Status', statusOptions(store), (v) => apply({ status: v })),
-    select('Priority', PRIORITIES.map(([v, l]) => ({ value: v, label: l, tone: v === 'none' ? 'plain' : v })), (v) => apply({ priority: v })),
-    select('Project', [
-      { value: '__personal', label: 'Personal' },
-      ...[...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
-    ], (v) => apply({ projectId: v === '__personal' ? null : v })),
-    select('Category', [{ value: NO_CATEGORY, label: 'No category' }, ...categories.map((c) => ({ value: c, label: c, color: categoryColor(store, c) }))],
-      (v) => apply({ category: v === NO_CATEGORY ? '' : v })),
-    h('span', { class: 'due-control' },
-      h('button', {
-        type: 'button',
-        class: 'btn-small',
-        title: 'Set the deadline of the selected tasks',
-        onclick: () => {
-          try { deadline.showPicker(); } catch { deadline.focus(); }
-        },
-      }, icon('calendar'), 'Deadline'),
-      deadline),
-    h('span', { class: 'grow' }),
-    h('button', { type: 'button', class: 'btn-small', title: 'Start one Dev session on the selected tasks', onclick: () => devTasks(store, items) }, icon('terminal'), 'Dev'),
-    h('button', { type: 'button', class: 'btn-small', title: 'Copy the selected tasks as a Markdown list', onclick: () => copyTasks(store, items) }, icon('copy'), 'Copy'),
-    h('button', { type: 'button', class: 'btn-small danger', onclick: () => removeItems(store, ids) }, icon('trash'), 'Delete'));
+        }, `${items.length} selected`, icon('x')),
+        allShown
+          ? null
+          : h('button', {
+              type: 'button',
+              class: 'btn-small',
+              onclick: () => {
+                for (const i of visible) view.selected.add(i.id);
+                store.refresh();
+              },
+            }, `Select all ${visible.length} shown`),
+        h('button', { type: 'button', class: 'btn-small', title: 'Mark the selected tasks done', onclick: () => apply({ status: 'done' }) }, icon('check'), 'Done')),
+      h('div', { class: 'batch-cell' }, select('Status', statusOptions(store), (v) => apply({ status: v }))),
+      h('div', { class: 'batch-cell' },
+        select('Priority', PRIORITIES.map(([v, l]) => ({ value: v, label: l, tone: v === 'none' ? 'plain' : v })), (v) => apply({ priority: v }))),
+      h('div', { class: 'batch-cell' }, select('Project', [
+        { value: '__personal', label: 'Personal' },
+        ...[...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
+      ], (v) => apply({ projectId: v === '__personal' ? null : v }))),
+      h('div', { class: 'batch-cell' },
+        select('Category', [{ value: NO_CATEGORY, label: 'No category' }, ...categories.map((c) => ({ value: c, label: c, color: categoryColor(store, c) }))],
+          (v) => apply({ category: v === NO_CATEGORY ? '' : v }))),
+      // Without a deadline column, the deadline button joins the actions, as it does on each row.
+      showDue ? h('div', { class: 'batch-cell' }, deadlineControl) : null,
+      h('span', { class: 'grow' }),
+      h('div', { class: 'batch-cell batch-actions' },
+        showDue ? null : deadlineControl,
+        h('button', {
+          type: 'button',
+          class: 'btn-small',
+          title: 'Start one Dev session on the selected tasks',
+          onclick: () => devTasks(store, items),
+        }, ...labelled('terminal', 'Dev')),
+        h('button', {
+          type: 'button',
+          class: 'btn-small',
+          title: 'Copy the selected tasks as a Markdown list',
+          onclick: () => copyTasks(store, items),
+        }, ...labelled('copy', 'Copy')),
+        h('button', {
+          type: 'button',
+          class: 'btn-small danger',
+          title: 'Delete the selected tasks',
+          onclick: () => removeItems(store, ids),
+        }, ...labelled('trash', 'Delete')))));
 }
 
 // Ticks or unticks every task shown, from the table header.
@@ -1555,7 +1583,7 @@ function draw(root, store) {
         tidyPanel(store),
 
         // While tasks are ticked, their actions take the place of the add field, so the list below stays put.
-        batchBar(store, visible, projects, categories) ?? h('form', {
+        batchBar(store, visible, projects, categories, { aligned: view.layout === 'table', showDue }) ?? h('form', {
           class: 'quick',
           onsubmit: (e) => {
             e.preventDefault();

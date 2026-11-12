@@ -1027,6 +1027,25 @@ button.danger { color: var(--danger); }
 .batch-bar .btn-small.danger { color: var(--danger); }
 .batch-bar .grow { flex: 1; }
 .batch-bar .batch-count { font-weight: 600; }
+.batch-grid { flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.batch-cell { display: contents; }
+/* In the table, the bar uses the table's columns so each picker sits above its column.
+   It only does so while the table fits without scrolling sideways (its smallest width, less the bar's 7px of extra padding a side). */
+.batch-bar.aligned { container-type: inline-size; }
+@container (min-width: 1162px) {
+  .batch-bar.aligned .batch-grid {
+    display: grid;
+    grid-template-columns: 20px 20px minmax(200px, 1fr) 156px 124px 140px 150px 136px 150px;
+    gap: 10px;
+    margin: 0 -7px;
+  }
+  .batch-bar.aligned.no-due .batch-grid { grid-template-columns: 20px 20px minmax(200px, 1fr) 156px 124px 140px 150px 180px; }
+  .batch-bar.aligned .batch-cell { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .batch-bar.aligned .batch-lead { grid-column: 1 / 4; flex-wrap: wrap; }
+  .batch-bar.aligned .batch-cell > .pick-btn { width: 100%; justify-content: space-between; }
+  .batch-bar.aligned .batch-actions { justify-content: flex-end; gap: 2px; }
+  .batch-bar.aligned .batch-actions .batch-label, .batch-bar.aligned .grow { display: none; }
+}
 .todo-item.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .todo-item.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
 .todo-item.image-drop, .kanban-card.image-drop { box-shadow: inset 0 0 0 2px var(--accent); }
