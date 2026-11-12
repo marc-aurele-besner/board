@@ -13,7 +13,7 @@ import { withoutLabel } from '../task-labels.js';
 import { connectedGmailOf } from '../gmail.js';
 import { connectedCalendarsOf } from '../gcal.js';
 import { resendSettings } from '../resend.js';
-import { DEFAULT_DEV_COMMAND, runnerOf } from './dev.js';
+import { DEFAULT_DEV_COMMAND, devPresets, runnerOf } from './dev.js';
 import { pickFolder } from '../folder-picker.js';
 
 const COLLECTION = 'projects';
@@ -146,6 +146,8 @@ export function makeProject(existingCount, fields = {}) {
     localPath: '',
     // What Dev runs when a task is handed to it; empty uses DEFAULT_DEV_COMMAND.
     devCommand: '',
+    // A command preset from Settings → Dev environment; when set, it runs instead of devCommand.
+    devPreset: '',
     labels: [],
     parentId: null,
     github: { org: '', repos: [] },
@@ -215,6 +217,14 @@ function githubLine(p) {
 
 // --- Actions ---
 
+export const LOCAL_PATH_ERROR = 'The local folder must be a full path, such as ~/code/my-app or /Users/me/code/my-app.';
+
+// A project's local folder without its trailing slash; null when it is not a full path. Empty clears it.
+export function cleanLocalPath(text) {
+  const localPath = String(text ?? '').trim().replace(/(.)[\\/]+$/, '$1');
+  return localPath && !/^(~|\/|[A-Za-z]:[\\/])/.test(localPath) ? null : localPath;
+}
+
 // Shows a problem with one field on the project page. The field keeps its old value until it is fixed.
 function flashError(store, message) {
   view.error = message;
@@ -256,8 +266,8 @@ function updateProject(store, id, patch) {
     patch = { ...rest, github: { org: owner, repos } };
   }
   if (patch.localPath !== undefined) {
-    const localPath = patch.localPath.trim().replace(/(.)[\\/]+$/, '$1');
-    if (localPath && !/^(~|\/|[A-Za-z]:[\\/])/.test(localPath)) return flashError(store, 'The local folder must be a full path, such as ~/code/my-app or /Users/me/code/my-app.');
+    const localPath = cleanLocalPath(patch.localPath);
+    if (localPath === null) return flashError(store, LOCAL_PATH_ERROR);
     patch = { ...patch, localPath };
   }
   if (patch.iconUrl !== undefined) {
@@ -815,15 +825,7 @@ function projectView(store, p, items, categories) {
             onclick: () => pickFolder({ base: runnerOf(store), start: p.localPath, onPick: (localPath) => updateProject(store, p.id, { localPath }) }),
           }, icon('folder'), 'Browse')),
         p.localPath ? h('a', { href: `#/dev?project=${p.id}`, class: 'muted small' }, 'Open a terminal here') : null),
-      h('section', { class: 'pp-block' },
-        h('h3', null, 'Dev command'),
-        editText({
-          value: p.devCommand ?? '',
-          placeholder: DEFAULT_DEV_COMMAND,
-          allowEmpty: true,
-          onSave: (devCommand) => updateProject(store, p.id, { devCommand: devCommand.trim() }),
-        }),
-        h('span', { class: 'muted small' }, 'Runs with the task as its prompt when a task goes to Dev. Empty uses the default.')),
+      devCommandBlock(store, p),
       h('section', { class: 'pp-block' },
         h('h3', null, 'Icon'),
         h('div', { class: 'pp-icon-row' },
@@ -865,6 +867,33 @@ function projectView(store, p, items, categories) {
     p.github.repos.length ? repoTable(store, p) : null,
     overviewBlock(store, p),
     triageBlock(store, p));
+}
+
+// The command a task goes to Dev with: a preset from Settings → Dev environment, or the project's own.
+function devCommandBlock(store, p) {
+  const presets = devPresets(store);
+  const preset = presets.find((x) => x.id === p.devPreset);
+  return h('section', { class: 'pp-block' },
+    h('h3', null, 'Dev command'),
+    presets.length
+      ? pickChip({
+          value: preset ? preset.id : null,
+          options: presets.map((x) => ({ value: x.id, label: x.name })),
+          nullable: true,
+          nullLabel: 'Own command',
+          onPick: (devPreset) => updateProject(store, p.id, { devPreset: devPreset ?? '' }),
+        })
+      : null,
+    preset
+      ? h('code', { class: 'muted small' }, preset.command)
+      : editText({
+          value: p.devCommand ?? '',
+          placeholder: DEFAULT_DEV_COMMAND,
+          allowEmpty: true,
+          onSave: (devCommand) => updateProject(store, p.id, { devCommand: devCommand.trim() }),
+        }),
+    h('span', { class: 'muted small' }, 'Runs with the task as its prompt when a task goes to Dev. Empty uses the default. Presets are set in ',
+      h('a', { href: '#/settings?section=dev' }, 'Settings → Dev environment'), '.'));
 }
 
 function categoriesPanel(store, categories, projects) {
