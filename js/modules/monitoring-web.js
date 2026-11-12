@@ -1,3 +1,4 @@
+// @ts-check
 // Monitoring tabs for the project websites: visitors (Google Analytics) and search (Google Search Console, Bing).
 import { h, empty, notice, progress, icon, refreshIcon } from '../ui.js';
 import { setupBanner } from '../integrations.js';
@@ -7,26 +8,37 @@ import { sitesOf } from '../automations.js';
 import { hostOf } from '../sitecheck.js';
 import { barChart, legend } from '../chart.js';
 import { stat } from './monitoring.js';
+/** @import { Project, Store } from '../../types/data' */
+/** @import { Child } from '../../types/ui' */
+/** @import { MonitoringView, PeriodWindow, SortColumn } from '../../types/monitoring' */
+/** @import { SearchReport, SearchRow } from '../webstats.js' */
 
-const ymd = (ms) => {
+/** @typedef {Awaited<ReturnType<typeof analyticsReport>>} AnalyticsData */
+/** @template T @typedef {{ status: 'loading' } | { status: 'ok', data: T } | { status: 'error', error: string }} Loaded */
+/** The period's days. @typedef {ReturnType<typeof dayBuckets>} DayBuckets */
+
+const ymd = (/** @type {number} */ ms) => {
   const d = new Date(ms);
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 };
-const fmt = (n) => Math.round(n).toLocaleString();
-const pct = (n) => `${(n * 100).toFixed(1)}%`;
-const duration = (s) => (s >= 60 ? `${Math.floor(s / 60)} min ${Math.round(s % 60)} s` : `${Math.round(s)} s`);
+const fmt = (/** @type {number} */ n) => Math.round(n).toLocaleString();
+const pct = (/** @type {number} */ n) => `${(n * 100).toFixed(1)}%`;
+const duration = (/** @type {number} */ s) => (s >= 60 ? `${Math.floor(s / 60)} min ${Math.round(s % 60)} s` : `${Math.round(s)} s`);
 
 // One load per site, period and source. Kept until the page is reloaded or "Refresh" is pressed.
+/** @type {Map<string, Loaded<unknown>>} */
 const cache = new Map();
 
+/** @template T @param {Store} store @param {string} key @param {() => Promise<T>} work @returns {Loaded<T>} */
 function load(store, key, work) {
-  const hit = cache.get(key);
+  const hit = /** @type {Loaded<T> | undefined} */ (cache.get(key));
   if (hit) return hit;
+  /** @type {Loaded<T>} */
   const entry = { status: 'loading' };
   cache.set(key, entry);
   work()
     .then((data) => Object.assign(entry, { status: 'ok', data }))
-    .catch((err) => Object.assign(entry, { status: 'error', error: err.message }))
+    .catch((/** @type {Error} */ err) => Object.assign(entry, { status: 'error', error: err.message }))
     .finally(() => {
       if (location.hash.startsWith('#/monitoring')) store.refresh();
     });
@@ -34,15 +46,18 @@ function load(store, key, work) {
 }
 
 // The days of the period as chart buckets. A one-day period is one bucket: these services report per day.
+/** @param {PeriodWindow} w */
 function dayBuckets(w) {
   const from = ymd(w.start);
   const to = ymd(w.end - 1);
+  /** @type {string[]} */
   const days = [];
   for (let ms = new Date(`${from}T12:00:00`).getTime(); ymd(ms) <= to; ms += 86400000) days.push(ymd(ms));
   return { from, to, days, labels: days.map((d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`) };
 }
 
 // "All" comes first and is the default: an empty `view.site` adds every site together.
+/** @param {Store} store @param {MonitoringView} view @param {Project[]} sites @param {Project | null} current */
 function siteChips(store, view, sites, current) {
   return h('div', { class: 'chips' }, [{ id: '', name: 'All' }, ...sites].map((p) =>
     h('button', {
@@ -55,26 +70,29 @@ function siteChips(store, view, sites, current) {
     }, p.name)));
 }
 
-const pickedSite = (view, sites) => sites.find((x) => x.id === view.site) ?? null;
+const pickedSite = (/** @type {MonitoringView} */ view, /** @type {Project[]} */ sites) => sites.find((x) => x.id === view.site) ?? null;
 
 // Loads every site for the "All" view. Sites that fail are named; the others are still added up.
+/** @template T @param {Store} store @param {Project[]} sites @param {(p: Project) => string} keyOf @param {(p: Project) => Promise<T>} work */
 function loadAll(store, sites, keyOf, work) {
   const entries = sites.map((p) => ({ p, key: keyOf(p), entry: load(store, keyOf(p), () => work(p)) }));
   return {
     keys: entries.map((e) => e.key),
     loading: entries.some((e) => e.entry.status === 'loading'),
-    ok: entries.filter((e) => e.entry.status === 'ok').map((e) => ({ p: e.p, d: e.entry.data })),
-    failed: entries.filter((e) => e.entry.status === 'error').map((e) => `${hostOf(e.p.website)} (${e.entry.error})`),
+    ok: entries.filter((e) => e.entry.status === 'ok').map((e) => ({ p: e.p, d: /** @type {{ data: T }} */ (e.entry).data })),
+    failed: entries.filter((e) => e.entry.status === 'error').map((e) => `${hostOf(e.p.website)} (${/** @type {{ error: string }} */ (e.entry).error})`),
   };
 }
 
 // Adds up rows of [name, ...numbers] from several sites, keeping the top `n` by the first number.
+/** @param {(string | number)[][][]} lists @param {number} [n] */
 function mergeRows(lists, n = 8) {
+  /** @type {Map<string | number, number[]>} */
   const sum = new Map();
   for (const rows of lists) {
     for (const [name, ...nums] of rows) {
       const cur = sum.get(name) ?? nums.map(() => 0);
-      sum.set(name, cur.map((v, i) => v + nums[i]));
+      sum.set(name, cur.map((v, i) => v + /** @type {number} */ (nums[i])));
     }
   }
   return [...sum.entries()].sort((a, b) => b[1][0] - a[1][0]).slice(0, n).map(([name, nums]) => [name, ...nums]);
@@ -82,7 +100,9 @@ function mergeRows(lists, n = 8) {
 
 // Search rows are [name, clicks, impressions, ctr, position]. Clicks and impressions add up; the rate
 // is worked out again and the position is weighed by impressions.
+/** @param {SearchRow[][]} lists @param {number} [n] @returns {SearchRow[]} */
 function mergeSearchRows(lists, n = 10) {
+  /** @type {Map<string, { clicks: number, imps: number, pos: number }>} */
   const sum = new Map();
   for (const rows of lists) {
     for (const [name, clicks, imps, , pos] of rows) {
@@ -94,13 +114,14 @@ function mergeSearchRows(lists, n = 10) {
     }
   }
   return [...sum.entries()].sort((a, b) => b[1].clicks - a[1].clicks || b[1].imps - a[1].imps).slice(0, n)
-    .map(([name, v]) => [name, v.clicks, v.imps, v.imps ? v.clicks / v.imps : 0, v.imps ? v.pos / v.imps : 0]);
+    .map(([name, v]) => /** @type {SearchRow} */ ([name, v.clicks, v.imps, v.imps ? v.clicks / v.imps : 0, v.imps ? v.pos / v.imps : 0]));
 }
 
 // Sort choice per table, kept across re-renders. No entry means the order the rows came in.
+/** @type {Map<string, { col: number, dir: number }>} */
 const sorts = new Map();
 
-const compare = (a, b) => {
+const compare = (/** @type {unknown} */ a, /** @type {unknown} */ b) => {
   // Missing values sink to the bottom in both directions.
   if (a === null || a === undefined) return b === null || b === undefined ? 0 : 1;
   if (b === null || b === undefined) return -1;
@@ -110,6 +131,13 @@ const compare = (a, b) => {
 // A table whose headers sort it. Columns: { label, num, value(row), format(value, row), clip }.
 // A click re-sorts only the body, so the page keeps its scroll and nothing reloads.
 // `rowClass(row)` gives a row its class, such as a session still running.
+/**
+ * @template R
+ * @param {string} key
+ * @param {SortColumn<R>[]} columns
+ * @param {R[]} rows
+ * @param {((row: R) => string) | null} [rowClass]
+ */
 export function sortTable(key, columns, rows, rowClass = null) {
   const tbody = h('tbody');
   const ths = columns.map((c, i) => h('th', { class: c.num ? 'num' : null },
@@ -124,9 +152,9 @@ export function sortTable(key, columns, rows, rowClass = null) {
     }) : rows;
     ths.forEach((th, i) => {
       const on = s?.col === i;
-      if (on) th.setAttribute('aria-sort', s.dir > 0 ? 'ascending' : 'descending');
+      if (on) th.setAttribute('aria-sort', /** @type {{ dir: number }} */ (s).dir > 0 ? 'ascending' : 'descending');
       else th.removeAttribute('aria-sort');
-      th.querySelector('.sort-mark').replaceChildren(icon(on && s.dir > 0 ? 'chevron-up' : 'chevron-down'));
+      /** @type {HTMLElement} */ (th.querySelector('.sort-mark')).replaceChildren(icon(on && /** @type {{ dir: number }} */ (s).dir > 0 ? 'chevron-up' : 'chevron-down'));
     });
     tbody.replaceChildren(...list.map((r) => h('tr', { class: rowClass?.(r) || null }, columns.map((c) => {
       const v = c.value(r);
@@ -134,7 +162,7 @@ export function sortTable(key, columns, rows, rowClass = null) {
     }))));
   };
   // Numbers start high to low, text A to Z; a second click flips it.
-  const pick = (i) => {
+  const pick = (/** @type {number} */ i) => {
     const s = sorts.get(key);
     sorts.set(key, { col: i, dir: s?.col === i ? -s.dir : columns[i].num ? -1 : 1 });
     draw();
@@ -143,13 +171,15 @@ export function sortTable(key, columns, rows, rowClass = null) {
   return h('div', { class: 'mon-scroll' }, h('table', { class: 'mon-table' }, h('thead', null, h('tr', null, ths)), tbody));
 }
 
+/** @param {string[]} head @param {unknown[][]} rows @param {(((value: any) => Child) | null)[]} [format] any: each column's format takes its own type */
 function table(head, rows, format) {
   if (!rows.length) return empty('Nothing in this period.');
   return sortTable(head.join('|'), head.map((label, i) => ({
-    label, num: i > 0, clip: i === 0, value: (r) => r[i], format: format?.[i] ? (v) => format[i](v) : null,
+    label, num: i > 0, clip: i === 0, value: (r) => r[i], format: format?.[i] ? (/** @type {unknown} */ v) => /** @type {(value: unknown) => Child} */ (format[i])(v) : null,
   })), rows);
 }
 
+/** @param {Store} store @param {string | string[]} keys */
 function refreshButton(store, keys) {
   const busy = [keys].flat().some((key) => cache.get(key)?.status === 'loading');
   return h('button', {
@@ -166,6 +196,7 @@ function refreshButton(store, keys) {
 
 // --- Web analytics ---
 
+/** @param {Store} store @param {MonitoringView} view @param {PeriodWindow} w */
 export function analyticsTab(store, view, w) {
   const settings = store.get('settings');
   const props = settings.analytics?.properties ?? {};
@@ -207,6 +238,7 @@ export function analyticsTab(store, view, w) {
 
 // --- Search ---
 
+/** @param {Store} store @param {MonitoringView} view @param {PeriodWindow} w */
 export function searchTab(store, view, w) {
   const settings = store.get('settings');
   const engine = view.engine === 'bing' ? 'bing' : 'google';
@@ -232,7 +264,7 @@ export function searchTab(store, view, w) {
   if (!sites.length) return h('div', { class: 'stack-lg' }, engines, empty('No project has a website yet. Add one on a project page.'));
   const p = pickedSite(view, sites);
   const b = dayBuckets(w);
-  const report = (x) => (engine === 'google' ? searchReport(x.website, b.from, b.to) : bingReport(store, x.website, b.from, b.to));
+  const report = (/** @type {Project} */ x) => (engine === 'google' ? searchReport(x.website, b.from, b.to) : bingReport(store, x.website, b.from, b.to));
   if (!p) return searchAll(store, view, sites, engine, engines, b, report);
   const key = `${engine}:${p.id}:${b.from}:${b.to}`;
   const entry = load(store, key, () => report(p));
@@ -244,9 +276,9 @@ export function searchTab(store, view, w) {
   const imps = b.days.map((day) => d.days[day]?.impressions ?? 0);
   const C = clicks.reduce((s, n) => s + n, 0);
   const I = imps.reduce((s, n) => s + n, 0);
-  const positions = b.days.map((day) => d.days[day]?.position).filter(Boolean);
+  const positions = /** @type {number[]} */ (b.days.map((day) => d.days[day]?.position).filter(Boolean));
   const cols = ['', 'Clicks', 'Impressions', 'CTR', 'Position'];
-  const format = [null, fmt, fmt, pct, (n) => (n ? n.toFixed(1) : '—')];
+  const format = [null, fmt, fmt, pct, (/** @type {number} */ n) => (n ? n.toFixed(1) : '—')];
   const clickSeries = [{ name: 'Clicks', color: 'var(--accent)', values: clicks }];
   const impSeries = [{ name: 'Impressions', color: 'var(--info)', values: imps }];
   return h('div', { class: 'stack-lg' }, engines, head,
@@ -266,11 +298,12 @@ export function searchTab(store, view, w) {
 }
 
 // What Google holds for the site's sitemaps: how many pages each lists, and whether Google could read it.
+/** @param {SearchReport} d */
 function indexingCard(d) {
   const body = d.sitemaps === null || d.sitemaps === undefined
     ? notice({ tone: 'info', text: 'The sitemaps could not be read from Search Console.' })
     : d.sitemaps.length
-      ? table(['Sitemap', 'Pages submitted', 'Errors', 'Warnings', 'Last read by Google'], d.sitemaps, [null, fmt, fmt, fmt, (v) => v || '—'])
+      ? table(['Sitemap', 'Pages submitted', 'Errors', 'Warnings', 'Last read by Google'], d.sitemaps, [null, fmt, fmt, fmt, (/** @type {string} */ v) => v || '—'])
       : empty('No sitemap is submitted for this property. Submit one in Search Console so new pages are found sooner.');
   return h('section', { class: 'card stack' },
     h('h3', null, 'Indexing'),
@@ -280,16 +313,17 @@ function indexingCard(d) {
 
 // --- All sites ---
 
+/** @param {Store} store @param {MonitoringView} view @param {Project[]} sites @param {Record<string, string>} props @param {DayBuckets} b */
 function analyticsAll(store, view, sites, props, b) {
   const all = loadAll(store, sites, (p) => `ga:${p.id}:${b.from}:${b.to}`, (p) => analyticsReport(props[p.id], b.from, b.to));
   const head = h('div', { class: 'row between' }, siteChips(store, view, sites, null), refreshButton(store, all.keys));
   const failed = all.failed.length ? notice({ text: `Could not read: ${all.failed.join('; ')}` }) : null;
   if (all.loading) return h('div', { class: 'stack-lg' }, head, progress(`Reading Google Analytics for ${sites.length} site${sites.length === 1 ? '' : 's'}…`));
   if (!all.ok.length) return h('div', { class: 'stack-lg' }, head, failed);
-  const sum = (f) => all.ok.reduce((s, x) => s + f(x.d), 0);
+  const sum = (/** @type {(d: AnalyticsData) => number} */ f) => all.ok.reduce((s, x) => s + f(x.d), 0);
   const sessions = sum((d) => d.totals.sessions);
   // Duration and engagement are per session, so each site counts by its number of sessions.
-  const perSession = (f) => (sessions ? sum((d) => f(d) * d.totals.sessions) / sessions : 0);
+  const perSession = (/** @type {(d: AnalyticsData) => number} */ f) => (sessions ? sum((d) => f(d) * d.totals.sessions) / sessions : 0);
   const views = sum((d) => d.totals.views);
   const series = [
     { name: 'Users', color: 'var(--accent)', values: b.days.map((day) => sum((d) => d.days[day]?.users ?? 0)) },
@@ -315,6 +349,7 @@ function analyticsAll(store, view, sites, props, b) {
 }
 
 // Clicks, impressions, rate and average position over a set of day rows; the position is weighed by impressions.
+/** @param {{ clicks: number, impressions: number, position: number }[]} rows */
 function searchTotals(rows) {
   const clicks = rows.reduce((s, r) => s + r.clicks, 0);
   const imps = rows.reduce((s, r) => s + r.impressions, 0);
@@ -323,20 +358,24 @@ function searchTotals(rows) {
   return { clicks, imps, ctr: imps ? clicks / imps : 0, position: weight ? seen.reduce((s, r) => s + r.position * r.impressions, 0) / weight : 0 };
 }
 
+/**
+ * @param {Store} store @param {MonitoringView} view @param {Project[]} sites @param {string} engine @param {HTMLElement} engines
+ * @param {DayBuckets} b @param {(p: Project) => Promise<SearchReport>} report
+ */
 function searchAll(store, view, sites, engine, engines, b, report) {
   const all = loadAll(store, sites, (p) => `${engine}:${p.id}:${b.from}:${b.to}`, report);
   const head = h('div', { class: 'row between' }, siteChips(store, view, sites, null), refreshButton(store, all.keys));
   const failed = all.failed.length ? notice({ text: `Could not read: ${all.failed.join('; ')}` }) : null;
   if (all.loading) return h('div', { class: 'stack-lg' }, engines, head, progress(`Reading search data for ${sites.length} site${sites.length === 1 ? '' : 's'}…`));
   if (!all.ok.length) return h('div', { class: 'stack-lg' }, engines, head, failed);
-  const daysOf = (d) => b.days.map((day) => d.days[day]).filter(Boolean);
+  const daysOf = (/** @type {SearchReport} */ d) => b.days.map((day) => d.days[day]).filter(Boolean);
   const total = searchTotals(all.ok.flatMap((x) => daysOf(x.d)));
-  const daySum = (f) => b.days.map((day) => all.ok.reduce((s, x) => s + (x.d.days[day]?.[f] ?? 0), 0));
+  const daySum = (/** @type {'clicks' | 'impressions'} */ f) => b.days.map((day) => all.ok.reduce((s, x) => s + (x.d.days[day]?.[f] ?? 0), 0));
   const cols = ['', 'Clicks', 'Impressions', 'CTR', 'Position'];
-  const format = [null, fmt, fmt, pct, (n) => (n ? n.toFixed(1) : '—')];
+  const format = [null, fmt, fmt, pct, (/** @type {number} */ n) => (n ? n.toFixed(1) : '—')];
   const bySite = all.ok.map(({ p, d }) => {
     const t = searchTotals(daysOf(d));
-    return [p.name, t.clicks, t.imps, t.ctr, t.position];
+    return /** @type {SearchRow} */ ([p.name, t.clicks, t.imps, t.ctr, t.position]);
   }).sort((a, c) => c[1] - a[1] || c[2] - a[2]);
   const clickSeries = [{ name: 'Clicks', color: 'var(--accent)', values: daySum('clicks') }];
   const impSeries = [{ name: 'Impressions', color: 'var(--info)', values: daySum('impressions') }];
