@@ -149,6 +149,7 @@ function row(ctx, w, use) {
           onclick: () => ctx.showTerminal(use.terminal.id, use.terminal.cwd),
         }, icon('terminal'))
         : button('terminal', 'Open a terminal in it', () => ctx.openTerminal(w.path)),
+      w.prunable ? null : ctx.cronLink({ session: use.session, worktree: w.claude ? w.name : '', runId: use.task?.cronRun }, w.name),
       busy ? h('span', { class: 'tree-action spin-icon wt-busy' }, icon('refresh')) : button('trash', 'Remove this worktree', () => {
         if (use.tone === 'running') confirmRemove(ctx, [[w, use]], 'Remove a worktree in use');
         else removeOne(ctx, w, use).then((ok) => {

@@ -23,6 +23,7 @@ import { linkWatcher, moveToReview } from '../task-links.js';
 import { watchDevSessions } from './todos.js';
 import { recordOfSession, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand } from '../dev-core.js';
+import { cronRunOf, cronRunHref } from '../cron.js';
 
 export { runnerOf, devPresets, DEFAULT_DEV_COMMAND, devCommandOf };
 
@@ -79,6 +80,7 @@ const filesCtx = (store) => ({
     const s = newSession(store, path);
     if (s) store.refresh();
   },
+  cronLink: (which, label) => cronLink(store, which, label),
   // A session the runner still runs but Dev's list lost (closed here, or saved over by another page) is listed again.
   showTerminal: (id, cwd = '') => {
     if (!view.sessions.some((s) => s.id === id)) {
@@ -817,6 +819,19 @@ function jumpTo(store, s) {
 }
 
 // Every open terminal, running ones first, with what runs in it or the task handed to it: a click jumps in.
+// On a terminal or worktree a Cron run started: a button that opens the run.
+function cronLink(store, which, label) {
+  const run = cronRunOf(store, which);
+  if (!run) return null;
+  const flow = store.get('cron')?.flows?.find((f) => f.id === run.flowId);
+  return h('a', {
+    class: 'tree-action cron-link',
+    href: cronRunHref(run),
+    title: `Started by ${flow ? `“${flow.name}”` : 'a Cron flow'}. Open the run.`,
+    'aria-label': `Open the Cron run: ${label}`,
+  }, icon('repeat'));
+}
+
 function terminalsPanel(store, picker, switcher) {
   const tasks = store.get('todos').items;
   const shown = activeSession()?.id;
@@ -838,6 +853,7 @@ function terminalsPanel(store, picker, switcher) {
         h('span', { class: 'term-list-text' },
           h('span', { class: 'tree-name' }, `${s.n} · ${s.cwd ? baseName(s.cwd) : 'board'}`),
           h('span', { class: 'term-list-sub muted' }, titles[0] ? `${titles[0]}${titles.length > 1 ? ` +${titles.length - 1}` : ''}` : what))),
+      cronLink(store, { session: s.id, runId: s.tasks.map((id) => tasks.find((t) => t.id === id)?.cronRun).find(Boolean) }, `terminal ${s.n}`),
       h('button', {
         type: 'button',
         class: 'tree-action',
