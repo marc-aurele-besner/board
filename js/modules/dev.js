@@ -18,6 +18,7 @@ import { explorer, editor, setRoot, hasOpenFiles, baseName, panelHead, panelActi
 import { sourceControl, refreshGit, decorOf, changeCount } from './dev-git.js';
 import { searchPanel } from './dev-search.js';
 import { worktreesPanel, refreshWorktrees } from './dev-worktrees.js';
+import { skillsPanel, refreshSkills } from './dev-skills.js';
 import { pickChip } from '../inline.js';
 import { projectIcon } from './projects.js';
 import { linkWatcher, moveToReview } from '../task-links.js';
@@ -52,7 +53,7 @@ const RECENT_SHOWN = 8;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 // Where this browser kept the open terminals before the runner did; read once, then removed.
 const OLD_SESSIONS_KEY = 'board:dev-sessions';
-// The side panel shown: 'files', 'search', 'git', 'worktrees' or 'terminals'.
+// The side panel shown: 'files', 'search', 'git', 'worktrees', 'skills' or 'terminals'.
 const SIDE_KEY = 'board:dev-side';
 
 // View state: the workspace, the sessions, the one shown, and what the runner said about itself.
@@ -71,7 +72,7 @@ function readSide() {
   try {
     // A missing key (null) is in no list.
     const side = /** @type {string} */ (localStorage.getItem(SIDE_KEY));
-    return ['git', 'search', 'worktrees', 'terminals'].includes(side) ? side : 'files';
+    return ['git', 'search', 'worktrees', 'skills', 'terminals'].includes(side) ? side : 'files';
   } catch {
     return 'files';
   }
@@ -119,6 +120,24 @@ const filesCtx = (store) => ({
     view.active = id;
     saveSessions();
     store.refresh();
+  },
+  // A skill picked in the Skills panel: typed into the running program of the terminal shown, or, when nothing
+  // runs there, put in its command line as a claude command to finish and run.
+  typeInTerminal: (text) => {
+    const s = activeSession();
+    if (!s) return toast('No terminal open.');
+    if (s.running && s.pid) {
+      s.stick = true;
+      sendInput(runnerOf(store), s.pid, { data: text });
+      requestAnimationFrame(() => s.el?.out.focus({ preventScroll: true }));
+      return;
+    }
+    const input = /** @type {HTMLInputElement | null} */ (document.querySelector('.term-input'));
+    if (!input) return;
+    input.value = `claude "${text}"`;
+    input.focus();
+    // The cursor waits before the closing quote, where the skill's arguments go.
+    input.setSelectionRange(input.value.length - 1, input.value.length - 1);
   },
 });
 
@@ -901,6 +920,7 @@ function sideSwitcher(store) {
     tab('git', 'git-branch', count ? `Source control · ${count} changed ${count === 1 ? 'file' : 'files'}` : 'Source control',
       count ? h('span', { class: 'ide-side-badge' }, count > 99 ? '99+' : count) : null),
     tab('worktrees', 'worktree', 'Worktrees'),
+    tab('skills', 'zap', 'Skills'),
     tab('terminals', 'terminal', running ? `Terminals · ${running} running` : 'Terminals',
       running ? h('span', { class: 'ide-side-badge' }, running) : null));
 }
@@ -1175,6 +1195,7 @@ function draw(root, store) {
   // The tree's change colours and the panel's count come from git, read again when stale.
   if (view.info) refreshGit(ctx, rootPath(store, view.workspace));
   if (view.info && view.side === 'worktrees') refreshWorktrees(ctx, rootPath(store, view.workspace));
+  if (view.info && view.side === 'skills') refreshSkills(ctx, rootPath(store, view.workspace));
 
   root.replaceChildren(
     h('div', { class: 'stack-lg dev' },
@@ -1186,9 +1207,11 @@ function draw(root, store) {
             ? searchPanel(ctx, workspacePicker(store), sideSwitcher(store), rootPath(store, view.workspace))
             : view.side === 'worktrees'
               ? worktreesPanel(ctx, workspacePicker(store), sideSwitcher(store), rootPath(store, view.workspace))
-              : view.side === 'terminals'
-                ? terminalsPanel(store, workspacePicker(store), sideSwitcher(store))
-                : explorer(ctx, workspacePicker(store), sideSwitcher(store)),
+              : view.side === 'skills'
+                ? skillsPanel(ctx, workspacePicker(store), sideSwitcher(store), rootPath(store, view.workspace))
+                : view.side === 'terminals'
+                  ? terminalsPanel(store, workspacePicker(store), sideSwitcher(store))
+                  : explorer(ctx, workspacePicker(store), sideSwitcher(store)),
         h('div', { class: hasOpenFiles() ? 'ide-main has-file' : 'ide-main' },
           editor(ctx),
           s ? terminal(store, s) : h('section', { class: 'card term' }, h('p', { class: 'muted small' }, 'Asking the runner for the open terminals…'))))));

@@ -187,3 +187,18 @@ export interface RunnerSearch {
 
 // POST /usage, by worktree name: what its claude sessions used (tools/usage.js).
 export type WorktreeUsage = Omit<DevUsage, 'name' | 'cwd' | 'added' | 'taskIds' | 'session'>;
+
+// A Claude Code skill, from its SKILL.md: typed as /<name> in claude.
+export interface RunnerSkill {
+  name: string;
+  description: string;
+  path: string;
+}
+
+// Dev's Skills panel: the user's own skills (~/.claude/skills) and the project's (.claude/skills), and the repository
+// (or folder) the project's were read from.
+export interface RunnerSkills {
+  global: RunnerSkill[];
+  project: RunnerSkill[];
+  root: string;
+}

@@ -1,4 +1,4 @@
-// What Dev's side panels (js/modules/dev-files.js, dev-git.js, dev-search.js, dev-worktrees.js) need of the Dev
+// What Dev's side panels (js/modules/dev-files.js, dev-git.js, dev-search.js, dev-worktrees.js, dev-skills.js) need of the Dev
 // section (js/modules/dev.js filesCtx()).
 
 import type { Store } from './data';
@@ -32,4 +32,6 @@ export interface DevContext {
   cronLink(which: { session?: string; worktree?: string; runId?: string }, label: string): HTMLElement | null;
   // Shows a terminal, listing it again when Dev's list lost it.
   showTerminal(id: string, cwd?: string): void;
+  // Types text into the terminal shown (Skills panel).
+  typeInTerminal(text: string): void;
 }

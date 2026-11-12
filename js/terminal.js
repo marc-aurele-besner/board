@@ -1,5 +1,5 @@
 // The Dev section's calls to the command runner on this machine (tools/terminal.js, started by `bun start`).
-/** @import { RunnerInfo, RunnerSessionList, RunnerStatus, RunnerFolder, RunnerFile, RunnerEvent, RunnerRun, RunnerRemoved, RunnerClaudeExit, RunnerWorktrees, RunnerOutcome, WorktreeUsage, GitStatus, GitDiff, RunnerSearch } from '../types/terminal' */
+/** @import { RunnerInfo, RunnerSessionList, RunnerStatus, RunnerFolder, RunnerFile, RunnerEvent, RunnerRun, RunnerRemoved, RunnerClaudeExit, RunnerWorktrees, RunnerSkills, RunnerOutcome, WorktreeUsage, GitStatus, GitDiff, RunnerSearch } from '../types/terminal' */
 /** @import { DevSessionList } from '../types/data' */
 export const TERMINAL_RUNNER = 'http://127.0.0.1:8419';
 
@@ -171,6 +171,10 @@ export const exitClaude = async (base, session) => (await call(base, '/claude/ex
 // [{ path, name, branch, head, claude, locked, prunable, pid, running, commands, changes }] }.
 /** @type {(base: string, path: string) => Promise<RunnerWorktrees>} */
 export const listWorktrees = async (base, path) => (await call(base, `/worktrees?path=${encodeURIComponent(path)}`)).json();
+
+// Claude Code's skills for the folder at `path`: the user's own and the project's ({ global, project, root }).
+/** @type {(base: string, path: string) => Promise<RunnerSkills>} */
+export const listSkills = async (base, path) => (await call(base, `/skills?path=${encodeURIComponent(path)}`)).json();
 
 // What a terminal left behind, for the Cron step after it: { output } (the end of its raw output), and when `path`
 // is in a repository { repo: true, root, branch, upstream, ahead, behind, base, commit, short, subject, commits:

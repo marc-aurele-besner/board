@@ -2814,6 +2814,9 @@ button.sum-line:hover { background: var(--surface-2); }
 .term-list-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .term-list-text .tree-name { min-width: 0; }
 .term-list-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.75rem; }
+/* Dev Skills: Claude Code's skills, a click types one in the terminal */
+.skill-row .tree-name { font-family: var(--mono, ui-monospace, monospace); font-size: 0.8rem; }
+.skill-empty { margin: 2px 0 6px 19px; }
 .scm-branches { display: flex; flex-direction: column; max-height: min(40vh, 320px); overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
 .scm-branches .fp-row.active { color: var(--accent); }
 
