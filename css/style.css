@@ -2643,6 +2643,8 @@ button.sum-line:hover { background: var(--surface-2); }
 .wt-actions .btn-small { display: inline-flex; align-items: center; gap: 5px; min-height: 0; padding: 4px 8px; font-size: 0.78rem; }
 .wt-actions .icon { width: 13px; height: 13px; }
 .wt-row .tree-item { padding-left: 6px; cursor: default; }
+.scm-row .tree-action.wt-term { display: inline-flex; opacity: 1; color: var(--warn); }
+.scm-row .tree-action.wt-term.running { color: var(--income); }
 .wt-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); opacity: 0.55; }
 .wt-dot.running { background: var(--income); opacity: 1; animation: pulse 1.4s ease-in-out infinite; }
 .wt-dot.held { background: var(--warn); opacity: 1; }
