@@ -38,13 +38,14 @@ import { hasProfileSources } from '../profile.js';
 // field and cursor: the {{…}} field last focused and where its cursor was, for the variable chips and the test data.
 // preview: the {{…}} text fields showing their Preview tab instead of the text.
 // terms: the terminals unfolded under runs (seenTerms: those drawn once, so one folded by hand stays folded).
+// sort: the order of the flow list, a key of FLOW_SORTS.
 // openRuns: the runs unfolded; focusRun: the run a link opened (#/cron?tab=runs&run=…), scrolled to once.
 /**
- * @type {{ tab: string, flow: string, node: string, runs: string, project: string, field: string,
+ * @type {{ tab: string, flow: string, node: string, runs: string, project: string, sort: string, field: string,
  *   cursor: { key: string, start: number, end: number } | null, preview: Set<string>, terms: Set<string>,
  *   seenTerms: Set<string>, openRuns: Set<string>, focusRun: string, scrollTo: string }}
  */
-const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', project: '', field: '', cursor: null, preview: new Set(), terms: new Set(), seenTerms: new Set(), openRuns: new Set(), focusRun: '', scrollTo: '' };
+const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', project: '', sort: 'next', field: '', cursor: null, preview: new Set(), terms: new Set(), seenTerms: new Set(), openRuns: new Set(), focusRun: '', scrollTo: '' };
 const NO_PROJECT = 'none';
 const TABS = [['flows', 'Flows'], ['runs', 'Runs'], ['templates', 'Templates']];
 /** @type {Record<string, string>} */
@@ -229,6 +230,61 @@ function projectFilter(store, flows) {
   });
 }
 
+// The flow list's orders. Where a time decides, paused flows and those that never ran go last.
+/** @type {Record<string, string>} */
+const FLOW_SORTS = { next: 'Next run', last: 'Last run', status: 'Needs attention', name: 'Name', project: 'Project', newest: 'Newest' };
+
+/**
+ * @param {Store} store
+ * @param {CronFlow[]} flows
+ */
+function sortFlows(store, flows) {
+  /** @param {CronFlow} f */
+  const next = (f) => (f.enabled ? nextRun(f)?.getTime() ?? Infinity : Infinity);
+  /** @param {CronFlow} f */
+  const last = (f) => Date.parse(lastRunOf(store, f.id)?.at ?? '') || 0;
+  /** @param {CronFlow} f */
+  const rank = (f) => (isRunning(f.id) ? 0 : lastRunOf(store, f.id)?.status === 'error' ? 1 : f.enabled ? 2 : 3);
+  /** @param {CronFlow} f */
+  const project = (f) => projectName(store, flowProjectId(f)) || '\uffff';
+  /** @param {number} a @param {number} b */
+  const diff = (a, b) => (a === b ? 0 : a < b ? -1 : 1);
+  /** @type {Record<string, (a: CronFlow, b: CronFlow) => number>} */
+  const by = {
+    next: (a, b) => diff(next(a), next(b)),
+    last: (a, b) => last(b) - last(a),
+    status: (a, b) => rank(a) - rank(b) || diff(next(a), next(b)),
+    project: (a, b) => project(a).localeCompare(project(b)) || diff(next(a), next(b)),
+    newest: (a, b) => (b.created || '').localeCompare(a.created || ''),
+  };
+  const cmp = by[view.sort];
+  return [...flows].sort((a, b) => (cmp ? cmp(a, b) : 0) || a.name.localeCompare(b.name));
+}
+
+/** @param {Store} store */
+function flowSort(store) {
+  return h('label', { class: 'inline cron-sort' }, 'Sort',
+    h('select', {
+      'aria-label': 'Sort flows',
+      onchange: (/** @type {Event} */ e) => {
+        view.sort = /** @type {HTMLSelectElement} */ (e.target).value;
+        store.refresh();
+      },
+    }, Object.entries(FLOW_SORTS).map(([key, label]) => h('option', { value: key, selected: key === view.sort }, label))));
+}
+
+// A row's timing: when the flow runs next, or when it last ran once paused or when the list is sorted by that.
+/**
+ * @param {CronFlow} f
+ * @param {CronRun | null} last
+ */
+function flowWhen(f, last) {
+  if (isRunning(f.id)) return 'running now';
+  if (view.sort === 'last' || !f.enabled) return last ? `last ${timeOf(last.at)}${last.status === 'error' ? ', failed' : ''}` : 'never ran';
+  const next = nextRun(f);
+  return next ? `next ${timeOf(next.toISOString())}` : 'no next run';
+}
+
 /** @param {CronFlow} f */
 const inFilter = (f) => !view.project || (flowProjectId(f) || NO_PROJECT) === view.project;
 
@@ -242,9 +298,9 @@ function flowList(store, all, flows) {
     h('div', { class: 'row between' },
       h('h3', null, 'Flows'),
       h('button', { type: 'button', class: 'btn-small primary', onclick: () => openNewFlow(store) }, icon('plus'), 'New flow')),
-    projectFilter(store, all),
+    h('div', { class: 'row cron-list-tools' }, projectFilter(store, all), flows.length > 1 ? flowSort(store) : null),
     flows.length
-      ? h('ul', { class: 'cron-flows' }, flows.map((f) => {
+      ? h('ul', { class: 'cron-flows' }, sortFlows(store, flows).map((f) => {
           const last = lastRunOf(store, f.id);
           const project = store.get('projects').projects.find((p) => p.id === flowProjectId(f));
           return h('li', { class: 'cron-flow-row' },
@@ -260,7 +316,7 @@ function flowList(store, all, flows) {
               h('span', { class: `cron-dot ${isRunning(f.id) ? 'running' : !f.enabled ? 'off' : last?.status === 'error' ? 'bad' : 'on'}` }),
               h('span', { class: 'grow' },
                 h('strong', null, f.name),
-                h('span', { class: 'muted small cron-flow-meta' }, h('span', { class: 'cron-flow-project' }, f.enabled ? scheduleLabel(f.schedule) : 'Paused')),
+                h('span', { class: 'muted small cron-flow-meta' }, h('span', { class: 'cron-flow-project' }, `${f.enabled ? scheduleLabel(f.schedule) : 'Paused'} · ${flowWhen(f, last)}`)),
                 project ? h('span', { class: 'muted small cron-flow-meta' }, projectIcon(project), h('span', { class: 'cron-flow-project' }, project.name)) : null)),
             h('input', {
               type: 'checkbox',
