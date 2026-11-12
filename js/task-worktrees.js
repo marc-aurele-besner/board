@@ -57,6 +57,19 @@ async function remove(store, { worktree, tasks }) {
   }
 }
 
+// The tasks holding the worktree `name`, and its record ({ name, cwd, session }), for Dev's Worktrees panel.
+export function tasksOfWorktree(store, name) {
+  return worktreesOf(store).find((e) => e.worktree.name === name) ?? { worktree: null, tasks: [] };
+}
+
+// A worktree removed from Dev's Worktrees panel: the tasks let it go, and what its session used is kept.
+export function forgetWorktree(store, name) {
+  const { worktree, tasks } = tasksOfWorktree(store, name);
+  if (!worktree) return;
+  rememberWorktrees(store, [{ worktree, taskIds: tasks.map((t) => t.id) }]);
+  forget(store, name);
+}
+
 // Called on every store change: cheap when no task holds a worktree.
 export function removeDoneWorktrees(store) {
   for (const entry of worktreesOf(store)) {
