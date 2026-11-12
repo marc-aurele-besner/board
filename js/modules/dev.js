@@ -79,8 +79,13 @@ const filesCtx = (store) => ({
     const s = newSession(store, path);
     if (s) store.refresh();
   },
-  showTerminal: (id) => {
-    if (!view.sessions.some((s) => s.id === id)) return;
+  // A session the runner still runs but Dev's list lost (closed here, or saved over by another page) is listed again.
+  showTerminal: (id, cwd = '') => {
+    if (!view.sessions.some((s) => s.id === id)) {
+      if (view.sessions.length >= maxSessions()) return toast(`${maxSessions()} terminals are open. Close one first.`);
+      const s = makeSession({ id, cwd });
+      if (view.info) attach(store, s);
+    }
     view.active = id;
     saveSessions();
     store.refresh();

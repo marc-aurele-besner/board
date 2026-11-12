@@ -38,8 +38,9 @@ export async function refreshWorktrees(ctx, path, { force = false } = {}) {
 
 // In use (a claude or a command runs in it), held (an open task or an open terminal points at it, but nothing
 // runs), or unused. `session` is the board's running terminal in it, stopped before it is removed. `why` says what
-// uses or holds it when no task says so, `task` is the task it was made for, if any. `terminal` is the board's open
-// terminal linked to it (its task's session, else one opened in its folder, running first), shown by its row.
+// uses or holds it when no task says so, `task` is the task it was made for, if any. `terminal` is the terminal
+// linked to it, shown by its row: one the runner says runs in it, else its task's session, else one opened in its
+// folder, running first. One Dev's list lost is { id, cwd, n: 0 }, listed again when shown.
 function usageOf(ctx, w) {
   return { ...usageTone(ctx, w), terminal: terminalOf(ctx, w) };
 }
@@ -47,20 +48,22 @@ function usageOf(ctx, w) {
 function terminalOf(ctx, w) {
   const { worktree } = w.claude ? tasksOfWorktree(ctx.store, w.name) : { worktree: null };
   const sessions = ctx.sessions();
+  const live = (w.sessions ?? []).map((r) => sessions.find((s) => s.id === r.id) ?? { id: r.id, cwd: r.cwd, n: 0, running: true });
   const linked = sessions.find((s) => s.id === worktree?.session);
   const inIt = sessions.filter((s) => inside(s.cwd, w.path));
-  return (linked?.running ? linked : null) ?? inIt.find((s) => s.running) ?? linked ?? inIt[0] ?? null;
+  return live.find((s) => s.id === worktree?.session) ?? live[0] ?? (linked?.running ? linked : null) ?? inIt.find((s) => s.running) ?? linked ?? inIt[0] ?? null;
 }
 
 function usageTone(ctx, w) {
   const { worktree, tasks } = w.claude ? tasksOfWorktree(ctx.store, w.name) : { worktree: null, tasks: [] };
   const sessions = ctx.sessions();
-  const session = worktree?.session ? sessions.find((s) => s.id === worktree.session && s.running) : null;
+  const session = (worktree?.session ? sessions.find((s) => s.id === worktree.session && s.running) : null)
+    ?? (w.sessions?.length ? sessions.find((s) => s.id === w.sessions[0].id) ?? { id: w.sessions[0].id, n: 0 } : null);
   const open = tasks.filter((t) => statusOf(t) !== 'done');
   const task = open[0] ?? tasks[0] ?? null;
   const more = (open.length || tasks.length) - 1;
   if (w.running || w.commands || session) {
-    const why = w.running ? `claude runs in it (pid ${w.pid})` : session ? `terminal ${session.n} runs in it` : 'a command runs in it';
+    const why = w.running ? `claude runs in it (pid ${w.pid})` : session ? `${session.n ? `terminal ${session.n}` : 'a terminal'} runs in it` : 'a command runs in it';
     return { tone: 'running', label: `In use: ${why}`, why, task, more, session: session?.id ?? worktree?.session ?? '' };
   }
   const terminals = sessions.filter((s) => inside(s.cwd, w.path));
@@ -140,10 +143,10 @@ function row(ctx, w, use) {
         ? h('button', {
           type: 'button',
           class: `tree-action wt-term${use.terminal.running ? ' running' : ''}`,
-          title: `Show terminal ${use.terminal.n}${use.terminal.running ? ', running in it' : ', open in it'}`,
-          'aria-label': `Show terminal ${use.terminal.n}: ${w.name}`,
+          title: `Show ${use.terminal.n ? `terminal ${use.terminal.n}` : 'its terminal'}${use.terminal.running ? ', running in it' : ', open in it'}`,
+          'aria-label': `Show its terminal: ${w.name}`,
           disabled: busy,
-          onclick: () => ctx.showTerminal(use.terminal.id),
+          onclick: () => ctx.showTerminal(use.terminal.id, use.terminal.cwd),
         }, icon('terminal'))
         : button('terminal', 'Open a terminal in it', () => ctx.openTerminal(w.path)),
       busy ? h('span', { class: 'tree-action spin-icon wt-busy' }, icon('refresh')) : button('trash', 'Remove this worktree', () => {

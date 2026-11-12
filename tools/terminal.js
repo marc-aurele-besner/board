@@ -467,10 +467,48 @@ const worktreeEntries = (list) => list.trim().split(/\n\n+/).filter(Boolean)
 const lockPid = (entry) => Number(/\bpid (\d+)/.exec(entry.locked ?? '')?.[1]) || 0;
 const inside = (path, dir) => path === dir || path.startsWith(dir.endsWith('/') ? dir : `${dir}/`);
 
+// Each process's parent, to tell which terminal a claude runs under. Empty where ps is missing (Windows).
+function parents() {
+  if (WINDOWS) return Promise.resolve(new Map());
+  return new Promise((done) => {
+    execFile('ps', ['-A', '-o', 'pid=,ppid='], { timeout: 5000, maxBuffer: 4 * 1024 * 1024 }, (err, out) => {
+      if (err) return done(new Map());
+      done(new Map(String(out).split('\n').map((l) => l.trim().split(/\s+/).map(Number)).filter(([pid]) => pid)));
+    });
+  });
+}
+
+// The session whose running command has `pid` among its descendants.
+function sessionOfPid(pid, parent) {
+  for (let p = pid, hops = 0; p > 1 && hops < 64; p = parent.get(p), hops++) {
+    const job = running.get(p);
+    if (job) return job.session;
+  }
+  return null;
+}
+
+// The runner's sessions running in a worktree: the one the claude that locked it runs under, one started inside it,
+// and one whose `claude --worktree <name>` names it from the main checkout. A page whose list lost the session (or
+// never had it, when claude was typed into a terminal) still finds it this way.
+function sessionsIn(e, root, parent) {
+  const found = new Set();
+  const pid = lockPid(e);
+  if (pid && alive(pid)) found.add(sessionOfPid(pid, parent));
+  for (const s of sessions.values()) {
+    if (!s.run) continue;
+    const cwd = s.events.findLast((x) => x.t === 'start')?.cwd ?? '';
+    if (cwd && inside(cwd, e.worktree)) found.add(s);
+    else if (cwd === root && worktreeOf(s.open?.command) === basename(e.worktree)) found.add(s);
+  }
+  found.delete(null);
+  return [...found].map((s) => ({ id: s.id, cwd: s.events.findLast((x) => x.t === 'start')?.cwd ?? '' }));
+}
+
 // Every worktree of the repository holding `path`, but the main checkout, for Dev's Worktrees panel: { repo: false }
 // outside one, else { root, worktrees: [{ path, name, branch, head, claude, locked, prunable, pid, running, commands,
-// changes }] }. `running`: the claude that locked it still runs; `commands`: the runner's running commands started
-// inside it; `changes`: files git would refuse to remove it over (null when it could not tell).
+// sessions, changes }] }. `running`: the claude that locked it still runs; `commands`: the runner's running commands
+// started inside it; `sessions`: the runner's running sessions in it ({ id, cwd }); `changes`: files git would
+// refuse to remove it over (null when it could not tell).
 async function listWorktrees(path) {
   const dir = await folderOf(path);
   let entries;
@@ -481,6 +519,7 @@ async function listWorktrees(path) {
   }
   const [main, ...rest] = entries;
   const started = [...sessions.values()].filter((s) => s.run).map((s) => s.events.findLast((e) => e.t === 'start')?.cwd ?? '');
+  const parent = rest.some((e) => lockPid(e)) ? await parents() : new Map();
   const worktrees = await Promise.all(rest.filter((e) => e.worktree).map(async (e) => {
     const pid = lockPid(e);
     const changes = 'prunable' in e ? 0 : await git(e.worktree, ['status', '--porcelain']).then((out) => out.split('\n').filter(Boolean).length, () => null);
@@ -495,6 +534,7 @@ async function listWorktrees(path) {
       pid,
       running: !!pid && alive(pid),
       commands: started.filter((cwd) => cwd && inside(cwd, e.worktree)).length,
+      sessions: sessionsIn(e, main.worktree, parent),
       changes,
     };
   }));
