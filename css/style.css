@@ -2231,9 +2231,6 @@ button.json-key:hover { background: color-mix(in srgb, var(--accent) 15%, transp
 .lp-search-more .icon { width: 13px; height: 13px; }
 .lp-coverage-chains .chain-chip { justify-self: start; max-width: 100%; }
 /* What a chain is searching now: a full-width line under its row, or under the recap when collapsed. */
-.lp-coverage-now { margin: 0; overflow-wrap: anywhere; }
-.lp-coverage-chains li > .lp-coverage-now { grid-column: 1 / -1; text-align: left; margin-top: -4px; }
-.lp-coverage.collapsed .lp-coverage-now { margin-top: 6px; }
 @media (max-width: 520px) {
   .lp-coverage-chains li { grid-template-columns: minmax(0, 1fr) auto auto auto; }
   .lp-coverage-chains .meter { grid-column: 1 / -1; grid-row: 2; }

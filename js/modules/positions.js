@@ -77,8 +77,6 @@ let loadError = '';
 let askedAt = 0; // when this tab last started a read, so a stale page asks once, not on every redraw
 /** @type {Store | null} */
 let bound = null; // the store of the page drawn last, for the state below
-/** @type {Map<number, unknown>} */
-const activity = new Map(); // what the page shows of a search's progress: the runners report none
 // The collect search runs in the runners; it is running while their job is, or while this tab waits on it.
 const historyRunning = () => historyAsking || Boolean(jobState('defi-history')?.running);
 /** @type {{ has: (chainId: number) => boolean, readonly size: number }} */
@@ -305,8 +303,6 @@ function loadHistory(store, only = null) {
     });
   store.refresh();
 }
-/** @type {(chainId: number) => string[]} */
-const activityLines = () => [];
 
 // How far the search for collects has got, per position, from 0 to 1. A position is covered in full once its
 // event search reached its opening, or once Etherscan read every transaction of its wallet. Until then, the
@@ -1312,13 +1308,9 @@ function coverageCard(store) {
     view.coverageOpen ? null : [h('strong', { class: 'lp-coverage-pct' }, coveragePct(cov.pct)), meter(cov.pct)],
     h('span', { class: 'muted small lp-coverage-recap' }, view.coverageOpen ? status : `${cov.done}/${cov.total} positions · ${status}`),
     h('span', { class: 'sort-mark' }, icon(view.coverageOpen ? 'chevron-up' : 'chevron-down')));
-  // What each chain is searching now: one line per position read at the same time.
-  /** @param {number} chainId */
-  const now = (chainId) => activityLines(chainId).map((text) => h('p', { class: 'muted small lp-coverage-now' }, text));
   if (!view.coverageOpen) {
     return h('section', { class: 'card lp-coverage collapsed', title: COVERAGE_TITLE },
-      toggle,
-      [...activity.keys()].flatMap((id) => activityLines(id).map((text) => h('p', { class: 'muted small lp-coverage-now' }, h('strong', null, `${chainOf(id)?.name ?? id}: `), text))));
+      toggle);
   }
   return h('section', { class: 'card stack lp-coverage', title: COVERAGE_TITLE },
     toggle,
@@ -1340,8 +1332,7 @@ function coverageCard(store) {
             title: searching.has(c.chainId) ? `Searching ${c.name}…` : `Search ${c.name} further back for collects now, without waiting for the next load`,
             'aria-label': `Search ${c.name} further`,
             onclick: () => loadHistory(store, c.chainId),
-          }, refreshIcon(searching.has(c.chainId))),
-          now(c.chainId))))
+          }, refreshIcon(searching.has(c.chainId))))))
       : null);
 }
 
