@@ -56,6 +56,8 @@ export interface Task {
   autoRef?: string;
   // Waits in "To Organize".
   inbox?: boolean;
+  // The task it sits under (Tasks nests it there); missing or '' for a top-level task.
+  parentId?: string;
   // The Cron run that made it.
   cronRun?: string;
   // The Dev session that last worked on it.

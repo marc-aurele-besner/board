@@ -74,6 +74,8 @@ export interface CronStep {
   status?: string;
   category?: string;
   due?: string;
+  // The task to put it under: a task id, usually a variable such as {{step2}}; '' for none.
+  parent?: string;
   // task, profile, dev, old gather; '' follows the flow's project.
   projectId?: string;
   // stop ('nothing', 'empty', 'contains', 'lacks'); `text` is what contains/lacks look for. notify and old gather use
