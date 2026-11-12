@@ -1566,6 +1566,8 @@ export async function runFlow(store, flowId, { manual = false, dry = false } = {
         run.current = { stepId: step.id, ...info };
         run.beat = now();
         save();
+        // A test run shows the terminal in the step's test data too, while it waits for it.
+        if (dry) saveTest(store, flowId, step.id, { ok: true, pending: true, output: '', data: info, note: `Started in Dev terminal ${info.terminal}; waiting for it to finish.`, ms: 0, at: now() });
       };
       const result = await stepOnce(store, flow, step, ctx);
       if (dry) saveTest(store, flowId, step.id, result);
@@ -1604,7 +1606,7 @@ export function cronRunOf(store, { session = '', worktree = '', runId = '' }) {
 export const cronRunHref = (run) => `#/cron?run=${encodeURIComponent(run.id)}`;
 
 // How a Dev step starts its terminal. The runners start it on the command runner and add it to its list of open
-// terminals; the board's Cron page (a step tested in a terminal) opens it in Dev at once (modules/dev.js).
+// terminals; the board's Cron page (a step's test, or a test run) opens it in Dev at once (modules/dev.js).
 let devStarter = startRunnerSession;
 export const useDevStarter = (fn) => {
   devStarter = fn;
