@@ -377,7 +377,41 @@ function canvas(store, flow) {
     parts.push(node(store, flow, { id: s.id, iconName, kind: s.type, title: `${i + 1}. ${label}`, sub: stepSummary(store, flow, s), status: statusOfStep(s.id) }));
   });
   parts.push(link(store, flow, flow.steps.length));
-  return h('div', { class: `flow-canvas${isRunning(flow.id) ? ' running' : ''}`, role: 'list', 'aria-label': 'Flow steps' }, parts);
+  const wires = document.createElementNS(SVG_NS, 'svg');
+  wires.setAttribute('class', 'flow-wires');
+  wires.setAttribute('aria-hidden', 'true');
+  const el = h('div', { class: `flow-canvas${isRunning(flow.id) ? ' running' : ''}`, role: 'list', 'aria-label': 'Flow steps' }, wires, parts);
+  new ResizeObserver(() => drawWires(el, wires, parts)).observe(el);
+  return el;
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+// Joins each node and link to the next one, centre to centre (the nodes and buttons cover their part). On one row that is a straight line; when the next
+// one wraps to a new row, the line goes out, down into the gap between the rows, back across
+// and into it, so a wrapped step still reads as the one after.
+function drawWires(canvas, svg, parts) {
+  const base = canvas.getBoundingClientRect();
+  if (!base.width) return;
+  const boxes = parts.map((p) => {
+    const r = p.getBoundingClientRect();
+    return { left: r.left - base.left, right: r.right - base.left, top: r.top - base.top, bottom: r.bottom - base.top, mid: r.top - base.top + r.height / 2, cx: r.left - base.left + r.width / 2 };
+  });
+  const sameRow = (a, b) => a.top < b.bottom && b.top < a.bottom;
+  const d = [];
+  for (let i = 0; i < boxes.length - 1; i++) {
+    const a = boxes[i];
+    const b = boxes[i + 1];
+    if (sameRow(a, b)) { d.push(`M${a.cx} ${a.mid}H${b.cx}`); continue; }
+    const rowBottom = Math.max(...boxes.filter((x) => sameRow(x, a)).map((x) => x.bottom));
+    const rowTop = Math.min(...boxes.filter((x) => sameRow(x, b)).map((x) => x.top));
+    const gap = (rowBottom + rowTop) / 2;
+    const out = Math.min(a.right + 9, base.width - 3);
+    const into = Math.max(b.left - 9, 3);
+    d.push(`M${a.cx} ${a.mid}H${out}V${gap}H${into}V${b.mid}H${b.cx}`);
+  }
+  svg.setAttribute('viewBox', `0 0 ${base.width} ${base.height}`);
+  svg.innerHTML = `<path d="${d.join('')}"/>`;
 }
 
 // --- Inspector ---

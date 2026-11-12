@@ -1897,9 +1897,9 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .cron-time input { width: auto; }
 .cron-error { color: var(--danger); }
 .mono-text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
-.flow-canvas { display: flex; align-items: center; flex-wrap: wrap; row-gap: 14px; padding: 18px; border-radius: var(--radius); overflow: hidden;
+.flow-canvas { position: relative; display: flex; align-items: center; flex-wrap: wrap; row-gap: 14px; padding: 18px; border-radius: var(--radius); overflow: hidden;
   background-color: var(--surface-2); background-image: radial-gradient(color-mix(in srgb, var(--muted) 35%, transparent) 1px, transparent 1px); background-size: 16px 16px; }
-.flow-node { display: flex; align-items: center; gap: 10px; width: 210px; min-height: 64px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); text-align: left; font-weight: 400; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
+.flow-node { position: relative; display: flex; align-items: center; gap: 10px; width: 210px; min-height: 64px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); text-align: left; font-weight: 400; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
 .flow-node:hover { border-color: var(--accent); }
 .flow-node.selected { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
 .flow-node.ok { border-left: 3px solid var(--income); }
@@ -1918,8 +1918,8 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .flow-node-kind { font-weight: 600; font-size: 0.9rem; }
 .flow-node-sub { color: var(--muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .flow-link { position: relative; display: grid; place-items: center; width: 46px; height: 64px; flex: none; }
-.flow-link::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 2px; background: var(--border); }
-.flow-link:last-child::before { right: 50%; }
+.flow-wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.flow-wires path { fill: none; stroke: color-mix(in srgb, var(--accent) 55%, var(--muted)); stroke-width: 2; stroke-linejoin: round; }
 .flow-add { position: relative; display: grid; place-items: center; width: 24px; height: 24px; min-height: 0; padding: 0; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); color: var(--muted); }
 .flow-add:hover { color: var(--accent); border-color: var(--accent); }
 .flow-add .icon { width: 13px; height: 13px; }
