@@ -165,9 +165,10 @@ export function profileInput(project, { read, gaps }) {
     }
     const body = clipWords(text, left);
     left -= countWords(body);
-    parts.push(`## ${title}\n${body}`);
+    // Tags, not headings: the sources' own Markdown headings would blur where one source ends.
+    parts.push(`<source name="${title}">\n${body}\n</source>`);
   }
-  parts.push(`## Sources that could not be read\n${gaps.length ? gaps.map((g) => `- ${g}`).join('\n') : '(none)'}`);
+  parts.push(`Sources that could not be read:\n${gaps.length ? gaps.map((g) => `- ${g}`).join('\n') : '(none)'}`);
   return parts.filter(Boolean).join('\n\n');
 }
 
