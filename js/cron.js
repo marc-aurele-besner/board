@@ -958,7 +958,7 @@ export function pageUrl(store, step) {
 
 function moneyTotals(store, type, month) {
   const totals = {};
-  for (const e of store.get('money').entries) {
+  for (const e of store.get('finance').entries) {
     if (e.type !== type || !e.date?.startsWith(month)) continue;
     const key = `${e.category || 'Other'} (${e.currency || 'USD'})`;
     totals[key] = (totals[key] ?? 0) + Number(e.amount || 0);
