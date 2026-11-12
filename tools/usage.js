@@ -15,6 +15,8 @@ const cache = new Map();
 
 // Claude names a folder's transcripts after its path, every character but letters and digits made a dash.
 const folderKey = (path) => path.replace(/[^a-zA-Z0-9]/g, '-');
+// Projects keep their folder as typed, often under ~, which resolve() would read as a folder named "~".
+const expand = (path) => (path === '~' ? homedir() : path.startsWith('~/') ? homedir() + path.slice(1) : path);
 
 // Where the model ran, from how its id is written: Bedrock prefixes `anthropic.`, Vertex adds `@<date>`.
 export function providerOf(model) {
@@ -119,7 +121,7 @@ async function transcriptsIn(folder) {
 
 // The usage of the sessions that ran in worktree `name` of the repo at `cwd`, added up; null when none is found.
 async function usageOf({ name, cwd }) {
-  const repo = resolve(cwd);
+  const repo = resolve(expand(cwd));
   const files = new Set([
     ...(await transcriptsIn(folderKey(join(repo, '.claude', 'worktrees', name)))),
     ...(await transcriptsIn(folderKey(repo))),
