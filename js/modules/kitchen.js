@@ -1,3 +1,4 @@
+// @ts-check
 import { h, uid, now, todayISO, empty, icon, notice, progress } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { ask, parseJson } from '../ai.js';
@@ -6,33 +7,59 @@ import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { makeTask } from '../capture.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
+/** @import { Store, Recipe, RecipeVersion, RecipesData, IconName } from '../../types/data' */
+/**
+ * A recipe as the model read it from a page or a photo: its JSON, as far as it is read.
+ * @typedef {{ title?: unknown, tags?: unknown[], ingredients?: unknown[], steps?: unknown[], notes?: unknown, images?: unknown[] }} ReadRecipe
+ */
 
 const COLLECTION = 'recipes';
+/** @type {[string, string][]} */
 const STATUSES = [
   ['idea', 'Ideas'],
   ['testing', 'Testing'],
   ['final', 'Final'],
 ];
+/** @type {Record<string, string>} */
 const STATUS_TONE = { idea: 'todo', testing: 'doing', final: 'done' };
 
 // View state: status tab, search text, the open recipe, and whether the "New" and "Log" forms are open.
 // tab: 'all' or a status. layout: 'cards' or 'list'.
+/** @type {{ tab: string, layout: string, query: string, selectedId: string | null, adding: boolean, logOpen: boolean }} */
 const view = { tab: 'all', layout: 'cards', query: '', selectedId: null, adding: false, logOpen: false };
 
+/** @param {string} text */
 const splitLines = (text) => text.split('\n').map((s) => s.trim()).filter(Boolean);
+/** @param {string} text */
 const splitTags = (text) => [...new Set(text.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean))];
-const formValues = (form) => Object.fromEntries(new FormData(form));
+// The forms here have text fields only.
+/** @param {HTMLFormElement} form */
+const formValues = (form) => /** @type {Record<string, string>} */ (Object.fromEntries(new FormData(form)));
+/**
+ * @param {RecipesData} d
+ * @param {string} id
+ */
 const findRecipe = (d, id) => d.recipes.find((r) => r.id === id);
 
+/** @param {RecipeVersion[]} versions */
 const averageRating = (versions) => {
-  const rated = versions.map((v) => v.rating).filter(Number.isFinite);
+  // Number.isFinite drops the unrated ones.
+  const rated = /** @type {number[]} */ (versions.map((v) => v.rating).filter(Number.isFinite));
   return rated.length ? rated.reduce((a, b) => a + b, 0) / rated.length : null;
 };
+/** @param {number} n */
 const stars = (n) => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
+/** @param {Recipe} r */
 const lastActivity = (r) => r.versions.reduce((latest, v) => (v.date > latest ? v.date : latest), r.created.slice(0, 10));
+/** @param {Recipe} r */
 const attempts = (r) => `${r.versions.length} ${r.versions.length === 1 ? 'try' : 'tries'}`;
 
 // Every change goes through one of these, so the store saves and re-renders.
+/**
+ * @param {Store} store
+ * @param {string} id
+ * @param {Partial<Recipe>} patch
+ */
 function updateRecipe(store, id, patch) {
   store.update(COLLECTION, (d) => {
     const r = findRecipe(d, id);
@@ -40,6 +67,11 @@ function updateRecipe(store, id, patch) {
   });
 }
 
+/**
+ * @param {Store} store
+ * @param {string} title
+ * @param {string} status
+ */
 function addRecipe(store, title, status) {
   const id = uid();
   view.selectedId = id;
@@ -49,6 +81,10 @@ function addRecipe(store, title, status) {
 }
 
 // Deleting is immediate, with a few seconds to take it back. The recipe returns to its place in the list.
+/**
+ * @param {Store} store
+ * @param {string} id
+ */
 function deleteRecipe(store, id) {
   const recipes = store.get(COLLECTION).recipes;
   const index = recipes.findIndex((r) => r.id === id);
@@ -61,6 +97,11 @@ function deleteRecipe(store, id) {
   toast(`“${removed.title}” deleted`, { undo: () => store.update(COLLECTION, (d) => d.recipes.splice(Math.min(index, d.recipes.length), 0, removed)) });
 }
 
+/**
+ * @param {Store} store
+ * @param {string} id
+ * @param {Record<string, string>} v
+ */
 function logIteration(store, id, v) {
   const changes = v.changes.trim();
   const notes = v.notes.trim();
@@ -74,6 +115,11 @@ function logIteration(store, id, v) {
   view.logOpen = false;
 }
 
+/**
+ * @param {Store} store
+ * @param {string} id
+ * @param {string} versionId
+ */
 function removeVersion(store, id, versionId) {
   const versions = findRecipe(store.get(COLLECTION), id)?.versions ?? [];
   const index = versions.findIndex((v) => v.id === versionId);
@@ -93,8 +139,13 @@ function removeVersion(store, id, versionId) {
 
 // --- Suggest variations (task 4) ---
 
+/** @type {{ recipeId: string | null, status: string, text: string }} */
 const ideas = { recipeId: null, status: 'idle', text: '' };
 
+/**
+ * @param {Store} store
+ * @param {Recipe} r
+ */
 async function runIdeas(store, r) {
   ideas.recipeId = r.id;
   ideas.status = 'loading';
@@ -119,11 +170,12 @@ async function runIdeas(store, r) {
     ideas.status = 'ok';
   } catch (err) {
     ideas.status = 'error';
-    ideas.text = err.message;
+    ideas.text = /** @type {Error} */ (err).message;
   }
   store.refresh();
 }
 
+/** @param {Recipe} r */
 function ideasBlock(r) {
   if (ideas.recipeId !== r.id || ideas.status === 'idle') return null;
   if (ideas.status === 'loading') return h('p', { class: 'muted small' }, 'Thinking about variations…');
@@ -137,6 +189,7 @@ function ideasBlock(r) {
 const READER = 'https://r.jina.ai/';
 const importState = { status: 'idle', error: '', url: '', pasting: false };
 
+/** @param {string} url */
 async function fetchPageText(url) {
   const res = await fetch(READER + url, { headers: { Accept: 'text/plain' } });
   if (!res.ok) throw new Error(`The page could not be read (${res.status}). Some sites do not allow it.`);
@@ -148,6 +201,7 @@ const IMAGE_LINK = /!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g;
 const MAX_IMAGE_CANDIDATES = 60;
 const MAX_RECIPE_IMAGES = 3;
 
+/** @param {string} text */
 function imageCandidates(text) {
   const found = [...text.matchAll(IMAGE_LINK)].map((m) => m[1]).filter((u) => !/\.svg(\?|$)/i.test(u));
   return [...new Set(found)].slice(0, MAX_IMAGE_CANDIDATES);
@@ -155,6 +209,11 @@ function imageCandidates(text) {
 
 // Adds a recipe as an idea. Its fields come from the model's reading of a page or a photo;
 // `extra` holds where it came from (a source link and its pictures, or the saved photos).
+/**
+ * @param {Store} store
+ * @param {ReadRecipe} data
+ * @param {{ id?: string, source?: string, images?: string[], scans?: string[] }} [where]
+ */
 function addImportedRecipe(store, data, { id = uid(), ...extra } = {}) {
   view.selectedId = id;
   store.update(COLLECTION, (d) =>
@@ -174,6 +233,11 @@ function addImportedRecipe(store, data, { id = uid(), ...extra } = {}) {
 }
 
 // Turns the page text into a recipe with the model, then adds it.
+/**
+ * @param {Store} store
+ * @param {string} text
+ * @param {string} url
+ */
 async function importFromText(store, text, url) {
   importState.status = 'loading';
   store.refresh();
@@ -186,6 +250,7 @@ async function importFromText(store, text, url) {
       },
       { role: 'user', content: `${text.slice(0, 40000)}\n\nImage URLs:\n${candidates.join('\n') || '(none)'}` },
     ]);
+    /** @type {ReadRecipe} */
     const data = parseJson(reply);
     // Only links that were on the page count, so the model cannot add a picture of its own.
     const images = [...new Set((data.images ?? []).map(String))].filter((u) => candidates.includes(u)).slice(0, MAX_RECIPE_IMAGES);
@@ -195,12 +260,16 @@ async function importFromText(store, text, url) {
     importState.url = '';
   } catch (err) {
     importState.status = 'error';
-    importState.error = err.message;
+    importState.error = /** @type {Error} */ (err).message;
   }
   store.refresh();
 }
 
 // Also started from the search palette, when a link is pasted there.
+/**
+ * @param {Store} store
+ * @param {string} url
+ */
 export async function importFromUrl(store, url) {
   importState.url = url;
   importState.status = 'loading';
@@ -212,21 +281,22 @@ export async function importFromUrl(store, url) {
     await importFromText(store, text, url);
   } catch (err) {
     importState.status = 'error';
-    importState.error = `${err.message} You can paste the recipe text instead.`;
+    importState.error = `${/** @type {Error} */ (err).message} You can paste the recipe text instead.`;
     importState.pasting = true;
     store.refresh();
   }
 }
 
 // The link import, in the side column: a link, or pasted text when the page cannot be read.
+/** @param {Store} store */
 function importBlock(store) {
   const s = importState;
   return h('div', { class: 'k-import stack' },
     h('form', {
       class: 'k-import-form',
-      onsubmit: (e) => {
+      onsubmit: (/** @type {SubmitEvent} */ e) => {
         e.preventDefault();
-        const url = String(new FormData(e.currentTarget).get('url') ?? '').trim();
+        const url = String(new FormData(/** @type {HTMLFormElement} */ (e.currentTarget)).get('url') ?? '').trim();
         if (!/^https?:\/\/\S+$/i.test(url)) {
           s.status = 'error';
           s.error = 'Enter a full link that starts with https://';
@@ -241,9 +311,9 @@ function importBlock(store) {
     s.pasting
       ? h('form', {
           class: 'stack',
-          onsubmit: (e) => {
+          onsubmit: (/** @type {SubmitEvent} */ e) => {
             e.preventDefault();
-            importFromText(store, String(new FormData(e.currentTarget).get('text') ?? ''), s.url);
+            importFromText(store, String(new FormData(/** @type {HTMLFormElement} */ (e.currentTarget)).get('text') ?? ''), s.url);
           },
         },
           h('p', { class: 'muted small' }, 'Copy the recipe text from the page and paste it here.'),
@@ -260,6 +330,10 @@ const PHOTO_EDGE = 1600;
 const photoState = { status: 'idle', stage: '', error: '' };
 
 // Draws the photo smaller, as a JPEG. createImageBitmap also applies the camera's rotation.
+/**
+ * @param {File} file
+ * @returns {Promise<Blob>}
+ */
 async function shrinkPhoto(file) {
   let bitmap;
   try {
@@ -271,23 +345,33 @@ async function shrinkPhoto(file) {
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(bitmap.width * scale);
   canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d')).drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   bitmap.close();
   return new Promise((resolve, reject) =>
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Could not prepare the photo.'))), 'image/jpeg', 0.85));
 }
 
+/**
+ * @param {Blob} blob
+ * @returns {Promise<string>}
+ */
 const readAsDataUrl = (blob) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
+    // readAsDataURL gives a string.
+    reader.onload = () => resolve(/** @type {string} */ (reader.result));
     reader.onerror = () => reject(new Error('Could not read the photo.'));
     reader.readAsDataURL(blob);
   });
 
 // Several photos are read as the pages of one recipe, in the order they were picked.
+/**
+ * @param {Store} store
+ * @param {File[] | FileList} fileList
+ */
 async function readRecipePhotos(store, fileList) {
   const files = [...fileList].filter((f) => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name));
+  /** @param {string} stage */
   const say = (stage) => {
     photoState.stage = stage;
     store.refresh();
@@ -311,10 +395,12 @@ async function readRecipePhotos(store, fileList) {
         ],
       },
     ]);
+    /** @type {ReadRecipe} */
     const data = parseJson(reply);
     // The original is kept in the data folder (recipes/), so the handwriting can be checked later.
     say('Saving the original photo…');
     const id = uid();
+    /** @type {string[]} */
     let scans = [];
     try {
       scans = await Promise.all(blobs.map((blob, i) => store.files.write(`recipes/${id}-${i + 1}.jpg`, blob)));
@@ -325,11 +411,12 @@ async function readRecipePhotos(store, fileList) {
     photoState.status = 'idle';
   } catch (err) {
     photoState.status = 'error';
-    photoState.error = err.message;
+    photoState.error = /** @type {Error} */ (err).message;
   }
   store.refresh();
 }
 
+/** @param {Store} store */
 function photoBlock(store) {
   if (photoState.status === 'loading') return h('div', { class: 'panel-mini' }, progress(photoState.stage || 'Reading…'));
   const input = h('input', {
@@ -338,9 +425,9 @@ function photoBlock(store) {
     multiple: true,
     class: 'sr-only',
     'aria-label': 'Choose a photo of a recipe',
-    onchange: (e) => {
-      const files = [...(e.target.files ?? [])];
-      e.target.value = '';
+    onchange: (/** @type {Event} */ e) => {
+      const files = [...(/** @type {HTMLInputElement} */ (e.target).files ?? [])];
+      /** @type {HTMLInputElement} */ (e.target).value = '';
       if (files.length) readRecipePhotos(store, files);
     },
   });
@@ -353,21 +440,22 @@ function photoBlock(store) {
       tabindex: '0',
       'aria-label': 'Drop a photo of a recipe here, or click to choose one',
       onclick: pick,
-      onkeydown: (e) => {
+      onkeydown: (/** @type {KeyboardEvent} */ e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           pick();
         }
       },
-      ondragover: (e) => {
+      ondragover: (/** @type {DragEvent} */ e) => {
         e.preventDefault();
-        e.currentTarget.classList.add('over');
+        /** @type {HTMLElement} */ (e.currentTarget).classList.add('over');
       },
-      ondragleave: (e) => e.currentTarget.classList.remove('over'),
-      ondrop: (e) => {
+      ondragleave: (/** @type {DragEvent} */ e) => /** @type {HTMLElement} */ (e.currentTarget).classList.remove('over'),
+      ondrop: (/** @type {DragEvent} */ e) => {
         e.preventDefault();
-        e.currentTarget.classList.remove('over');
-        if (e.dataTransfer.files?.length) readRecipePhotos(store, e.dataTransfer.files);
+        /** @type {HTMLElement} */ (e.currentTarget).classList.remove('over');
+        // A drop always carries a dataTransfer.
+        if (/** @type {DataTransfer} */ (e.dataTransfer).files?.length) readRecipePhotos(store, /** @type {DataTransfer} */ (e.dataTransfer).files);
       },
     },
       icon('plus'),
@@ -382,10 +470,15 @@ function photoBlock(store) {
 }
 
 // Opens the photos a recipe was read from, from the data folder.
+/**
+ * @param {Store} store
+ * @param {Recipe} r
+ */
 async function showScans(store, r) {
   const body = h('div', { class: 'stack' });
   openDialog({ title: `${r.title}: original`, wide: true, body });
-  for (const path of r.scans) {
+  // Shown only for a recipe that has scans.
+  for (const path of /** @type {string[]} */ (r.scans)) {
     try {
       const url = URL.createObjectURL(await store.files.read(path));
       body.append(h('img', { class: 'bill-img', src: url, alt: `Original photo of ${r.title}` }));
@@ -397,8 +490,17 @@ async function showScans(store, r) {
 
 // --- Gallery ---
 
+/**
+ * @param {Recipe} r
+ * @param {string} q
+ */
 const matches = (r, q) => !q || `${r.title} ${r.tags.join(' ')} ${r.ingredients.join(' ')}`.toLowerCase().includes(q);
+/** @param {string} status */
 const statusLabel = (status) => STATUSES.find(([k]) => k === status)?.[1] ?? status;
+/**
+ * @param {Store} store
+ * @param {Recipe} r
+ */
 const open = (store, r) => {
   view.selectedId = r.id;
   view.logOpen = false;
@@ -406,6 +508,7 @@ const open = (store, r) => {
 };
 
 // A stable colour for a recipe without a picture, so its card still looks like its own.
+/** @param {string} text */
 function hueOf(text) {
   let hash = 0;
   for (const c of String(text)) hash = (hash * 31 + c.charCodeAt(0)) % 360;
@@ -413,15 +516,23 @@ function hueOf(text) {
 }
 
 // The picture of a recipe: its first imported image, or its initial on its own colour.
+/**
+ * @param {Recipe} r
+ * @param {string} cls
+ */
 function cover(r, cls) {
   const letter = () => h('span', { class: 'r-letter', 'aria-hidden': 'true' }, r.title.slice(0, 1).toUpperCase());
   const box = h('div', { class: cls, style: { '--hue': hueOf(r.title) } });
   const src = r.images?.[0];
-  if (src) box.append(h('img', { src, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => e.currentTarget.replaceWith(letter()) }));
+  if (src) box.append(h('img', { src, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (/** @type {Event} */ e) => /** @type {HTMLImageElement} */ (e.currentTarget).replaceWith(letter()) }));
   else box.append(letter());
   return box;
 }
 
+/**
+ * @param {Store} store
+ * @param {Recipe} r
+ */
 function recipeCard(store, r) {
   const avg = averageRating(r.versions);
   const blurb = r.notes || r.ingredients.slice(0, 4).join(' · ') || 'No notes yet. Open it to add ingredients and steps.';
@@ -440,13 +551,17 @@ function recipeCard(store, r) {
           h('span', null, `${r.versions.length ? 'last tried' : 'added'} ${lastActivity(r)}`)))));
 }
 
+/**
+ * @param {Store} store
+ * @param {Recipe[]} shown
+ */
 function recipeTable(store, shown) {
   return h('div', { class: 'card mon-scroll' },
     h('table', { class: 'mon-table r-table' },
       h('thead', null, h('tr', null, ['Recipe', 'Status', 'Rating', 'Tries', 'Last tried', 'Notes'].map((t) => h('th', null, t)))),
       h('tbody', null, shown.map((r) => {
         const avg = averageRating(r.versions);
-        return h('tr', { tabindex: '0', onclick: () => open(store, r), onkeydown: (e) => { if (e.key === 'Enter') open(store, r); } },
+        return h('tr', { tabindex: '0', onclick: () => open(store, r), onkeydown: (/** @type {KeyboardEvent} */ e) => { if (e.key === 'Enter') open(store, r); } },
           h('td', null, h('div', { class: 'row r-name' }, cover(r, 'r-thumb'),
             h('div', null, h('strong', null, r.title), r.tags.length ? h('div', { class: 'tags' }, r.tags.map((t) => h('span', { class: 'tag' }, t))) : null))),
           h('td', null, h('span', { class: `pill tone-${STATUS_TONE[r.status]}` }, statusLabel(r.status))),
@@ -458,6 +573,10 @@ function recipeTable(store, shown) {
 }
 
 // The recipes that match the search and the tab, as cards or as a list.
+/**
+ * @param {Store} store
+ * @param {Recipe[]} recipes
+ */
 function results(store, recipes) {
   const q = view.query.trim().toLowerCase();
   const shown = recipes
@@ -467,6 +586,10 @@ function results(store, recipes) {
   return view.layout === 'list' ? recipeTable(store, shown) : h('ul', { class: 'r-grid' }, shown.map((r) => recipeCard(store, r)));
 }
 
+/**
+ * @param {Store} store
+ * @param {Recipe[]} recipes
+ */
 function gallery(store, recipes) {
   const box = h('div', { class: 'r-results' });
   const tabs = h('div', { class: 'segmented r-tabs' });
@@ -487,6 +610,11 @@ function gallery(store, recipes) {
     box.replaceChildren(results(store, recipes));
   };
   fill();
+  /**
+   * @param {string} key
+   * @param {string} label
+   * @param {IconName} iconName
+   */
   const layout = (key, label, iconName) =>
     h('button', {
       type: 'button',
@@ -509,8 +637,8 @@ function gallery(store, recipes) {
           placeholder: 'Search recipes by name, tag or ingredient',
           'aria-label': 'Search recipes',
           value: view.query,
-          oninput: (e) => {
-            view.query = e.target.value;
+          oninput: (/** @type {Event} */ e) => {
+            view.query = /** @type {HTMLInputElement} */ (e.target).value;
             fill();
           },
         })),
@@ -527,9 +655,9 @@ function gallery(store, recipes) {
     view.adding
       ? h('form', {
           class: 'k-new card-inset',
-          onsubmit: (e) => {
+          onsubmit: (/** @type {SubmitEvent} */ e) => {
             e.preventDefault();
-            const v = formValues(e.currentTarget);
+            const v = formValues(/** @type {HTMLFormElement} */ (e.currentTarget));
             const title = v.title.trim();
             if (title) addRecipe(store, title, v.status);
           },
@@ -554,9 +682,18 @@ function gallery(store, recipes) {
 
 // --- Detail ---
 
+/**
+ * @param {string} title
+ * @param {Node} child
+ */
 const block = (title, child) => h('div', { class: 'k-block' }, h('h3', null, title), child);
 
 // Pictures taken from the web page. They are hotlinked, so a removed picture only leaves the recipe's list.
+/**
+ * @param {Store} store
+ * @param {string} id
+ * @param {string} src
+ */
 function removeImage(store, id, src) {
   store.update(COLLECTION, (d) => {
     const r = findRecipe(d, id);
@@ -564,6 +701,10 @@ function removeImage(store, id, src) {
   });
 }
 
+/**
+ * @param {Store} store
+ * @param {Recipe} r
+ */
 function photos(store, r) {
   if (!r.images?.length) return null;
   return h('div', { class: 'k-photos' },
@@ -579,6 +720,11 @@ function photos(store, r) {
         }, icon('x')))));
 }
 
+/**
+ * @param {Store} store
+ * @param {Recipe} r
+ * @param {RecipeVersion} v
+ */
 function iterationCard(store, r, v) {
   return h('li', { class: 'timeline-item' },
     h('span', { class: 'timeline-dot', 'aria-hidden': 'true' }),
@@ -598,12 +744,16 @@ function iterationCard(store, r, v) {
       v.notes ? h('p', { class: 'muted small' }, v.notes) : null));
 }
 
+/**
+ * @param {Store} store
+ * @param {Recipe} r
+ */
 function logForm(store, r) {
   return h('form', {
     class: 'card-inset k-log',
-    onsubmit: (e) => {
+    onsubmit: (/** @type {SubmitEvent} */ e) => {
       e.preventDefault();
-      logIteration(store, r.id, formValues(e.currentTarget));
+      logIteration(store, r.id, formValues(/** @type {HTMLFormElement} */ (e.currentTarget)));
       store.refresh();
     },
   },
@@ -617,6 +767,10 @@ function logForm(store, r) {
     h('div', { class: 'row end' }, h('button', { class: 'primary btn-small', type: 'submit' }, 'Log iteration')));
 }
 
+/**
+ * @param {Store} store
+ * @param {Recipe} r
+ */
 function detailPane(store, r) {
   const avg = averageRating(r.versions);
   const versions = [...r.versions].sort((a, b) => b.date.localeCompare(a.date));
@@ -739,6 +893,10 @@ function detailPane(store, r) {
         : empty('No iterations yet. Log one after each attempt.')));
 }
 
+/**
+ * @param {HTMLElement} root
+ * @param {Store} store
+ */
 function draw(root, store) {
   const { recipes } = store.get(COLLECTION);
   if (view.selectedId && !recipes.some((r) => r.id === view.selectedId)) view.selectedId = null;
@@ -755,7 +913,7 @@ export default {
   defaults: { recipes: [] },
   render: draw,
   serialize: () => ({ tab: view.tab === 'all' ? '' : view.tab, view: view.layout === 'list' ? 'list' : '', recipe: view.selectedId ?? '', q: view.query }),
-  restore: (p = {}) => {
+  restore: (/** @type {Record<string, string>} */ p = {}) => {
     view.tab = ['idea', 'testing', 'final'].includes(p.tab) ? p.tab : 'all';
     view.layout = p.view === 'list' ? 'list' : 'cards';
     view.selectedId = p.recipe || null;
