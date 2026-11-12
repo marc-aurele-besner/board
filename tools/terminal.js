@@ -547,11 +547,15 @@ function parseStatus(text) {
   return out;
 }
 
+// The worktrees `claude --worktree` makes live inside the repo (.claude/worktrees); they are other checkouts, not
+// changes, so Source control neither lists them nor stages them with everything else.
+const NOT_WORKTREES = ['--', '.', ':(exclude).claude/worktrees'];
+
 async function gitStatus(path) {
   const root = await repoOf(path);
   if (!root) return { repo: false, path: await folderOf(path) };
   const [status, log, branches, remotes] = await Promise.all([
-    git(root, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all']),
+    git(root, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', ...NOT_WORKTREES]),
     git(root, ['log', `-n${LOG_SHOWN}`, '--format=%H%x1f%h%x1f%an%x1f%at%x1f%s%x1f%D%x1e'], { ok: [0, 128] }).catch(() => ''),
     git(root, ['for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads']).catch(() => ''),
     git(root, ['remote']).catch(() => ''),
@@ -617,7 +621,7 @@ async function gitAction(body) {
       await git(root, ['add', '-A', '--', ...files]);
       break;
     case 'stage-all':
-      await git(root, ['add', '-A']);
+      await git(root, ['add', '-A', ...NOT_WORKTREES]);
       break;
     case 'unstage': {
       if (!validFiles(files)) throw new Error('No files.');
@@ -643,7 +647,7 @@ async function gitAction(body) {
     case 'commit': {
       const message = String(body.message ?? '').trim();
       if (!message) throw new Error('Write a commit message first.');
-      if (body.all) await git(root, ['add', '-A']);
+      if (body.all) await git(root, ['add', '-A', ...NOT_WORKTREES]);
       await git(root, ['commit', '-q', '-m', message], { timeout: 60000 });
       break;
     }

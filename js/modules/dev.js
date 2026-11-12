@@ -677,13 +677,16 @@ function workspacePicker(store) {
   return chip;
 }
 
-// Files or Source Control, as the activity bar of VS Code picks them. Source Control shows how many files changed.
+// Files or Source Control, as icons along the top like Cursor's activity bar. Source Control shows how many files
+// changed as a badge on its icon.
 function sideSwitcher(store) {
-  const tab = (side, name, label, extra) => h('button', {
+  const tab = (side, name, label, badge) => h('button', {
     type: 'button',
     role: 'tab',
     class: view.side === side ? 'ide-side-tab active' : 'ide-side-tab',
     'aria-selected': String(view.side === side),
+    'aria-label': label,
+    title: label,
     onclick: () => {
       view.side = side;
       try {
@@ -691,11 +694,12 @@ function sideSwitcher(store) {
       } catch {}
       store.refresh();
     },
-  }, icon(name), label, extra);
+  }, icon(name), badge);
   const count = changeCount();
   return h('nav', { class: 'ide-side-tabs', role: 'tablist', 'aria-label': 'Side panel' },
-    tab('files', 'folder', 'Files'),
-    tab('git', 'git-branch', 'Source control', count ? h('span', { class: 'scm-count', title: `${count} changed ${count === 1 ? 'file' : 'files'}` }, count > 999 ? '999+' : count) : null));
+    tab('files', 'files', 'Explorer'),
+    tab('git', 'git-branch', count ? `Source control · ${count} changed ${count === 1 ? 'file' : 'files'}` : 'Source control',
+      count ? h('span', { class: 'ide-side-badge' }, count > 99 ? '99+' : count) : null));
 }
 
 function sessionTabs(store) {
