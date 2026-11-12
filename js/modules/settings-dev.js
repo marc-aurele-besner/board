@@ -1,3 +1,4 @@
+// @ts-check
 // Settings → Dev environment: command presets, then each project's folder and the command its tasks go to Dev
 // with. The same fields as a project's page, in one list, so a preset is picked instead of pasting a command again.
 import { h, icon, notice, uid } from '../ui.js';
@@ -5,17 +6,19 @@ import { editText, pickChip } from '../inline.js';
 import { pickFolder } from '../folder-picker.js';
 import { projectIcon, projectTree, cleanLocalPath, LOCAL_PATH_ERROR } from './projects.js';
 import { DEFAULT_DEV_COMMAND, devPresets, runnerOf } from './dev.js';
+/** @import { Store, DevPreset, Project } from '../../types/data' */
 
 // The last problem shown above the cards.
 const devEnvView = { error: '' };
 
-const fail = (store, message) => {
+const fail = (/** @type {Store} */ store, /** @type {string} */ message) => {
   devEnvView.error = message;
   store.refresh();
 };
 
-const plural = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
+const plural = (/** @type {number} */ n, /** @type {string} */ one) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
+/** @param {Store} store @param {string} id @param {Partial<DevPreset>} patch */
 function updatePreset(store, id, patch) {
   devEnvView.error = '';
   store.update('dev', (d) => {
@@ -25,6 +28,7 @@ function updatePreset(store, id, patch) {
 }
 
 // The projects that used the preset keep running its command, now as their own.
+/** @param {Store} store @param {DevPreset} preset */
 function removePreset(store, preset) {
   devEnvView.error = '';
   store.update('dev', (d) => {
@@ -37,6 +41,7 @@ function removePreset(store, preset) {
   });
 }
 
+/** @param {Store} store @param {string} id @param {Partial<Project>} patch */
 function updateProject(store, id, patch) {
   if (patch.localPath !== undefined) {
     const localPath = cleanLocalPath(patch.localPath);
@@ -50,10 +55,12 @@ function updateProject(store, id, patch) {
   });
 }
 
+/** @param {Store} store @param {DevPreset[]} presets @param {Project[]} projects */
 function presetsPanel(store, presets, projects) {
-  const add = (e) => {
+  const add = (/** @type {SubmitEvent} */ e) => {
     e.preventDefault();
-    const form = e.currentTarget;
+    // The form below, with its two fields.
+    const form = /** @type {HTMLFormElement & { elements: { name: HTMLInputElement, command: HTMLInputElement } }} */ (e.currentTarget);
     const name = form.elements.name.value.trim();
     const command = form.elements.command.value.trim();
     if (!name || !command) return fail(store, 'A preset needs a name and a command.');
@@ -110,6 +117,7 @@ function presetsPanel(store, presets, projects) {
       h('button', { type: 'submit' }, icon('plus'), 'Add preset')));
 }
 
+/** @param {Store} store @param {Project} p @param {number} depth @param {DevPreset[]} presets */
 function projectRow(store, p, depth, presets) {
   const presetOptions = presets.map((x) => ({ value: x.id, label: x.name }));
   const preset = presets.find((x) => x.id === p.devPreset);
@@ -154,6 +162,7 @@ function projectRow(store, p, depth, presets) {
           })));
 }
 
+/** @param {Store} store */
 export function devEnvironmentCard(store) {
   const presets = devPresets(store);
   const { projects } = store.get('projects');
