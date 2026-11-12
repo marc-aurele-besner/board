@@ -9,12 +9,14 @@ import { toast } from '../toast.js';
 import {
   COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, DEV_MODES, TEMPLATES, daysOf,
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
-  makeFlow, makeStep, makeSource, sourcesOf, sourceLabel, flowFromTemplate, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
+  makeFlow, makeStep, makeSource, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
 } from '../cron.js';
 import { modelForTask } from './settings.js';
 
-// View state: the tab, the open flow, the selected node ('trigger' or a step id) and the Runs tab's filter.
-const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all' };
+// View state: the tab, the open flow, the selected node ('trigger' or a step id), the Runs tab's filter and the
+// flow list's project filter ('' for all, NO_PROJECT for flows without one).
+const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', project: '' };
+const NO_PROJECT = 'none';
 const TABS = [['flows', 'Flows'], ['runs', 'Runs'], ['templates', 'Templates']];
 const SUBTITLES = {
   flows: 'Recurring flows that gather data from the board, ask an AI model, and turn the answer into a task, a notification or work for claude in Dev.',
@@ -25,6 +27,7 @@ const SUBTITLES = {
 const typeOf = (type) => STEP_TYPES.find(([t]) => t === type) ?? [type, type, 'info', ''];
 const timeOf = (at) => (at ? new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never');
 const projectsOf = (store) => projectTree(store.get('projects').projects).map(({ project }) => project);
+const projectName = (store, id) => (id ? store.get('projects').projects.find((p) => p.id === id)?.name ?? 'Removed project' : '');
 const lastRunOf = (store, flowId) => store.get(COLLECTION).runs.find((r) => r.flowId === flowId) ?? null;
 
 function updateFlow(store, id, mutate) {
@@ -72,6 +75,20 @@ function duplicateFlow(store, flow) {
   toast(`Duplicated “${flow.name}”`);
 }
 
+// Steps that named the new project themselves now just follow the flow.
+function setFlowProject(store, flow, projectId) {
+  const was = flowProjectId(flow);
+  // A filtered list follows the flow, so it stays open.
+  if (view.project) view.project = projectId || NO_PROJECT;
+  updateFlow(store, flow.id, (f) => {
+    f.projectId = projectId;
+    for (const s of f.steps) {
+      const items = s.type === 'gather' && Array.isArray(s.sources) ? s.sources : [s];
+      for (const x of items) if (x.projectId && (x.projectId === projectId || x.projectId === was)) x.projectId = '';
+    }
+  });
+}
+
 function setEnabled(store, flow, enabled) {
   updateFlow(store, flow.id, (f) => {
     f.enabled = enabled;
@@ -93,11 +110,35 @@ function startRun(store, flow, { dry = false } = {}) {
 
 // --- Flow list ---
 
-function flowList(store, flows) {
+// Narrows the list to one project's flows. Only projects some flow uses are offered.
+function projectFilter(store, flows) {
+  const used = new Set(flows.map(flowProjectId));
+  if (used.size < 2 && !view.project) return null;
+  const list = projectsOf(store).filter((p) => used.has(p.id));
+  return pickChip({
+    value: view.project || null,
+    options: [
+      ...list.map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
+      ...(used.has('') ? [{ value: NO_PROJECT, label: 'No project', plainIcon: () => icon('folder') }] : []),
+    ],
+    nullable: true,
+    nullLabel: 'All projects',
+    className: 'field-pick project-field-pick cron-project-filter',
+    onPick: (v) => {
+      view.project = v ?? '';
+      store.refresh();
+    },
+  });
+}
+
+const inFilter = (f) => !view.project || (flowProjectId(f) || NO_PROJECT) === view.project;
+
+function flowList(store, all, flows) {
   return h('aside', { class: 'card cron-list' },
     h('div', { class: 'row between' },
       h('h3', null, 'Flows'),
       h('button', { type: 'button', class: 'btn-small primary', onclick: () => openNewFlow(store) }, icon('plus'), 'New flow')),
+    projectFilter(store, all),
     flows.length
       ? h('ul', { class: 'cron-flows' }, flows.map((f) => {
           const last = lastRunOf(store, f.id);
@@ -114,7 +155,7 @@ function flowList(store, flows) {
               h('span', { class: `cron-dot ${isRunning(f.id) ? 'running' : !f.enabled ? 'off' : last?.status === 'error' ? 'bad' : 'on'}` }),
               h('span', { class: 'grow' },
                 h('strong', null, f.name),
-                h('span', { class: 'muted small' }, f.enabled ? scheduleLabel(f.schedule) : 'Paused'))),
+                h('span', { class: 'muted small' }, [f.enabled ? scheduleLabel(f.schedule) : 'Paused', projectName(store, flowProjectId(f))].filter(Boolean).join(' · ')))),
             h('input', {
               type: 'checkbox',
               class: 'cron-flow-toggle',
@@ -150,7 +191,10 @@ function templateCard(store, { name, about, schedule, steps, blank = false }) {
       class: 'btn-small primary',
       onclick: () => {
         view.tab = 'flows';
-        addFlow(store, blank ? makeFlow({ steps: [makeStep('ai')] }) : flowFromTemplate({ name, schedule, steps }));
+        const flow = blank ? makeFlow({ steps: [makeStep('ai')] }) : flowFromTemplate({ name, schedule, steps });
+        // A flow made while the list shows one project starts in it.
+        if (view.project && view.project !== NO_PROJECT) flow.projectId = view.project;
+        addFlow(store, flow);
       },
     }, icon('plus'), blank ? 'Start blank' : 'Use template')));
 }
@@ -199,12 +243,12 @@ function runsTab(store) {
 
 // --- Canvas ---
 
-function stepSummary(store, step) {
+function stepSummary(store, flow, step) {
   if (step.type === 'gather') {
     const sources = sourcesOf(step);
     const plus = step.append ? '+ ' : '';
     if (!sources.length) return 'Add a source';
-    const first = sources[0];
+    const first = withFlowProject(flow, sources[0]);
     const one = first.source === 'page' && !first.label && !first.projectId && !first.url ? 'Enter an address' : sourceLabel(store, first);
     return `${plus}${one}${sources.length > 1 ? ` +${sources.length - 1}` : ''}`;
   }
@@ -212,7 +256,8 @@ function stepSummary(store, step) {
   if (step.type === 'task') return step.title || '{{input}}';
   if (step.type === 'stop') return stopLabel(step);
   if (step.type === 'dev') {
-    const where = step.projectId ? projectsOf(store).find((p) => p.id === step.projectId)?.name ?? 'Choose a project' : 'Task’s project or board';
+    const id = withFlowProject(flow, step).projectId;
+    const where = id ? projectName(store, id) : 'Task’s project or board';
     return `${step.mode === 'command' ? step.command || 'Enter a command' : 'claude'} · ${where}`;
   }
   return step.text || 'Notification';
@@ -267,7 +312,7 @@ function canvas(store, flow) {
   flow.steps.forEach((s, i) => {
     const [, label, iconName] = typeOf(s.type);
     parts.push(link(store, flow, i));
-    parts.push(node(store, flow, { id: s.id, iconName, kind: s.type, title: `${i + 1}. ${label}`, sub: stepSummary(store, s), status: statusOfStep(s.id) }));
+    parts.push(node(store, flow, { id: s.id, iconName, kind: s.type, title: `${i + 1}. ${label}`, sub: stepSummary(store, flow, s), status: statusOfStep(s.id) }));
   });
   parts.push(link(store, flow, flow.steps.length));
   return h('div', { class: `flow-canvas${isRunning(flow.id) ? ' running' : ''}`, role: 'list', 'aria-label': 'Flow steps' }, parts);
@@ -293,6 +338,12 @@ function projectPick(store, value, none, onPick, { list = projectsOf(store), nam
     className: 'field-pick project-field-pick',
     onPick: (v) => onPick(v ?? ''),
   });
+}
+
+// A step's own project: empty follows the flow's, so most steps never need one.
+function stepProjectPick(store, flow, value, onPick, { none = 'None', ...opts } = {}) {
+  const fp = flowProjectId(flow);
+  return projectPick(store, value === fp ? '' : value, fp ? `Flow’s project (${projectName(store, fp)})` : none, onPick, opts);
 }
 
 const chip = (label, on, onclick, title) =>
@@ -418,15 +469,16 @@ const sourcePick = (value, onPick) => pickChip({
 });
 
 // One source of a data step: what it reads, its settings, and the label that heads its data.
-function sourceCard(store, flow, src, { setSource, remove }) {
-  const set = (patch) => setSource(src.id, patch);
+function sourceCard(store, flow, own, { setSource, remove }) {
+  const set = (patch) => setSource(own.id, patch);
+  const src = withFlowProject(flow, own);
   const about = src.source in SOURCE_ABOUT ? SOURCE_ABOUT[src.source] : 'Read from your board when the flow runs, as plain text for the next step.';
   const otherFlows = store.get(COLLECTION).flows.filter((f) => f.id !== flow.id);
   return h('div', { class: 'cron-source stack' },
     h('div', { class: 'row cron-fields' },
       field('Source', sourcePick(src.source, (source) => set({ source }))),
-      src.source === 'project' ? field('Project', projectPick(store, src.projectId, 'Choose…', (projectId) => set({ projectId }))) : null,
-      src.source === 'page' ? field('Project', projectPick(store, src.projectId, 'None: use the link below', (projectId) => set({ projectId }))) : null,
+      src.source === 'project' ? field('Project', stepProjectPick(store, flow, own.projectId, (projectId) => set({ projectId }), { none: 'Choose…' })) : null,
+      src.source === 'page' ? field('Project', stepProjectPick(store, flow, own.projectId, (projectId) => set({ projectId }), { none: 'None: use the link below' })) : null,
       src.source === 'history'
         ? field('How many runs', h('input', { type: 'number', min: 1, max: 20, value: String(src.count ?? 5), onchange: (e) => set({ count: Math.min(20, Math.max(1, Number(e.target.value) || 5)) }) }))
         : null,
@@ -497,7 +549,7 @@ function stepForm(store, flow, step) {
       field('Task title', h('input', { value: step.title, autocomplete: 'off', onchange: (e) => set({ title: e.target.value }) }), 'The first line is used. The full input becomes the description.'),
       vars,
       h('div', { class: 'row cron-fields' },
-        field('Project', projectPick(store, step.projectId, 'Personal', (projectId) => set({ projectId }))),
+        field('Project', stepProjectPick(store, flow, step.projectId, (projectId) => set({ projectId }), { none: 'Personal' })),
         field('Priority', select(step.priority, [['none', 'No priority'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], (priority) => set({ priority }))),
         field('Due', select(step.due, [['', 'No deadline'], ['today', 'Day of the run'], ['tomorrow', 'Day after the run']], (due) => set({ due })))));
   }
@@ -511,12 +563,14 @@ function stepForm(store, flow, step) {
   }
   if (step.type === 'dev') {
     const claude = step.mode !== 'command';
-    const folders = projectsOf(store).filter((p) => p.localPath || p.id === step.projectId);
+    const own = withFlowProject(flow, step).projectId;
+    const folders = projectsOf(store).filter((p) => p.localPath || p.id === own);
     const hasTask = flow.steps.slice(0, flow.steps.indexOf(step)).some((s) => s.type === 'task');
     return h('div', { class: 'stack' },
       h('div', { class: 'row cron-fields' },
         field('Run', select(step.mode, DEV_MODES, (mode) => set({ mode }))),
-        field('Folder', projectPick(store, step.projectId, 'The task’s project, else this board', (projectId) => set({ projectId }), {
+        field('Folder', stepProjectPick(store, flow, step.projectId, (projectId) => set({ projectId }), {
+          none: 'The task’s project, else this board',
           list: folders, name: (p) => (p.localPath ? p.name : `${p.name} (no local folder)`),
         }), 'Projects show here once they have a local folder.')),
       claude
@@ -651,6 +705,9 @@ function editor(store, flow) {
           h('button', { type: 'button', class: 'btn-small primary', disabled: busy || !flow.steps.length, onclick: () => startRun(store, flow) }, icon('play'), busy ? 'Running…' : 'Run now'),
           h('button', { type: 'button', class: 'icon-btn', title: 'Duplicate flow', 'aria-label': 'Duplicate flow', onclick: () => duplicateFlow(store, flow) }, icon('copy')),
           h('button', { type: 'button', class: 'icon-btn', title: 'Delete flow', 'aria-label': 'Delete flow', onclick: () => deleteFlow(store, flow) }, icon('trash')))),
+      h('div', { class: 'row cron-fields' },
+        field('Project', projectPick(store, flowProjectId(flow), 'No project', (projectId) => setFlowProject(store, flow, projectId)),
+          'Data, task and Dev steps use it, unless a step chooses another.')),
       canvas(store, flow),
       h('p', { class: 'muted small' }, `Last run: ${timeOf(flow.lastRun)}${flow.enabled ? ` · next: ${timeOf(nextRun(flow)?.toISOString())}` : ''}`)),
     inspector(store, flow),
@@ -658,11 +715,14 @@ function editor(store, flow) {
 }
 
 function flowsTab(store) {
-  const flows = store.get(COLLECTION).flows;
+  const all = store.get(COLLECTION).flows;
+  // A filter whose project no flow uses any more is dropped.
+  if (!all.some(inFilter)) view.project = '';
+  const flows = all.filter(inFilter);
   const flow = flows.find((f) => f.id === view.flow) ?? flows[0] ?? null;
   if (flow) view.flow = flow.id;
   return h('div', { class: 'cron-layout' },
-    flowList(store, flows),
+    flowList(store, all, flows),
     flow ? editor(store, flow) : h('div', { class: 'card stack' }, empty('Create a flow to schedule AI work, such as a morning plan from your open tasks.'),
       h('div', null, h('button', { type: 'button', class: 'primary', onclick: () => openNewFlow(store) }, icon('plus'), 'New flow'))));
 }
