@@ -24,10 +24,11 @@ export const listFolder = async (base, path) => (await call(base, `/files?path=$
 // One file: { path, size, text }, or { binary } / { tooLarge } instead of text.
 export const readFile = async (base, path) => (await call(base, `/file?path=${encodeURIComponent(path)}`)).json();
 
-// Runs one command in a terminal of `cols` × `rows`, telling it the theme ('light' or 'dark'), and calls onEvent for each line the runner streams: start,
-// out, err, cwd and exit. Aborting `signal` closes the stream, and the runner then stops the command.
-export async function runCommand(base, { command, cwd, cols, rows, theme, signal, onEvent }) {
-  const res = await call(base, '/run', post({ command, cwd, cols, rows, theme }, signal));
+// Attaches to a terminal session and calls onEvent for each line the runner streams: `session` (known: whether
+// the runner had it), the events so far (start, out, err, cwd, exit), `live`, then new events as they come.
+// The stream ends when `signal` is aborted, the session is closed, or the runner stops.
+export async function attachSession(base, { session, signal, onEvent }) {
+  const res = await call(base, `/attach?session=${encodeURIComponent(session)}`, { signal });
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = '';
   for (;;) {
@@ -42,6 +43,15 @@ export async function runCommand(base, { command, cwd, cols, rows, theme, signal
     }
   }
 }
+
+// Runs one command in a session's terminal of `cols` × `rows`, telling it the theme ('light' or 'dark'). Its output
+// reaches the session's attached stream; the command keeps running if the page goes away.
+export const runCommand = async (base, { session, command, cwd, cols, rows, theme }) => (await call(base, '/run', post({ session, command, cwd, cols, rows, theme }))).json();
+
+// Stops the session's command; empties its kept output; or stops it and forgets the session.
+export const stopCommand = (base, session) => call(base, '/stop', post({ session }));
+export const clearSession = (base, session) => call(base, '/clear', post({ session }));
+export const closeSession = (base, session) => call(base, '/close', post({ session }));
 
 // Keys for a running command, or its terminal's new size. Calls for one command are sent one after another,
 // so fast typing arrives in order.
