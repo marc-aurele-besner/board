@@ -1028,6 +1028,11 @@ function todoRow(store, item, ctx) {
         }),
         ctx.showDue ? dueControl(store, item) : null),
       h('div', { class: 'todo-actions' },
+        // The description and image markers lead: before the deadline button, or the PR button with a deadline column.
+        hasDescription
+          ? h('span', { class: 'desc-indicator', title: 'Has a description', 'aria-label': 'Has a description' }, icon('align-left'))
+          : null,
+        imageCount(item),
         ctx.showDue ? null : dueControl(store, item),
         repos.length || issuesOf(item).length || prsOf(item).length ? issueControl(store, item, repos) : null,
         cronButton(store, item),
@@ -1035,10 +1040,6 @@ function todoRow(store, item, ctx) {
         item.email
           ? h('a', { href: `#/inbox?email=${encodeURIComponent(item.email.id)}`, class: 'icon-btn', title: 'Open the email', 'aria-label': 'Open the email this task came from' }, icon('mail'))
           : null,
-        hasDescription
-          ? h('span', { class: 'desc-indicator', title: 'Has a description', 'aria-label': 'Has a description' }, icon('align-left'))
-          : null,
-        imageCount(item),
         copyButton(store, item),
         h('button', {
           type: 'button',
