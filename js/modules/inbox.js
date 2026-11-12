@@ -1,3 +1,4 @@
+// @ts-check
 // Inbox: every email sent and received through Resend and Gmail, for every project that has a key or an account.
 // Laid out like a mail client: received mail lands in the Inbox; sent, starred and archived mail have their own folders.
 import { h, icon, refreshIcon, notice, statusOf } from '../ui.js';
@@ -11,10 +12,15 @@ import { makeTask } from '../capture.js';
 import { pickChip } from '../inline.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
+/** @import { Store, InboxMessage, Project, GmailAccount, RunnerJobError, IconName } from '../../types/data' */
+/** @import { Child } from '../../types/ui' */
+/** @typedef {[string, string, IconName, (e: InboxMessage) => unknown]} Folder */
+/** @typedef {{ html: string, text: string }} MailBody */
 
 const COLLECTION = 'inbox';
 const STEP = 100;
 // [key, label, icon, which emails it holds]
+/** @type {Folder[]} */
 const FOLDERS = [
   ['inbox', 'Inbox', 'inbox', (e) => e.dir === 'received' && !e.archived],
   ['starred', 'Starred', 'star', (e) => e.starred],
@@ -22,6 +28,7 @@ const FOLDERS = [
   ['archive', 'Archive', 'archive', (e) => e.archived],
   ['all', 'All mail', 'mail', () => true],
 ];
+/** @type {Record<string, string>} */
 const EMPTY = {
   inbox: 'Nothing new in the Inbox.',
   starred: 'No starred emails. Star one to keep it at hand.',
@@ -30,6 +37,7 @@ const EMPTY = {
   all: 'No emails yet.',
 };
 // Resend's last event of a sent email, and the tone it is shown in.
+/** @type {Record<string, [string, string]>} */
 const STATUS = {
   delivered: ['Delivered', 'done'],
   opened: ['Opened', 'doing'],
@@ -46,20 +54,33 @@ const STATUS = {
 
 // View state. open: an email to open once it is on screen (from a link in a task).
 // collapsed: directories whose mailboxes are folded away. dirsOpen: whether the directory list is open (null: by screen width).
+/** @type {{ folder: string, project: string, mailbox: string, status: string, flagged: boolean, query: string, limit: number, open: string, collapsed: Set<string>, dirsOpen: boolean | null }} */
 const view = { folder: 'inbox', project: 'all', mailbox: 'all', status: 'all', flagged: false, query: '', limit: STEP, open: '', collapsed: new Set(), dirsOpen: null };
 // The last read: whether one runs now, what failed, and which Gmail accounts need a sign-in first.
 // errors: what the last Refresh reported, or null to show what the runners' last reads reported.
+/** @type {{ busy: boolean, errors: RunnerJobError[] | null, waiting: string[] }} */
 const read = { busy: false, errors: null, waiting: [] };
 
 // The body of an email, from the service it came through.
-const readBody = (store, e) => (e.source === 'gmail' ? readGmail(e) : readEmail(store, e));
+// A Gmail row always has its account and message id.
+/**
+ * @param {Store} store
+ * @param {InboxMessage} e
+ * @returns {Promise<MailBody>}
+ */
+const readBody = (store, e) => (e.source === 'gmail' ? readGmail(/** @type {InboxMessage & { account: string, msgId: string }} */ (e)) : readEmail(store, e));
 // "resend" or a Gmail address: the mailbox an email was read from.
-const mailboxOf = (e) => (e.source === 'gmail' ? e.account : 'resend');
+/** @param {InboxMessage} e */
+const mailboxOf = (e) => (e.source === 'gmail' ? /** @type {string} */ (e.account) : 'resend');
 
+/** @param {string} s */
 const statusLabel = (s) => STATUS[s]?.[0] ?? s.replace(/_/g, ' ');
+/** @param {string} address */
 const nameOf = (address) => address.replace(/\s*<[^>]*>\s*$/, '').replace(/^"|"$/g, '').trim() || address.replace(/[<>]/g, '');
+/** @param {InboxMessage} e */
 const counterparty = (e) => (e.dir === 'sent' ? (e.to.length > 1 ? `${nameOf(e.to[0])} +${e.to.length - 1}` : nameOf(e.to[0] ?? '')) : nameOf(e.from));
 
+/** @param {string} at */
 function dateOf(at) {
   if (!at) return '';
   const d = new Date(at);
@@ -67,12 +88,17 @@ function dateOf(at) {
   if (d.toDateString() === today.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   return d.toLocaleDateString([], { month: 'short', day: 'numeric', ...(d.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }) });
 }
+/** @param {string} at */
 const fullDate = (at) => (at ? new Date(at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '');
 
 // Emails of one conversation share a project and a subject, once "Re:" and "Fwd:" are taken off.
+/** @param {string} subject */
 const topicOf = (subject) => subject.replace(/^\s*((re|fwd?|aw|tr)\s*(\[\d+\])?\s*:\s*)+/i, '').trim().toLowerCase();
+/** @param {InboxMessage} e */
 const threadKey = (e) => (topicOf(e.subject) ? `${e.projectId}|${topicOf(e.subject)}` : `${e.projectId}|#${e.id}`);
+/** @param {InboxMessage[]} emails */
 function threadsOf(emails) {
+  /** @type {Map<string, InboxMessage[]>} */
   const map = new Map();
   for (const e of emails) {
     const key = threadKey(e);
@@ -82,24 +108,39 @@ function threadsOf(emails) {
 }
 
 // Sets fields on saved emails, by id.
+/**
+ * @param {Store} store
+ * @param {string[]} ids
+ * @param {Partial<InboxMessage>} fields
+ */
 function patch(store, ids, fields) {
   const set = new Set(ids);
   store.update(COLLECTION, (d) => {
     for (const e of d.emails) if (set.has(e.id)) Object.assign(e, fields);
   });
 }
+/**
+ * @param {Store} store
+ * @param {InboxMessage} e
+ * @param {boolean} archived
+ */
 function archive(store, e, archived) {
   patch(store, [e.id], { archived });
   toast(archived ? 'Archived' : 'Moved to the Inbox', { undo: () => patch(store, [e.id], { archived: !archived }) });
 }
+/**
+ * @param {Store} store
+ * @param {InboxMessage} e
+ */
 const current = (store, e) => store.get(COLLECTION).emails.find((x) => x.id === e.id) ?? e;
 
 // "Today", "Yesterday", "This week", "This month", then month and year.
+/** @param {string} at */
 function groupOf(at) {
   if (!at) return 'Undated';
   const d = new Date(at);
   const today = new Date();
-  const days = Math.floor((new Date(today.toDateString()) - new Date(d.toDateString())) / 86400000);
+  const days = Math.floor((new Date(today.toDateString()).getTime() - new Date(d.toDateString()).getTime()) / 86400000);
   if (days <= 0) return 'Today';
   if (days === 1) return 'Yesterday';
   if (days < 7) return 'This week';
@@ -107,10 +148,15 @@ function groupOf(at) {
   return d.toLocaleDateString([], { month: 'long', year: 'numeric' });
 }
 
+/**
+ * @param {Store} store
+ * @param {InboxMessage} e
+ */
 const taskOf = (store, e) => (e.taskId ? store.get('todos').items.find((t) => t.id === e.taskId) ?? null : null);
 
 // The runners read the mail (tools/jobs/gmail.js and resend.js); Refresh asks them to read now. The new rows arrive
 // through inbox.json, and the answer only drives the button and the errors.
+/** @param {Store} store */
 function refresh(store) {
   if (read.busy) return;
   read.busy = true;
@@ -118,8 +164,8 @@ function refresh(store) {
   const jobs = [keyedProjects(store).length ? 'resend' : '', gmailAccounts(store).length ? 'gmail' : ''].filter(Boolean);
   Promise.allSettled(jobs.map((id) => runJob(id)))
     .then(async (results) => {
-      const added = results.reduce((n, r) => n + (r.value?.added ?? 0), 0);
-      const failed = results.filter((r) => r.status === 'rejected').map((r) => ({ projectIds: [], text: r.reason.message }));
+      const added = results.reduce((n, r) => n + (/** @type {{ value?: { added?: number } }} */ (r).value?.added ?? 0), 0);
+      const failed = results.filter((r) => r.status === 'rejected').map((r) => ({ projectIds: [], text: /** @type {Error} */ (r.reason).message }));
       read.errors = failed.length ? failed : null;
       await store.sync();
       await readRunnersNow(store);
@@ -135,21 +181,28 @@ function refresh(store) {
 function lastReads() {
   const gmail = jobState('gmail');
   const resend = jobState('resend');
-  const errors = [gmail, resend].flatMap((s) => (s?.ok === false ? [{ projectIds: [], text: s.error }] : s?.errors ?? []));
+  // The Gmail and Resend jobs report their errors as objects; a failed run has its error.
+  /** @type {RunnerJobError[]} */
+  const errors = [gmail, resend].flatMap((s) => (s?.ok === false ? [{ projectIds: [], text: /** @type {string} */ (s.error) }] : /** @type {RunnerJobError[]} */ (s?.errors ?? [])));
   const waiting = String(gmail?.waiting ?? '').match(/^Not connected: (.*)\.$/)?.[1]?.split(', ') ?? [];
   const at = [gmail?.lastOkAt, resend?.lastOkAt].filter(Boolean).sort().pop() ?? '';
   return { errors, waiting, at };
 }
 
 // Signs in to a Gmail account from a click, then reads the mail again.
+/**
+ * @param {Store} store
+ * @param {string} address
+ */
 function connectAndRead(store, address, after = () => refresh(store)) {
   const clientId = store.get('settings').google?.clientId ?? '';
   connectGmail(clientId, address)
     .then(after)
-    .catch((err) => toast(err.message));
+    .catch((/** @type {Error} */ err) => toast(err.message));
 }
 
 // Text for a task description: the plain part of the email, or its HTML read as text.
+/** @param {MailBody} body */
 function plainText(body) {
   const text = body.text || new DOMParser().parseFromString(body.html || '', 'text/html').body.textContent || '';
   const clean = text.replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
@@ -157,6 +210,10 @@ function plainText(body) {
 }
 
 // A task from an email, filled in for its project and editable before it is added. The email keeps the task's id.
+/**
+ * @param {Store} store
+ * @param {InboxMessage} e
+ */
 function openTaskDialog(store, e) {
   const projects = projectTree(store.get('projects').projects).map(({ project }) => project);
   const head = `${e.dir === 'sent' ? `Sent to ${e.to.join(', ')}` : `From ${e.from}`} · ${fullDate(e.at)}`;
@@ -177,12 +234,12 @@ function openTaskDialog(store, e) {
     title: 'Create a task from this email',
     body: h('form', {
       class: 'stack',
-      onsubmit: (ev) => {
+      onsubmit: (/** @type {SubmitEvent} */ ev) => {
         ev.preventDefault();
-        const f = new FormData(ev.currentTarget);
+        const f = new FormData(/** @type {HTMLFormElement} */ (ev.currentTarget));
         const title = String(f.get('text') ?? '').trim();
         if (!title) return;
-        const projectId = f.get('project') || null;
+        const projectId = /** @type {string | null} */ (f.get('project') || null);
         const task = makeTask({
           text: title,
           description: String(f.get('description') ?? '').trim(),
@@ -214,6 +271,10 @@ function openTaskDialog(store, e) {
 }
 
 // The task of an email as a link, or a button that makes one.
+/**
+ * @param {Store} store
+ * @param {InboxMessage} e
+ */
 function taskControl(store, e, onCreate = () => openTaskDialog(store, e), label = false) {
   const task = taskOf(store, e);
   if (task) {
@@ -230,6 +291,7 @@ function taskControl(store, e, onCreate = () => openTaskDialog(store, e), label 
 }
 
 // HTML mail is shown in a sandboxed frame: no scripts, nothing read from this page, links open in a new tab.
+/** @param {string} html */
 function htmlFrame(html) {
   const head = '<!doctype html><meta charset="utf-8">'
     + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src https: http: data:; style-src \'unsafe-inline\' https:; font-src https: data:">'
@@ -237,6 +299,10 @@ function htmlFrame(html) {
   return h('iframe', { class: 'mail-frame', sandbox: 'allow-popups allow-popups-to-escape-sandbox', srcdoc: head + html, title: 'Email content' });
 }
 
+/**
+ * @param {Store} store
+ * @param {InboxMessage} e
+ */
 function starButton(store, e, after = () => {}) {
   return h('button', {
     type: 'button',
@@ -251,10 +317,18 @@ function starButton(store, e, after = () => {}) {
   }, icon('star'));
 }
 
+/**
+ * @param {Store} store
+ * @param {InboxMessage} e
+ */
 function openReader(store, e) {
   if (e.unread) patch(store, [e.id], { unread: false });
   const project = store.get('projects').projects.find((p) => p.id === e.projectId);
   const content = h('div', { class: 'mail-body muted' }, 'Loading the email…');
+  /**
+   * @param {string} label
+   * @param {string | undefined} value
+   */
   const meta = (label, value) => (value ? h('div', { class: 'mail-meta-row' }, h('span', { class: 'muted' }, label), h('span', null, value)) : null);
   // The buttons read the saved email again after each change, since the dialog is not redrawn with the page.
   const actions = h('div', { class: 'row between mail-actions' });
@@ -333,21 +407,31 @@ function openReader(store, e) {
       content.className = 'mail-body';
       content.replaceChildren(body.html ? htmlFrame(body.html) : body.text ? h('pre', { class: 'mail-text' }, body.text) : h('p', { class: 'muted' }, 'This email has no content.'));
     })
-    .catch((err) => content.replaceChildren(notice({
+    .catch((/** @type {Error} */ err) => content.replaceChildren(notice({
       text: `The email could not be read: ${err.message}`,
       // A Gmail account signs in again from here, then the email loads.
-      actions: e.source === 'gmail' && !isGmailConnected(e.account)
-        ? [h('button', { type: 'button', class: 'btn-small', onclick: () => connectAndRead(store, e.account, load) }, `Connect ${e.account}`)]
+      actions: e.source === 'gmail' && !isGmailConnected(/** @type {string} */ (e.account))
+        ? [h('button', { type: 'button', class: 'btn-small', onclick: () => connectAndRead(store, /** @type {string} */ (e.account), load) }, `Connect ${e.account}`)]
         : [],
     })));
   load();
 }
 
+/**
+ * @param {InboxMessage} e
+ * @param {string} q
+ */
 function matches(e, q) {
   if (!q) return true;
   return [e.subject, e.from, ...e.to, ...e.cc].some((s) => s.toLowerCase().includes(q));
 }
 
+/**
+ * @param {Store} store
+ * @param {InboxMessage} e
+ * @param {Map<string | null, Project>} projects
+ * @param {number} threadSize
+ */
 function rowEl(store, e, projects, threadSize) {
   const project = projects.get(e.projectId);
   const [, tone] = STATUS[e.status] ?? ['', 'plain'];
@@ -379,39 +463,67 @@ function rowEl(store, e, projects, threadSize) {
 }
 
 // view.project is a project id, 'all', or 'none' for mail of a Gmail account that has no project.
+/**
+ * @param {InboxMessage} e
+ * @param {string} project
+ */
 const inProject = (e, project) => project === 'all' || (project === 'none' ? !e.projectId : e.projectId === project);
 
 // A mailbox with its look: Resend gets the mail icon, a Gmail account its Google picture.
+/** @param {string} key */
 const mailboxIcon = (key) => (key === 'resend' ? icon('send') : accountAvatar(key));
+/** @param {string} key */
 const mailboxLabel = (key) => (key === 'resend' ? 'Resend' : key);
 
 // The directories beside the list, like a mail client's labels: each project (nested as in Projects) with the
 // mailboxes its mail comes through, then mail with no project. Counts are unread mail in the Inbox.
+/**
+ * @param {Store} store
+ * @param {InboxMessage[]} emails
+ * @param {GmailAccount[]} accounts
+ * @param {Project[]} resendKeyed
+ * @param {(patchView: Partial<typeof view>) => void} set
+ */
 function directories(store, emails, accounts, resendKeyed, set) {
   const all = store.get('projects').projects;
+  /** @type {Map<string | null | undefined, Project>} */
   const byId = new Map(all.map((p) => [p.id, p]));
+  /** @type {Map<string, Set<string>>} */
   const boxes = new Map(); // project id or 'none' -> Set of mailbox keys
+  /**
+   * @param {string | null | undefined} projectId
+   * @param {string} key
+   */
   const add = (projectId, key) => {
     const id = projectId || 'none';
     if (!boxes.has(id)) boxes.set(id, new Set());
-    boxes.get(id).add(key);
+    /** @type {Set<string>} */ (boxes.get(id)).add(key);
   };
   for (const p of resendKeyed) add(p.id, 'resend');
   for (const a of accounts) add(a.projectId, a.email);
   for (const e of emails) add(e.projectId, mailboxOf(e));
   // A project with mail keeps its parents, so the tree reads as on the Projects page.
+  /** @type {Set<string>} */
   const shown = new Set();
   for (const id of boxes.keys()) {
     for (let p = byId.get(id); p && !shown.has(p.id); p = byId.get(p.parentId)) shown.add(p.id);
   }
+  /** @param {(e: InboxMessage) => boolean} match */
   const unread = (match) => emails.filter((e) => FOLDERS[0][3](e) && e.unread && match(e)).length;
 
+  /** @param {{ active: boolean, depth?: number, lead: Child, label: string, count: number, onclick: () => void, toggle?: Child, title?: string }} options */
   const entry = ({ active, depth = 0, lead, label, count, onclick, toggle = null, title }) =>
     h('li', { class: 'inbox-dir', style: { '--depth': depth } },
       toggle ?? h('span', { class: 'inbox-dir-gap' }),
       h('button', { type: 'button', class: active ? 'inbox-dir-btn active' : 'inbox-dir-btn', 'aria-current': active ? 'true' : null, title: title ?? label, onclick },
         lead, h('span', { class: 'inbox-dir-name' }, label), count ? h('span', { class: 'chip-count' }, count) : null));
 
+  /**
+   * @param {string} id
+   * @param {number} depth
+   * @param {Child} lead
+   * @param {string} label
+   */
   const branch = (id, depth, lead, label) => {
     const keys = [...(boxes.get(id) ?? [])];
     const open = !view.collapsed.has(id);
@@ -455,12 +567,17 @@ function directories(store, emails, accounts, resendKeyed, set) {
     boxes.has('none') ? branch('none', 0, icon('inbox'), 'No project') : null);
 }
 
+/**
+ * @param {HTMLElement} root
+ * @param {Store} store
+ */
 function draw(root, store) {
   const accounts = gmailAccounts(store);
   const resendKeyed = keyedProjects(store);
   // Projects with a Resend key or a Gmail account, in project order.
   const withMail = new Set([...resendKeyed, ...gmailProjects(store)].map((p) => p.id));
   const keyed = store.get('projects').projects.filter((p) => withMail.has(p.id));
+  /** @type {Map<string | null, Project>} */
   const projects = new Map(store.get('projects').projects.map((p) => [p.id, p]));
   const { emails, syncedAt } = store.get(COLLECTION);
   // A Gmail account needs no project, so it counts on its own.
@@ -476,9 +593,11 @@ function draw(root, store) {
   // The project filter is a project id, 'none', or "label:<id>" for a project label: Gmail mail can carry its account's label.
   const labels = store.get('projects').categories ?? [];
   const allProjects = store.get('projects').projects;
+  /** @type {Map<string | undefined, string | null>} */
   const labelOfAccount = new Map(accounts.map((a) => [a.email, a.labelId ?? null]));
   const labelFilter = view.project.startsWith('label:') ? view.project.slice(6) : null;
   if (labelFilter && !labels.some((c) => c.id === labelFilter)) view.project = 'all';
+  /** @param {InboxMessage} e */
   const matchesProject = (e) => (labelFilter
     ? underLabel(allProjects, e.projectId, e.source === 'gmail' ? labelOfAccount.get(e.account) ?? null : null, labelFilter)
     : inProject(e, view.project));
@@ -500,6 +619,7 @@ function draw(root, store) {
     // A search looks through all mail, as in a mail client; the folder applies when the field is empty.
     const pool = q ? byProject.filter((e) => (view.status === 'all' || e.status === view.status) && (!view.flagged || taskOf(store, e))) : filtered;
     const shown = pool.filter((e) => matches(e, q));
+    /** @type {HTMLLIElement[]} */
     const rows = [];
     let group = '';
     for (const e of shown.slice(0, view.limit)) {
@@ -524,15 +644,25 @@ function draw(root, store) {
     }
   }
 
+  /** @param {Partial<typeof view>} patchView */
   const set = (patchView) => {
     Object.assign(view, patchView, { limit: STEP });
     store.refresh();
   };
+  /**
+   * @param {boolean} active
+   * @param {Child} label
+   * @param {number} count
+   * @param {() => void} onclick
+   * @param {Record<string, string | undefined>} [extra]
+   */
   const chip = (active, label, count, onclick, extra = {}) =>
     h('button', { type: 'button', class: active ? 'lp-chip active' : 'lp-chip', 'aria-pressed': String(active), onclick, ...extra }, label, count ? h('span', { class: 'chip-count' }, count) : null);
+  /** @param {string} id */
   const nameOfProject = (id) => projects.get(id)?.name ?? 'a project';
   const flaggedCount = inFolder.filter((e) => taskOf(store, e)).length;
   // The Inbox counts what is unread; the other folders count what they hold.
+  /** @param {Folder} folder */
   const countOf = ([key, , , holds]) => (key === 'inbox' ? unread.length : byProject.filter(holds).length);
 
   root.replaceChildren(h('div', { class: 'stack-lg inbox' },
@@ -574,7 +704,7 @@ function draw(root, store) {
             h('details', {
               class: 'inbox-dirs-wrap',
               open: (view.dirsOpen ?? !window.matchMedia?.('(max-width: 760px)').matches) || null,
-              ontoggle: (ev) => { view.dirsOpen = ev.currentTarget.open; },
+              ontoggle: (/** @type {Event} */ ev) => { view.dirsOpen = /** @type {HTMLDetailsElement} */ (ev.currentTarget).open; },
             },
               h('summary', { class: 'muted small' }, 'Projects'),
               directories(store, emails, accounts, resendKeyed, set))),
@@ -598,7 +728,7 @@ function draw(root, store) {
                     nullable: true,
                     nullLabel: 'All projects',
                     className: 'inbox-project-pick',
-                    onPick: (v) => set({ project: v ?? 'all' }),
+                    onPick: (/** @type {string | null} */ v) => set({ project: v ?? 'all' }),
                   })
                 : null,
               accounts.length && mailboxes.length > 1
@@ -609,11 +739,11 @@ function draw(root, store) {
                     nullable: true,
                     nullLabel: 'All mailboxes',
                     className: 'inbox-project-pick',
-                    onPick: (v) => set({ mailbox: v ?? 'all' }),
+                    onPick: (/** @type {string | null} */ v) => set({ mailbox: v ?? 'all' }),
                   })
                 : null,
               statuses.length
-                ? h('select', { 'aria-label': 'Status', onchange: (ev) => set({ status: ev.target.value }) },
+                ? h('select', { 'aria-label': 'Status', onchange: (/** @type {Event} */ ev) => set({ status: /** @type {HTMLSelectElement} */ (ev.target).value }) },
                     h('option', { value: 'all' }, 'Any status'),
                     statuses.map((s) => h('option', { value: s, selected: view.status === s }, statusLabel(s))))
                 : null)),
@@ -624,8 +754,8 @@ function draw(root, store) {
             value: view.query,
             'aria-label': 'Search emails',
             // Only the list is redrawn, so the field keeps focus while typing.
-            oninput: (ev) => {
-              view.query = ev.target.value;
+            oninput: (/** @type {Event} */ ev) => {
+              view.query = /** @type {HTMLInputElement} */ (ev.target).value;
               view.limit = STEP;
               paint();
             },
@@ -636,6 +766,7 @@ function draw(root, store) {
 }
 
 // Received emails in the Inbox not opened yet, for the Home page.
+/** @param {Store} store */
 export const unreadCount = (store) => store.get(COLLECTION).emails.filter((e) => FOLDERS[0][3](e) && e.unread).length;
 
 /** @satisfies {import('../../types/data').Module} */
@@ -656,7 +787,7 @@ export default {
     flagged: view.flagged ? '1' : '',
     email: view.open,
   }),
-  restore: (p = {}) => {
+  restore: (/** @type {Record<string, string>} */ p = {}) => {
     // Older links used dir=sent|received.
     view.folder = FOLDERS.some(([k]) => k === p.folder) ? p.folder : p.dir === 'sent' ? 'sent' : 'inbox';
     view.project = p.project || 'all';
