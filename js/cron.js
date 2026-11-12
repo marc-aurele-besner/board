@@ -11,7 +11,8 @@ import { openPositions } from './modules/positions.js';
 import { startDevSession, devPresets, devCommandOf } from './modules/dev.js';
 
 export const COLLECTION = 'cron';
-export const DEFAULTS = { flows: [], runs: [] };
+// templates: flows saved as templates. tests: each flow's step test results, by flow id then step id.
+export const DEFAULTS = { flows: [], runs: [], templates: [], tests: {} };
 export const AI_TASK = 'task-cron';
 const MAX_RUNS = 60;
 const MINUTE = 60000;
@@ -413,15 +414,31 @@ export const TEMPLATES = [
   },
 ];
 
-// Templates write a data step's single source on the step itself, which reads shorter.
+// Built-in templates write a data step's single source on the step itself, which reads shorter. A saved template
+// keeps its steps whole, without ids, and its sources get new ids so two flows made from it share none.
 function templateStep(s) {
-  if (s.type !== 'gather' || s.sources) return { ...makeStep(s.type), ...s };
+  if (s.type !== 'gather') return { ...makeStep(s.type), ...s };
+  if (s.sources) return { ...makeStep(s.type), ...s, sources: s.sources.map((x) => ({ ...makeSource(x.source), ...x, id: uid() })) };
   const { type, source, append, ...fields } = s;
   return { ...makeStep(type), sources: [makeSource(source, fields)], append: Boolean(append) };
 }
 
 export function flowFromTemplate(t) {
-  return makeFlow({ name: t.name, schedule: { ...makeFlow().schedule, ...t.schedule },steps: t.steps.map(templateStep) });
+  return makeFlow({ name: t.name, schedule: { ...makeFlow().schedule, ...t.schedule }, projectId: t.projectId ?? '', steps: t.steps.map(templateStep) });
+}
+
+// A flow saved as a template: its schedule, project and steps. {{stepN}} still points at the right step, since the
+// steps keep their order.
+export function templateFromFlow(flow, { name, about }) {
+  return {
+    id: uid(),
+    name,
+    about,
+    schedule: structuredClone(flow.schedule),
+    projectId: flowProjectId(flow),
+    steps: structuredClone(flow.steps).map(({ id, ...step }) => step),
+    created: now(),
+  };
 }
 
 // --- Schedule ---
@@ -1117,12 +1134,50 @@ async function stepOnce(store, flow, step, ctx) {
 
 // --- Step by step tests ---
 // As in n8n, a step can run on its own, as a test (no task, no notification, no terminal), on the results the steps
-// before it left. They last while the page is open: flowId → Map(stepId → result).
-const tests = new Map();
+// before it left. The results are kept in cron.json, so they are there after a reload and in another browser on the
+// same folder. Only what cannot be rebuilt is saved: a step's variables come from the results before it, and its
+// data from its output when it was read from the output.
 const testing = new Set();
-export const testsOf = (flowId) => tests.get(flowId) ?? new Map();
 export const isTesting = (flowId) => testing.has(flowId);
-export const clearTests = (flowId) => tests.delete(flowId);
+const same = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
+
+function packTest(r) {
+  const { vars, data, ...rest } = r;
+  return r.ok && same(data, parseData(r.output) ?? r.output) ? rest : { ...rest, data };
+}
+
+function saveTest(store, flowId, stepId, result) {
+  store.update(COLLECTION, (d) => {
+    d.tests ??= {};
+    d.tests[flowId] ??= {};
+    d.tests[flowId][stepId] = packTest(result);
+  });
+}
+
+// flowId's test results as stepId → result, each with the variables and data the editor shows.
+export function testsOf(store, flowId) {
+  const map = new Map();
+  const { flows, tests } = store.get(COLLECTION);
+  const saved = tests?.[flowId];
+  const flow = flows.find((f) => f.id === flowId);
+  if (!saved || !flow) return map;
+  const results = [];
+  for (const step of flow.steps) {
+    const r = saved[step.id];
+    if (!r) continue;
+    const result = { ...r, data: 'data' in r ? r.data : parseData(r.output) ?? r.output, vars: varsFor(flow, { results }) };
+    map.set(step.id, result);
+    if (result.ok) results.push(result);
+  }
+  return map;
+}
+
+export function clearTests(store, flowId) {
+  if (!store.get(COLLECTION).tests?.[flowId]) return;
+  store.update(COLLECTION, (d) => {
+    delete d.tests?.[flowId];
+  });
+}
 
 // Tests one step: earlier steps with no result yet run first, then this one runs again. A "Stop if" that would stop
 // does not keep the next step from being tested, since testing it is the point.
@@ -1133,8 +1188,7 @@ export async function testStep(store, flowId, stepId) {
   if (end < 0) return null;
   testing.add(flowId);
   store.refresh();
-  if (!tests.has(flowId)) tests.set(flowId, new Map());
-  const saved = tests.get(flowId);
+  const saved = testsOf(store, flowId);
   const ctx = { dry: true, nothing: false, stop: false, note: '', results: [] };
   let last = null;
   try {
@@ -1146,7 +1200,7 @@ export async function testStep(store, flowId, stepId) {
         continue;
       }
       last = await stepOnce(store, flow, step, ctx);
-      saved.set(step.id, last);
+      saveTest(store, flowId, step.id, last);
       if (!last.ok) break;
     }
   } finally {
@@ -1172,11 +1226,11 @@ export async function runFlow(store, flowId, { manual = false, dry = false } = {
   }
   const ctx = { dry, nothing: false, stop: false, note: '', results: [] };
   // A test run of the whole flow also fills the step tests, so its data can be looked at and picked from.
-  if (dry) tests.set(flowId, new Map());
+  if (dry) clearTests(store, flowId);
   try {
     for (const step of flow.steps) {
       const result = await stepOnce(store, flow, step, ctx);
-      if (dry) tests.get(flowId)?.set(step.id, result);
+      if (dry) saveTest(store, flowId, step.id, result);
       run.steps.push({ stepId: step.id, ok: result.ok, output: result.output.slice(0, 4000), note: result.note, ms: result.ms });
       if (!result.ok) throw new Error(result.output);
       if (ctx.stop) {
