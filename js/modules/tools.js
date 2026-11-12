@@ -1,3 +1,4 @@
+// @ts-check
 // Tools: checks that run against the website of each project, and the status of the services they rely on.
 import { h, icon, refreshIcon, empty, notice, uid } from '../ui.js';
 import { projectIcon, projectTree } from './projects.js';
@@ -9,36 +10,46 @@ import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
 import { barChart } from '../chart.js';
 import { contractsTab, contractsSerialize, contractsRestore } from './tools-contracts.js';
+/** @import { CrawlFile, IconName, LlmsFile, Project, Provider, ProviderStatus, RobotsFile, SecurityFile, Site, SiteCrawl, SiteDns, SiteLogEntry, SiteDomain, SiteMeta, SitemapFile, Store } from '../../types/data' */
+/** @import { Child } from '../../types/ui' */
+
+/** A crawl file of any kind, or the stand-in for one not read yet. @typedef {Partial<Omit<CrawlFile, 'found'> & RobotsFile & SitemapFile & LlmsFile & SecurityFile> & { found: boolean }} CrawlEntry */
+/** A DNS lookup that found the domain, which fills every list. @typedef {SiteDns & Required<Pick<SiteDns, 'domain' | 'a' | 'aaaa' | 'caa' | 'ns' | 'mx' | 'spf' | 'dmarc' | 'dkim'>>} FoundDns */
 
 const COLLECTION = 'tools';
+/** @type {[string, string, IconName][]} */
 const TABS = [['health', 'Website health', 'globe'], ['ssl', 'SSL and domains', 'shield'], ['dns', 'DNS and email', 'mail'], ['crawl', 'Crawl files', 'file'], ['meta', 'Metadata preview', 'link'], ['status', 'Provider status', 'activity'], ['contracts', 'Contracts', 'code']];
 // What "Check all now" looks up on each tab.
+/** @type {Record<string, string[]>} */
 const TAB_PARTS = { health: ['health'], ssl: ['ssl', 'domain'], dns: ['dns'], crawl: ['crawl'] };
 const EVERY = [[15, '15 minutes'], [60, 'hour'], [360, '6 hours'], [1440, 'day']];
+/** @type {Record<string, [string, string]>} */
 const STATUS = { up: ['Up', 'done'], slow: ['Slow', 'medium'], down: ['Down', 'high'] };
 
 // View state: the tab, the project shown in the metadata preview, and which sites are being checked now.
+/** @type {{ tab: string, project: string, busy: Set<string>, openDns: Set<string>, openFile: string, logLevel: string }} */
 const view = { tab: 'health', project: '', busy: new Set(), openDns: new Set(), openFile: '', logLevel: '' };
 
-const pillOf = (text, tone) => h('span', { class: `pill tone-${tone}` }, text);
-const timeOf = (at) => (at ? new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never');
+const pillOf = (/** @type {string} */ text, /** @type {string} */ tone) => h('span', { class: `pill tone-${tone}` }, text);
+const timeOf = (/** @type {string | undefined} */ at) => (at ? new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never');
 
 // A check can finish in a few milliseconds; the busy state lasts long enough to be seen.
 const MIN_BUSY_MS = 600;
 
+/** @param {Store} store @param {string} key @param {() => Promise<unknown>} work */
 function run(store, key, work) {
   view.busy.add(key);
   store.refresh();
   const shown = new Promise((resolve) => setTimeout(resolve, MIN_BUSY_MS));
   return Promise.all([work(), shown])
-    .catch((err) => toast(err.message))
+    .catch((/** @type {Error} */ err) => toast(err.message))
     .finally(() => {
       view.busy.delete(key);
       store.refresh();
     });
 }
 
-const check = (store, p, parts) =>
+const check = (/** @type {Store} */ store, /** @type {Project} */ p, /** @type {string[]} */ parts) =>
   run(store, p.id, async () => {
     await checkSite(store, p, parts);
     const made = runRules(store);
@@ -46,16 +57,18 @@ const check = (store, p, parts) =>
   });
 
 // What a rule's task is about: the registered domain for domain and mail rules, the host otherwise.
-const refOf = (store, p, kind) =>
+const refOf = (/** @type {Store} */ store, /** @type {Project} */ p, /** @type {string} */ kind) =>
   kind === 'domain' ? siteData(store, p.id).domain?.name : kind === 'email' ? siteData(store, p.id).dns?.domain : hostOf(p.website);
 
 // A task for a site, made by hand from a row. It is linked to the rule it belongs to, so the rule does not add another.
+/** @param {Store} store @param {Project} p @param {string} kind @param {string} text @param {string} [due] */
 function addTask(store, p, kind, text, due = '') {
   const ref = refOf(store, p, kind);
   store.update('todos', (d) => d.items.push(makeTask({ text, projectId: p.id, priority: 'medium', due, ...(kind ? { auto: kind, autoRef: ref } : {}) })));
   toast(`Task added to ${p.name}`);
 }
 
+/** @param {Store} store @param {Project} p @param {string} kind @param {string} text @param {string} [due] */
 function taskCell(store, p, kind, text, due) {
   const ref = refOf(store, p, kind);
   return autoTaskFor(store, kind, ref)
@@ -65,18 +78,22 @@ function taskCell(store, p, kind, text, due) {
 
 // A task for something a check found, filled in for the site's project and editable before it is added.
 // `comment` adds a field for what to change, put at the top of the description.
+/**
+ * @param {Store} store @param {Project} p
+ * @param {{ text: string, description?: string, priority?: string, comment?: string }} task
+ */
 function openTaskDialog(store, p, { text, description = '', priority = 'low', comment = '' }) {
   const projects = projectTree(store.get('projects').projects).map(({ project }) => project);
   const dialog = openDialog({
     title: 'Create a task',
     body: h('form', {
       class: 'stack',
-      onsubmit: (e) => {
+      onsubmit: (/** @type {SubmitEvent} */ e) => {
         e.preventDefault();
-        const f = new FormData(e.currentTarget);
+        const f = new FormData(/** @type {HTMLFormElement} */ (e.currentTarget));
         const title = String(f.get('text') ?? '').trim();
         if (!title) return;
-        const projectId = f.get('project') || null;
+        const projectId = /** @type {string | null} */ (f.get('project') || null);
         store.update('todos', (d) => d.items.push(makeTask({
           text: title,
           description: [f.get('comment'), f.get('description')].map((x) => String(x ?? '').trim()).filter(Boolean).join('\n\n'),
@@ -103,11 +120,12 @@ function openTaskDialog(store, p, { text, description = '', priority = 'low', co
 }
 
 // A check or a cross. A cross that is given a task opens the task dialog for it.
-const tick = (found, title, task) =>
+const tick = /** @param {boolean} found @param {string} title @param {(() => void) | null} [task] */ (found, title, task) =>
   !found && task
     ? h('button', { type: 'button', class: 'tick miss', title: `${title} · create a task`, 'aria-label': `${title}: create a task`, onclick: task }, icon('x'))
     : h('span', { class: found ? 'tick ok' : 'tick miss', title }, icon(found ? 'check' : 'x'));
 
+/** @param {string} until */
 function daysPill(until) {
   const n = daysUntil(until);
   return pillOf(n < 0 ? 'Expired' : `${n} day${n === 1 ? '' : 's'} left`, n <= 14 ? 'high' : n <= 30 ? 'medium' : 'done');
@@ -115,20 +133,23 @@ function daysPill(until) {
 
 // --- Website health ---
 
-const openSite = (store, p) => () => {
+const openSite = (/** @type {Store} */ store, /** @type {Project} */ p) => () => {
   view.project = p.id;
   store.refresh();
 };
-const goTab = (store, p, tab) => () => {
+const goTab = (/** @type {Store} */ store, /** @type {Project} */ p, /** @type {string} */ tab) => () => {
   view.tab = tab;
   view.project = p.id;
   store.refresh();
 };
 
+/** @type {Record<string, [string, string]>} */
 const LEVEL = { error: ['Error', 'high'], warn: ['Warning', 'medium'], info: ['Info', 'done'] };
+/** @type {Record<string, string>} */
 const SOURCE = { health: 'Health', ssl: 'SSL', domain: 'Domain', dns: 'DNS', crawl: 'Crawl files', meta: 'Metadata' };
 
 // The site's log, newest first. Checks made before the log existed are filled in from the uptime history.
+/** @param {Site} s @returns {SiteLogEntry[]} */
 function logOf(s) {
   const log = s.log ?? [];
   const since = log[0]?.at ?? '9999';
@@ -137,11 +158,12 @@ function logOf(s) {
   return [...older, ...log].reverse();
 }
 
+/** @param {Store} store @param {Project[]} sites @param {Project} p */
 function siteDetail(store, sites, p) {
   const s = siteData(store, p.id);
   const host = hostOf(p.website);
   const busy = view.busy.has(p.id) || view.busy.has('all');
-  const [label, tone] = STATUS[s.health?.status] ?? ['Not checked', 'plain'];
+  const [label, tone] = STATUS[/** @type {string} */ (s.health?.status)] ?? ['Not checked', 'plain'];
   const history = s.history ?? [];
   const ok = history.filter((c) => c.ok);
   const up = history.length ? Math.round((ok.length / history.length) * 1000) / 10 : null;
@@ -149,14 +171,15 @@ function siteDetail(store, sites, p) {
   const avg = times.length ? Math.round(times.reduce((a, b) => a + b, 0) / times.length) : null;
   const p95 = times.length ? times[Math.min(times.length - 1, Math.floor(times.length * 0.95))] : null;
   const lastDown = [...history].reverse().find((c) => !c.ok);
-  const stat = (value, text) => h('div', null, h('strong', null, value ?? '—'), h('span', { class: 'muted small' }, text));
+  const stat = (/** @type {Child} */ value, /** @type {string} */ text) => h('div', null, h('strong', null, value ?? '—'), h('span', { class: 'muted small' }, text));
   const all = logOf(s);
   const shown = view.logLevel ? all.filter((e) => e.level === view.logLevel) : all;
-  const count = (level) => all.filter((e) => e.level === level).length;
+  const count = (/** @type {string} */ level) => all.filter((e) => e.level === level).length;
   const gaps = emailGaps(s.dns);
   const crawlCore = s.crawl?.robots ? CORE.filter(([k]) => crawlFile(s.crawl, k).found).length : null;
-  const metaCount = s.meta && !s.meta.error ? ['title', 'description', 'ogTitle', 'ogDescription', 'ogImage', 'ogUrl', 'twitterCard', 'twitterImage'].filter((k) => s.meta[k]).length : null;
+  const metaCount = s.meta && !s.meta.error ? /** @type {(keyof SiteMeta)[]} */ (['title', 'description', 'ogTitle', 'ogDescription', 'ogImage', 'ogUrl', 'twitterCard', 'twitterImage']).filter((k) => /** @type {SiteMeta} */ (s.meta)[k]).length : null;
   // One line per other check, each opening its tab on this site.
+  /** @type {[string, string, Child, string][]} */
   const checks = [
     ['ssl', 'SSL certificate', s.ssl?.until ? daysPill(s.ssl.until) : null, s.ssl?.until ? `until ${s.ssl.until}${s.ssl.issuer ? ` · ${s.ssl.issuer}` : ''}` : s.ssl?.error ?? 'Not checked yet'],
     ['ssl', 'Domain', s.domain?.until ? daysPill(s.domain.until) : null, s.domain?.until ? `${s.domain.name} · renews by ${s.domain.until}` : s.domain?.error ?? 'Not checked yet'],
@@ -172,7 +195,7 @@ function siteDetail(store, sites, p) {
           h('div', null, h('h3', null, p.name), h('a', { href: p.website, target: '_blank', rel: 'noopener', class: 'small' }, host))),
         h('div', { class: 'row' },
           busy ? pillOf('Checking…', 'plain') : pillOf(label, tone),
-          s.health?.status === 'down' || s.health?.status === 'slow' ? taskCell(store, p, 'health', `Look into ${host}: ${s.health.status === 'down' ? 'not answering' : 'slow'}`) : null,
+          s.health?.status === 'down' || s.health?.status === 'slow' ? taskCell(store, p, 'health', `Look into ${host}: ${/** @type {NonNullable<Site['health']>} */ (s.health).status === 'down' ? 'not answering' : 'slow'}`) : null,
           h('button', { type: 'button', class: 'btn-small primary', disabled: busy, onclick: () => check(store, p, ['health', 'ssl', 'domain', 'dns']) }, refreshIcon(busy), busy ? 'Checking…' : 'Check everything'))),
       h('div', { class: 'stats detail-stats' },
         stat(up === null ? null : `${up}%`, `up, over ${history.length} check${history.length === 1 ? '' : 's'}`),
@@ -221,19 +244,20 @@ function siteDetail(store, sites, p) {
         : null));
 }
 
+/** @param {Store} store @param {Project[]} sites */
 function healthTab(store, sites) {
   const picked = pickedSite(sites);
   if (picked) return siteDetail(store, sites, picked);
-  const data = sites.map((p) => [p, siteData(store, p.id)]);
-  const countOf = (status) => data.filter(([, s]) => s.health?.status === status).length;
-  const stat = (n, label) => h('div', { class: 'card stat' }, h('strong', null, String(n)), h('span', { class: 'muted small' }, label));
+  const data = sites.map((p) => /** @type {[Project, Site]} */ ([p, siteData(store, p.id)]));
+  const countOf = (/** @type {string} */ status) => data.filter(([, s]) => s.health?.status === status).length;
+  const stat = (/** @type {number} */ n, /** @type {string} */ label) => h('div', { class: 'card stat' }, h('strong', null, String(n)), h('span', { class: 'muted small' }, label));
   return h('div', { class: 'stack-lg' },
     siteChips(store, sites, null),
     h('div', { class: 'summary tool-stats' }, stat(countOf('up'), 'up'), stat(countOf('slow'), 'slow'), stat(countOf('down'), 'down'), stat(sites.length, 'sites')),
     h('div', { class: 'site-grid' }, data.map(([p, s]) => {
       const host = hostOf(p.website);
       const busy = view.busy.has(p.id) || view.busy.has('all');
-      const [label, tone] = STATUS[s.health?.status] ?? ['Not checked', 'plain'];
+      const [label, tone] = STATUS[/** @type {string} */ (s.health?.status)] ?? ['Not checked', 'plain'];
       const history = s.history ?? [];
       const up = history.length ? Math.round((history.filter((c) => c.ok).length / history.length) * 1000) / 10 : null;
       const issues = logOf(s).filter((e) => e.level !== 'info' && Date.now() - Date.parse(e.at) < 86400000).length;
@@ -260,7 +284,7 @@ function healthTab(store, sites) {
               'Details', issues ? h('span', { class: 'pill tone-medium', title: 'Warnings and errors in the last 24 hours' }, String(issues)) : null),
             h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => check(store, p, ['health']) }, refreshIcon(busy), 'Check now'),
             s.health?.status === 'down' || s.health?.status === 'slow'
-              ? taskCell(store, p, 'health', `Look into ${host}: ${s.health.status === 'down' ? 'not answering' : 'slow'}`)
+              ? taskCell(store, p, 'health', `Look into ${host}: ${/** @type {NonNullable<Site['health']>} */ (s.health).status === 'down' ? 'not answering' : 'slow'}`)
               : null)));
     })),
     h('p', { class: 'muted small' }, 'A check asks the site for its home page from this browser. The browser hides the answer itself, so a check tells “answered” from “did not answer” and how long it took, not the status code.'));
@@ -268,10 +292,11 @@ function healthTab(store, sites) {
 
 // --- SSL and domains ---
 
+/** @param {Store} store @param {Project[]} sites */
 function sslTab(store, sites) {
   const ssl = ruleOf(store, 'ssl');
   const domain = ruleOf(store, 'domain');
-  const cell = (info, body) => (info?.until ? body() : h('span', { class: 'muted small' }, info?.error ?? 'Not checked yet'));
+  const cell = (/** @type {{ until?: string, error?: string } | undefined} */ info, /** @type {() => Child} */ body) => (info?.until ? body() : h('span', { class: 'muted small' }, info?.error ?? 'Not checked yet'));
   return h('div', { class: 'stack-lg' },
     notice({
       tone: 'info',
@@ -288,10 +313,10 @@ function sslTab(store, sites) {
           const busy = view.busy.has(p.id) || view.busy.has('all');
           return h('tr', null,
             h('td', null, h('div', { class: 'row' }, projectIcon(p), h('div', null, h('strong', null, p.name), h('div', { class: 'muted small' }, host)))),
-            h('td', null, cell(s.ssl, () => [daysPill(s.ssl.until), h('div', { class: 'muted small' }, `valid until ${s.ssl.until}`)])),
+            h('td', null, cell(s.ssl, () => [daysPill(/** @type {{ until: string }} */ (s.ssl).until), h('div', { class: 'muted small' }, `valid until ${/** @type {{ until: string }} */ (s.ssl).until}`)])),
             h('td', null, s.ssl?.issuer ?? ''),
             h('td', null, s.ssl?.until && daysUntil(s.ssl.until) <= 30 ? taskCell(store, p, 'ssl', `Renew the SSL certificate for ${host}`, s.ssl.until) : h('span', { class: 'muted small' }, s.ssl?.until ? 'Not needed yet' : '')),
-            h('td', null, cell(s.domain, () => [daysPill(s.domain.until), h('div', { class: 'muted small' }, `${s.domain.name} · renews by ${s.domain.until}`)])),
+            h('td', null, cell(s.domain, () => [daysPill(/** @type {{ until: string }} */ (s.domain).until), h('div', { class: 'muted small' }, `${/** @type {SiteDomain} */ (s.domain).name} · renews by ${/** @type {SiteDomain} */ (s.domain).until}`)])),
             h('td', null, s.domain?.registrar ?? ''),
             h('td', null, s.domain?.until && daysUntil(s.domain.until) <= 60 ? taskCell(store, p, 'domain', `Renew the domain ${s.domain.name}`, s.domain.until) : h('span', { class: 'muted small' }, s.domain?.until ? 'Not needed yet' : '')),
             h('td', null, h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Look up again', 'aria-label': `Look up ${host} again`, onclick: () => check(store, p, ['ssl', 'domain']) }, refreshIcon(busy))));
@@ -302,16 +327,19 @@ function sslTab(store, sites) {
 // --- DNS and email ---
 
 // SPF ends with how strictly mail from other servers is treated; "+all" lets anyone send as the domain.
+/** @type {Record<string, [string, string]>} */
 const SPF_ALL = { '-all': ['Strict', 'done'], '~all': ['Soft fail', 'done'], '?all': ['Neutral', 'medium'], '+all': ['Anyone may send', 'high'], all: ['Anyone may send', 'high'] };
+/** @type {Record<string, [string, string]>} */
 const DMARC_POLICY = { reject: ['Reject', 'done'], quarantine: ['Quarantine', 'done'], none: ['Monitor only', 'medium'] };
 
-const ttlOf = (s) => (s >= 86400 && s % 86400 === 0 ? `${s / 86400} d` : s >= 3600 && s % 3600 === 0 ? `${s / 3600} h` : s >= 60 && s % 60 === 0 ? `${s / 60} min` : `${s} s`);
+const ttlOf = (/** @type {number} */ s) => (s >= 86400 && s % 86400 === 0 ? `${s / 86400} d` : s >= 3600 && s % 3600 === 0 ? `${s / 3600} h` : s >= 60 && s % 60 === 0 ? `${s / 60} min` : `${s} s`);
 // "@" for the domain itself and "www" for www.example.com, as DNS dashboards show them.
-const relName = (name, domain) => (name === domain ? '@' : name.endsWith(`.${domain}`) ? name.slice(0, -domain.length - 1) : name);
+const relName = (/** @type {string} */ name, /** @type {string} */ domain) => (name === domain ? '@' : name.endsWith(`.${domain}`) ? name.slice(0, -domain.length - 1) : name);
 
 // Every record the lookup found, one row each, with a count per type above.
+/** @param {FoundDns & Required<Pick<SiteDns, 'records'>>} d */
 function recordTable(d) {
-  const counts = d.records.reduce((m, r) => m.set(r.type, (m.get(r.type) ?? 0) + 1), new Map());
+  const counts = d.records.reduce((m, r) => m.set(r.type, (m.get(r.type) ?? 0) + 1), /** @type {Map<string, number>} */ (new Map()));
   return h('div', { class: 'stack dns-all' },
     h('div', { class: 'chips' }, [...counts].map(([type, n]) => h('span', { class: 'pill tone-plain' }, `${n} ${type}`))),
     d.records.length
@@ -328,6 +356,7 @@ function recordTable(d) {
     h('p', { class: 'muted small' }, `DNS cannot list every name under a domain, so this asks for ${d.domain}, the site’s host, www, _dmarc, MTA-STS, TLS reporting, BIMI and common DKIM selectors. Records on other names are not shown.`));
 }
 
+/** @param {Store} store @param {Project[]} sites */
 function dnsTab(store, sites) {
   const email = ruleOf(store, 'email');
   return h('div', { class: 'stack-lg' },
@@ -342,7 +371,7 @@ function dnsTab(store, sites) {
       h('table', { class: 'mon-table tool-table' },
         h('thead', null, h('tr', null, ['Site', 'Mail servers', 'SPF', 'DMARC', 'DKIM', 'CAA', 'Task', ''].map((t) => h('th', null, t)))),
         h('tbody', null, sites.flatMap((p) => {
-          const d = siteData(store, p.id).dns;
+          const d = /** @type {FoundDns | undefined} */ (siteData(store, p.id).dns);
           const host = hostOf(p.website);
           const busy = view.busy.has(p.id) || view.busy.has('all');
           const site = h('td', null, h('div', { class: 'row' }, projectIcon(p), h('div', null, h('strong', null, p.name), h('div', { class: 'muted small' }, d?.domain ?? host))));
@@ -354,6 +383,7 @@ function dnsTab(store, sites) {
           const [spfText, spfTone] = !d.spf.record ? ['Missing', 'high'] : SPF_ALL[d.spf.all.toLowerCase()] ?? ['No “all” rule', 'medium'];
           const [dmarcText, dmarcTone] = !d.dmarc.record ? ['Missing', 'high'] : DMARC_POLICY[d.dmarc.policy] ?? ['Unclear policy', 'medium'];
           const issuers = d.caa.filter((c) => / issue "/.test(c)).map((c) => c.match(/"([^"]*)"/)?.[1]).filter(Boolean);
+          /** @type {[string, string[]][]} */
           const records = [['A', d.a], ['AAAA', d.aaaa], ['NS', d.ns], ['MX', d.mx], ['SPF', [d.spf.record]], ['DMARC', [d.dmarc.record]], ['DKIM selectors', d.dkim], ['CAA', d.caa]];
           return [
             h('tr', null,
@@ -367,12 +397,12 @@ function dnsTab(store, sites) {
               again),
             h('tr', { class: 'dns-raw' },
               h('td', { colspan: 8 },
-                h('details', { open: view.openDns.has(p.id), ontoggle: (e) => (e.currentTarget.open ? view.openDns.add(p.id) : view.openDns.delete(p.id)) },
+                h('details', { open: view.openDns.has(p.id), ontoggle: (/** @type {Event} */ e) => (/** @type {HTMLDetailsElement} */ (e.currentTarget).open ? view.openDns.add(p.id) : view.openDns.delete(p.id)) },
                   h('summary', { class: 'small' },
                     h('strong', null, d.records ? `All ${d.records.length} records` : 'Records'),
                     h('span', { class: 'muted' }, ` for ${d.domain} · looked up ${timeOf(d.at)}${d.error ? ` · last try failed: ${d.error}` : ''}`)),
                   d.records
-                    ? recordTable(d)
+                    ? recordTable(/** @type {FoundDns & Required<Pick<SiteDns, 'records'>>} */ (d))
                     : [h('p', { class: 'muted small' }, 'Look up again to see every record, with CNAME and TXT.'),
                         h('dl', { class: 'dns-records' }, records.flatMap(([k, v]) => [h('dt', null, k), h('dd', null, v.filter(Boolean).length ? v.filter(Boolean).map((x) => h('code', null, x)) : h('span', { class: 'muted small' }, 'None'))]))]))),
           ];
@@ -383,12 +413,13 @@ function dnsTab(store, sites) {
 // --- Crawl files ---
 
 // What a task for a missing file says.
-const crawlTask = (store, p, name, why) => () =>
+const crawlTask = (/** @type {Store} */ store, /** @type {Project} */ p, /** @type {string} */ name, /** @type {string} */ why) => () =>
   openTaskDialog(store, p, { text: `Add ${name === 'Sitemap' ? 'a sitemap' : name} to ${hostOf(p.website)}`, description: why });
 
-const kb = (n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`);
+const kb = (/** @type {number} */ n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`);
 
 // [key, name, short name for the table, what it is for, needed by most sites, what is worth knowing about it once found].
+/** @type {[keyof SiteCrawl & string, string, string, string, boolean, ((f: CrawlEntry) => Child[]) | null][]} */
 const CRAWL_FILES = [
   ['robots', 'robots.txt', 'robots', 'Tells crawlers what they may read.', true, (f) => [
     f.blocksSearch ? pillOf('Blocks Google or Bing', 'high') : f.blocksAll ? pillOf('Blocks unnamed crawlers', 'medium') : pillOf('Search engines allowed', 'done'),
@@ -412,11 +443,13 @@ const CRAWL_FILES = [
   ['assetlinks', 'Android asset links', 'android', 'Opens links in the site’s Android app.', false, null],
 ];
 const CORE = CRAWL_FILES.filter((x) => x[4]);
-const fileOf = (key) => CRAWL_FILES.find(([k]) => k === key);
+const fileOf = (/** @type {string} */ key) => CRAWL_FILES.find(([k]) => k === key);
 // Files saved before a kind was added have no entry; they read as unread until the next read.
-const crawlFile = (c, key) => c?.[key] ?? { found: false, unread: 'Read again to check this file.' };
-const issuesOf = (f) => (f.checks ?? []).filter(([level]) => level !== 'ok');
+/** @returns {CrawlEntry} */
+const crawlFile = (/** @type {SiteCrawl | undefined} */ c, /** @type {string} */ key) => /** @type {Record<string, CrawlEntry | undefined> | undefined} */ (c)?.[key] ?? { found: false, unread: 'Read again to check this file.' };
+const issuesOf = (/** @type {CrawlEntry} */ f) => (f.checks ?? []).filter(([level]) => level !== 'ok');
 
+/** @param {CrawlEntry} f */
 function checksPill(f) {
   if (!f.checks) return null;
   const errors = f.checks.filter(([l]) => l === 'error').length;
@@ -425,8 +458,9 @@ function checksPill(f) {
 }
 
 // A found file is green, or amber when its format check found an error. A missing optional file is an empty circle.
+/** @param {Store} store @param {Project} p @param {string} key @param {CrawlEntry} f @param {() => void} onOpen */
 function fileTick(store, p, key, f, onOpen) {
-  const [, name, , why, core] = fileOf(key);
+  const [, name, , why, core] = /** @type {(typeof CRAWL_FILES)[number]} */ (fileOf(key));
   if (f.unread) return h('span', { class: 'tick todo', title: `${name}: ${f.unread}` }, icon('clock'));
   if (f.found) {
     const bad = (f.checks ?? []).some(([l]) => l === 'error');
@@ -436,8 +470,9 @@ function fileTick(store, p, key, f, onOpen) {
 }
 
 // The file itself, with what its format check found. Shown under the row it belongs to.
+/** @param {Store} store @param {Project} p @param {string} key @param {CrawlEntry} f */
 function filePreview(store, p, key, f) {
-  const [, name, , why] = fileOf(key);
+  const [, name, , why] = /** @type {(typeof CRAWL_FILES)[number]} */ (fileOf(key));
   const host = hostOf(p.website);
   if (!f.found) {
     return h('div', { class: 'file-preview stack' },
@@ -450,7 +485,7 @@ function filePreview(store, p, key, f) {
   return h('div', { class: 'file-preview stack' },
     h('div', { class: 'row between' },
       h('a', { href: f.url, target: '_blank', rel: 'noopener', class: 'small file-url' }, f.url),
-      h('span', { class: 'muted small' }, [f.size ? kb(f.size) : '', cut ? `first ${f.raw.length.toLocaleString()} characters shown` : ''].filter(Boolean).join(' · '))),
+      h('span', { class: 'muted small' }, [f.size ? kb(f.size) : '', cut ? `first ${/** @type {string} */ (f.raw).length.toLocaleString()} characters shown` : ''].filter(Boolean).join(' · '))),
     f.checks
       ? h('ul', { class: 'file-checks' }, f.checks.map(([level, text]) => h('li', { class: `lvl-${level}` }, icon(level === 'ok' ? 'check' : level === 'warn' ? 'alert' : 'x'), h('span', null, text))))
       : h('p', { class: 'muted small' }, 'Read again to check its format.'),
@@ -464,11 +499,12 @@ function filePreview(store, p, key, f) {
     h('pre', { class: 'file-raw' }, (f.raw ?? '').split('\n').map((line) => h('span', { class: 'line' }, `${line}\n`))));
 }
 
-const toggleFile = (store, ref) => () => {
+const toggleFile = (/** @type {Store} */ store, /** @type {string} */ ref) => () => {
   view.openFile = view.openFile === ref ? '' : ref;
   store.refresh();
 };
 
+/** @param {Store} store @param {Project[]} sites */
 function crawlTab(store, sites) {
   const p = pickedSite(sites);
   if (!p) return crawlAll(store, sites);
@@ -521,6 +557,7 @@ function crawlTab(store, sites) {
 }
 
 // The "All" table. A file's tick opens it under its site's row.
+/** @param {Store} store @param {Project[]} sites */
 function crawlAll(store, sites) {
   const cols = CRAWL_FILES.length + 3;
   return h('div', { class: 'stack-lg' }, siteChips(store, sites, null),
@@ -534,7 +571,7 @@ function crawlAll(store, sites) {
             ? CRAWL_FILES.map(([k]) => {
                 const ref = `${p.id}:${k}`;
                 return h('td', { class: view.openFile === ref ? 'picked' : '' }, fileTick(store, p, k, crawlFile(c, k), toggleFile(store, ref)),
-                  k === 'robots' && c.robots.blocksSearch ? pillOf('Blocks search', 'high') : null);
+                  k === 'robots' && /** @type {RobotsFile} */ (c.robots).blocksSearch ? pillOf('Blocks search', 'high') : null);
               })
             : [h('td', { colspan: CRAWL_FILES.length }, h('span', { class: 'muted small' }, busy ? 'Reading…' : c?.error ?? 'Not read yet'))];
           const openKey = c?.robots && view.openFile.startsWith(`${p.id}:`) ? view.openFile.slice(p.id.length + 1) : '';
@@ -542,7 +579,7 @@ function crawlAll(store, sites) {
             h('tr', { class: openKey ? 'has-preview' : '' }, siteCell(store, p), ...cells, h('td', { class: 'muted small' }, c?.at ? timeOf(c.at) : ''), h('td', null, againButton(store, p, 'crawl', busy))),
             openKey && fileOf(openKey)
               ? h('tr', { class: 'preview-row' }, h('td', { colspan: cols },
-                  h('div', { class: 'row between' }, h('strong', null, `${fileOf(openKey)[1]} on ${hostOf(p.website)}`),
+                  h('div', { class: 'row between' }, h('strong', null, `${/** @type {(typeof CRAWL_FILES)[number]} */ (fileOf(openKey))[1]} on ${hostOf(p.website)}`),
                     h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close the preview', onclick: toggleFile(store, view.openFile) }, icon('x'))),
                   filePreview(store, p, openKey, crawlFile(c, openKey))))
               : null,
@@ -554,6 +591,7 @@ function crawlAll(store, sites) {
 // --- Metadata preview ---
 
 // How a shared link looks on one network. The picture is the site's own og:image, loaded from the site.
+/** @param {string} kind @param {Project} p @param {SiteMeta} m */
 function shareCard(kind, p, m) {
   const host = hostOf(p.website);
   const title = m.ogTitle || m.title || host;
@@ -574,8 +612,8 @@ function shareCard(kind, p, m) {
 
 // The tabs that show one site at a time pick it with a row of chips. "All" comes first and is the default:
 // an empty `view.project` means every site, shown side by side in one table.
-const pickedSite = (sites) => sites.find((x) => x.id === view.project) ?? null;
-const siteChips = (store, sites, p) =>
+const pickedSite = (/** @type {Project[]} */ sites) => sites.find((x) => x.id === view.project) ?? null;
+const siteChips = (/** @type {Store} */ store, /** @type {Project[]} */ sites, /** @type {Project | null} */ p) =>
   h('div', { class: 'chips' }, [{ id: '', name: 'All' }, ...sites].map((x) =>
     h('button', {
       type: 'button',
@@ -587,14 +625,14 @@ const siteChips = (store, sites, p) =>
     }, x.name)));
 
 // The site cell of an "All" table. Its name opens the site on its own.
-const siteCell = (store, p) =>
+const siteCell = (/** @type {Store} */ store, /** @type {Project} */ p) =>
   h('td', null, h('div', { class: 'row' }, projectIcon(p),
     h('div', null,
       h('button', { type: 'button', class: 'btn-link-inline', onclick: () => { view.project = p.id; store.refresh(); } }, h('strong', null, p.name)),
       h('div', { class: 'muted small' }, hostOf(p.website)))));
 
 // Reads every page from the metadata "All" view, which has no "Check all now" in its header.
-const readAll = (store, part, label) =>
+const readAll = (/** @type {Store} */ store, /** @type {string} */ part, /** @type {string} */ label) =>
   h('button', {
     type: 'button',
     class: 'btn-small primary',
@@ -606,14 +644,15 @@ const readAll = (store, part, label) =>
     }),
   }, refreshIcon(view.busy.has('all')), view.busy.has('all') ? 'Reading…' : label);
 
-const againButton = (store, p, part, busy) =>
+const againButton = (/** @type {Store} */ store, /** @type {Project} */ p, /** @type {string} */ part, /** @type {boolean} */ busy) =>
   h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Read again', 'aria-label': `Read ${hostOf(p.website)} again`, onclick: () => check(store, p, [part]) }, refreshIcon(busy));
 
 // What is off with a tag that is there: a length search results or previews cut, an address that is not full.
+/** @param {string} tag @param {string | undefined} v */
 function tagHint(tag, v) {
   if (!v) return '';
   const len = v.length;
-  const long = (max, where) => (len > max ? `${len} characters; ${where} show about ${max}.` : '');
+  const long = (/** @type {number} */ max, /** @type {string} */ where) => (len > max ? `${len} characters; ${where} show about ${max}.` : '');
   if (tag === '<title>') return len < 15 ? `Only ${len} characters; a title of 30 to 60 says more.` : long(60, 'search results');
   if (tag === 'meta description') return len < 50 ? `Only ${len} characters; 70 to 160 reads better in search results.` : long(160, 'search results');
   if (tag === 'og:title') return long(90, 'most networks');
@@ -625,7 +664,7 @@ function tagHint(tag, v) {
 }
 
 // A task about one tag: add it when missing, fix it when the hint found something, or improve it otherwise.
-const metaTask = (store, p, tag, value = '') => () => {
+const metaTask = /** @param {Store} store @param {Project} p @param {string} tag @param {string} [value] */ (store, p, tag, value = '') => () => {
   const host = hostOf(p.website);
   const hint = tagHint(tag, value);
   const image = /image/.test(tag);
@@ -638,14 +677,16 @@ const metaTask = (store, p, tag, value = '') => () => {
 };
 
 // A task about the whole preview on one network, with a comment on what to change.
-const previewTask = (store, p, label, m) => () =>
+const previewTask = (/** @type {Store} */ store, /** @type {Project} */ p, /** @type {string} */ label, /** @type {SiteMeta} */ m) => () =>
   openTaskDialog(store, p, {
     text: `Improve how ${hostOf(p.website)} looks when shared on ${label}`,
     description: [`Title: ${m.ogTitle || m.title || 'none'}`, `Description: ${m.ogDescription || m.description || 'none'}`, `Image: ${m.ogImage || 'none'}`].join('\n'),
     comment: 'For example: the banner is cropped, the text is too long',
   });
 
+/** @param {Store} store @param {Project[]} sites */
 function metaAll(store, sites) {
+  /** @type {(keyof SiteMeta)[]} */
   const TAGS = ['title', 'description', 'ogTitle', 'ogDescription', 'ogImage', 'ogUrl', 'twitterCard', 'twitterImage'];
   return h('div', { class: 'stack-lg' }, siteChips(store, sites, null),
     h('div', { class: 'card mon-scroll' },
@@ -669,6 +710,7 @@ function metaAll(store, sites) {
     h('div', null, readAll(store, 'meta', 'Read every page')));
 }
 
+/** @param {Store} store @param {Project[]} sites */
 function metaTab(store, sites) {
   const p = pickedSite(sites);
   if (!p) return metaAll(store, sites);
@@ -681,6 +723,7 @@ function metaTab(store, sites) {
       m?.error ? notice({ text: m.error }) : null,
       h('div', { class: 'card stack' }, h('p', { class: 'muted' }, `Read ${hostOf(p.website)} to see its share tags and how a link to it looks.`), h('div', null, read)));
   }
+  /** @type {[string, string | undefined][]} */
   const tags = [['<title>', m.title], ['meta description', m.description], ['og:title', m.ogTitle], ['og:description', m.ogDescription], ['og:image', m.ogImage], ['og:url', m.ogUrl], ['twitter:card', m.twitterCard], ['twitter:image', m.twitterImage]];
   const present = tags.filter(([, v]) => v).length;
   const missing = tags.filter(([, v]) => !v).map(([k]) => k);
@@ -747,12 +790,17 @@ const PRESETS = [
   ['DigitalOcean', 'https://status.digitalocean.com'],
   ['Discord', 'https://discordstatus.com'],
 ];
+/** @type {Record<string, [string, string]>} */
 const INDICATOR = { none: ['Operational', 'done'], minor: ['Minor issue', 'medium'], maintenance: ['Maintenance', 'medium'], major: ['Major outage', 'high'], critical: ['Critical outage', 'high'] };
+/** @type {Record<string, string>} */
 const COMPONENT = { degraded_performance: 'degraded', partial_outage: 'partial outage', major_outage: 'major outage', under_maintenance: 'maintenance' };
+/** @type {Record<string, string>} */
 const IMPACT = { none: 'plain', minor: 'medium', major: 'high', critical: 'high', maintenance: 'medium' };
+/** @type {Record<string, string>} */
 const INCIDENT_STATUS = { investigating: 'Investigating', identified: 'Identified', monitoring: 'Monitoring', scheduled: 'Scheduled', in_progress: 'In progress', verifying: 'Verifying' };
 
 // "3 hours ago", "in 2 days": close enough to tell how fresh an incident is.
+/** @param {string | undefined} at */
 function agoOf(at) {
   if (!at) return '';
   const diff = Date.parse(at) - Date.now();
@@ -762,6 +810,7 @@ function agoOf(at) {
   return diff > 0 ? `in ${text}` : `${text} ago`;
 }
 
+/** @param {Store} store @param {string} name @param {string} url @param {string} [kind] */
 function follow(store, name, url, kind = '') {
   const page = statusPageOf(url);
   if (!page) return toast('Enter the address of a status page, such as www.githubstatus.com.');
@@ -773,6 +822,7 @@ function follow(store, name, url, kind = '') {
   run(store, id, () => checkProviders(store, [id]));
 }
 
+/** @param {Store} store @param {Provider} pr */
 function unfollow(store, pr) {
   store.update(COLLECTION, (d) => {
     d.providers = d.providers.filter((x) => x.id !== pr.id);
@@ -781,8 +831,9 @@ function unfollow(store, pr) {
   toast(`${pr.name} is no longer followed`);
 }
 
-const problemOf = (s) => (s?.indicator && s.indicator !== 'none' ? (s.indicator === 'maintenance' ? 1 : 2) : 0);
+const problemOf = (/** @type {ProviderStatus | undefined} */ s) => (s?.indicator && s.indicator !== 'none' ? (s.indicator === 'maintenance' ? 1 : 2) : 0);
 
+/** @param {Store} store @param {Provider} pr */
 function providerCard(store, pr) {
   const s = store.get(COLLECTION).status[pr.id];
   const busy = view.busy.has(pr.id) || view.busy.has('all');
@@ -839,6 +890,7 @@ function providerCard(store, pr) {
         h('button', { type: 'button', class: 'icon-btn', title: 'Stop following', 'aria-label': `Stop following ${pr.name}`, onclick: () => unfollow(store, pr) }, icon('x')))));
 }
 
+/** @param {Store} store */
 function statusTab(store) {
   const { providers, status } = store.get(COLLECTION);
   const followed = new Set(providers.map((pr) => pr.url));
@@ -848,7 +900,7 @@ function statusTab(store) {
   // Services with a problem come first; the rest keep the order they were followed in.
   const sorted = [...providers].sort((a, b) => problemOf(status[b.id]) - problemOf(status[a.id]));
   const incidents30 = providers.reduce((n, pr) => n + (status[pr.id]?.recentCount ?? 0), 0);
-  const stat = (n, label, tone = '') => h('div', { class: `card stat ${tone}` }, h('strong', null, String(n)), h('span', { class: 'muted small' }, label));
+  const stat = /** @param {number} n @param {string} label @param {string} [tone] */ (n, label, tone = '') => h('div', { class: `card stat ${tone}` }, h('strong', null, String(n)), h('span', { class: 'muted small' }, label));
   // The fields are read on submit, so typing never re-renders the tab.
   const name = h('input', { type: 'text', placeholder: 'Name', 'aria-label': 'Provider name', autocomplete: 'off' });
   const url = h('input', { type: 'text', inputmode: 'url', placeholder: 'status.example.com', 'aria-label': 'Status page address', autocomplete: 'off' });
@@ -875,7 +927,7 @@ function statusTab(store) {
         : null,
       h('form', {
         class: 'follow-form',
-        onsubmit: (e) => {
+        onsubmit: (/** @type {SubmitEvent} */ e) => {
           e.preventDefault();
           follow(store, name.value, url.value);
         },
@@ -883,6 +935,7 @@ function statusTab(store) {
     h('p', { class: 'muted small' }, 'Works with status pages hosted on Statuspage (most providers use it) and on Datadog (OpenRouter, for one). The page’s public summary and recent incidents are read on the same interval as website health; nothing about you is sent. Datadog pages are read through r.jina.ai, which receives only the page’s address.'));
 }
 
+/** @param {HTMLElement} root @param {Store} store */
 function draw(root, store) {
   const sites = sitesOf(store);
   const without = store.get('projects').projects.filter((p) => !hostOf(p.website ?? ''));
@@ -905,8 +958,8 @@ function draw(root, store) {
                 h('select', {
                   value: String(store.get(COLLECTION).every),
                   'aria-label': 'How often to check',
-                  onchange: (e) => store.update(COLLECTION, (d) => {
-                    d.every = Number(e.target.value);
+                  onchange: (/** @type {Event} */ e) => store.update(COLLECTION, (d) => {
+                    d.every = Number(/** @type {HTMLSelectElement} */ (e.target).value);
                   }),
                 }, EVERY.map(([v, label]) => h('option', { value: v }, label)))),
               h('button', {
@@ -954,7 +1007,7 @@ export default {
   defaults: TOOLS_DEFAULTS,
   render: draw,
   serialize: () => ({ tab: view.tab === 'health' ? '' : view.tab, project: ['meta', 'crawl', 'health'].includes(view.tab) ? view.project : '', contract: view.tab === 'contracts' ? contractsSerialize() : '' }),
-  restore: (p = {}) => {
+  restore: (/** @type {Record<string, string>} */ p = {}) => {
     view.tab = TABS.some(([k]) => k === p.tab) ? p.tab : 'health';
     view.project = p.project || '';
     contractsRestore(p.contract);

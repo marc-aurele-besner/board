@@ -33,7 +33,7 @@ export const AUTO_SOURCES = { domain: 'the domain check', ssl: 'the SSL check', 
 export const TOOLS_DEFAULTS = { sites: {}, every: 60, providers: [], status: {} };
 export const sitesOf = (/** @type {DataStore} */ store) => store.get('projects').projects.filter((p) => hostOf(p.website ?? ''));
 export const siteData = (/** @type {DataStore} */ store, /** @type {string} */ projectId) => /** @type {Site} */ (store.get('tools').sites[projectId] ?? {});
-export const autoTaskFor = (/** @type {DataStore} */ store, /** @type {string} */ kind, /** @type {string} */ ref) =>
+export const autoTaskFor = (/** @type {DataStore} */ store, /** @type {string} */ kind, /** @type {string | undefined} */ ref) =>
   store.get('todos').items.find((t) => t.auto === kind && t.autoRef === ref && statusOf(t) !== 'done') ?? null;
 
 /**
