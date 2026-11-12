@@ -141,6 +141,9 @@ export interface CronRunCurrent {
   terminal: number;
   worktree?: string;
   taskId?: string;
+  // The folder it works in (its worktree's, when it has one), and that folder as the step names it.
+  work?: string;
+  where?: string;
 }
 
 // What a run keeps of one step (stepRecord()).

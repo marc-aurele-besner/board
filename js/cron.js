@@ -1900,7 +1900,7 @@ async function runDev(store, flow, step, input, vars, ctx) {
   const on = `Dev terminal ${n}, in ${where}${task ? `, on the task “${task.text}”` : ''}`;
   // session and cwd let the editor show the terminal's output, which the runner keeps, and open it in Dev.
   ctx.data = { terminal: n, session: id, cwd, folder: where, worktree: worktree ? workPath : '', ...(claude ? { prompt } : { command }) };
-  ctx.started?.({ session: id, cwd, terminal: n, ...(worktree ? { worktree: worktree.name } : {}), ...(task ? { taskId: task.id } : {}) });
+  ctx.started?.({ session: id, cwd, terminal: n, ...(worktree ? { worktree: worktree.name } : {}), ...(task ? { taskId: task.id } : {}), work: workPath || cwd, where });
   if (!waits) {
     ctx.note = `${ctx.dry ? 'Test: started' : 'Started'} in ${on}.`;
     // Nothing waits for it, but claude is still ended once it is done, in the background.
@@ -1913,17 +1913,29 @@ async function runDev(store, flow, step, input, vars, ctx) {
     return input;
   }
   const status = await waitForSession(store, id, step.waitMinutes ?? DEV_WAIT_MINUTES, ctx.beat);
-  if (status.state === 'failed') throw new Error(`${on} ended with exit ${status.code ?? 'an error'}.`);
-  if (status.state === 'stopped') throw new Error(`${on} was stopped.`);
-  const { links, data } = await devOutcome(store, { session: id, path: workPath || cwd, prompt: claude ? prompt : command, task, json });
+  const done = await finishDev(store, { session: id, terminal: n, work: workPath || cwd, where, on, prompt: claude ? prompt : command, task, json, worktree, dry: Boolean(ctx.dry) }, status);
+  ctx.data = { .../** @type {object} */ (ctx.data), ...done.data };
+  ctx.note = done.note;
+  return done.output;
+}
+
+// Once the terminal ended or claude waits: what it did, for the next steps, and claude ended.
+/**
+ * @param {DataStore} store
+ * @param {{ session: string, terminal: number, work: string, where: string, on: string, prompt: string, task: Task | null, json: boolean, worktree: { name: string } | null, dry: boolean }} d
+ * @param {{ state: string, code?: number | null }} status
+ */
+async function finishDev(store, d, status) {
+  if (status.state === 'failed') throw new Error(`${d.on} ended with exit ${status.code ?? 'an error'}.`);
+  if (status.state === 'stopped') throw new Error(`${d.on} was stopped.`);
+  const { links, data } = await devOutcome(store, { session: d.session, path: d.work, prompt: d.prompt, task: d.task, json: d.json });
   // The PR and issues go to the task even when Dev was not open to see them printed.
   // The session has ended or waits for its user by now, so a PR moves the task on to review.
-  if (task && links.length) addTaskLinks(store, [task.id], links, { review: true });
-  ctx.data = { .../** @type {object} */ (ctx.data), ...data };
+  if (d.task && links.length) addTaskLinks(store, [d.task.id], links, { review: true });
   // Its work was read above, so claude can go, and its worktree with it.
-  const ended = worktree && status.state === 'waiting' ? await endClaude(store, id, worktree) : '';
-  ctx.note = `${ctx.dry ? 'Test: ran' : 'Ran'} in ${on}; it ${STATE_TEXT[status.state] ?? 'ended'}${data.pr ? `, PR #${data.pr.number}` : ''}${ended ? `; ${ended}` : ''}.`;
-  return outcomeText(data, { terminal: n, where, state: status.state });
+  const ended = d.worktree && status.state === 'waiting' ? await endClaude(store, d.session, d.worktree) : '';
+  const note = `${d.dry ? 'Test: ran' : 'Ran'} in ${d.on}; it ${STATE_TEXT[status.state] ?? 'ended'}${data.pr ? `, PR #${data.pr.number}` : ''}${ended ? `; ${ended}` : ''}.`;
+  return { data, note, output: outcomeText(data, { terminal: d.terminal, where: d.where, state: status.state }) };
 }
 
 // Rebuilds the project's profile through the same call as Projects → Profile. A profile edited by hand never blocks
@@ -2240,6 +2252,64 @@ export async function testStep(store, flowId, stepId, { live = false } = {}) {
     store.refresh();
   }
   return last;
+}
+
+// A Dev step's test waits for its terminal in the tab that started it. Once that tab reloads, the test is left
+// waiting; the Cron page picks it up again here, waits for the terminal and saves what it did. The prompt is not
+// kept, so a link it named may count as one claude opened.
+/** @type {Set<string>} */
+const resuming = new Set();
+/** @param {DataStore} store */
+export function resumeDevTests(store) {
+  const { flows, tests } = store.get(COLLECTION);
+  for (const [flowId, saved] of Object.entries(tests ?? {})) {
+    const flow = flows.find((f) => f.id === flowId);
+    if (!flow || testing.has(flowId) || running.has(flowId)) continue;
+    for (const [stepId, r] of Object.entries(saved)) {
+      const info = r.pending && r.data && typeof r.data === 'object' ? /** @type {Partial<StartedInfo>} */ (r.data) : null;
+      const step = flow.steps.find((s) => s.id === stepId);
+      if (!info?.session || !step || resuming.has(info.session)) continue;
+      const session = info.session;
+      resuming.add(session);
+      resumeTest(store, flow, step, /** @type {StartedInfo} */ (info), r.at)
+        .finally(() => resuming.delete(session));
+    }
+  }
+}
+
+/**
+ * @param {DataStore} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {StartedInfo} info
+ * @param {string} at
+ */
+async function resumeTest(store, flow, step, info, at) {
+  const startedAt = Date.parse(at) || Date.now();
+  // Only while the test still waits on this terminal: not run again, nor cleared, meanwhile.
+  const current = () => {
+    const r = store.get(COLLECTION).tests?.[flow.id]?.[step.id];
+    return Boolean(r?.pending) && /** @type {Partial<StartedInfo> | undefined} */ (r?.data)?.session === info.session;
+  };
+  /** @type {CronTest} */
+  let result;
+  try {
+    const left = (step.waitMinutes ?? DEV_WAIT_MINUTES) - (Date.now() - startedAt) / MINUTE;
+    const status = await waitForSession(store, info.session, left);
+    if (!current()) return;
+    const task = info.taskId ? store.get('todos').items.find((t) => t.id === info.taskId) ?? null : null;
+    const where = info.where || 'its folder';
+    const work = info.work || (info.worktree ? `${info.cwd.replace(/\/+$/, '')}/.claude/worktrees/${info.worktree}` : info.cwd);
+    const on = `Dev terminal ${info.terminal}, in ${where}`;
+    const done = await finishDev(store, {
+      session: info.session, terminal: info.terminal, work, where, on, prompt: '', task, json: devJson(flow, step),
+      worktree: info.worktree ? { name: info.worktree } : null, dry: true,
+    }, status);
+    result = { ok: true, output: done.output, data: { ...info, folder: where, ...done.data }, note: done.note, ms: Date.now() - startedAt, at: now() };
+  } catch (err) {
+    result = { ok: false, output: /** @type {Error} */ (err).message, data: null, note: '', ms: Date.now() - startedAt, at: now() };
+  }
+  if (current()) saveTest(store, flow.id, step.id, result);
 }
 
 // What a run keeps of a step besides its output, so the Runs tab can link to what it made: the task, the terminal,
