@@ -1349,7 +1349,7 @@ function stepForm(store, flow, step) {
         : null,
       preview ? h('code', { class: 'muted small' }, preview) : null,
       claude
-        ? varField('Dev prompt', h('textarea', { rows: 6, class: 'mono-text', onchange: (/** @type {FieldEvent} */ e) => set({ prompt: e.target.value }) }, step.prompt ?? ''), key('prompt'), devNames, null, vars)
+        ? varField('Dev prompt', h('textarea', { rows: 13, class: 'mono-text', onchange: (/** @type {FieldEvent} */ e) => set({ prompt: e.target.value }) }, step.prompt ?? ''), key('prompt'), devNames, null, vars)
         : varField('Command', h('input', { value: step.command ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, placeholder: 'npm run build', onchange: (/** @type {FieldEvent} */ e) => set({ command: e.target.value }) }), key('command'), devNames,
             'Each {{…}} goes in as one quoted word, so text from a model never runs as a command.'),
       h('div', { class: 'row cron-fields' },
