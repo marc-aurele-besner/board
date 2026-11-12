@@ -1,3 +1,4 @@
+// @ts-check
 // Telegram: messages sent to your own bot become tasks, and notifications can be sent back to the same chat.
 // The runners (tools/jobs/telegram.js) listen for new messages all the time; the board only reads them during setup.
 // The token goes only to api.telegram.org.
@@ -6,12 +7,29 @@
 import { parseTask, makeTask } from './capture.js';
 import { notify } from './notify-core.js';
 import { createProject } from './projects-core.js';
+/** @import { DataStore, TelegramSettings } from '../types/data' */
+/**
+ * An update from getUpdates, as far as it is read.
+ * @typedef {{ update_id: number, message?: { text?: string, chat?: { id?: number } } }} TelegramUpdate
+ */
 
 const API = 'https://api.telegram.org';
 
+/**
+ * @param {DataStore} store
+ * @returns {Partial<TelegramSettings>}
+ */
 const config = (store) => store.get('settings').telegram ?? {};
+/** @param {DataStore} store */
 export const hasTelegram = (store) => Boolean(config(store).token && config(store).chatId);
 
+/**
+ * @param {string} token
+ * @param {string} method
+ * @param {object} [body]
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<unknown>}
+ */
 async function call(token, method, body, signal) {
   let res;
   try {
@@ -25,6 +43,7 @@ async function call(token, method, body, signal) {
     if (signal?.aborted) throw err;
     throw new Error('Telegram could not be reached. Check your connection.');
   }
+  /** @type {{ ok?: boolean, description?: string, result?: unknown }} */
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 || res.status === 404) throw new Error('Telegram rejected this token. Copy it again from BotFather.');
   // 409: a webhook is set on the bot, or another program is reading its messages at the same time.
@@ -38,14 +57,21 @@ async function call(token, method, body, signal) {
 }
 
 // The bot's name, to confirm the token works.
-export const checkBot = async (token) => `Connected as @${(await call(token, 'getMe')).username}`;
+/** @param {string} token */
+export const checkBot = async (token) => `Connected as @${/** @type {{ username?: string }} */ (await call(token, 'getMe')).username}`;
 
 let polling = false;
 
-const lastChat = (updates) => updates.filter((u) => u.message?.chat?.id).pop()?.message.chat.id;
+// Only updates with a chat are kept, so the last one has its message and chat.
+/** @param {unknown} updates */
+const lastChat = (updates) => /** @type {{ message: { chat: { id: number } } }[]} */ (/** @type {TelegramUpdate[]} */ (updates).filter((u) => u.message?.chat?.id)).pop()?.message.chat.id;
 
 // The chat of the most recent message sent to the bot. Messages the board already read are gone
 // from Telegram, so when none is waiting it keeps listening for a short while for a new one.
+/**
+ * @param {string} token
+ * @param {() => void} [onWait]
+ */
 export async function findChat(token, onWait) {
   while (polling) await new Promise((r) => setTimeout(r, 200));
   polling = true;
@@ -62,6 +88,10 @@ export async function findChat(token, onWait) {
   }
 }
 
+/**
+ * @param {DataStore} store
+ * @param {string} text
+ */
 export async function sendTelegram(store, text) {
   const { token, chatId } = config(store);
   if (!token || !chatId) return;
@@ -70,6 +100,10 @@ export async function sendTelegram(store, text) {
 
 // Turns one message into a task. Without a project or a deadline it waits in "To Organize".
 // `ref` (the update's id) is kept as the task's autoRef, so a message read twice never makes two tasks.
+/**
+ * @param {DataStore} store
+ * @param {string} text
+ */
 export function taskFromMessage(store, text, ref = '') {
   if (ref && store.get('todos').items.some((t) => t.auto === 'telegram' && t.autoRef === ref)) return null;
   const projects = store.get('projects').projects;
@@ -90,12 +124,16 @@ export function taskFromMessage(store, text, ref = '') {
 
 // Reads the messages that arrived since the last read. Only the saved chat can create tasks. `wait` is how long
 // Telegram may hold the request open for a new message (long polling), in seconds. Runs in the runners.
+/**
+ * @param {DataStore} store
+ * @param {{ wait?: number, signal?: AbortSignal }} [options]
+ */
 export async function pollTelegram(store, { wait = 0, signal } = {}) {
   const cfg = config(store);
   if (polling || !cfg.token || !cfg.chatId) return 0;
   polling = true;
   try {
-    const updates = await call(cfg.token, 'getUpdates', { offset: cfg.offset || 0, timeout: wait, allowed_updates: ['message'] }, signal);
+    const updates = /** @type {TelegramUpdate[]} */ (await call(cfg.token, 'getUpdates', { offset: cfg.offset || 0, timeout: wait, allowed_updates: ['message'] }, signal));
     if (!updates.length) return 0;
     let made = 0;
     for (const u of updates) {
