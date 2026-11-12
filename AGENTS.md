@@ -8,7 +8,7 @@ A personal command center that runs locally. It is plain HTML, CSS and JavaScrip
 
 ## Run and verify
 
-- Start the board with `bun start` (or `node tools/start.js`): it runs the static server, the API relays and the command runner together, each logging with its name as prefix. `bun dev` runs the same and restarts them when a file in `tools/` changes. `bun run serve` alone serves the folder. Then open `http://localhost:8000` in Chrome or Edge. The File System Access API needs a secure context (`localhost` counts) and does not work in Firefox or Safari.
+- Start the board with `bun start` (or `node tools/start.js`): it runs the static server, the command runner and the runners (the worker) together, each logging with its name as prefix. `bun dev` runs the same and restarts them when a file in `tools/` changes. `bun run serve` alone serves the folder. Then open `http://localhost:8000` in Chrome or Edge. The File System Access API needs a secure context (`localhost` counts) and does not work in Firefox or Safari.
 - A changed module is not always picked up: `python3 -m http.server` sends no cache headers, so the browser reuses the module it cached and keeps running the old code. `tools/serve.js` marks every file `no-cache`, so a reload runs the new code. With the Python server, ask the user for a hard reload (Cmd+Shift+R) before checking a change in the browser.
 - Syntax check every module before committing:
   `for f in js/*.js js/modules/*.js tools/*.js tools/*/*.js; do node --experimental-default-type=module --check "$f" || echo "FAIL $f"; done`
@@ -56,7 +56,7 @@ js/google.js          every Google sign-in, kept in google.json; the sign-in pop
 js/google-core.js     Google tokens without the DOM: live access tokens, googleFetch; only the runners renew a token
 js/gmail.js           the Inbox's Gmail reads: one sign-in per account, its email list, and one email's body
 js/gcal.js            Calendar's Google reads: one sign-in per account, its calendar list; events read by the runners into calendar.json
-js/background.js      timers for the above; started once the data folder is open
+js/background.js      the Cron timer, while the board is open; the rest runs in the runners
 js/runner-jobs.js     the jobs the runners do, with their labels and default intervals (shared by the worker and Settings)
 js/runners.js         the board's side of the runners: their heartbeat in runners.json, Run now, their data folder's path
 js/modules/settings-runners.js  Settings → Runners: the worker's status and folder, and each job's switch, interval and Run now
@@ -73,11 +73,10 @@ js/task-query.js      the Tasks search: words plus #project, !priority, is:statu
 js/shortcuts.js       the single-key shortcuts ("g" then a letter) and the sheet that lists them
 js/sample.js          "Explore with sample data": a data folder in memory with placeholder content
 fonts/                bundled typefaces (SIL Open Font License)
-package.json          scripts only (start, serve, relays); no dependencies
-tools/start.js        one command for the board: starts serve.js, relays.js, terminal.js and worker.js together
+package.json          scripts only (start, dev, serve, terminal); no dependencies
+tools/start.js        one command for the board: starts serve.js, terminal.js and worker.js together
 tools/log.js          terminal lines prefixed with each runner's name
 tools/serve.js        local static server with no-cache headers; no dependencies
-tools/relays.js       local relay for Bing's API, which sends no CORS header
 tools/terminal.js     the Dev section's runner: terminal sessions that outlive the page (output and the list of open terminals kept on disk), typed keys, read-only file reads, git for Source control, listing worktrees and removing one (a done task's, or any from Dev's Worktrees panel), saving images for claude; localhost only
 tools/worker.js       the runners: one worker that runs the background jobs on a schedule and writes into the data folder; localhost API on 8420
 tools/worker/store.js the store for Node (get, update, save over node:fs), merged with what the tabs write through js/merge.js
@@ -88,6 +87,8 @@ tools/jobs/gmail.js, resend.js  read new mail into inbox.json; resend.js also an
 tools/jobs/calendar.js  reads every shown calendar's window into calendar.json, or a range Calendar asks for
 tools/jobs/monitoring.js  deadlines, budgets, site checks, status pages and the rules that make tasks, every 5 minutes
 tools/jobs/telegram.js  long-polls the bot and turns messages into tasks (a `loop` job: it starts again at once)
+tools/jobs/github.js, webstats.js, fx.js  GitHub counts (github.json), Bing data (webstats.json), exchange rates (fx.json)
+tools/jobs/dev-usage.js, worktrees.js  what claude sessions used; removing done tasks' worktrees through the command runner
 tools/jobs/google.js  renews Google access tokens; a tab that finds one expired asks it through POST /run/google
 tools/check-imports.js  loads every worker module under plain Node, to catch a missing import or a DOM call at load time
 tools/check-merge.js  the worker and a tab change two fields of one file; both must survive
