@@ -16,6 +16,7 @@ import {
 import { modelForTask } from '../models.js';
 import { openSession, runnerOf, liveSession, onSessionPaint, exitText, terminalView, terminalBackground, startDevSession } from './dev.js';
 import { runJob } from '../runners.js';
+import { previewChips } from '../previews.js';
 import { attachSession, sessionStatus } from '../terminal.js';
 import { createTerminal } from '../vt.js';
 import { hasProfileSources } from '../profile.js';
@@ -1444,7 +1445,7 @@ function runSteps(store, flow, r, state) {
 }
 
 // One run: a header that opens it (status dot, flow, time, how it started, how long it took), then what it made
-// (its task, terminals, PR and branch) as links, then, once opened, each step.
+// (its task, terminals, PR, its preview and branch) as links, then, once opened, each step.
 function runCard(store, flow, r, { showFlow = false } = {}) {
   const state = runState(r);
   const [label, dot, tone] = RUN_STATUS[state] ?? RUN_STATUS.error;
@@ -1458,7 +1459,7 @@ function runCard(store, flow, r, { showFlow = false } = {}) {
   const end = r.ended ? Date.parse(r.ended) : state === 'running' ? Date.now() : NaN;
   const took = end - Date.parse(r.at);
   const { tasks, terms, prs, branches } = runOutcomes(r);
-  const links = [...tasks.map((id) => taskChip(store, id)), ...terms.map((t) => terminalChip(store, t)), ...prs.map(prChip), ...branches.map(branchChip)];
+  const links = [...tasks.map((id) => taskChip(store, id)), ...terms.map((t) => terminalChip(store, t)), ...prs.map(prChip), ...previewChips(store, prs, 'run-chip'), ...branches.map(branchChip)];
   return h('li', { class: `cron-run${view.focusRun === r.id ? ' focus' : ''}`, 'data-run': r.id },
     h('div', { class: 'cron-run-head' },
       h('button', { type: 'button', class: 'cron-run-toggle', 'aria-expanded': String(open), onclick: toggle },

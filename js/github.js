@@ -257,3 +257,15 @@ export async function getIssue(repo, number) {
   const issue = await res.json();
   return { repo, number: issue.number, url: issue.html_url, title: issue.title };
 }
+
+// The comments of an issue or a PR's conversation: the first 100, and the last 100 when there are more pages.
+export async function issueComments(repo, number) {
+  const url = `${API}/repos/${repo}/issues/${number}/comments?per_page=100`;
+  const res = await fetch(url, { headers: headers(repo) });
+  if (!res.ok) throw new Error(explain(res.status));
+  const first = await res.json();
+  const last = (res.headers.get('Link') ?? '').match(/<([^>]+)>;\s*rel="last"/)?.[1];
+  if (!last) return first;
+  const more = await fetch(last, { headers: headers(repo) });
+  return more.ok ? [...first, ...(await more.json())] : first;
+}
