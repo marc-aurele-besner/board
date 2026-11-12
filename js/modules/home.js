@@ -3,6 +3,7 @@ import { projectIcon, labelsOf, labelColor } from './projects.js';
 import { repoStats } from '../github.js';
 import { ask } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
+import { profilesFor } from '../profile.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { calendarAccounts, calendarEvents, cachedCalendarEvents, CALENDAR_TTL, connectCalendar, isCalendarConnected, eventDate } from '../gcal.js';
 import { eventAsTask } from './calendar.js';
@@ -32,13 +33,17 @@ async function runPlan(store) {
       },
       {
         role: 'user',
-        content: JSON.stringify(open.map((i) => ({
-          text: i.text,
-          status: statusOf(i),
-          priority: i.priority ?? 'none',
-          project: projects.find((p) => p.id === i.projectId)?.name ?? 'Personal',
-          category: i.category || '',
-        }))),
+        content: JSON.stringify({
+          tasks: open.map((i) => ({
+            text: i.text,
+            status: statusOf(i),
+            priority: i.priority ?? 'none',
+            project: projects.find((p) => p.id === i.projectId)?.name ?? 'Personal',
+            projectId: i.projectId ?? null,
+            category: i.category || '',
+          })),
+          profiles: profilesFor(projects, open.map((i) => i.projectId)),
+        }),
       },
     ])).trim();
     plan.status = 'ok';

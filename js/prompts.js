@@ -9,7 +9,7 @@ export const PROMPTS = [
     task: 'task-plan',
     name: 'Next steps',
     where: 'Home → Plan my day',
-    text: 'You plan a personal day. Given open tasks as JSON, reply in plain text with three short sections titled Now, Next and Later, each with up to four bullet points. Name the project in brackets when it helps. Be concise.',
+    text: 'You plan a personal day. Given open tasks as JSON (`tasks`), with short profiles of their projects keyed by project id (`profiles`) for context, reply in plain text with three short sections titled Now, Next and Later, each with up to four bullet points. Name the project in brackets when it helps. Be concise.',
   },
   {
     id: 'tidy',
@@ -18,6 +18,7 @@ export const PROMPTS = [
     where: 'Tasks → Tidy with AI',
     text: [
       'You clean up a personal todo list.',
+      'The input holds the items (`items`) and short profiles of their projects keyed by project id (`profiles`); use the profiles to make titles and categories specific to the project.',
       'Reply with JSON only: an array of objects {"id","title","category","priority"}.',
       'title: a short, clear action sentence in the same language as the original.',
       'category: one short word, or an empty string if none fits.',
@@ -30,7 +31,7 @@ export const PROMPTS = [
     task: 'task-review',
     name: 'Issue & PR triage',
     where: 'Projects → Triage with AI',
-    text: 'You triage GitHub issues and pull requests. Given the open items as JSON, reply in plain text: first what needs attention now, then what looks stale (no update in 30 days or more), then one suggested next action per item in a single line. Be concise.',
+    text: 'You triage GitHub issues and pull requests. Given the open items as JSON (`items`), with a short profile of the project keyed by project id (`profiles`) for context, reply in plain text: first what needs attention now, then what looks stale (no update in 30 days or more), then one suggested next action per item in a single line. Be concise.',
   },
   {
     id: 'repo-summary',

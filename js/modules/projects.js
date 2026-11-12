@@ -16,7 +16,7 @@ import { resendSettings } from '../resend.js';
 import { DEFAULT_DEV_COMMAND, devPresets, runnerOf } from './dev.js';
 import { pickFolder } from '../folder-picker.js';
 import { openDialog } from '../modal.js';
-import { buildProfile, profileOf, hasProfileSources } from '../profile.js';
+import { buildProfile, profileOf, hasProfileSources, profilesFor } from '../profile.js';
 import { fmtCost } from '../dev-usage.js';
 
 const COLLECTION = 'projects';
@@ -556,7 +556,7 @@ async function runTriage(store, p) {
           role: 'system',
           content: systemPrompt(store, 'triage'),
         },
-        { role: 'user', content: JSON.stringify(all) },
+        { role: 'user', content: JSON.stringify({ items: all, profiles: profilesFor([p], [p.id]) }) },
       ])).trim();
       triage.status = 'ok';
     }

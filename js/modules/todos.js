@@ -14,6 +14,7 @@ import { imagesOf, imageDrop, imageStrip, imagePathsFor, addImages } from '../ta
 import { dragsFiles, imageFiles } from '../images.js';
 import { ask, parseJson } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
+import { profilesFor } from '../profile.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { taskMatcher, QUERY_HINT } from '../task-query.js';
 import { taskStatuses, statusName, statusOptions, statusLook, categoryColor, taskCategoryNames, categoryLabelIds } from '../task-labels.js';
@@ -1140,7 +1141,13 @@ async function runTidy(store) {
   try {
     const reply = await ask(store, 'task-tidy', [
       { role: 'system', content: systemPrompt(store, 'tidy') },
-      { role: 'user', content: JSON.stringify(open.map((i) => ({ id: i.id, title: i.text, category: i.category || '', priority: i.priority ?? 'none' }))) },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          items: open.map((i) => ({ id: i.id, title: i.text, category: i.category || '', priority: i.priority ?? 'none', projectId: i.projectId ?? null })),
+          profiles: profilesFor(store.get('projects').projects, open.map((i) => i.projectId)),
+        }),
+      },
     ]);
     const parsed = parseJson(reply);
     const list = Array.isArray(parsed) ? parsed : parsed.items ?? [];
