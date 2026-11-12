@@ -1,3 +1,4 @@
+// @ts-check
 // DeFi → Lending: the Aave v3 positions of every DeFi wallet, per chain: what is supplied and borrowed, at what rate,
 // and how far each account is from liquidation. Drawn inside the Liquidity Pools section, like Wallets.
 import { h, icon, refreshIcon, notice } from '../ui.js';
@@ -7,6 +8,14 @@ import { aaveChains } from '../defi/lending-read.js';
 import { runJob } from '../runners.js';
 import { toast } from '../toast.js';
 import { savedChainRows, walletsOf } from '../defi/wallets-read.js';
+/** @import { Store, Wallet, LendingAccount, LendingAsset, ChainReadState, IconName } from '../../types/data' */
+/** @import { DefiUi, DefiTab } from '../../types/defi' */
+/** @import { Child } from '../../types/ui' */
+/**
+ * An account as shown: its row with the names of its chain and wallet.
+ * @typedef {LendingAccount & { chainName: string, chainLogo: string | undefined, walletName: string }} AccountRow
+ * @typedef {LendingAsset & { chainId: number }} AssetRow
+ */
 
 const COLLECTION = 'pools';
 // Health factor bands: liquidation starts below 1.
@@ -14,11 +23,14 @@ const RISK = 1.1;
 const WATCH = 1.5;
 
 // View state. chain: a chain id or 'all'. wallet: a lowercase address or 'all'. layout: 'cards' or 'list'.
+/** @type {{ chain: number | 'all', wallet: string, layout: string }} */
 export const lendingView = { chain: 'all', wallet: 'all', layout: 'cards' };
 // The reads run in js/defi/lending-read.js and save in pools.json; the page draws that. loading: a read this tab started.
 let loading = false;
 let askedAt = 0; // when this tab last started a read, so a stale page asks once, not on every redraw
+/** @type {Store | null} */
 let bound = null;
+/** @returns {Partial<ChainReadState>} */
 const readOf = () => bound?.get(COLLECTION)?.lendingRead ?? {};
 const state = {
   get status() {
@@ -35,13 +47,19 @@ const state = {
   },
 };
 
+/** @param {string} a */
 const shortAddress = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+/** @param {number | null} n */
 const pct = (n) => (n == null ? '—' : `${(n * 100).toFixed(2)}%`);
+/** @param {number} n */
 const amountText = (n) => (n >= 1e6 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toLocaleString(undefined, { maximumFractionDigits: 4 }) : n.toPrecision(4));
+/** @param {number | null | undefined} hf */
 const healthTone = (hf) => (hf == null ? 'safe' : hf < RISK ? 'risk' : hf < WATCH ? 'watch' : 'safe');
+/** @param {number | null} hf */
 const healthText = (hf) => (hf == null ? '∞' : hf >= 100 ? '>100' : hf.toFixed(2));
 
 // Asks the runners to read every chain now (tools/jobs/defi.js); each lands on screen as soon as they save it.
+/** @param {Store} store */
 export async function load(store) {
   if (loading) return;
   loading = true;
@@ -52,7 +70,7 @@ export async function load(store) {
     await store.sync();
   } catch (err) {
     // Their last error also shows in Settings → Runners.
-    toast(err.message);
+    toast(/** @type {Error} */ (err).message);
   } finally {
     loading = false;
     store.refresh();
@@ -60,6 +78,7 @@ export async function load(store) {
 }
 
 // The yearly rate the account earns on its equity: supply interest less borrow interest, over supplied less borrowed.
+/** @param {LendingAsset[]} assets */
 function netApy(assets) {
   const supplied = assets.reduce((s, a) => s + a.suppliedUsd, 0);
   const borrowed = assets.reduce((s, a) => s + a.borrowedUsd, 0);
@@ -67,6 +86,10 @@ function netApy(assets) {
   return supplied - borrowed > 0 ? earn / (supplied - borrowed) : null;
 }
 
+/**
+ * @param {string} title @param {AssetRow[]} items @param {DefiUi} ui @param {(a: AssetRow) => number} amountOf
+ * @param {(a: AssetRow) => number} usdOf @param {(a: AssetRow) => number | null} apyOf @param {(a: AssetRow) => Child} [extra]
+ */
 function assetList(title, items, ui, amountOf, usdOf, apyOf, extra) {
   if (!items.length) return null;
   return h('div', { class: 'lend-side' },
@@ -78,12 +101,14 @@ function assetList(title, items, ui, amountOf, usdOf, apyOf, extra) {
 }
 
 // How much of the borrowing limit before liquidation is used: debt over collateral times the liquidation threshold.
+/** @param {LendingAccount} r */
 function limitUsed(r) {
   const limit = r.collateral * r.threshold;
   return limit > 0 ? Math.min(1, r.debt / limit) : 0;
 }
 
 // One account: a wallet on one chain.
+/** @param {AccountRow} r @param {DefiUi} ui @param {number} i */
 function accountCard(r, ui, i) {
   const assets = r.assets.map((a) => ({ ...a, chainId: r.chainId }));
   const supplied = assets.filter((a) => a.supplied > 0).sort((a, b) => b.suppliedUsd - a.suppliedUsd);
@@ -118,6 +143,10 @@ function accountCard(r, ui, i) {
 }
 
 // The rows to show, from the last read saved; read again when stale.
+/**
+ * @param {Store} store @param {{ id: number }[]} chains @param {Wallet[]} wallets
+ * @returns {AccountRow[]}
+ */
 function currentRows(store, chains, wallets) {
   bound = store;
   // The runners keep it fresh; only a folder they never read is asked for at once.
@@ -132,11 +161,12 @@ function currentRows(store, chains, wallets) {
     .filter((r) => chainIds.has(r.chainId) && names.has(r.wallet))
     .map((r) => {
       const chain = CHAINS.find((c) => c.id === r.chainId);
-      return { ...r, chainName: chain?.name ?? String(r.chainId), chainLogo: chain?.logo, walletName: names.get(r.wallet) };
+      return { ...r, chainName: chain?.name ?? String(r.chainId), chainLogo: chain?.logo, walletName: /** @type {string} */ (names.get(r.wallet)) };
     });
 }
 
 // For DeFi → Summary: every Aave account, unfiltered, riskiest first. null when no wallet or chain has Aave.
+/** @param {Store} store */
 export function lendingSummary(store) {
   const wallets = walletsOf(store);
   const chains = aaveChains(store.get('settings').uniswap ?? {});
@@ -162,7 +192,9 @@ export function lendingSummary(store) {
 export { healthTone, healthText, RISK };
 
 // The list layout: one row per account, in the same order as the cards.
+/** @param {AccountRow[]} rows @param {DefiUi} ui */
 function accountTable(rows, ui) {
+  /** @param {AccountRow} r @param {'supplied' | 'borrowed'} key */
   const symbols = (r, key) => r.assets.filter((a) => a[key] > 0).map((a) => a.symbol).join(', ');
   return h('div', { class: 'card mon-scroll' },
     h('table', { class: 'mon-table lend-table' },
@@ -190,9 +222,10 @@ function accountTable(rows, ui) {
       }))));
 }
 
+/** @param {DefiUi} ui */
 function layoutSwitch(ui) {
   return h('div', { class: 'segmented lp-layout', role: 'group', 'aria-label': 'View' },
-    [['cards', 'Cards', 'cards'], ['list', 'List', 'list']].map(([key, label, iconName]) =>
+    /** @type {[string, string, IconName][]} */ ([['cards', 'Cards', 'cards'], ['list', 'List', 'list']]).map(([key, label, iconName]) =>
       h('button', {
         type: 'button',
         class: lendingView.layout === key ? 'seg active' : 'seg',
@@ -202,6 +235,11 @@ function layoutSwitch(ui) {
 }
 
 // The tab: { subtitle, actions, body }. ui carries the section's helpers: cash, logo, logoOf and refresh.
+/**
+ * @param {Store} store
+ * @param {DefiUi} ui
+ * @returns {DefiTab}
+ */
 export function lendingTab(store, ui) {
   const cfg = store.get('settings').uniswap ?? {};
   const wallets = walletsOf(store);
@@ -220,11 +258,13 @@ export function lendingTab(store, ui) {
 
   const supplied = shown.reduce((s, r) => s + r.collateral, 0);
   const borrowed = shown.reduce((s, r) => s + r.debt, 0);
-  const lowest = shown.filter((r) => r.health != null).reduce((m, r) => (m == null || r.health < m.health ? r : m), null);
+  // Only accounts with a health factor are compared.
+  const lowest = shown.filter((r) => r.health != null).reduce((m, r) => (m == null || /** @type {number} */ (r.health) < /** @type {number} */ (m.health) ? r : m), /** @type {AccountRow | null} */ (null));
   const atRisk = shown.filter((r) => r.health != null && r.health < RISK);
   const reading = state.status === 'loading';
   const firstRead = reading && !all.length;
 
+  /** @param {boolean} active @param {Child} label @param {number} count @param {() => void} onclick @param {Child} [lead] */
   const chip = (active, label, count, onclick, lead = null) => h('button', { type: 'button', class: active ? 'lp-chip chain active' : 'lp-chip chain', onclick }, lead, label, h('span', { class: 'chip-count' }, count));
   const chainsWithRows = chains.filter((c) => inWallet.some((r) => r.chainId === c.id));
   const walletsWithRows = wallets.filter((w) => all.some((r) => r.wallet === w.address.toLowerCase()));
