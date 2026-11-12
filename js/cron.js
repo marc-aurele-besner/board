@@ -93,6 +93,21 @@ export function sourcesOf(step) {
   return [makeSource(step.source || 'open', { id: step.id, projectId: step.projectId ?? '', url: step.url ?? '', text: step.text ?? '', count: step.count ?? 5 })];
 }
 
+// The flow's project: data, task and Dev steps use it unless they choose another. A flow saved before flows had a
+// project takes the one project its steps share, if they share one.
+export function flowProjectId(flow) {
+  if (typeof flow?.projectId === 'string') return flow.projectId;
+  const ids = new Set();
+  for (const s of flow?.steps ?? []) {
+    if (s.type === 'gather') sourcesOf(s).forEach((x) => x.projectId && ids.add(x.projectId));
+    else if (s.projectId) ids.add(s.projectId);
+  }
+  return ids.size === 1 ? [...ids][0] : '';
+}
+
+// A step or source with its project filled in from the flow when it has none of its own.
+export const withFlowProject = (flow, item) => ({ ...item, projectId: item.projectId || flowProjectId(flow) });
+
 // The heading a source's data gets when it sits next to other data: its own label, else what it reads.
 export function sourceLabel(store, src) {
   if (String(src.label ?? '').trim()) return src.label.trim();
@@ -126,6 +141,7 @@ export function makeFlow(fields = {}) {
     name: 'New flow',
     enabled: false,
     schedule: { every: 'daily', time: '08:00', weekday: 1, days: [1, 2, 3, 4, 5], day: 1, minutes: 60, from: '', to: '' },
+    projectId: '',
     steps: [],
     lastRun: '',
     created: now(),
@@ -217,7 +233,7 @@ export const TEMPLATES = [
   },
   {
     name: 'Website content ideas',
-    about: 'Reads a project’s website and drafts three pieces of content it does not have yet. Choose the project first.',
+    about: 'Reads a project’s website and drafts three pieces of content it does not have yet. Choose the flow’s project first.',
     schedule: { every: 'weekly', time: '09:00', weekday: 1 },
     steps: [
       { type: 'gather', source: 'page' },
@@ -235,7 +251,7 @@ export const TEMPLATES = [
   },
   {
     name: 'Blog post draft',
-    about: 'Reads a project’s website and its blog, then drafts a post on a topic the blog has not covered. Choose the project, and the blog’s path if it is not /blog.',
+    about: 'Reads a project’s website and its blog, then drafts a post on a topic the blog has not covered. Choose the flow’s project, and the blog’s path if it is not /blog.',
     schedule: { every: 'weekly', time: '09:00', weekday: 4 },
     steps: [
       { type: 'gather', source: 'page' },
@@ -254,7 +270,7 @@ export const TEMPLATES = [
   },
   {
     name: 'Blog post as a PR',
-    about: 'Drafts a post from a project’s website and blog, adds it as a task, then has claude add it to the project’s repository and open a PR. Choose the project in the data steps and the task step; it needs a local folder.',
+    about: 'Drafts a post from a project’s website and blog, adds it as a task, then has claude add it to the project’s repository and open a PR. Choose the flow’s project; it needs a local folder.',
     schedule: { every: 'weekly', time: '09:00', weekday: 2 },
     steps: [
       { type: 'gather', source: 'page' },
@@ -280,7 +296,7 @@ export const TEMPLATES = [
   },
   {
     name: 'Social posts (project or org)',
-    about: 'Drafts an X post and a LinkedIn post for a project, from its description and website. Choose the project in both data steps.',
+    about: 'Drafts an X post and a LinkedIn post for a project, from its description and website. Choose the flow’s project.',
     schedule: { every: 'days', time: '10:00', days: [1, 3, 5] },
     steps: [
       { type: 'gather', source: 'project' },
@@ -655,7 +671,7 @@ export function pageUrl(store, step) {
   const raw = String(step.url ?? '').trim();
   if (step.projectId) {
     const p = store.get('projects').projects.find((x) => x.id === step.projectId);
-    if (!p) throw new Error('Choose a project for this source.');
+    if (!p) throw new Error('Choose the flow’s project, or one for this source.');
     if (raw && looksLikeLink(raw)) return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
     if (!p.website) throw new Error(`${p.name} has no website. Add one in Projects, or enter a full link.`);
     try {
@@ -664,7 +680,7 @@ export function pageUrl(store, step) {
       throw new Error(`“${raw}” is not a path or address.`);
     }
   }
-  if (!raw) throw new Error('Choose a project or enter the address of the page to read.');
+  if (!raw) throw new Error('Choose the flow’s project or enter the address of the page to read.');
   return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
 }
 
@@ -701,7 +717,7 @@ async function gather(store, step, flow) {
   }
   if (step.source === 'project') {
     const p = store.get('projects').projects.find((x) => x.id === step.projectId);
-    if (!p) throw new Error('Choose a project for this step.');
+    if (!p) throw new Error('Choose the flow’s project, or one for this source.');
     return `Project: ${p.name}\n${p.description || ''}\n\nOpen tasks:\n${taskLines(store, open.filter((t) => t.projectId === p.id)) || 'none'}`;
   }
   if (step.source === 'overdue') return taskLines(store, open.filter((t) => t.due && t.due < todayISO()));
@@ -806,7 +822,7 @@ function taskText(task, fallback) {
 async function runDev(store, flow, step, input, vars, ctx) {
   const claude = step.mode !== 'command';
   const task = ctx.task ?? null;
-  const projectId = step.projectId || task?.projectId || '';
+  const projectId = withFlowProject(flow, step).projectId || task?.projectId || '';
   const project = projectId ? store.get('projects').projects.find((p) => p.id === projectId) : null;
   if (projectId && !project) throw new Error('The project of this step was removed. Choose another.');
   if (project && !project.localPath) throw new Error(`${project.name} has no local folder. Add one in Projects.`);
@@ -842,7 +858,8 @@ async function runStep(store, flow, step, input, ctx) {
     const sources = sourcesOf(step);
     if (!sources.length) throw new Error('Add a source to this step.');
     const parts = [];
-    for (const src of sources) {
+    for (const own of sources) {
+      const src = withFlowProject(flow, own);
       const text = await gather(store, src, flow);
       parts.push({ src, text, body: text || NOTHING[src.source] || '' });
     }
@@ -874,7 +891,7 @@ async function runStep(store, flow, step, input, ctx) {
     const task = makeTask({
       text: title,
       description: input,
-      projectId: step.projectId || null,
+      projectId: withFlowProject(flow, step).projectId || null,
       priority: step.priority || 'none',
       due,
       auto: 'cron',
