@@ -5,5 +5,6 @@ import gmail from './gmail.js';
 import resend from './resend.js';
 import calendar from './calendar.js';
 import monitoring from './monitoring.js';
+import telegram from './telegram.js';
 
-export const jobs = [google, gmail, resend, calendar, monitoring];
+export const jobs = [google, gmail, resend, calendar, monitoring, telegram];

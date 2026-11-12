@@ -8,6 +8,7 @@ export const JOBS = [
   { id: 'resend', label: 'Resend', every: 5, description: 'Reads the emails each project sends and receives through Resend.' },
   { id: 'calendar', label: 'Calendar', every: 10, description: 'Reads every shown calendar from the start of last month to three months ahead.' },
   { id: 'monitoring', label: 'Monitoring', every: 5, description: 'Deadlines, budgets, site checks (health on the Tools interval, the rest daily), status pages and the automation rules.' },
+  { id: 'telegram', label: 'Telegram', every: 0.5, fixed: 'Listens all the time', description: 'Turns messages sent to your bot into tasks, within a second or two.' },
 ];
 
 export const WORKER_URL = 'http://127.0.0.1:8420';

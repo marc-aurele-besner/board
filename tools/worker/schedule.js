@@ -70,7 +70,7 @@ export function createScheduler({ jobs, log }) {
         l.failures = 0;
         l.state = { lastRunAt: iso(started), lastOkAt: iso(Date.now()), durationMs: Date.now() - started, ok: true, error: null, ...result };
         const said = Object.entries(result).filter(([, v]) => (typeof v === 'number' || typeof v === 'string') && v !== '').map(([k, v]) => `${k} ${v}`).join(', ');
-        log.info(`${job.id} ok in ${Date.now() - started} ms${said ? ` (${said})` : ''}`);
+        if (!job.quiet || result.added) log.info(`${job.id} ok in ${Date.now() - started} ms${said ? ` (${said})` : ''}`);
         return { ok: true, error: null, ...result };
       })
       .catch((err) => {
@@ -82,7 +82,9 @@ export function createScheduler({ jobs, log }) {
       .finally(() => {
         clearTimeout(timer);
         store?.flush();
-        const wait = Math.min(intervalOf(job) * 2 ** l.failures, Math.max(MAX_BACKOFF_MS, intervalOf(job)));
+        // A `loop` job (Telegram's long poll) starts again at once; it waits inside its own run.
+        const base = job.loop ? (l.failures ? 5000 : 0) : intervalOf(job);
+        const wait = Math.min(base * 2 ** l.failures, Math.max(MAX_BACKOFF_MS, base));
         l.nextAt = Date.now() + wait;
         l.running = null;
         beat();
@@ -98,7 +100,7 @@ export function createScheduler({ jobs, log }) {
       if (l.running || !jobConfig(settings(), job.id).on) continue;
       // A shorter interval saved in Settings takes effect at once, not after the old wait.
       const last = Date.parse(l.state.lastRunAt ?? '') || 0;
-      if (last && !l.failures) l.nextAt = Math.min(l.nextAt, last + intervalOf(job));
+      if (last && !l.failures && !job.loop) l.nextAt = Math.min(l.nextAt, last + intervalOf(job));
       if (now >= l.nextAt) run(job);
     }
   }
