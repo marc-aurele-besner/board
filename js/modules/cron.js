@@ -162,8 +162,8 @@ function flowList(store, all, flows) {
               h('span', { class: 'grow' },
                 h('strong', null, f.name),
                 h('span', { class: 'muted small cron-flow-meta' },
-                  f.enabled ? scheduleLabel(f.schedule) : 'Paused',
-                  project ? ['·', projectIcon(project), h('span', { class: 'cron-flow-project' }, project.name)] : null))),
+                  h('span', null, f.enabled ? scheduleLabel(f.schedule) : 'Paused'),
+                  project ? [h('span', { 'aria-hidden': 'true' }, '·'), projectIcon(project), h('span', { class: 'cron-flow-project' }, project.name)] : null))),
             h('input', {
               type: 'checkbox',
               class: 'cron-flow-toggle',
