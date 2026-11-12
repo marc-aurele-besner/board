@@ -1,7 +1,8 @@
 // Local command runner for the Dev section: `bun run terminal` (or `node tools/terminal.js`), or with the board
 // through `bun start`. It runs a command in the user's shell and streams its output back as it comes, and lists
 // folders and reads files for the Dev file explorer (read only), and runs git for Dev's Source Control. It also
-// removes the git worktree a task's session made once the task is completed, and only a clean one.
+// removes the git worktree a task's session made once the task is completed, and only a clean one, and saves the
+// images the page hands to claude as files.
 // The runner owns each terminal session: a command keeps running when the page reloads or closes, and the session's
 // output is kept (in memory and in TERMINAL_STATE, a folder in the system's temp folder by default) so the page
 // shows it again when it comes back, even after the runner restarted. The list of open terminals is kept there too,
@@ -10,9 +11,10 @@
 // It can run anything on this machine, so it listens on 127.0.0.1 only and answers only pages served from this
 // machine: the Origin check keeps other websites out, the Host check keeps out DNS rebinding.
 import { createServer } from 'node:http';
+import { randomBytes } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { appendFile, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,6 +44,10 @@ const LIST_FILE = join(STATE, 'sessions.json');
 // A task's prompt can be long; the list may be this large.
 const LIST_MAX = 2 * 1024 * 1024;
 const WORKTREE_NAME = /^[\w.-]{1,64}$/;
+// Images the page hands to claude (pasted into a terminal, or kept on a task) are saved here, as files claude can read.
+const IMAGES = join(STATE, 'images');
+const IMAGE_MAX = 20 * 1024 * 1024;
+const IMAGE_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
 const log = logger('terminal');
 // Running commands by pid: the child, the folder it reports into, and its session.
 const running = new Map();
@@ -114,6 +120,12 @@ readdir(STATE)
   .then((names) => Promise.all(names.filter((n) => n.endsWith('.ndjson')).map(async (n) => {
     const info = await stat(join(STATE, n)).catch(() => null);
     if (info && Date.now() - info.mtimeMs > KEEP_MS) await rm(join(STATE, n), { force: true });
+  })))
+  .catch(() => {});
+readdir(IMAGES)
+  .then((names) => Promise.all(names.map(async (n) => {
+    const info = await stat(join(IMAGES, n)).catch(() => null);
+    if (info && Date.now() - info.mtimeMs > KEEP_MS) await rm(join(IMAGES, n), { force: true });
   })))
   .catch(() => {});
 
@@ -211,6 +223,25 @@ function readBody(req, max = 100_000) {
     req.on('end', () => done(text));
     req.on('error', fail);
   });
+}
+
+// Saves an image sent as raw bytes and answers its path: { path }. Its content type picks the extension.
+async function saveImage(req, res, cors, ext) {
+  const chunks = [];
+  let size = 0;
+  try {
+    for await (const chunk of req) {
+      size += chunk.length;
+      if (size > IMAGE_MAX) return res.writeHead(413, cors).end('That image is larger than 20 MB.');
+      chunks.push(chunk);
+    }
+    await mkdir(IMAGES, { recursive: true, mode: 0o700 });
+    const path = join(IMAGES, `${Date.now().toString(36)}-${randomBytes(4).toString('hex')}.${ext}`);
+    await writeFile(path, Buffer.concat(chunks), { mode: 0o600 });
+    res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify({ path }));
+  } catch (err) {
+    res.writeHead(500, cors).end(`Could not save the image: ${err.message}`);
+  }
 }
 
 // The whole process group, so a dev server started by the command stops with it.
@@ -725,6 +756,9 @@ createServer(async (req, res) => {
   if (req.method === 'POST' && path === '/sessions' && json) return saveList(req, res, cors);
   if (req.method === 'POST' && ['/stop', '/clear', '/close'].includes(path) && json) return control(req, res, cors, path.slice(1));
   if (req.method === 'POST' && path === '/worktree/remove' && json) return removeWorktree(req, res, cors);
+  // An image type also needs a preflight, so other websites cannot send one either.
+  const imageType = IMAGE_TYPES[(req.headers['content-type'] ?? '').split(';')[0].trim()];
+  if (req.method === 'POST' && path === '/image' && imageType) return saveImage(req, res, cors, imageType);
   res.writeHead(404, cors).end('Not a terminal request.');
 })
   .on('error', (err) => {
