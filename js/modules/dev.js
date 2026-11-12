@@ -589,12 +589,13 @@ export async function startDevSession({ store, claude = false, prompt = '', comm
   }
   // The terminal is not on the page yet: it starts at a usual size and is fitted once shown.
   await runCommand(base, { session: id, command, cwd, cols: 120, rows: 32, theme: currentTheme().dark ? 'dark' : 'light' });
-  const tasks = claude ? taskIds : [];
+  const tasks = taskIds;
+  if (!claude) prompt = '';
   let n;
   if (view.restored) {
     // Dev has its list: the terminal joins it, and its output streams in like any other's.
     currentStore ??= store;
-    const s = makeSession({ id, cwd, tasks, prompt: claude ? prompt : '' });
+    const s = makeSession({ id, cwd, tasks, prompt });
     n = s.n;
     saveSessions();
     if (view.info) attach(store, s);
