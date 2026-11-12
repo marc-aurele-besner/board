@@ -1,9 +1,16 @@
+// @ts-check
 // Syntax colouring for the Dev file reader, IDE style, with no dependency. Each language is a list of rules tried
 // in order at each position; a word is then sorted into keyword, literal, type or function. It reads like an
 // editor's colours without parsing: good enough to read code, not to check it.
 // highlight(text, language) returns lines, each a list of [class, text] runs ('' for plain).
 
-const words = (list) => new Set(list.split(' '));
+/**
+ * @typedef {[string, RegExp]} Rule
+ * @typedef {{ rules: Rule[], keywords: Set<string>, types?: boolean, js?: boolean, word?: RegExp, plainWords?: boolean, caseless?: boolean }} Lang
+ * @typedef {[string, string]} Run A class ('' for plain) and its text.
+ */
+
+const words = (/** @type {string} */ list) => new Set(list.split(' '));
 
 const JS_KEYWORDS = words('as async await break case catch class const continue debugger default delete do else enum export extends finally for from function get if implements import in instanceof interface let new of package private protected public readonly return satisfies set static super switch this throw try type typeof var void while with yield declare namespace abstract keyof infer is');
 const LITERALS = words('true false null undefined NaN Infinity None True False nil');
@@ -18,9 +25,10 @@ const WORD = /[A-Za-z_$][\w$]*/y;
 // A name given an arrow function (`const draw = (root) =>`), coloured as a function like a declared one.
 const ARROW = /^\s*=\s*(?:async\s*)?(?:\([^()]*\)|[\w$]+)\s*=>/;
 
+/** @type {Record<string, Lang>} */
 const LANGS = {
   js: {
-    rules: [...C_LIKE.comments.map((r) => ['comment', r]), ['string', /`(?:\\[\s\S]|[^`\\])*`?/y], ...C_LIKE.strings.map((r) => ['string', r]), ['meta', /@[\w.]+/y], ['number', NUMBER]],
+    rules: [...C_LIKE.comments.map((r) => /** @type {Rule} */ (['comment', r])), ['string', /`(?:\\[\s\S]|[^`\\])*`?/y], ...C_LIKE.strings.map((r) => /** @type {Rule} */ (['string', r])), ['meta', /@[\w.]+/y], ['number', NUMBER]],
     keywords: JS_KEYWORDS,
     types: true,
     js: true,
@@ -30,7 +38,7 @@ const LANGS = {
     keywords: words(''),
   },
   css: {
-    rules: [['comment', /\/\*[\s\S]*?(?:\*\/|$)/y], ['comment', /\/\/[^\n]*/y], ...C_LIKE.strings.map((r) => ['string', r]), ['meta', /@[\w-]+/y], ['number', /#[\da-fA-F]{3,8}\b/y], ['property', /--?[A-Za-z][\w-]*(?=\s*:)/y], ['property', /[a-z][\w-]*(?=\s*:[^:{]*[;}\n])/y], ['number', /-?\d*\.?\d+(?:%|[a-z]+)?/y], ['keyword', /!important/y], ['function', /[\w-]+(?=\()/y], ['tag', /[.#][\w-]+/y], ['variable', /\$[\w-]+/y]],
+    rules: [['comment', /\/\*[\s\S]*?(?:\*\/|$)/y], ['comment', /\/\/[^\n]*/y], ...C_LIKE.strings.map((r) => /** @type {Rule} */ (['string', r])), ['meta', /@[\w-]+/y], ['number', /#[\da-fA-F]{3,8}\b/y], ['property', /--?[A-Za-z][\w-]*(?=\s*:)/y], ['property', /[a-z][\w-]*(?=\s*:[^:{]*[;}\n])/y], ['number', /-?\d*\.?\d+(?:%|[a-z]+)?/y], ['keyword', /!important/y], ['function', /[\w-]+(?=\()/y], ['tag', /[.#][\w-]+/y], ['variable', /\$[\w-]+/y]],
     keywords: words(''),
     word: /[A-Za-z_-][\w-]*/y,
   },
@@ -71,6 +79,7 @@ const LANGS = {
 };
 
 // C-like languages share the JS rules with their own keywords.
+/** @type {(keywords: string, extra?: Rule[]) => Lang} */
 const cLike = (keywords, extra = []) => ({ rules: [...extra, ...LANGS.js.rules.filter(([kind]) => kind !== 'meta')], keywords: words(keywords), types: true });
 Object.assign(LANGS, {
   sol: cLike('pragma solidity contract interface library abstract function modifier event error emit struct enum mapping returns return public private internal external view pure payable constant immutable override virtual memory storage calldata if else for while do break continue new delete import using is require revert assert unchecked try catch constructor fallback receive address bool string bytes uint int uint8 uint16 uint32 uint64 uint128 uint256 int256 bytes32 bytes4 msg block tx this super indexed anonymous assembly type'),
@@ -81,6 +90,7 @@ Object.assign(LANGS, {
   swift: cLike('associatedtype class deinit enum extension fileprivate func import init inout internal let open operator private protocol public rethrows static struct subscript typealias var break case continue default defer do else fallthrough for guard if in repeat return switch where while as catch is throw throws try async await self Self some any'),
 });
 
+/** @type {Record<string, string>} */
 const EXTENSIONS = {
   js: 'js', mjs: 'js', cjs: 'js', jsx: 'js', ts: 'js', tsx: 'js', mts: 'js', cts: 'js', vue: 'html', svelte: 'html', astro: 'html',
   json: 'json', jsonc: 'json', json5: 'json', webmanifest: 'json',
@@ -94,23 +104,28 @@ const EXTENSIONS = {
   sql: 'sql',
   sol: 'sol', rs: 'rs', go: 'go', c: 'c', h: 'c', cpp: 'c', cc: 'c', hpp: 'c', m: 'c', java: 'java', kt: 'java', kts: 'java', scala: 'java', swift: 'swift', cs: 'java', dart: 'java', php: 'java',
 };
+/** @type {Record<string, string>} */
 const NAMES = { Dockerfile: 'sh', Makefile: 'sh', '.gitignore': 'sh', '.npmrc': 'toml', '.editorconfig': 'toml', '.zshrc': 'sh', '.bashrc': 'sh' };
 
 // The language of a file name, or '' for plain text.
+/** @param {string} name */
 export function languageOf(name) {
   if (NAMES[name]) return NAMES[name];
   if (/^\.env(\.|$)/.test(name)) return 'sh';
-  const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+  const ext = name.includes('.') ? /** @type {string} */ (name.split('.').pop()).toLowerCase() : '';
   return EXTENSIONS[ext] ?? '';
 }
 
+/** @type {Record<string, string>} */
 const LABELS = { js: 'JavaScript', json: 'JSON', css: 'CSS', html: 'HTML', md: 'Markdown', py: 'Python', sh: 'Shell', yaml: 'YAML', toml: 'TOML', sql: 'SQL', sol: 'Solidity', rs: 'Rust', go: 'Go', c: 'C', java: 'Java', swift: 'Swift' };
-export const languageLabel = (lang, name = '') => (lang === 'js' && /\.(ts|tsx|mts|cts)$/.test(name) ? 'TypeScript' : LABELS[lang] ?? 'Plain text');
+export const languageLabel = (/** @type {string} */ lang, name = '') => (lang === 'js' && /\.(ts|tsx|mts|cts)$/.test(name) ? 'TypeScript' : LABELS[lang] ?? 'Plain text');
 
+/** @param {string} text @param {string} lang */
 function tokens(text, lang) {
   const def = LANGS[lang];
+  /** @type {Run[]} */
   const out = [];
-  const push = (cls, value) => {
+  const push = (/** @type {string} */ cls, /** @type {string} */ value) => {
     const last = out.at(-1);
     if (last && last[0] === cls) last[1] += value;
     else out.push([cls, value]);
@@ -165,14 +180,21 @@ function tokens(text, lang) {
 // Files past this size are shown without colours: the reader stays quick.
 const COLOR_MAX = 300_000;
 
+/**
+ * @param {string} text
+ * @param {string} lang
+ * @returns {Run[][]}
+ */
 export function highlight(text, lang) {
+  /** @type {Run[]} */
   const runs = lang && LANGS[lang] && text.length <= COLOR_MAX ? tokens(text, lang) : [['', text]];
+  /** @type {Run[][]} */
   const lines = [[]];
   for (const [cls, value] of runs) {
     const parts = value.split('\n');
     parts.forEach((part, n) => {
       if (n) lines.push([]);
-      if (part) lines.at(-1).push([cls, part]);
+      if (part) /** @type {Run[]} */ (lines.at(-1)).push([cls, part]);
     });
   }
   return lines;
