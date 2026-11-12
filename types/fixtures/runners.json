@@ -15,6 +15,7 @@
     "defi-positions": { "lastRunAt": "2026-11-12T08:40:00.000Z", "lastOkAt": "2026-11-12T08:40:09.000Z", "durationMs": 9000, "ok": true, "error": null, "positions": 2, "warnings": null, "on": true, "running": false, "nextRunAt": "2026-11-12T09:10:00.000Z" },
     "defi-wallets": { "lastRunAt": "2026-11-12T08:41:00.000Z", "lastOkAt": "2026-11-12T08:41:02.000Z", "durationMs": 2000, "ok": true, "error": null, "failed": 1, "on": true, "running": false, "nextRunAt": "2026-11-12T09:11:00.000Z" },
     "fx": { "lastRunAt": "2026-11-12T08:30:00.000Z", "lastOkAt": null, "durationMs": 30000, "ok": false, "error": "Timed out after 30 s", "on": true, "running": false, "nextRunAt": "2026-11-12T09:30:00.000Z" },
+    "worktrees": { "lastRunAt": "2026-11-12T08:57:00.000Z", "lastOkAt": "2026-11-12T08:57:01.000Z", "durationMs": 640, "ok": true, "error": null, "removed": 1, "on": true, "running": false, "nextRunAt": "2026-11-12T09:02:00.000Z" },
     "cron": { "on": false, "running": false, "nextRunAt": null }
   }
 }
