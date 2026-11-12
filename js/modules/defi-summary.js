@@ -1,3 +1,4 @@
+// @ts-check
 // DeFi → Summary: the first tab. What every other tab holds in one place: total liquidity across wallets, LP
 // positions and Aave, what needs attention, and the main lines of each tab. It reads nothing itself: each tab's
 // module reads (or shows its last saved read) and hands its totals here.
@@ -5,16 +6,25 @@ import { h, icon, notice } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { walletsSummary, load as loadBalances } from './defi-wallets.js';
 import { lendingSummary, load as loadLending, healthTone, healthText, RISK } from './defi-lending.js';
+/** @import { Store, IconName } from '../../types/data' */
+/** @import { DefiUi, DefiTab } from '../../types/defi' */
+/** @import { Child } from '../../types/ui' */
 
+/** @param {number | null} n */
 const pctText = (n) => (n == null ? '—' : `${(n * 100).toFixed(2)}%`);
 
 // One line of a panel's list: a lead (logo or dot), a name with a note under it, and a value.
+/** @param {Child} lead @param {string} name @param {string | null} note @param {string} value @param {(() => void) | null} [onclick] */
 const line = (lead, name, note, value, onclick = null) => h('li', null,
   h(onclick ? 'button' : 'div', { type: onclick ? 'button' : null, class: 'sum-line', onclick },
     lead,
     h('span', { class: 'sum-line-name' }, h('strong', null, name), note ? h('span', { class: 'muted small' }, note) : null),
     h('span', { class: 'sum-num' }, value)));
 
+/**
+ * @param {IconName} iconName @param {string} title @param {string} tab @param {DefiUi} ui @param {string} headline
+ * @param {[string, string, string?][]} facts @param {Child[]} list @param {string} empty
+ */
 function panel(iconName, title, tab, ui, headline, facts, list, empty) {
   return h('section', { class: 'card panel sum-panel' },
     h('div', { class: 'row between' },
@@ -28,6 +38,11 @@ function panel(iconName, title, tab, ui, headline, facts, list, empty) {
 
 // The tab: { subtitle, actions, body }. ui carries the section's helpers (cash, logo, logoOf, refresh) and, from
 // the LP views, lp() for their totals, loadLp() to read them again, go(tab) and openPosition(ref).
+/**
+ * @param {Store} store
+ * @param {DefiUi} ui
+ * @returns {DefiTab}
+ */
 export function summaryTab(store, ui) {
   const w = walletsSummary(store);
   const l = lendingSummary(store);
