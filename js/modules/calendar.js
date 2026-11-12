@@ -3,12 +3,13 @@
 import { h, icon, refreshIcon, notice, statusOf } from '../ui.js';
 import { projectIcon, projectTree, labelsOf, labelColor, underLabel } from './projects.js';
 import { setupBanner } from '../integrations.js';
-import { calendarAccounts, calendarEvents, cachedCalendarEvents, CALENDAR_TTL, connectCalendar, isCalendarConnected, setCalendar, setCalendarAccount, eventDate, calendarProject, calendarLabel } from '../gcal.js';
+import { calendarAccounts, calendarEvents, cachedCalendarEvents, calendarWindow, connectCalendar, isCalendarConnected, setCalendar, setCalendarAccount, eventDate, calendarProject, calendarLabel } from '../gcal.js';
 import { accountAvatar } from '../google.js';
 import { pickChip, pickTree } from '../inline.js';
 import { makeTask } from '../capture.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
+import { runJob } from '../runners.js';
 
 const MODES = [['day', 'Day'], ['week', 'Week'], ['month', 'Month']];
 const MONTH_CELL = 3; // events listed in a month cell before "+N more"
@@ -17,9 +18,9 @@ const MONTH_CELL = 3; // events listed in a month cell before "+N more"
 // mini: the month the small calendar shows when paged away from the main view. scroll: the time grid's position, kept
 // across redraws.
 const view = { mode: 'week', date: '', project: 'all', tasks: true, mini: '', scroll: null };
-// The last read: the range and calendars it covered, so a change of either reads again. at: when the oldest of its
-// events was read from Google; checked: when the board last asked, so a stale view refreshes itself once per TTL.
-const read = { key: '', busy: false, events: [], errors: [], waiting: [], at: 0, checked: 0 };
+// Events come from calendar.json, which the runners keep read. key: the range and calendars last checked, so a range
+// the file does not hold yet is asked of the runners once; errors: what that ask, or Refresh, reported.
+const read = { key: '', busy: false, errors: [] };
 
 const pad = (n) => String(n).padStart(2, '0');
 const isoOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -109,20 +110,22 @@ function keyOf(store, from, to) {
   return `${isoOf(from)}|${isoOf(to)}|${shown.join(';')}`;
 }
 
-function load(store, key, from, to, { maxAge } = {}) {
-  // A new range shows what the cache has right away; a refresh of the same range keeps what is on screen.
-  if (read.key !== key) Object.assign(read, cachedCalendarEvents(store, from, to), { errors: [], waiting: [] });
+// Asks the runners for a range calendar.json does not hold, or (`force`, from Refresh) to read it again now.
+function load(store, key, from, to, { force = false } = {}) {
   read.key = key;
   read.busy = true;
-  read.checked = Date.now();
   store.refresh();
-  calendarEvents(store, from, to, { maxAge })
-    .then(({ events, errors, waiting, at }) => {
-      if (read.key !== key) return;
-      Object.assign(read, { events, errors, waiting, at });
+  const [start, end] = calendarWindow();
+  const inWindow = from >= start && to <= end;
+  const work = force
+    ? runJob('calendar', inWindow ? {} : { from: from.toISOString(), to: to.toISOString() }).then(() => store.sync()).then(() => ({ errors: [] }))
+    : calendarEvents(store, from, to);
+  work
+    .then(({ errors }) => {
+      if (read.key === key) read.errors = errors;
     })
     .catch((err) => {
-      if (read.key === key) Object.assign(read, { events: [], errors: [err.message] });
+      if (read.key === key) read.errors = [err.message];
     })
     .finally(() => {
       if (read.key === key) read.busy = false;
@@ -421,14 +424,13 @@ function draw(root, store) {
   const [from, to] = rangeOf(view.mode, d);
   const connected = accounts.filter((a) => isCalendarConnected(a.email));
   const key = keyOf(store, from, to);
-  const stale = connected.length && !read.busy && Date.now() - read.checked > CALENDAR_TTL;
-  if (accounts.length && (key !== read.key || stale)) queueMicrotask(() => load(store, key, from, to));
+  if (accounts.length && key !== read.key) queueMicrotask(() => load(store, key, from, to));
+  const cached = cachedCalendarEvents(store, from, to);
 
   // Events carry their calendar's label; tasks only have their project's.
   const byProject = (x) => view.project === 'all' ||
     (labelFilter ? underLabel(projects, x.projectId, x.labelId ?? null, labelFilter) : x.projectId === view.project);
-  // Before the new read lands, the cache stands in: a redraw that waits for an open picker would otherwise show nothing.
-  const events = (read.key === key ? read.events : cachedCalendarEvents(store, from, to).events).filter(byProject);
+  const events = cached.events.filter(byProject);
   const tasks = view.tasks
     ? store.get('todos').items.filter((t) => t.due && statusOf(t) !== 'done' && t.due >= isoOf(from) && t.due < isoOf(to)).filter(byProject)
     : [];
@@ -453,14 +455,14 @@ function draw(root, store) {
       h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Next', title: 'Next', onclick: go(() => step(1)) }, icon('chevron-right')),
       h('h3', { class: 'cal-title' }, titleOf(view.mode, d))),
     h('div', { class: 'row cal-actions' },
-      read.key === key && read.at ? h('span', { class: 'muted small', title: new Date(read.at).toLocaleString() }, `Updated ${ago(read.at)}`) : null,
+      cached.at ? h('span', { class: 'muted small', title: new Date(cached.at).toLocaleString() }, `Updated ${ago(cached.at)}`) : null,
       h('button', {
         type: 'button',
         class: 'icon-btn',
-        title: read.busy ? 'Reading…' : 'Read again from Google',
+        title: read.busy ? 'Reading…' : 'Read again from Google (through the runners)',
         'aria-label': 'Refresh',
         disabled: read.busy || !connected.length,
-        onclick: () => load(store, key, from, to, { maxAge: 0 }),
+        onclick: () => load(store, key, from, to, { force: true }),
       }, refreshIcon(read.busy)),
       h('div', { class: 'segmented cal-modes', role: 'group', 'aria-label': 'View' },
         MODES.map(([k, label]) => h('button', {

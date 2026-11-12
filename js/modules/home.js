@@ -5,7 +5,8 @@ import { ask } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
 import { profilesFor } from '../profile.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
-import { calendarAccounts, calendarEvents, cachedCalendarEvents, CALENDAR_TTL, connectCalendar, isCalendarConnected, eventDate } from '../gcal.js';
+import { calendarAccounts, calendarEvents, cachedCalendarEvents, connectCalendar, isCalendarConnected, eventDate } from '../gcal.js';
+import { jobState } from '../runners.js';
 import { eventAsTask } from './calendar.js';
 import { sitesOf, siteData, ruleOf } from '../automations.js';
 import { hostOf, daysUntil } from '../sitecheck.js';
@@ -66,9 +67,9 @@ function planPanel(store) {
 
 // --- Calendar (Google) ---
 
-// The next two days of every calendar. Shown from the cache at once, then read again when it is stale; Calendar has
-// the full view. checked: when the board last asked, so the panel refreshes itself once per TTL.
-const cal = { status: 'idle', events: [], error: '', waiting: [], checked: 0 };
+// The next two days of every calendar, from calendar.json, which the runners keep read; Calendar has the full view.
+// status: 'loading' only while the runners are asked for days calendar.json does not hold yet.
+const cal = { status: 'idle', error: '' };
 
 const timeLabel = (e) => (e.allDay ? 'All day' : eventDate(e.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
 const dayLabel = (e) => {
@@ -89,17 +90,10 @@ const upcoming = (events) => {
 
 function loadCalendar(store) {
   const [from, to] = nextTwoDays();
-  if (cal.status === 'idle') {
-    const cached = cachedCalendarEvents(store, from, to);
-    if (cached.at) Object.assign(cal, { status: 'ok', events: upcoming(cached.events) });
-  }
-  if (cal.status !== 'ok') cal.status = 'loading';
-  cal.checked = Date.now();
+  cal.status = 'loading';
   store.refresh();
   calendarEvents(store, from, to)
-    .then(({ events, errors, waiting }) => {
-      cal.events = upcoming(events);
-      cal.waiting = waiting;
+    .then(({ errors }) => {
       cal.error = errors.join(' · ');
       cal.status = 'ok';
     })
@@ -127,27 +121,33 @@ function calendarBlock(store) {
     return setupBanner('google', clientId ? 'Add a Google account to see your calendars here.' : 'Calendar needs a Google OAuth Client ID.');
   }
   const offline = accounts.filter((a) => !isCalendarConnected(a.email));
-  if (cal.status === 'idle' || (cal.status !== 'loading' && Date.now() - cal.checked > CALENDAR_TTL)) {
-    cal.checked = Date.now();
+  const [from, to] = nextTwoDays();
+  const cached = cachedCalendarEvents(store, from, to);
+  // Nothing read yet (a new account, or runners that have not run): ask them once.
+  if (cal.status === 'idle' && !cached.at && accounts.length > offline.length) {
+    cal.status = 'asked';
     queueMicrotask(() => loadCalendar(store));
   }
+  const events = upcoming(cached.events);
+  const last = jobState('calendar');
+  const error = (!cached.at && cal.error) || (last?.ok === false ? last.error : '');
   // With no account signed in, cached events still show, with the connect buttons below them.
-  if (offline.length === accounts.length && !cal.events.length) {
+  if (offline.length === accounts.length && !events.length) {
     return h('div', { class: 'stack' },
       h('p', { class: 'muted small' }, 'Connect to see the next two days.'),
       h('div', { class: 'row' }, offline.map((a) =>
         h('button', { type: 'button', class: 'btn-small', onclick: () => connectAccount(store, clientId, a.email) }, icon('plus'), a.email))));
   }
-  if (cal.status !== 'ok' && cal.status !== 'error') return h('p', { class: 'muted small' }, 'Loading events…');
-  if (cal.status === 'error') {
-    return h('div', { class: 'stack' }, notice({ text: cal.error }),
+  if (cal.status === 'loading' && !cached.at) return h('p', { class: 'muted small' }, 'Loading events…');
+  if (!cached.at && error) {
+    return h('div', { class: 'stack' }, notice({ text: error }),
       h('button', { type: 'button', class: 'btn-small', onclick: () => loadCalendar(store) }, 'Try again'));
   }
   return h('div', { class: 'stack' },
-    cal.error ? notice({ text: cal.error }) : null,
-    cal.events.length
+    error ? notice({ text: error }) : null,
+    events.length
       ? h('ul', { class: 'board-list' },
-          cal.events.map((e) =>
+          events.map((e) =>
             h('li', null,
               h('span', { class: 'gcal-swatch', style: { '--c': e.color || 'var(--accent)' } }),
               h('span', { class: 'time muted small' }, [dayLabel(e), timeLabel(e)].filter(Boolean).join(' ')),
@@ -380,6 +380,8 @@ export default {
   title: 'Board',
   icon: 'home',
   collection: null,
+  // Redrawn when the runners' heartbeat changes: the calendar panel shows their last error.
+  readsRunners: true,
   defaults: {},
   render: draw,
 };
