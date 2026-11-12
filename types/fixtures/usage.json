@@ -1,0 +1,116 @@
+{
+  "entries": [
+    {
+      "id": "u-old1",
+      "at": "2026-01-05T09:00:00.000Z",
+      "task": "summarize",
+      "model": "example/model-small",
+      "promptTokens": 1200,
+      "completionTokens": 180,
+      "cost": null
+    },
+    {
+      "id": "u-ok1",
+      "at": "2026-11-10T14:30:00.000Z",
+      "task": "triage",
+      "model": "example/model-large",
+      "promptTokens": 2400,
+      "completionTokens": 320,
+      "cost": 0.0123,
+      "input": [
+        { "role": "system", "content": "You sort tasks." },
+        {
+          "role": "user",
+          "content": [
+            { "type": "text", "text": "What is in this picture?" },
+            { "type": "image_url", "image_url": { "url": "[image/png, 12 KB, not kept]" } }
+          ]
+        }
+      ],
+      "output": "{\"label\":\"example\"}",
+      "meta": {
+        "overridden": false,
+        "status": 200,
+        "ms": 1840,
+        "generationId": "gen-0000000000",
+        "provider": "ExampleProvider",
+        "servedModel": "example/model-large",
+        "finishReason": "stop",
+        "usage": {
+          "prompt_tokens": 2400,
+          "completion_tokens": 320,
+          "total_tokens": 2720,
+          "cost": 0.0123,
+          "is_byok": false,
+          "prompt_tokens_details": { "cached_tokens": 0, "cache_write_tokens": 0, "audio_tokens": 0, "video_tokens": 0 },
+          "cost_details": { "upstream_inference_cost": 0, "upstream_inference_prompt_cost": 0, "upstream_inference_completions_cost": 0 },
+          "completion_tokens_details": { "reasoning_tokens": 64, "image_tokens": 0, "audio_tokens": 0 }
+        }
+      }
+    },
+    {
+      "id": "u-fail1",
+      "at": "2026-11-11T08:00:00.000Z",
+      "task": "triage",
+      "model": "example/model-large",
+      "promptTokens": 0,
+      "completionTokens": 0,
+      "cost": 0,
+      "input": [{ "role": "user", "content": "Hello" }],
+      "output": "",
+      "meta": { "overridden": true, "ms": 120, "status": 500 },
+      "error": "OpenRouter error 500. Example failure"
+    }
+  ],
+  "dev": {
+    "sample-worktree-a1b2c3": {
+      "name": "sample-worktree-a1b2c3",
+      "cwd": "/home/example/worktrees/sample-worktree-a1b2c3",
+      "added": "2026-11-09T10:00:00.000Z",
+      "taskIds": ["t1"],
+      "session": "00000000-0000-4000-8000-000000000001",
+      "sessions": 1,
+      "billing": "plan",
+      "models": {
+        "claude-example-1": { "provider": "Anthropic", "input": 820, "output": 31200, "thinking": 0, "cacheRead": 410000, "cacheWrite": 16000, "cost": 2.84, "extraCost": 0 },
+        "claude-example-2": { "provider": "Anthropic", "input": 1300, "output": 210, "thinking": 0, "cacheRead": 0, "cacheWrite": 0, "cost": null, "extraCost": null }
+      },
+      "cost": 2.84,
+      "extraCost": 0,
+      "duration": 2280000,
+      "apiDuration": 1260000,
+      "linesAdded": 214,
+      "linesRemoved": 37,
+      "efforts": { "high": 60 },
+      "replies": 60,
+      "start": 1762682400000,
+      "end": 1762684800000
+    },
+    "sample-worktree-d4e5f6": {
+      "name": "sample-worktree-d4e5f6",
+      "cwd": "/home/example/worktrees/sample-worktree-d4e5f6",
+      "added": "2026-11-11T10:00:00.000Z",
+      "taskIds": ["t2", "t3"]
+    },
+    "sample-worktree-gone": {
+      "name": "sample-worktree-gone",
+      "cwd": "/home/example/worktrees/sample-worktree-gone",
+      "added": "2026-10-01T10:00:00.000Z",
+      "taskIds": ["t4"],
+      "sessions": 2,
+      "billing": null,
+      "models": {},
+      "cost": null,
+      "extraCost": null,
+      "duration": 0,
+      "apiDuration": 0,
+      "linesAdded": 0,
+      "linesRemoved": 0,
+      "efforts": {},
+      "replies": 3,
+      "start": null,
+      "end": null
+    }
+  },
+  "schemaVersion": 1
+}

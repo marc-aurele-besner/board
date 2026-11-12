@@ -1,0 +1,79 @@
+{
+  "entries": [
+    {
+      "id": "e-001",
+      "date": "2026-01-05",
+      "type": "expense",
+      "amount": 23,
+      "tax": 3,
+      "billId": "b-001",
+      "currency": "USD",
+      "category": "Hosting",
+      "note": "Sample server plan",
+      "projectId": "p-sample",
+      "source": "Example Vendor",
+      "created": "2026-01-05T10:00:00.000Z"
+    },
+    {
+      "id": "e-002",
+      "date": "2026-01-01",
+      "type": "expense",
+      "amount": 12.5,
+      "tax": 0,
+      "billId": "",
+      "currency": "CAD",
+      "category": "Software",
+      "note": "Sample subscription",
+      "projectId": null,
+      "source": "Recurring",
+      "recurringId": "rc-001",
+      "created": "2026-01-01T08:00:00.000Z"
+    },
+    {
+      "id": "e-003",
+      "date": "2025-03-14",
+      "type": "income",
+      "amount": 1000,
+      "category": "Salary",
+      "note": "Older entry without currency or tax",
+      "projectId": null,
+      "created": "2025-03-14T09:00:00.000Z"
+    }
+  ],
+  "categories": ["Hosting", "Software", "Salary"],
+  "bills": [
+    {
+      "id": "b-001",
+      "name": "sample-invoice.pdf",
+      "type": "application/pdf",
+      "file": "bills/b-001-sample-invoice.pdf",
+      "dataUrl": "",
+      "created": "2026-01-05T10:00:00.000Z"
+    },
+    {
+      "id": "b-000",
+      "name": "old-receipt.png",
+      "type": "image/png",
+      "dataUrl": "data:image/png;base64,AAAA",
+      "created": "2025-02-01T10:00:00.000Z"
+    }
+  ],
+  "categoryColors": { "Hosting": "#3b6ea8" },
+  "recurring": [
+    {
+      "id": "rc-001",
+      "name": "Sample subscription",
+      "amount": 12.5,
+      "currency": "CAD",
+      "category": "Software",
+      "projectId": null,
+      "cadence": "monthly",
+      "kind": "fixed",
+      "startDate": "2026-01-01",
+      "generated": ["2026-01-01"],
+      "created": "2025-12-20T08:00:00.000Z"
+    }
+  ],
+  "budgets": { "Software": { "amount": 50, "currency": "USD" } },
+  "schemaVersion": 1
+}

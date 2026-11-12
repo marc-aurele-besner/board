@@ -1,0 +1,129 @@
+{
+  "github": {
+    "token": "",
+    "orgs": [
+      { "org": "example-org", "token": "" }
+    ]
+  },
+  "openrouter": { "key": "" },
+  "google": { "clientId": "", "clientSecret": "" },
+  "uniswap": {
+    "wallets": [
+      { "address": "0x0000000000000000000000000000000000000001", "label": "Main wallet" },
+      { "address": "0x0000000000000000000000000000000000000002", "label": "" }
+    ],
+    "chains": {
+      "1": { "enabled": true, "node": "", "explorer": "" },
+      "8453": { "enabled": false, "node": "https://rpc.example.test https://rpc2.example.test", "explorer": "https://explorer.example.test" }
+    },
+    "v3ids": [{ "chainId": 1, "tokenId": "1001" }],
+    "v4ids": [{ "chainId": 8453, "tokenId": "2002" }],
+    "node": "",
+    "etherscan": ""
+  },
+  "blockchains": {
+    "custom": [
+      { "id": 999999, "name": "Example Chain", "rpc": "https://rpc.example.test", "explorer": "", "symbol": "ETH" }
+    ],
+    "etherscan": ""
+  },
+  "contracts": [
+    {
+      "id": "contract-1",
+      "label": "Example token",
+      "chainId": 1,
+      "address": "0x0000000000000000000000000000000000000003",
+      "projectId": "project-1",
+      "abi": [
+        {
+          "type": "function",
+          "name": "balanceOf",
+          "stateMutability": "view",
+          "inputs": [{ "internalType": "address", "name": "account", "type": "address" }],
+          "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }]
+        },
+        {
+          "type": "event",
+          "name": "Transfer",
+          "anonymous": false,
+          "inputs": [
+            { "indexed": true, "internalType": "address", "name": "from", "type": "address" },
+            { "indexed": true, "internalType": "address", "name": "to", "type": "address" },
+            { "indexed": false, "internalType": "uint256", "name": "value", "type": "uint256" }
+          ]
+        },
+        {
+          "type": "function",
+          "name": "setConfig",
+          "stateMutability": "nonpayable",
+          "inputs": [
+            {
+              "internalType": "struct Example.Config",
+              "name": "config",
+              "type": "tuple",
+              "components": [
+                { "internalType": "uint256", "name": "limit", "type": "uint256" },
+                { "internalType": "bool", "name": "open", "type": "bool" }
+              ]
+            }
+          ],
+          "outputs": []
+        },
+        { "type": "constructor", "stateMutability": "nonpayable", "inputs": [] },
+        { "type": "function", "name": "legacy", "constant": true, "payable": false, "inputs": [], "outputs": [] }
+      ]
+    },
+    {
+      "id": "contract-2",
+      "label": "Unassigned contract",
+      "chainId": 999999,
+      "address": "0x0000000000000000000000000000000000000004",
+      "projectId": "",
+      "abi": []
+    }
+  ],
+  "telegram": { "token": "", "chatId": "", "confirm": true, "offset": 0 },
+  "analytics": { "properties": { "project-1": "123456789" } },
+  "bing": { "key": "", "relay": "" },
+  "resend": { "relay": "", "keys": { "project-1": "" } },
+  "gmail": {
+    "accounts": [
+      { "email": "person@example.com", "projectId": "project-1", "labelId": "label-1" },
+      { "email": "other@example.com", "projectId": null }
+    ]
+  },
+  "gcal": {
+    "accounts": [
+      {
+        "email": "person@example.com",
+        "calendars": [
+          { "id": "person@example.com", "name": "Personal", "color": "#3366cc", "on": true, "projectId": null, "labelId": null },
+          { "id": "team-calendar@example.com", "name": "Team", "color": "#16a765", "on": false, "projectId": "project-1", "labelId": "label-1" }
+        ],
+        "projectId": "project-1",
+        "labelId": "label-1"
+      },
+      { "email": "other@example.com", "calendars": [] }
+    ]
+  },
+  "automations": {
+    "domain": { "on": true, "days": 30 },
+    "email": { "on": false },
+    "lending": { "on": true, "factor": 1.5 }
+  },
+  "models": {
+    "default": "example/model-a",
+    "tasks": [
+      { "id": "task-summary", "name": "Project summaries", "description": "Summarize a project’s todos and notes into a short status.", "model": "" },
+      { "id": "task-custom-1", "name": "Custom task", "description": "A task added by hand.", "model": "example/model-b" }
+    ]
+  },
+  "prompts": { "global": "Answer briefly.", "plan": "Placeholder prompt text." },
+  "fx": { "provider": "example-provider", "fallback": false, "manual": null },
+  "runners": {
+    "github": { "on": true, "every": 15 },
+    "defi": { "on": false, "every": null }
+  },
+  "folderId": "folder-1",
+  "schemaVersion": 1
+}

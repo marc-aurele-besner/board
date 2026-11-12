@@ -1,0 +1,48 @@
+{
+  "calendars": {
+    "someone@example.com|someone@example.com": [
+      {
+        "from": 1759291200000,
+        "to": 1769835600000,
+        "at": 1762896400000,
+        "events": [
+          {
+            "key": "someone@example.com|someone@example.com|evt001",
+            "account": "someone@example.com",
+            "calendarId": "someone@example.com",
+            "calendar": "Work",
+            "color": "#3b6ea8",
+            "projectId": "p-atlas",
+            "labelId": "cat-web",
+            "title": "Planning",
+            "start": "2026-11-13T10:00:00+01:00",
+            "end": "2026-11-13T11:00:00+01:00",
+            "allDay": false,
+            "location": "Room 1",
+            "description": "Sample event.",
+            "link": "https://example.com/event/evt001",
+            "meet": "https://example.com/meet/abc"
+          },
+          {
+            "key": "someone@example.com|someone@example.com|evt002",
+            "account": "someone@example.com",
+            "calendarId": "someone@example.com",
+            "calendar": "Work",
+            "color": "",
+            "projectId": null,
+            "labelId": null,
+            "title": "(no title)",
+            "start": "2026-11-20",
+            "end": "2026-11-21",
+            "allDay": true,
+            "location": "",
+            "description": "",
+            "link": "",
+            "meet": ""
+          }
+        ]
+      }
+    ]
+  },
+  "schemaVersion": 1
+}

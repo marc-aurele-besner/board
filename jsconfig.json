@@ -11,7 +11,8 @@
     "strict": true,
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "resolveJsonModule": true
   },
-  "include": ["js/**/*.js", "types/**/*.d.ts"]
+  "include": ["js/**/*.js", "types/**/*.d.ts", "types/**/*.js"]
 }

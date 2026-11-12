@@ -1,0 +1,21 @@
+{
+  "bing": {
+    "https://example.com": {
+      "at": 1762896400000,
+      "traffic": [
+        { "__type": "RankAndTrafficStats:#Example", "Clicks": 12, "Date": "/Date(1762819200000)/", "Impressions": 340 }
+      ],
+      "queries": [
+        { "__type": "QueryStats:#Example", "AvgClickPosition": 3, "AvgImpressionPosition": 5.2, "Clicks": 4, "Date": "/Date(1762214400000)/", "Impressions": 90, "Query": "example query" }
+      ],
+      "pages": [
+        { "__type": "QueryStats:#Example", "AvgClickPosition": 2, "AvgImpressionPosition": 4.1, "Clicks": 6, "Date": "/Date(1762214400000)/", "Impressions": 120, "Query": "https://example.com/pricing" }
+      ],
+      "error": null
+    },
+    "https://docs.example.com": {
+      "error": "Bing error 400: Example failure"
+    }
+  },
+  "schemaVersion": 1
+}

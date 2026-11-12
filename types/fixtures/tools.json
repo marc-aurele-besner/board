@@ -1,0 +1,121 @@
+{
+  "sites": {
+    "p-sample": {
+      "health": { "status": "up", "ms": 180, "at": "2026-01-10T10:00:00.000Z" },
+      "history": [
+        { "at": "2026-01-10T09:00:00.000Z", "ok": false, "ms": 0 },
+        { "at": "2026-01-10T10:00:00.000Z", "ok": true, "ms": 180 }
+      ],
+      "ssl": { "until": "2026-04-01", "issuer": "Sample CA", "at": "2026-01-10T10:00:00.000Z" },
+      "domain": { "name": "example.com", "until": "2027-01-01", "registrar": "Sample Registrar", "at": "2026-01-10T10:00:00.000Z" },
+      "meta": {
+        "title": "Sample site",
+        "description": "Placeholder description.",
+        "ogTitle": "Sample site",
+        "ogDescription": "Placeholder description.",
+        "ogImage": "https://example.com/og.png",
+        "ogUrl": "https://example.com/",
+        "twitterCard": "summary_large_image",
+        "twitterImage": "https://example.com/og.png",
+        "at": "2026-01-10T10:00:00.000Z"
+      },
+      "dns": {
+        "domain": "example.com",
+        "a": ["192.0.2.1"],
+        "aaaa": ["2001:db8::1"],
+        "caa": [],
+        "records": [{ "name": "example.com", "type": "A", "ttl": 300, "data": "192.0.2.1" }],
+        "ns": ["ns1.example.net"],
+        "mx": ["mx.example.net"],
+        "spf": { "record": "v=spf1 -all", "all": "-all" },
+        "dmarc": { "record": "v=DMARC1; p=none", "policy": "none" },
+        "dkim": ["default"],
+        "at": "2026-01-10T10:00:00.000Z"
+      },
+      "crawl": {
+        "robots": {
+          "url": "https://example.com/robots.txt",
+          "found": true,
+          "status": 200,
+          "raw": "User-agent: *\nAllow: /",
+          "checks": [["ok", "Placeholder check."]],
+          "size": 22,
+          "sitemaps": ["https://example.com/sitemap.xml"],
+          "blocksSearch": false,
+          "blocksAll": false,
+          "aiBlocked": []
+        },
+        "sitemap": {
+          "url": "https://example.com/sitemap.xml",
+          "found": true,
+          "status": 200,
+          "raw": "<urlset></urlset>",
+          "checks": [],
+          "size": 17,
+          "urls": 0,
+          "indexes": 0,
+          "lastmod": ""
+        },
+        "llms": { "url": "https://example.com/llms.txt", "found": false, "unread": "The reader took too long." },
+        "llmsFull": { "url": "https://example.com/llms-full.txt", "found": false, "status": 404 },
+        "security": {
+          "url": "https://example.com/.well-known/security.txt",
+          "found": true,
+          "status": 200,
+          "raw": "Contact: mailto:security@example.com",
+          "checks": [],
+          "size": 36,
+          "contact": ["mailto:security@example.com"],
+          "expires": ""
+        },
+        "humans": { "url": "https://example.com/humans.txt", "found": false, "status": 200, "note": "The site answered with a page, not this file." },
+        "at": "2026-01-10T10:00:00.000Z"
+      },
+      "log": [{ "at": "2026-01-10T09:00:00.000Z", "level": "error", "source": "health", "text": "example.com did not answer." }]
+    },
+    "p-other": {
+      "health": { "status": "down", "ms": 0, "at": "2026-01-10T10:00:00.000Z" },
+      "ssl": { "error": "No valid certificate is logged for this host.", "at": "2026-01-10T10:00:00.000Z" },
+      "crawl": { "error": "The reader took too long.", "at": "2026-01-10T10:00:00.000Z" }
+    }
+  },
+  "every": 60,
+  "providers": [
+    { "id": "pr-001", "name": "Sample Cloud", "url": "https://status.example.com", "kind": "statuspage" },
+    { "id": "pr-002", "name": "Sample API", "url": "https://status.example.org" }
+  ],
+  "status": {
+    "pr-001": {
+      "indicator": "minor",
+      "description": "Minor Service Outage",
+      "parts": { "total": 4, "ok": 3 },
+      "components": [{ "name": "API", "status": "degraded_performance" }],
+      "incidents": [
+        {
+          "name": "Sample incident",
+          "impact": "minor",
+          "status": "investigating",
+          "url": "https://status.example.com/incidents/1",
+          "started": "2026-01-10T08:00:00.000Z",
+          "updated": "2026-01-10T09:00:00.000Z",
+          "update": "Placeholder update."
+        }
+      ],
+      "maintenances": [
+        {
+          "name": "Sample maintenance",
+          "status": "scheduled",
+          "start": "2026-01-12T00:00:00.000Z",
+          "end": "2026-01-12T02:00:00.000Z",
+          "url": "https://status.example.com/incidents/2"
+        }
+      ],
+      "recent": [{ "name": "Earlier incident", "impact": "none", "at": "2026-01-02T00:00:00.000Z", "url": "https://status.example.com/incidents/0" }],
+      "recentCount": 1,
+      "kind": "statuspage",
+      "at": "2026-01-10T10:00:00.000Z"
+    },
+    "pr-002": { "error": "The status page took too long.", "at": "2026-01-10T10:00:00.000Z" }
+  },
+  "schemaVersion": 1
+}

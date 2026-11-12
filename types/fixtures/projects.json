@@ -1,0 +1,52 @@
+{
+  "projects": [
+    {
+      "id": "project-1",
+      "name": "Example project",
+      "color": "#3b6ea8",
+      "description": "Example description.",
+      "website": "https://example.com",
+      "localPath": "~/example/project",
+      "devCommand": "",
+      "devPreset": "preset-1",
+      "labels": ["label-1"],
+      "parentId": null,
+      "github": { "org": "example-org", "repos": ["example-org/example-repo"] },
+      "npm": { "org": "example-org", "packages": ["example-package"] },
+      "profile": {
+        "text": "## What it is\nAn example project.",
+        "sources": ["https://example.com/blog"],
+        "updated": "2026-01-03T09:00:00.000Z",
+        "edited": false,
+        "usageId": "usage-1"
+      },
+      "created": "2026-01-01T09:00:00.000Z"
+    },
+    {
+      "id": "project-2",
+      "name": "Example sub-project",
+      "color": "#2e8a8a",
+      "description": "",
+      "website": "",
+      "labels": [],
+      "parentId": "project-1",
+      "github": { "org": "", "repos": [] },
+      "created": "2026-01-02T09:00:00.000Z"
+    },
+    {
+      "id": "project-3",
+      "name": "Example old project",
+      "color": "#a3432b",
+      "description": "",
+      "website": "",
+      "categoryId": "label-2",
+      "github": { "org": "", "repos": [] },
+      "created": "2025-06-01T09:00:00.000Z"
+    }
+  ],
+  "categories": [
+    { "id": "label-1", "name": "Example label", "color": "#3b6ea8" },
+    { "id": "label-2", "name": "Example old label" }
+  ],
+  "schemaVersion": 1
+}
