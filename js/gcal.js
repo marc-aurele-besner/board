@@ -1,9 +1,11 @@
-// Google Calendar, read-only, straight from the browser. Like Gmail, each account signs in on its own, so several
-// accounts can be shown side by side. Sign-ins are kept in google.json and renewed by themselves (see js/google.js).
+// Google Calendar, read-only. Like Gmail, each account signs in on its own, so several accounts can be shown side by
+// side. Sign-ins are kept in google.json and renewed by the runners (see js/google-core.js).
 // settings.json keeps gcal: { accounts: [{ email, projectId, labelId, calendars: [{ id, name, color, on, projectId, labelId }] }] }.
-// The account's project and project label are optional defaults; a calendar's own ones win. Events are cached in google.json,
-// so a reload shows the last read at once and Google is asked again when it is stale.
-import { PROFILE_SCOPE, rememberPicture, signIn, saveToken, forgetToken, hasToken, accessToken, googleData, saveGoogleData } from './google.js';
+// The account's project and project label are optional defaults; a calendar's own ones win. The runners
+// (tools/jobs/calendar.js) read every shown calendar's window, from the start of last month to three months ahead, into
+// calendar.json every 10 minutes. The board only reads that file, and asks the runners for a range outside it.
+import { PROFILE_SCOPE, rememberPicture, signIn, saveToken, forgetToken, hasToken, accessToken } from './google.js';
+import { runJob, jobState } from './runners.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
 const API = 'https://www.googleapis.com/calendar/v3';
@@ -13,29 +15,36 @@ const MAX_PAGES = 4;
 const keyOf = (address) => `gcal:${address}`;
 
 // --- Event cache ---
-// One entry per calendar in google.json's events, holding its last few reads: [{ from, to, at, events }], newest first.
-// A read is used for any range it covers, so a day or week inside a cached month needs no request.
+// calendar.json: { calendars: { "<address>|<calendarId>": [{ from, to, at, events }] } }, each calendar's reads, newest
+// first: the window, plus the last few ranges read outside it. A read is used for any range it covers.
+export const CALENDAR = 'calendar';
+export const CALENDAR_DEFAULTS = { calendars: {} };
 export const CALENDAR_TTL = 10 * 60 * 1000;
-const CACHE_READS = 6;
+const CACHE_READS = 7; // the window and 6 more
 const cacheKey = (address, calendarId) => `${address}|${calendarId}`;
 
-function cachedReads(address, calendarId) {
-  const list = googleData().events?.[cacheKey(address, calendarId)];
+// The range the runners keep read: the start of last month to the end of the third month ahead.
+export function calendarWindow(now = new Date()) {
+  return [new Date(now.getFullYear(), now.getMonth() - 1, 1), new Date(now.getFullYear(), now.getMonth() + 4, 1)];
+}
+
+function cachedReads(store, address, calendarId) {
+  const list = store.get(CALENDAR)?.calendars?.[cacheKey(address, calendarId)];
   return Array.isArray(list) ? list : [];
 }
 
-function cacheRead(address, calendarId, from, to, events) {
+function cacheRead(store, address, calendarId, from, to, events) {
   const read = { from: from.getTime(), to: to.getTime(), at: Date.now(), events };
   // Reads the new one covers are dropped.
-  const kept = cachedReads(address, calendarId).filter((r) => r.from < read.from || r.to > read.to);
-  saveGoogleData((d) => {
-    d.events = { ...d.events, [cacheKey(address, calendarId)]: [read, ...kept].slice(0, CACHE_READS) };
+  const kept = cachedReads(store, address, calendarId).filter((r) => r.from < read.from || r.to > read.to);
+  store.save(CALENDAR, (d) => {
+    d.calendars = { ...d.calendars, [cacheKey(address, calendarId)]: [read, ...kept].slice(0, CACHE_READS) };
   });
 }
 
 // The newest cached read of a calendar that covers [from, to), with only the events in that range, or null.
-function fromCache(account, cal, from, to) {
-  const hit = cachedReads(account.email, cal.id).find((r) => r.from <= from.getTime() && r.to >= to.getTime());
+function fromCache(store, account, cal, from, to) {
+  const hit = cachedReads(store, account.email, cal.id).find((r) => r.from <= from.getTime() && r.to >= to.getTime());
   if (!hit) return null;
   // Same overlap rule as Google's timeMin/timeMax. The calendar's name, project and label are taken from settings, as they may
   // have changed since the read.
@@ -45,9 +54,9 @@ function fromCache(account, cal, from, to) {
   return { at: hit.at, events };
 }
 
-export function clearCalendarCache(address = '') {
-  saveGoogleData((d) => {
-    d.events = Object.fromEntries(Object.entries(d.events ?? {}).filter(([key]) => address && !key.startsWith(`${address}|`)));
+export function clearCalendarCache(store, address = '') {
+  store.save(CALENDAR, (d) => {
+    d.calendars = Object.fromEntries(Object.entries(d.calendars ?? {}).filter(([key]) => address && !key.startsWith(`${address}|`)));
   });
 }
 
@@ -124,7 +133,7 @@ export async function syncCalendarList(store, address) {
 
 export const removeCalendarAccount = (store, address) => {
   disconnectCalendar(address);
-  clearCalendarCache(address);
+  clearCalendarCache(store, address);
   saveAccounts(store, (accounts) => accounts.filter((a) => a.email !== address));
 };
 
@@ -188,43 +197,60 @@ async function eventsOf(account, cal, from, to) {
 const byDay = (a, b) => eventDate(a.start).setHours(0, 0, 0, 0) - eventDate(b.start).setHours(0, 0, 0, 0)
   || Number(b.allDay) - Number(a.allDay) || eventDate(a.start) - eventDate(b.start);
 
-// Events of every shown calendar of every account between two dates, in day order. A calendar whose cached read is
-// younger than maxAge is not asked again; pass maxAge 0 to read everything. Accounts not connected show their
-// cached events, of any age.
-// Returns { events, errors: [text], waiting: [addresses not connected], at: time of the oldest read used, or 0 }.
-export async function calendarEvents(store, from, to, { maxAge = CALENDAR_TTL } = {}) {
-  const events = [];
+// Reads every shown calendar of every connected account into calendar.json: the window, or [from, to). Runners only.
+// Returns { read: calendars read, errors: [text], waiting: [addresses not connected] }.
+export async function readCalendars(store, { from, to } = {}) {
+  const [start, end] = from && to ? [new Date(from), new Date(to)] : calendarWindow();
   const errors = [];
   const waiting = [];
-  const times = [];
-  await Promise.all(calendarAccounts(store).map(async (account) => {
-    const connected = isCalendarConnected(account.email);
-    if (!connected) waiting.push(account.email);
-    await Promise.all(account.calendars.filter((c) => c.on).map(async (cal) => {
-      const cached = fromCache(account, cal, from, to);
-      if (cached && (!connected || Date.now() - cached.at < maxAge)) {
-        events.push(...cached.events);
-        times.push(cached.at);
-        return;
-      }
-      if (!connected) return;
+  let read = 0;
+  for (const account of calendarAccounts(store)) {
+    if (!isCalendarConnected(account.email)) {
+      waiting.push(account.email);
+      continue;
+    }
+    for (const cal of account.calendars.filter((c) => c.on)) {
       try {
-        const fresh = await eventsOf(account, cal, from, to);
-        cacheRead(account.email, cal.id, from, to, fresh);
-        events.push(...fresh);
-        times.push(Date.now());
+        cacheRead(store, account.email, cal.id, start, end, await eventsOf(account, cal, start, end));
+        read += 1;
       } catch (err) {
+        // The last read stays while Google cannot be reached.
         errors.push(`${cal.name}: ${err.message}`);
-        // The last read stands in while Google cannot be reached.
-        if (cached) {
-          events.push(...cached.events);
-          times.push(cached.at);
-        }
       }
-    }));
-  }));
-  events.sort(byDay);
-  return { events, errors, waiting, at: times.length ? Math.min(...times) : 0 };
+    }
+  }
+  return { read, errors, waiting };
+}
+
+// How a range outside the cache gets read: the board asks the runners; the runners read it themselves.
+let rangeReader = async (store, from, to) => {
+  await runJob('calendar', { from: from.toISOString(), to: to.toISOString() });
+  await store.sync();
+};
+export const useRangeReader = (fn) => {
+  rangeReader = fn;
+};
+
+// Events of every shown calendar of every account between two dates, in day order, from calendar.json. A range it does
+// not cover yet is read first (see rangeReader). Accounts not connected show their cached events, of any age.
+// Returns { events, errors: [text], waiting: [addresses not connected], at: time of the oldest read used, or 0 }.
+export async function calendarEvents(store, from, to) {
+  const errors = [];
+  const missing = calendarAccounts(store).some((a) => isCalendarConnected(a.email)
+    && a.calendars.some((c) => c.on && !fromCache(store, a, c, from, to)));
+  if (missing) {
+    try {
+      await rangeReader(store, from, to);
+    } catch (err) {
+      errors.push(err.message);
+    }
+  }
+  const { events, at } = cachedCalendarEvents(store, from, to);
+  const last = jobState('calendar');
+  if (last?.ok === false) errors.push(last.error);
+  else errors.push(...(last?.errors ?? []));
+  const waiting = calendarAccounts(store).filter((a) => !isCalendarConnected(a.email)).map((a) => a.email);
+  return { events, errors, waiting, at };
 }
 
 // What the cache already holds for a range, without asking Google: shown while a read is on its way.
@@ -233,7 +259,7 @@ export function cachedCalendarEvents(store, from, to) {
   const times = [];
   for (const account of calendarAccounts(store)) {
     for (const cal of account.calendars.filter((c) => c.on)) {
-      const cached = fromCache(account, cal, from, to);
+      const cached = fromCache(store, account, cal, from, to);
       if (!cached) continue;
       events.push(...cached.events);
       times.push(cached.at);

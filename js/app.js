@@ -11,6 +11,7 @@ import { openPalette } from './palette.js';
 import { startBackground } from './background.js';
 import { watchRunners, runnersOnline, runnersKnown } from './runners.js';
 import { GOOGLE, GOOGLE_DEFAULTS, useGoogleStore } from './google.js';
+import { CALENDAR, CALENDAR_DEFAULTS } from './gcal.js';
 import { JUMPS, openShortcuts } from './shortcuts.js';
 import { sampleFolder } from './sample.js';
 import { toast } from './toast.js';
@@ -49,8 +50,10 @@ function toggleTheme() {
 const collectionDefaults = () => ({
   ...Object.fromEntries(modules.filter((m) => m.collection).map((m) => [m.collection, m.defaults])),
   [NOTIFICATIONS]: NOTIFICATION_DEFAULTS,
-  // Google sign-ins, account pictures and the calendar cache, shared by Gmail, Calendar, Analytics and Search Console.
+  // Google sign-ins and account pictures, shared by Gmail, Calendar, Analytics and Search Console.
   [GOOGLE]: GOOGLE_DEFAULTS,
+  // The events the runners read, shared by Calendar, Home and Cron.
+  [CALENDAR]: CALENDAR_DEFAULTS,
 });
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 // The URL is #/<section>?<view params>. The params restore each section's view after a refresh.

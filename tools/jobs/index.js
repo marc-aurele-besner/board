@@ -3,5 +3,6 @@
 import google from './google.js';
 import gmail from './gmail.js';
 import resend from './resend.js';
+import calendar from './calendar.js';
 
-export const jobs = [google, gmail, resend];
+export const jobs = [google, gmail, resend, calendar];
