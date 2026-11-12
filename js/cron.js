@@ -842,7 +842,7 @@ export function projectVars(project) {
 // The project is the step's or source's own when it has one, else the flow's. A data step's sources each choose theirs.
 function varsFor(flow, ctx, step = null, store = ctx.store) {
   const results = ctx.results ?? [];
-  const prev = results.at(-1);
+  const prev = pipedResult(results, step?.from ?? ctx.from);
   const vars = { input: prev?.output ?? '', date: todayISO(), flow: flow.name, $data: { input: prev?.data ?? null } };
   const projectId = (step?.type !== 'gather' && step?.projectId) || flowProjectId(flow);
   const project = projectVars(projectId && store ? store.get('projects').projects.find((p) => p.id === projectId) : null);
@@ -855,6 +855,30 @@ function varsFor(flow, ctx, step = null, store = ctx.store) {
     vars.$data[`step${i + 1}`] = r.data;
   });
   return vars;
+}
+
+// What a step reads as {{input}}: the step before it by default, a chosen earlier step (its id), or nothing ('none'),
+// so a flow can branch: two steps can both read the same data step. A source of a data step reads its step's input.
+export const INPUT_NONE = 'none';
+export function pipedResult(results, from = '') {
+  if (from === INPUT_NONE) return null;
+  return from ? results.find((r) => r.stepId === from) ?? null : results.at(-1) ?? null;
+}
+
+// A step can only read one before it: after a move, an add or a remove, a pipe from a step that is gone or now comes
+// later goes back to the step before.
+export function fixPipes(steps) {
+  steps.forEach((s, i) => {
+    if (s.from && s.from !== INPUT_NONE && !steps.slice(0, i).some((x) => x.id === s.from)) delete s.from;
+  });
+}
+
+// Puts the steps in a new order and renumbers every {{stepN}} to follow its step.
+export function reorderSteps(f, next) {
+  const at = new Map(next.map((s, i) => [s.id, i + 1]));
+  remapStepRefs(next, (n) => at.get(f.steps[n - 1]?.id) ?? null);
+  f.steps = next;
+  fixPipes(f.steps);
 }
 
 // The path to one key, in the form a variable reads it.
@@ -1360,12 +1384,13 @@ async function stepOnce(store, flow, step, ctx) {
   const started = Date.now();
   ctx.note = '';
   ctx.data = undefined;
-  const input = ctx.results.at(-1)?.output ?? '';
+  ctx.from = step.from ?? '';
+  const input = pipedResult(ctx.results, ctx.from)?.output ?? '';
   const vars = varsFor(flow, ctx, step, store);
   try {
     const output = String(await runStep(store, flow, step, input, ctx) ?? '');
     const data = ctx.data !== undefined ? ctx.data : parseData(output) ?? output;
-    const result = { ok: true, vars, output, data, note: ctx.note, ms: Date.now() - started, at: now(), nothing: ctx.nothing };
+    const result = { ok: true, stepId: step.id, vars, output, data, note: ctx.note, ms: Date.now() - started, at: now(), nothing: ctx.nothing };
     ctx.results.push(result);
     return result;
   } catch (err) {
@@ -1406,7 +1431,7 @@ export function testsOf(store, flowId) {
   for (const step of flow.steps) {
     const r = saved[step.id];
     if (!r) continue;
-    const result = { ...r, data: 'data' in r ? r.data : parseData(r.output) ?? r.output, vars: varsFor(flow, { results }, step, store) };
+    const result = { ...r, stepId: step.id, data: 'data' in r ? r.data : parseData(r.output) ?? r.output, vars: varsFor(flow, { results }, step, store) };
     map.set(step.id, result);
     if (result.ok) results.push(result);
   }
