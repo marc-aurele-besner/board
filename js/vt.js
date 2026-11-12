@@ -1,3 +1,4 @@
+// @ts-check
 // A small terminal emulator for the Dev section: enough of xterm for shells, test runners, progress bars and
 // full-screen programs such as the Claude CLI. It keeps a grid of cells and the lines that scrolled off the top;
 // modules/dev.js draws them. No dependency.
@@ -5,31 +6,42 @@
 // A line is { cells, v }: cells[x] is { c, k } (a character and a style key) or undefined for a blank,
 // and v changes whenever the line does, so a drawn line can be reused until then.
 
+/**
+ * @typedef {{ c: string, k: string }} Cell
+ * @typedef {{ cells: (Cell | undefined)[], v: number }} Line
+ * @typedef {{ fg?: number | string, bg?: number | string, bold?: boolean, dim?: boolean, italic?: boolean, under?: boolean,
+ *   inverse?: boolean, strike?: boolean, cls?: string, link?: string }} Style
+ * @typedef {ReturnType<typeof createTerminal>} Terminal
+ */
+
 const HISTORY_MAX = 5000;
 const TAB = 8;
 
+/** @returns {Line} */
 const blankLine = () => ({ cells: [], v: 0 });
-const touch = (line) => {
+const touch = (/** @type {Line} */ line) => {
   line.v++;
   return line;
 };
 
 // Styles are shared by key: '' is the default.
+/** @type {Map<string, Style>} */
 const styles = new Map([['', {}]]);
-const keyOf = (s) => {
+const keyOf = (/** @type {Style} */ s) => {
   const key = [s.fg ?? '', s.bg ?? '', s.bold ? 'b' : '', s.dim ? 'd' : '', s.italic ? 'i' : '', s.under ? 'u' : '', s.inverse ? 'r' : '', s.strike ? 's' : '', s.cls ?? '', s.link ?? ''].join('|');
   if (!styles.has(key)) styles.set(key, { ...s });
   return key === '|||||||||' ? '' : key;
 };
-export const styleOf = (key) => styles.get(key) ?? {};
+export const styleOf = (/** @type {string} */ key) => styles.get(key) ?? {};
 
 // The 256-colour palette above the first 16, as CSS colours. The first 16 follow the theme (see css --ansi-*).
+/** @param {number | string} n */
 export function colorOf(n) {
   if (typeof n === 'string') return n;
   if (n < 16) return `var(--ansi-${n})`;
   if (n < 232) {
     const i = n - 16;
-    const step = (v) => (v ? 55 + v * 40 : 0);
+    const step = (/** @type {number} */ v) => (v ? 55 + v * 40 : 0);
     return `rgb(${step(Math.floor(i / 36))}, ${step(Math.floor(i / 6) % 6)}, ${step(i % 6)})`;
   }
   const g = 8 + (n - 232) * 10;
@@ -37,21 +49,24 @@ export function colorOf(n) {
 }
 
 // `reply` sends answers to the program (cursor position, device attributes, background colour).
+/**
+ * @param {{ cols?: number, rows?: number, reply?: (answer: string) => void, background?: (which: 'fg' | 'bg') => string }} [options]
+ */
 export function createTerminal({ cols = 100, rows = 30, reply = () => {}, background = () => '' } = {}) {
   const t = {
     cols,
     rows,
-    history: [],
+    history: /** @type {Line[]} */ ([]),
     trimmed: 0, // lines dropped from the start of history, so a view can tell what it already drew
     screen: Array.from({ length: rows }, blankLine),
-    main: null, // the normal screen while the alternate one is shown
+    main: /** @type {{ screen: Line[], x: number, y: number } | null} */ (null), // the normal screen while the alternate one is shown
     x: 0,
     y: 0,
     top: 0,
     bottom: rows - 1,
-    style: {},
+    style: /** @type {Style} */ ({}),
     key: '',
-    saved: null,
+    saved: /** @type {{ x: number, y: number, style: Style } | null} */ (null),
     cursor: true,
     appCursor: false,
     paste: false,
@@ -65,6 +80,7 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
   const clampX = () => (t.x = Math.min(Math.max(t.x, 0), t.cols - 1));
   const clampY = () => (t.y = Math.min(Math.max(t.y, 0), t.rows - 1));
 
+  /** @param {Line} l */
   function pushHistory(l) {
     if (t.main) return; // the alternate screen keeps no history
     t.history.push(l);
@@ -95,11 +111,13 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
     else if (t.y < t.rows - 1) t.y++;
   }
 
+  /** @param {Line} l @param {number} from @param {number} to */
   function erase(l, from, to) {
     for (let x = from; x < Math.min(to, l.cells.length); x++) l.cells[x] = t.key ? { c: ' ', k: t.key } : undefined;
     touch(l);
   }
 
+  /** @param {string} ch */
   function put(ch) {
     if (t.x >= t.cols) {
       t.x = 0;
@@ -111,6 +129,7 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
     t.x++;
   }
 
+  /** @param {boolean} on */
   function setAlt(on) {
     if (on && !t.main) {
       t.main = { screen: t.screen, x: t.x, y: t.y };
@@ -124,6 +143,7 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
     }
   }
 
+  /** @param {string[]} params */
   function sgr(params) {
     const list = params.length ? params : ['0'];
     for (let i = 0; i < list.length; i++) {
@@ -168,6 +188,7 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
     t.key = keyOf(t.style);
   }
 
+  /** @param {string} seq */
   function csi(seq) {
     const final = seq.at(-1);
     const prefix = /^[?>=<]/.test(seq) ? seq[0] : '';
@@ -242,6 +263,7 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
     }
   }
 
+  /** @param {string} seq */
   function osc(seq) {
     // Programs ask for the background colour to pick a light or dark look.
     const [code, value] = seq.split(';');
@@ -258,6 +280,7 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
     }
   }
 
+  /** @param {string} ch */
   function escape(ch) {
     t.state = 'text';
     if (ch === '[') {
@@ -289,6 +312,7 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
     }
   }
 
+  /** @param {string} data */
   function write(data) {
     for (const ch of data) {
       switch (t.state) {
@@ -329,6 +353,7 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
   }
 
   // A line the board adds itself (the command, how it ended), styled with a class rather than a colour.
+  /** @param {string} text @param {string} cls */
   function note(text, cls) {
     // Below everything shown: a program that ended may have left the cursor higher up.
     t.y = Math.max(t.y, used() - 1);
@@ -373,6 +398,7 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
     return last + 1;
   }
 
+  /** @param {number} cols @param {number} rows */
   function resize(cols, rows) {
     if (cols === t.cols && rows === t.rows) return;
     t.cols = cols;

@@ -1,3 +1,4 @@
+// @ts-check
 // Terminal colours that follow the board's theme. Programs pick their own RGB colours for a dark or a light
 // terminal (the Claude CLI paints its prompt box dark grey and its text near white), which on the other theme
 // gives dark bars and white on white. Each colour is adapted to the current theme instead: a background made for
@@ -6,25 +7,31 @@
 
 const MIN_CONTRAST = 4.5;
 
-const hex = (value) => {
+/** @typedef {number[]} Rgb Red, green and blue, 0 to 255. */
+/** @typedef {ReturnType<typeof readTheme>} TermTheme */
+
+const hex = (/** @type {string} */ value) => {
   const m = /^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(value.trim());
   return m ? m.slice(1).map((x) => parseInt(x, 16)) : null;
 };
-const rgbOf = (value) => {
+const rgbOf = (/** @type {string} */ value) => {
   const m = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(value);
-  return m ? m.slice(1).map(Number) : hex(value);
+  // The values come from js/vt.js, which writes them as rgb(…) or #rrggbb, so they always parse.
+  return /** @type {Rgb} */ (m ? m.slice(1).map(Number) : hex(value));
 };
-const css = ([r, g, b]) => `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+const css = (/** @type {Rgb} */ [r, g, b]) => `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
 
+/** @param {Rgb} rgb */
 function luminance([r, g, b]) {
-  const lin = (c) => ((c /= 255) <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const lin = (/** @type {number} */ c) => ((c /= 255) <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
   return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
 }
-const contrast = (a, b) => {
+const contrast = (/** @type {Rgb} */ a, /** @type {Rgb} */ b) => {
   const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p);
   return (x + 0.05) / (y + 0.05);
 };
 
+/** @param {Rgb} rgb */
 function toHsl([r, g, b]) {
   r /= 255;
   g /= 255;
@@ -38,11 +45,12 @@ function toHsl([r, g, b]) {
   const h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
   return [h / 6, s, l];
 }
+/** @param {number[]} hsl @returns {Rgb} */
 function fromHsl([h, s, l]) {
   if (!s) return [l * 255, l * 255, l * 255];
   const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
   const p = 2 * l - q;
-  const ch = (t) => {
+  const ch = (/** @type {number} */ t) => {
     t = (t + 1) % 1;
     if (t < 1 / 6) return p + (q - p) * 6 * t;
     if (t < 1 / 2) return q;
@@ -51,7 +59,7 @@ function fromHsl([h, s, l]) {
   };
   return [ch(h + 1 / 3) * 255, ch(h) * 255, ch(h - 1 / 3) * 255];
 }
-const flip = (rgb) => {
+const flip = (/** @type {Rgb} */ rgb) => {
   const [h, s, l] = toHsl(rgb);
   return fromHsl([h, s, 1 - l]);
 };
@@ -59,7 +67,7 @@ const flip = (rgb) => {
 // The theme as the terminal shows it: its background and text, and the 16 ANSI colours, read from the CSS tokens.
 export function readTheme() {
   const style = getComputedStyle(document.documentElement);
-  const get = (name) => style.getPropertyValue(name);
+  const get = (/** @type {string} */ name) => style.getPropertyValue(name);
   const bg = hex(get('--surface-2')) ?? [229, 234, 236];
   const text = hex(get('--text')) ?? [17, 26, 30];
   const ansi = Array.from({ length: 16 }, (_, n) => hex(get(`--ansi-${n}`)) ?? text);
@@ -67,12 +75,14 @@ export function readTheme() {
 }
 
 // A background colour for this theme: one clearly made for the other theme is flipped.
+/** @param {Rgb} rgb @param {TermTheme} theme */
 function themedBg(rgb, theme) {
   const lum = luminance(rgb);
   return theme.dark ? (lum > 0.45 ? flip(rgb) : rgb) : lum < 0.18 ? flip(rgb) : rgb;
 }
 
 // Text moved, if needed, until it reads on `behind`: flipped first, then darkened or lightened step by step.
+/** @param {Rgb} rgb @param {Rgb} behind */
 function readable(rgb, behind) {
   if (contrast(rgb, behind) >= MIN_CONTRAST) return rgb;
   const flipped = flip(rgb);
@@ -86,16 +96,25 @@ function readable(rgb, behind) {
   return best;
 }
 
+/** @type {Map<string, { fg: string, bg: string }>} */
 const cache = new Map();
 
 // Colours for one span. `fg` and `bg` are what the program asked for: an ANSI index, a 256-colour index turned
 // into 'rgb(…)', or 'rgb(…)'; undefined for the default. Returns CSS values, '' for the default.
+/**
+ * @param {number | string | undefined} fg
+ * @param {number | string | undefined} bg
+ * @param {boolean | undefined} inverse
+ * @param {TermTheme} theme
+ * @returns {{ fg: string, bg: string }}
+ */
 export function themedColors(fg, bg, inverse, theme) {
   const id = `${fg}|${bg}|${inverse ? 1 : 0}|${theme.key}`;
-  if (cache.has(id)) return cache.get(id);
+  if (cache.has(id)) return /** @type {{ fg: string, bg: string }} */ (cache.get(id));
   // The 16 colours stay theme tokens; only a colour the program chose itself is adapted.
+  /** @type {(v: number | string | undefined) => v is number} */
   const token = (v) => typeof v === 'number' && v < 16;
-  const raw = (v, fallback) => (v === undefined ? fallback : token(v) ? theme.ansi[v] : rgbOf(v));
+  const raw = (/** @type {number | string | undefined} */ v, /** @type {Rgb} */ fallback) => (v === undefined ? fallback : token(v) ? theme.ansi[v] : rgbOf(v));
   let out;
   if (inverse) {
     // Swapped: the text colour becomes the background. It is meant to stand out, so it is not flipped.
