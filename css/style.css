@@ -2449,6 +2449,8 @@ button.sum-line:hover { background: var(--surface-2); }
 .term-line .t-cmd { color: var(--accent); font-weight: 600; }
 .term-line .t-meta { color: var(--muted); }
 .term-line .t-meta.t-ok { color: var(--income); }
+.term-line .term-link { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); text-underline-offset: 2px; cursor: pointer; }
+.term-line .term-link:hover { color: var(--accent); text-decoration-color: currentColor; }
 .term-cursor { outline: 1px solid var(--text); outline-offset: -1px; }
 .term-out:focus .term-cursor { background: var(--text); color: var(--surface-2); outline: none; }
 .term-probe { position: absolute; visibility: hidden; white-space: pre; }
