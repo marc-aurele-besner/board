@@ -11,6 +11,7 @@ import { readTheme, themedColors } from '../term-colors.js';
 import { explorer, editor, setRoot, hasOpenFiles, baseName } from './dev-files.js';
 import { pickChip } from '../inline.js';
 import { projectIcon } from './projects.js';
+import { linkWatcher } from '../task-links.js';
 
 const COLLECTION = 'dev';
 const DEFAULTS = { history: [], runner: '' };
@@ -280,14 +281,15 @@ export const DEFAULT_DEV_COMMAND = 'claude --dangerously-skip-permissions --work
 
 // Opens Dev with a new terminal that runs claude on a prompt, in the project's folder when it has one.
 // The command waits for the runner to answer, so it also works when Dev was not open yet.
-export function startClaudeSession({ prompt, projectId = '' }) {
-  view.queued = { prompt, projectId };
+// Issue and PR links the session prints are added to the tasks in `taskIds`.
+export function startClaudeSession({ prompt, projectId = '', taskIds = [] }) {
+  view.queued = { prompt, projectId, taskIds };
   if (location.hash.startsWith('#/dev')) currentStore?.refresh();
   else location.hash = '#/dev';
 }
 
 function startQueued(store) {
-  const { prompt, projectId } = view.queued;
+  const { prompt, projectId, taskIds } = view.queued;
   const project = store.get('projects').projects.find((p) => p.id === projectId);
   if (project?.localPath) {
     view.workspace = `p:${project.id}`;
@@ -296,6 +298,7 @@ function startQueued(store) {
   view.queued = null;
   const s = newSession(store);
   if (!s) return;
+  if (taskIds.length) s.watch = linkWatcher(store, taskIds, prompt);
   // Runs once the terminal is on the page, so it starts at the size it is shown.
   // `--` ends the options, so a flag with an optional value (--worktree [name]) cannot take the prompt.
   const command = project?.devCommand?.trim() || DEFAULT_DEV_COMMAND;
@@ -338,7 +341,10 @@ async function run(store, s, command, { remember: keep = true } = {}) {
         if (e.t === 'start') {
           s.pid = e.pid;
           s.cwd = e.cwd;
-        } else if (e.t === 'out' || e.t === 'err') s.term.write(e.d);
+        } else if (e.t === 'out' || e.t === 'err') {
+          s.term.write(e.d);
+          s.watch?.(e.d);
+        }
         else if (e.t === 'cwd') s.cwd = e.d;
         else if (e.t === 'exit') s.exit = { code: e.code, signal: e.signal, ms: e.ms };
         schedulePaint();

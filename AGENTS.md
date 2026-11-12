@@ -50,6 +50,7 @@ js/google.js          every Google sign-in, kept in google.json and renewed befo
 js/gmail.js           the Inbox's Gmail reads: one sign-in per account, its email list, and one email's body
 js/gcal.js            Calendar's Google reads: one sign-in per account, its calendar list, and the events of a range
 js/background.js      timers for the above; started once the data folder is open
+js/task-links.js      a task's GitHub issues and PRs; finds the links a Dev session prints and adds them to its tasks
 js/capture.js         parseTask(), parseMoney() and makeTask(): one place for a task's shape
 js/palette.js         the Cmd/Ctrl+K search palette: jump, or capture a task, a Money entry or a recipe link
 js/search.js          what the full search page (modules/search.js, hidden) looks through, grouped by kind
