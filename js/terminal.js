@@ -3,10 +3,16 @@ export const TERMINAL_RUNNER = 'http://127.0.0.1:8419';
 
 const unreachable = (base) => new Error(`Could not reach the terminal runner at ${base}. In the board folder, run bun start (or bun dev) and keep it open.`);
 
+// The runner answers only requests with a local Origin. A page sends one by itself; the runners (Node) set it here.
+let origin = null;
+export const useRunnerOrigin = (value) => {
+  origin = value;
+};
+
 async function call(base, path, init) {
   let res;
   try {
-    res = await fetch(`${base}${path}`, init);
+    res = await fetch(`${base}${path}`, origin ? { ...init, headers: { ...init?.headers, origin } } : init);
   } catch (err) {
     throw err.name === 'AbortError' ? err : unreachable(base);
   }

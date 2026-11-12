@@ -1,5 +1,6 @@
 // The git worktrees Dev sessions made for tasks (task.worktrees: { name, cwd, session }). Once every task that holds
-// one is completed, the command runner stops its session and removes it, wherever the tasks were completed from.
+// one is completed, the runners ask the command runner to stop its session and remove it, wherever the tasks were
+// completed from.
 // git refuses a worktree with changes or untracked files: that one is kept, marked `kept` with git's answer, and
 // tried again when its tasks are reopened and completed again.
 import { removeWorktree, TERMINAL_RUNNER } from './terminal.js';
@@ -38,19 +39,19 @@ function forget(store, name, patch) {
   });
 }
 
-async function remove(store, { worktree, tasks }) {
+async function remove(store, { worktree, tasks }, say) {
   busy.add(worktree.name);
   // Its record outlives the task's entry, so what its session used is still read once it is gone.
   rememberWorktrees(store, [{ worktree, taskIds: tasks.map((t) => t.id) }]);
   try {
     const { removed } = await removeWorktree(runnerOf(store), worktree);
     forget(store, worktree.name);
-    if (removed) toast(`Worktree ${worktree.name} removed: “${tasks[0].text}” is completed`);
+    if (removed) say(`Worktree ${worktree.name} removed: “${tasks[0].text}” is completed`);
   } catch (err) {
     if (/reach the terminal runner/.test(err.message)) unreachableAt = Date.now();
     else {
       forget(store, worktree.name, { kept: err.message });
-      toast(`Worktree ${worktree.name} kept: ${err.message}`);
+      say(`Worktree ${worktree.name} kept: ${err.message}`);
     }
   } finally {
     busy.delete(worktree.name);
@@ -70,8 +71,10 @@ export function forgetWorktree(store, name) {
   forget(store, name);
 }
 
-// Called on every store change: cheap when no task holds a worktree.
-export function removeDoneWorktrees(store) {
+// The runners' job (tools/jobs/worktrees.js), when todos.json changes and every 5 minutes: cheap when no task holds a
+// worktree. `say` reports what happened (the runners log it). Returns the removals started, which it awaits.
+export function removeDoneWorktrees(store, say = toast) {
+  const started = [];
   for (const entry of worktreesOf(store)) {
     const { worktree, tasks } = entry;
     const done = tasks.every((t) => statusOf(t) === 'done');
@@ -80,6 +83,7 @@ export function removeDoneWorktrees(store) {
       continue;
     }
     if (!done || busy.has(worktree.name) || Date.now() - unreachableAt < RETRY_MS) continue;
-    remove(store, entry);
+    started.push(remove(store, entry, say));
   }
+  return Promise.all(started);
 }
