@@ -1,3 +1,4 @@
+// @ts-check
 // Dev: a small IDE for this machine, Cursor style. A workspace folder (the board, the home folder, or a project's
 // local folder) is shown as a file tree; files open read-only with syntax colours; terminals sit below. The side
 // panel switches to Search, which finds text in the folder's files, and to Source Control, which shows and commits
@@ -24,6 +25,21 @@ import { watchDevSessions } from './todos.js';
 import { recordOfSession, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand } from '../dev-core.js';
 import { cronRunOf, cronRunHref } from '../cron.js';
+/** @import { Store, DevSessionList, IconName } from '../../types/data' */
+/** @import { RunnerInfo, RunnerEvent } from '../../types/terminal' */
+/** @import { DevContext } from '../../types/dev' */
+/** @import { Child } from '../../types/ui' */
+/** @import { Terminal, Line } from '../vt.js' */
+
+/**
+ * How a command ended: stopped, lost when the runner stopped, or its exit code or signal.
+ * @typedef {{ stopped?: boolean, lost?: boolean, code?: number | null, signal?: string | null, ms?: number }} Exit
+ * @typedef {{ history: HTMLElement, screen: HTMLElement, from: number, theme?: string }} LinesEl
+ * @typedef {LinesEl & { out: HTMLElement, top: number }} TermEl
+ * @typedef {{ id: string, n: number, cwd: string, tasks: string[], prompt: string, running: boolean, attach: AbortController | null,
+ *   replaying: boolean, pid: number, exit: Exit | null, command: string, browse: number, stick: boolean, el: TermEl | null,
+ *   term: Terminal, watch?: (text: string) => void, observer?: ResizeObserver }} Session
+ */
 
 export { runnerOf, devPresets, DEFAULT_DEV_COMMAND, devCommandOf };
 
@@ -40,12 +56,21 @@ const OLD_SESSIONS_KEY = 'board:dev-sessions';
 const SIDE_KEY = 'board:dev-side';
 
 // View state: the workspace, the sessions, the one shown, and what the runner said about itself.
+/**
+ * @type {{ side: string, workspace: string, sessions: Session[], active: string, wanted: number, info: RunnerInfo | null,
+ *   infoError: string, checking: boolean, count: number, pending: string | null,
+ *   queued: { id: string, prompt: string, projectId: string, taskIds: string[], command: string } | null,
+ *   opening: { id: string, cwd: string, taskIds: string[] } | null, restored: boolean, back: string }}
+ */
 const view = { side: readSide(), workspace: 'board', sessions: [], active: '', wanted: 0, info: null, infoError: '', checking: false, count: 0, pending: null, queued: null, opening: null, restored: false, back: '' };
+// Set by draw(), before any terminal is made or used.
+/** @type {Store | null} */
 let currentStore = null;
 
 function readSide() {
   try {
-    const side = localStorage.getItem(SIDE_KEY);
+    // A missing key (null) is in no list.
+    const side = /** @type {string} */ (localStorage.getItem(SIDE_KEY));
     return ['git', 'search', 'worktrees', 'terminals'].includes(side) ? side : 'files';
   } catch {
     return 'files';
@@ -54,14 +79,16 @@ function readSide() {
 
 const maxSessions = () => view.info?.max ?? 12;
 const activeSession = () => view.sessions.find((s) => s.id === view.active) ?? view.sessions[0];
-const projectsWithFolder = (store) => store.get('projects').projects.filter((p) => p.localPath);
+const projectsWithFolder = (/** @type {Store} */ store) => store.get('projects').projects.filter((p) => p.localPath);
 
 // Where a workspace is: 'board', 'home', or 'p:<project id>'.
+/** @param {Store} store @param {string} root */
 function rootPath(store, root) {
   if (root === 'home') return view.info?.home ?? '~';
   if (root.startsWith('p:')) return store.get('projects').projects.find((p) => p.id === root.slice(2))?.localPath ?? '';
   return view.info?.root ?? '';
 }
+/** @param {Store} store @param {string} root */
 function rootLabel(store, root) {
   if (root === 'home') return 'Home';
   if (root.startsWith('p:')) return store.get('projects').projects.find((p) => p.id === root.slice(2))?.name ?? 'Project';
@@ -69,6 +96,7 @@ function rootLabel(store, root) {
 }
 
 // What the file explorer needs from this module.
+/** @type {(store: Store) => DevContext} */
 const filesCtx = (store) => ({
   base: () => runnerOf(store),
   ready: () => !!view.info,
@@ -95,6 +123,7 @@ const filesCtx = (store) => ({
 });
 
 // The terminal answers questions programs ask (cursor position, colours) as the theme shows it.
+/** @param {'fg' | 'bg'} which */
 function themeColor(which) {
   const value = getComputedStyle(document.documentElement).getPropertyValue(which === 'fg' ? '--text' : '--surface-2').trim();
   const m = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(value);
@@ -110,21 +139,23 @@ function saveSessions() {
   saveTimer = setTimeout(() => {
     saveTimer = 0;
     const list = { active: view.active, sessions: view.sessions.map(({ id, n, cwd, tasks, prompt }) => ({ id, n, cwd, ...(tasks.length ? { tasks, prompt } : {}) })) };
-    saveSessionList(runnerOf(currentStore), list).catch(() => {});
+    saveSessionList(runnerOf(/** @type {Store} */ (currentStore)), list).catch(() => {});
   }, 150);
 }
 
+/** @param {{ id?: string, n?: number, cwd?: string, tasks?: string[], prompt?: string }} options @returns {Session} */
 function makeSession({ id = uid(), n = ++view.count, cwd = '', tasks = [], prompt = '' }) {
-  const s = { id, n, cwd, tasks, prompt, running: false, attach: null, replaying: false, pid: 0, exit: null, command: '', browse: -1, stick: true, el: null };
+  // term is added next.
+  const s = /** @type {Session} */ ({ id, n, cwd, tasks, prompt, running: false, attach: null, replaying: false, pid: 0, exit: null, command: '', browse: -1, stick: true, el: null });
   s.term = createTerminal({
     // Questions in replayed output were answered long ago; only a live program gets an answer.
-    reply: (data) => !s.replaying && s.running && s.pid && sendInput(runnerOf(currentStore), s.pid, { data }),
+    reply: (data) => !s.replaying && s.running && s.pid && sendInput(runnerOf(/** @type {Store} */ (currentStore)), s.pid, { data }),
     background: themeColor,
   });
   // Issue and PR links the session prints are added to its tasks. Tasks moves them on to review once claude waits,
   // and watches for that even when it was not shown.
   if (tasks.length) {
-    s.watch = linkWatcher(currentStore, tasks, prompt);
+    s.watch = linkWatcher(/** @type {Store} */ (currentStore), tasks, prompt);
     if (currentStore) watchDevSessions(currentStore);
   }
   view.sessions.push(s);
@@ -133,9 +164,12 @@ function makeSession({ id = uid(), n = ++view.count, cwd = '', tasks = [], promp
 
 // The terminals the runner lists, read once it answers. A list this browser kept before the runner did is moved
 // to the runner. Blank terminals drawn while the runner could not be reached give way to the listed ones.
+/** @param {Store} store */
 async function restoreSessions(store) {
   // A runner started before it kept the list has none to give, and the old list stays until one does.
+  /** @type {{ active?: string, sessions: DevSessionList['sessions'] | null } | null} */
   let saved = await listSessions(runnerOf(store)).catch(() => null);
+  /** @type {typeof saved} */
   let old = null;
   try {
     old = JSON.parse(localStorage.getItem(OLD_SESSIONS_KEY) ?? 'null');
@@ -162,7 +196,7 @@ async function restoreSessions(store) {
     });
   }
   view.count = Math.max(view.count, ...view.sessions.map((s) => s.n));
-  if (view.sessions.some((s) => s.id === saved.active)) view.active = saved.active;
+  if (view.sessions.some((s) => s.id === saved.active)) view.active = /** @type {string} */ (saved.active);
   saveSessions();
 }
 
@@ -175,6 +209,11 @@ function showWanted() {
   saveSessions();
 }
 
+/**
+ * @param {Store} store
+ * @param {string} [cwd]
+ * @param {{ id?: string, tasks?: string[], prompt?: string }} [options]
+ */
 function newSession(store, cwd = rootPath(store, view.workspace), { id, tasks = [], prompt = '' } = {}) {
   if (view.sessions.length >= maxSessions()) {
     toast(`${maxSessions()} terminals are open. Close one first.`);
@@ -187,16 +226,18 @@ function newSession(store, cwd = rootPath(store, view.workspace), { id, tasks = 
   return s;
 }
 
+/** @param {Session} s */
 function closeSession(s) {
   s.attach?.abort();
   s.observer?.disconnect();
-  closeOnRunner(runnerOf(currentStore), s.id).catch(() => {});
+  closeOnRunner(runnerOf(/** @type {Store} */ (currentStore)), s.id).catch(() => {});
   view.sessions = view.sessions.filter((x) => x !== s);
   if (view.active === s.id) view.active = view.sessions.at(-1)?.id ?? '';
   saveSessions();
 }
 
 // Reads the session's events: first everything so far (drawn without toasts or answers), then live ones.
+/** @param {Store} store @param {Session} s */
 async function attach(store, s) {
   if (s.attach) return;
   const ctl = new AbortController();
@@ -213,6 +254,7 @@ async function attach(store, s) {
   setTimeout(() => checkRunner(store), 1500);
 }
 
+/** @param {Store} store @param {Session} s @param {RunnerEvent} e */
 function onSessionEvent(store, s, e) {
   if (e.t === 'session') {
     s.replaying = true;
@@ -251,6 +293,7 @@ function onSessionEvent(store, s, e) {
   schedulePaint();
 }
 
+/** @param {Store} store @param {Session} s @param {Exit} e */
 function finish(store, s, e) {
   s.exit = e.stopped ? { stopped: true, ms: e.ms } : e.lost ? { lost: true } : { code: e.code, signal: e.signal, ms: e.ms };
   Object.assign(s, { running: false, pid: 0 });
@@ -269,19 +312,24 @@ function finish(store, s, e) {
 
 // Drawing. A terminal's elements are made once and moved into each new page, so its output, scroll and focus
 // survive the page being rebuilt. Lines are drawn again only when they changed.
+/** @typedef {WeakMap<Line, { v: number, cx: number, theme: string, el: HTMLElement }>} LineCache */
+/** @type {LineCache} */
 const drawn = new WeakMap();
 
 // The theme the terminal is drawn in; lines drawn in another one are drawn again.
+/** @type {ReturnType<typeof readTheme> | null} */
 let theme = null;
 const currentTheme = () => (theme ??= readTheme());
 
+/** @param {string} key */
 function spanStyle(key) {
   const s = styleOf(key);
   const cls = [s.cls, s.bold && 'b', s.dim && 'd', s.italic && 'i', s.under && 'u', s.strike && 's'].filter(Boolean).join(' ');
+  /** @type {{ color?: string, background?: string }} */
   const style = {};
   if (s.fg !== undefined || s.bg !== undefined || s.inverse) {
     // 256-colour indices above the 16 ANSI ones become RGB, which themedColors adapts like any other.
-    const norm = (v) => (typeof v === 'number' && v >= 16 ? colorOf(v) : v);
+    const norm = (/** @type {number | string | undefined} */ v) => (typeof v === 'number' && v >= 16 ? colorOf(v) : v);
     const { fg, bg } = themedColors(norm(s.fg), norm(s.bg), s.inverse, currentTheme());
     if (fg) style.color = fg;
     if (bg) style.background = bg;
@@ -291,12 +339,14 @@ function spanStyle(key) {
 
 // The web addresses printed in a line, by column: plain text, so a program that prints a URL without OSC 8 links too.
 const URL_RE = /https?:\/\/[^\s<>"'`]+/g;
+/** @param {Line} line */
 function lineLinks(line) {
   // One character per column, so a match's index is its column; a wide or combined character ends a URL.
   const text = Array.from({ length: line.cells.length }, (_, i) => {
     const c = line.cells[i]?.c ?? ' ';
     return c.length === 1 ? c : ' ';
   }).join('');
+  /** @type {string[]} */
   const hrefs = [];
   for (const m of text.matchAll(URL_RE)) {
     // Punctuation that ends a sentence, or a bracket the URL was wrapped in, is not part of it.
@@ -307,14 +357,16 @@ function lineLinks(line) {
   return hrefs;
 }
 
+/** @param {Line} line @param {number} [cursorX] @param {LineCache} [cache] */
 function lineNode(line, cursorX = -1, cache = drawn) {
   const was = cache.get(line);
   if (was && was.v === line.v && was.cx === cursorX && was.theme === currentTheme().key) return was.el;
   const el = was?.el ?? h('div', { class: 'term-line' });
+  /** @type {(Node | string)[]} */
   const spans = [];
   const end = Math.max(line.cells.length, cursorX + 1);
   const hrefs = lineLinks(line);
-  const hrefAt = (x) => styleOf(line.cells[x]?.k ?? '').link ?? hrefs[x];
+  const hrefAt = (/** @type {number} */ x) => styleOf(line.cells[x]?.k ?? '').link ?? hrefs[x];
   let x = 0;
   while (x < end) {
     const cursor = x === cursorX;
@@ -339,6 +391,7 @@ function lineNode(line, cursorX = -1, cache = drawn) {
 
 // Draws a terminal into a view's elements ({ history, screen, from, theme }). `cache` keeps each line's element for
 // that view: one line can be shown by Dev and by another view at once.
+/** @param {LinesEl} el @param {Terminal} term @param {number} cursorY @param {LineCache} [cache] */
 function drawLines(el, term, cursorY, cache = drawn) {
   const { history, screen } = el;
   // The theme changed: every line is drawn again in the new colours.
@@ -349,12 +402,14 @@ function drawLines(el, term, cursorY, cache = drawn) {
   }
   // History lines never change once scrolled off; only new ones are added, and old ones dropped.
   const drop = Math.min(history.childElementCount, term.trimmed - el.from);
-  for (let i = 0; i < drop; i++) history.firstChild.remove();
+  // drop is at most the number of lines shown.
+  for (let i = 0; i < drop; i++) /** @type {ChildNode} */ (history.firstChild).remove();
   if (term.trimmed > el.from) el.from = term.trimmed;
   for (let i = el.from + history.childElementCount - term.trimmed; i < term.history.length; i++) history.append(lineNode(term.history[i], -1, cache));
   screen.replaceChildren(...term.screen.slice(0, term.used()).map((l, y) => lineNode(l, y === cursorY ? Math.min(term.x, term.cols - 1) : -1, cache)));
 }
 
+/** @param {Session} s */
 function paint(s) {
   if (!s.el) return;
   const { term } = s;
@@ -366,14 +421,17 @@ function paint(s) {
 
 // A read-only terminal for other sections (Cron), drawn as Dev draws its own: colours, styles and links. paint(term)
 // draws it again and keeps it at the end when it was there.
+/** @param {string} [label] */
 export function terminalView(label = 'Terminal output') {
   const history = h('div', { class: 'term-history' });
   const screen = h('div', { class: 'term-screen' });
   const out = h('div', { class: 'term-out term-view', tabindex: '0', role: 'log', 'aria-label': label }, history, screen);
   const el = { history, screen, from: 0, theme: '' };
+  /** @type {LineCache} */
   const cache = new WeakMap();
   return {
     el: out,
+    /** @param {Terminal} term */
     paint(term) {
       const atEnd = out.scrollHeight - out.scrollTop - out.clientHeight < 24;
       // The theme may have been switched since Dev last drew.
@@ -385,7 +443,7 @@ export function terminalView(label = 'Terminal output') {
 }
 
 // The colours programs are told the page uses, for terminals drawn outside Dev.
-export const terminalBackground = (which) => themeColor(which);
+export const terminalBackground = (/** @type {'fg' | 'bg'} */ which) => themeColor(which);
 
 let frame = 0;
 const schedulePaint = () => (frame ||= requestAnimationFrame(() => {
@@ -396,17 +454,21 @@ const schedulePaint = () => (frame ||= requestAnimationFrame(() => {
 
 // A page reads a session through one stream, so a second reader would cut Dev's off. Elsewhere (Cron) a view of a
 // terminal Dev already reads shows Dev's copy, told of each change.
+/** @type {Set<() => void>} */
 const painted = new Set();
+/** @param {string} id */
 export function liveSession(id) {
   const s = view.sessions.find((x) => x.id === id && x.attach);
   return s ? { term: s.term, running: s.running, exit: s.exit } : null;
 }
+/** @param {() => void} fn */
 export function onSessionPaint(fn) {
   painted.add(fn);
   return () => painted.delete(fn);
 }
 
 // Columns and rows that fit the terminal, from the size of one character.
+/** @param {Session} s */
 function fit(s) {
   const out = s.el?.out;
   if (!out?.isConnected || !out.clientWidth) return;
@@ -421,16 +483,19 @@ function fit(s) {
   const rows = Math.max(5, Math.floor(height / box.height));
   if (cols === s.term.cols && rows === s.term.rows) return;
   s.term.resize(cols, rows);
-  if (s.running && s.pid) sendInput(runnerOf(currentStore), s.pid, { cols, rows });
+  if (s.running && s.pid) sendInput(runnerOf(/** @type {Store} */ (currentStore)), s.pid, { cols, rows });
   schedulePaint();
 }
 
 // Keys for the program, as a terminal sends them.
+/** @param {KeyboardEvent} e @param {boolean} appCursor @returns {string | null} */
 function keyData(e, appCursor) {
   if (e.isComposing || e.metaKey) return null;
   const mod = 1 + (e.shiftKey ? 1 : 0) + (e.altKey ? 2 : 0) + (e.ctrlKey ? 4 : 0);
+  /** @type {Record<string, string>} */
   const arrows = { ArrowUp: 'A', ArrowDown: 'B', ArrowRight: 'C', ArrowLeft: 'D', Home: 'H', End: 'F' };
   if (arrows[e.key]) return mod > 1 ? `\x1b[1;${mod}${arrows[e.key]}` : `${appCursor ? '\x1bO' : '\x1b['}${arrows[e.key]}`;
+  /** @type {Record<string, string>} */
   const named = {
     Enter: e.shiftKey || e.altKey ? '\x1b\r' : '\r',
     Backspace: e.altKey ? '\x1b\x7f' : e.ctrlKey ? '\x08' : '\x7f',
@@ -447,6 +512,7 @@ function keyData(e, appCursor) {
     const k = e.key.length === 1 ? e.key.toLowerCase() : '';
     if (k >= 'a' && k <= 'z') return String.fromCharCode(k.charCodeAt(0) - 96);
     if (k === ' ' || k === '@' || k === '2') return '\x00';
+    /** @type {Record<string, string>} */
     const ctrl = { '[': '\x1b', '\\': '\x1c', ']': '\x1d', '^': '\x1e', '6': '\x1e', '_': '\x1f', '-': '\x1f', '/': '\x1f' };
     return ctrl[k] ?? null;
   }
@@ -455,10 +521,11 @@ function keyData(e, appCursor) {
   return e.altKey && !isMac ? `\x1b${e.key}` : e.key;
 }
 
+/** @param {Store} store @param {Session} s @param {KeyboardEvent} e */
 function onTerminalKey(store, s, e) {
   if (!s.running || !s.pid) {
     // Typing in the output of an idle terminal goes to its command line.
-    if ([...e.key].length === 1 && !e.metaKey && !e.ctrlKey) document.querySelector('.term-input')?.focus();
+    if ([...e.key].length === 1 && !e.metaKey && !e.ctrlKey) /** @type {HTMLInputElement | null} */ (document.querySelector('.term-input'))?.focus();
     return;
   }
   // Copy keeps working: Cmd+C on a Mac, and Ctrl+C elsewhere while text is selected.
@@ -470,6 +537,7 @@ function onTerminalKey(store, s, e) {
   sendInput(runnerOf(store), s.pid, { data });
 }
 
+/** @param {Store} store @param {Session} s @param {ClipboardEvent} e */
 function onTerminalPaste(store, s, e) {
   if (!s.running || !s.pid) return;
   e.preventDefault();
@@ -481,13 +549,14 @@ function onTerminalPaste(store, s, e) {
 
 // Types the paths of images into the running program, as dragging a file onto a terminal does: claude attaches them.
 // The browser does not say where a file lives, so the runner saves a copy and answers its path.
+/** @param {Store} store @param {Session} s @param {File[]} images */
 async function typeImages(store, s, images) {
   const pid = s.pid;
   let paths;
   try {
     paths = await Promise.all(images.map(async (blob) => (await saveImage(runnerOf(store), blob)).path));
   } catch (err) {
-    return toast(err.message);
+    return toast(/** @type {Error} */ (err).message);
   }
   if (!s.running || s.pid !== pid) return;
   const text = `${paths.join(' ')} `;
@@ -496,10 +565,12 @@ async function typeImages(store, s, images) {
   s.el?.out.focus({ preventScroll: true });
 }
 
+/** @param {Store} store @param {Session} s @param {DragEvent} e */
 function onTerminalDrop(store, s, e) {
   if (!dragsFiles(e)) return;
   e.preventDefault();
-  s.el.out.classList.remove('dropping');
+  // Dropped on the terminal's own element.
+  /** @type {TermEl} */ (s.el).out.classList.remove('dropping');
   const images = imageFiles(e.dataTransfer);
   if (!images.length) return toast('Only PNG, JPEG, GIF and WebP images can be dropped here');
   if (!s.running || !s.pid) return toast('Start claude in this terminal first, then drop the image');
@@ -509,16 +580,19 @@ function onTerminalDrop(store, s, e) {
 // Scrolling up to read stops following new output; scrolling back to the end follows it again. The direction
 // decides, not only the distance: a smooth wheel scroll starts a few pixels from the end, and following output
 // there would pull it straight back down.
+/** @param {Session} s */
 function onTerminalScroll(s) {
-  const { out } = s.el;
+  // Scrolled: its elements exist.
+  const { out } = /** @type {TermEl} */ (s.el);
   const top = out.scrollTop;
-  if (top < s.el.top - 1) s.stick = false;
+  if (top < /** @type {TermEl} */ (s.el).top - 1) s.stick = false;
   else if (out.scrollHeight - top - out.clientHeight < 24) s.stick = true;
-  s.el.top = top;
+  /** @type {TermEl} */ (s.el).top = top;
 }
 
 // A full-screen program (the Claude CLI, less, vim) keeps no scrollback here, so the wheel goes to it, as a
 // terminal sends it: mouse reports when it asked for them, otherwise arrow keys on the alternate screen.
+/** @param {Store} store @param {Session} s @param {WheelEvent} e */
 function onTerminalWheel(store, s, e) {
   if (e.deltaY < 0) s.stick = false;
   const { term } = s;
@@ -528,7 +602,7 @@ function onTerminalWheel(store, s, e) {
   const lines = Math.min(10, Math.max(1, Math.round(Math.abs(e.deltaMode ? e.deltaY : e.deltaY / 40))));
   let data;
   if (term.mouse) {
-    const box = s.el.screen.getBoundingClientRect();
+    const box = /** @type {TermEl} */ (s.el).screen.getBoundingClientRect();
     const x = Math.min(term.cols, Math.max(1, Math.ceil(((e.clientX - box.left) / box.width) * term.cols) || 1));
     const y = Math.min(term.rows, Math.max(1, Math.ceil(((e.clientY - box.top) / box.height) * term.rows) || 1));
     const b = up ? 64 : 65;
@@ -540,6 +614,7 @@ function onTerminalWheel(store, s, e) {
   sendInput(runnerOf(store), s.pid, { data });
 }
 
+/** @param {Store} store @param {Session} s @returns {TermEl} */
 function elementsOf(store, s) {
   if (s.el) return s.el;
   const history = h('div', { class: 'term-history' });
@@ -550,16 +625,16 @@ function elementsOf(store, s) {
     role: 'log',
     'aria-label': `Terminal ${s.n} output`,
     onscroll: () => onTerminalScroll(s),
-    onwheel: (e) => onTerminalWheel(store, s, e),
-    onkeydown: (e) => onTerminalKey(store, s, e),
-    onpaste: (e) => onTerminalPaste(store, s, e),
-    ondragover: (e) => {
+    onwheel: (/** @type {WheelEvent} */ e) => onTerminalWheel(store, s, e),
+    onkeydown: (/** @type {KeyboardEvent} */ e) => onTerminalKey(store, s, e),
+    onpaste: (/** @type {ClipboardEvent} */ e) => onTerminalPaste(store, s, e),
+    ondragover: (/** @type {DragEvent} */ e) => {
       if (!dragsFiles(e)) return;
       e.preventDefault();
       out.classList.add('dropping');
     },
-    ondragleave: (e) => !out.contains(e.relatedTarget) && out.classList.remove('dropping'),
-    ondrop: (e) => onTerminalDrop(store, s, e),
+    ondragleave: (/** @type {DragEvent} */ e) => !out.contains(/** @type {Node | null} */ (e.relatedTarget)) && out.classList.remove('dropping'),
+    ondrop: (/** @type {DragEvent} */ e) => onTerminalDrop(store, s, e),
   }, history, screen);
   s.el = { out, history, screen, from: 0, top: 0 };
   s.observer = new ResizeObserver(() => fit(s));
@@ -568,17 +643,20 @@ function elementsOf(store, s) {
 }
 
 // A command on one line, for the places that show it: a prompt can span several.
-const oneLine = (text) => text.replace(/\s*\n\s*/g, ' ↵ ');
+const oneLine = (/** @type {string} */ text) => text.replace(/\s*\n\s*/g, ' ↵ ');
 
-const duration = (ms) => (ms < 1000 ? `${Math.round(ms)}ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`);
+const duration = (/** @type {number} */ ms) => (ms < 1000 ? `${Math.round(ms)}ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`);
+/** @param {Exit | null | undefined} exit */
 export function exitText(exit) {
   if (!exit) return '';
-  if (exit.stopped) return `Stopped after ${duration(exit.ms)}`;
+  // Only a lost command has no time.
+  if (exit.stopped) return `Stopped after ${duration(/** @type {number} */ (exit.ms))}`;
   if (exit.lost) return 'Ended when the runner stopped';
-  if (exit.signal) return `Ended by ${exit.signal} after ${duration(exit.ms)}`;
-  return `Exit ${exit.code} · ${duration(exit.ms)}`;
+  if (exit.signal) return `Ended by ${exit.signal} after ${duration(/** @type {number} */ (exit.ms))}`;
+  return `Exit ${exit.code} · ${duration(/** @type {number} */ (exit.ms))}`;
 }
 
+/** @param {Store} store */
 async function checkRunner(store) {
   view.checking = true;
   try {
@@ -591,7 +669,7 @@ async function checkRunner(store) {
     for (const s of view.sessions) attach(store, s);
   } catch (err) {
     view.info = null;
-    view.infoError = err.message;
+    view.infoError = /** @type {Error} */ (err).message;
   } finally {
     view.checking = false;
     // The terminals the runner listed are known now: the one the URL or a task names can be shown.
@@ -601,6 +679,7 @@ async function checkRunner(store) {
 }
 
 // What claude used in a task's terminal so far, read from its transcript (dev-usage.js).
+/** @param {Store} store @param {Session} s */
 function sessionUsage(store, s) {
   const record = recordOfSession(store, s.id);
   if (!record) return null;
@@ -614,6 +693,7 @@ function sessionUsage(store, s) {
 // Returns the terminal's session id, so the tasks can find it again (openSession), and the worktree claude makes
 // ({ name, cwd }: its name and the folder of its repo), so the tasks can remove it once done; null when the command
 // makes none, or names its own.
+/** @param {{ store: Store, prompt: string, projectId?: string, taskIds?: string[], title?: string }} options */
 export function startClaudeSession({ store, prompt, projectId = '', taskIds = [], title = '' }) {
   const id = uid();
   const { command, worktree } = claudeCommand(store, projectId, title, id, rootPath(store, view.workspace));
@@ -627,6 +707,10 @@ export function startClaudeSession({ store, prompt, projectId = '', taskIds = []
 // terminal opens in the project's folder, or the board's when there is none. Resolves to { id, n, worktree } once
 // the runner started it; fails when the runner cannot be reached or refuses. `devCommand` replaces the project's Dev
 // command for this one start (a preset or a command typed in Cron).
+/**
+ * @param {{ store: Store, claude?: boolean, prompt?: string, command?: string, devCommand?: string, projectId?: string,
+ *   taskIds?: string[], title?: string }} options
+ */
 export async function startDevSession({ store, claude = false, prompt = '', command = '', devCommand = '', projectId = '', taskIds = [], title = '' }) {
   const base = runnerOf(store);
   const info = view.info ?? await runnerInfo(base);
@@ -664,6 +748,7 @@ export async function startDevSession({ store, claude = false, prompt = '', comm
 
 // Opens Dev on a terminal session a task started. One this page does not list (closed here, or started in another
 // browser) is listed again while the runner still has it.
+/** @param {{ id: string, cwd?: string, taskIds?: string[] }} options */
 export function openSession({ id, cwd = '', taskIds = [] }) {
   view.opening = { id, cwd, taskIds };
   showDev();
@@ -694,8 +779,10 @@ function backButton() {
   }, icon('arrow-left'));
 }
 
+/** @param {Store} store */
 function showOpening(store) {
-  const { id, cwd, taskIds } = view.opening;
+  // Called once view.opening is set.
+  const { id, cwd, taskIds } = /** @type {NonNullable<typeof view.opening>} */ (view.opening);
   view.opening = null;
   let s = view.sessions.find((x) => x.id === id);
   if (!s) {
@@ -706,8 +793,10 @@ function showOpening(store) {
   saveSessions();
 }
 
+/** @param {Store} store */
 function startQueued(store) {
-  const { id, prompt, projectId, taskIds, command } = view.queued;
+  // Called once view.queued is set.
+  const { id, prompt, projectId, taskIds, command } = /** @type {NonNullable<typeof view.queued>} */ (view.queued);
   const project = store.get('projects').projects.find((p) => p.id === projectId);
   if (project?.localPath) {
     view.workspace = `p:${project.id}`;
@@ -721,19 +810,22 @@ function startQueued(store) {
   requestAnimationFrame(() => run(store, s, `${command} -- ${shellQuote(prompt)}`, { remember: false }));
 }
 
+/** @param {Store} store @param {string} command */
 function remember(store, command) {
   store.update(COLLECTION, (d) => {
     d.history = [command, ...d.history.filter((c) => c !== command)].slice(0, HISTORY_MAX);
   });
 }
 
+/** @param {Session} s */
 function clearTerminal(s) {
   s.term.clear();
   schedulePaint();
-  clearSession(runnerOf(currentStore), s.id).catch(() => {});
+  clearSession(runnerOf(/** @type {Store} */ (currentStore)), s.id).catch(() => {});
 }
 
 // The runner starts the command; what it prints, and how it ends, arrive through the session's stream.
+/** @param {Store} store @param {Session} s @param {string} command @param {{ remember?: boolean }} [options] */
 async function run(store, s, command, { remember: keep = true } = {}) {
   if (command === 'clear') {
     clearTerminal(s);
@@ -748,14 +840,15 @@ async function run(store, s, command, { remember: keep = true } = {}) {
   try {
     await runCommand(runnerOf(store), { session: s.id, command, cwd: s.cwd, cols: s.term.cols, rows: s.term.rows, theme: currentTheme().dark ? 'dark' : 'light' });
   } catch (err) {
-    s.term.note(err.message, 't-err');
+    s.term.note(/** @type {Error} */ (err).message, 't-err');
     schedulePaint();
     // The runner may have gone away; ask again so the page says so.
-    if (/reach the terminal runner/.test(err.message)) checkRunner(store);
+    if (/reach the terminal runner/.test(/** @type {Error} */ (err).message)) checkRunner(store);
   }
 }
 
 // A searchable list, since a board with many projects makes a plain dropdown long; projects show their icon.
+/** @param {Store} store */
 function workspacePicker(store) {
   const projects = [...projectsWithFolder(store)].sort((a, b) => a.name.localeCompare(b.name));
   const options = [
@@ -782,7 +875,9 @@ function workspacePicker(store) {
 
 // Files, Search or Source Control, as icons along the top like Cursor's activity bar. Source Control shows how many files
 // changed as a badge on its icon.
+/** @param {Store} store */
 function sideSwitcher(store) {
+  /** @type {(side: string, name: IconName, label: string, badge?: Child) => HTMLButtonElement} */
   const tab = (side, name, label, badge) => h('button', {
     type: 'button',
     role: 'tab',
@@ -811,6 +906,7 @@ function sideSwitcher(store) {
 }
 
 // Shows a terminal and gives it the keys.
+/** @param {Store} store @param {Session} s */
 function jumpTo(store, s) {
   view.active = s.id;
   saveSessions();
@@ -820,6 +916,7 @@ function jumpTo(store, s) {
 
 // Every open terminal, running ones first, with what runs in it or the task handed to it: a click jumps in.
 // On a terminal or worktree a Cron run started: a button that opens the run.
+/** @param {Store} store @param {{ session?: string, worktree?: string, runId?: string }} which @param {string} label */
 function cronLink(store, which, label) {
   const run = cronRunOf(store, which);
   if (!run) return null;
@@ -832,12 +929,14 @@ function cronLink(store, which, label) {
   }, icon('repeat'));
 }
 
+/** @param {Store} store @param {Child} picker @param {Child} switcher */
 function terminalsPanel(store, picker, switcher) {
   const tasks = store.get('todos').items;
   const shown = activeSession()?.id;
+  // @ts-expect-error booleans subtract as 1 and 0: running terminals first.
   const list = [...view.sessions].sort((a, b) => (b.running - a.running) || a.n - b.n);
   const running = list.filter((s) => s.running).length;
-  const row = (s) => {
+  const row = (/** @type {Session} */ s) => {
     const titles = s.tasks.map((id) => tasks.find((t) => t.id === id)?.text).filter(Boolean);
     const what = s.running ? oneLine(s.command) : exitText(s.exit) || 'Ready';
     const state = s.running ? 'Running' : 'Idle';
@@ -877,6 +976,7 @@ function terminalsPanel(store, picker, switcher) {
       : h('p', { class: 'muted small' }, 'No terminals open.'));
 }
 
+/** @param {Store} store */
 function sessionTabs(store) {
   const full = view.sessions.length >= maxSessions();
   return h('nav', { class: 'term-tabs', role: 'tablist', 'aria-label': 'Terminals' },
@@ -918,6 +1018,7 @@ function sessionTabs(store) {
     }, icon('plus')));
 }
 
+/** @param {Store} store @param {Session} s */
 function terminal(store, s) {
   const history = store.get(COLLECTION).history;
   const { out } = elementsOf(store, s);
@@ -933,7 +1034,7 @@ function terminal(store, s) {
     'aria-label': 'Command',
     'data-autofocus': !s.running,
     // Up and Down walk the saved commands, newest first, as in a shell.
-    onkeydown: (e) => {
+    onkeydown: (/** @type {KeyboardEvent} */ e) => {
       if (e.key === 'l' && e.ctrlKey) {
         e.preventDefault();
         clearTerminal(s);
@@ -966,7 +1067,7 @@ function terminal(store, s) {
     out,
     h('form', {
       class: 'term-form',
-      onsubmit: (e) => {
+      onsubmit: (/** @type {SubmitEvent} */ e) => {
         e.preventDefault();
         if (s.running) return stopCommand(runnerOf(store), s.id).catch((err) => toast(err.message));
         const command = input.value.trim();
@@ -997,6 +1098,7 @@ function terminal(store, s) {
         : null));
 }
 
+/** @param {Store} store */
 function runnerNotice(store) {
   return h('div', { class: 'stack' },
     notice({
@@ -1005,9 +1107,9 @@ function runnerNotice(store) {
     }),
     h('form', {
       class: 'row term-runner',
-      onsubmit: (e) => {
+      onsubmit: (/** @type {SubmitEvent} */ e) => {
         e.preventDefault();
-        const runner = String(new FormData(e.currentTarget).get('runner') ?? '').trim().replace(/\/+$/, '');
+        const runner = String(new FormData(/** @type {HTMLFormElement} */ (e.currentTarget)).get('runner') ?? '').trim().replace(/\/+$/, '');
         store.update(COLLECTION, (d) => {
           d.runner = runner;
         });
@@ -1019,6 +1121,7 @@ function runnerNotice(store) {
     h('p', { class: 'muted small' }, `Leave the address empty to use ${TERMINAL_RUNNER}. Change it only if you started the board with TERMINAL_PORT.`));
 }
 
+/** @param {HTMLElement} root @param {Store} store */
 function draw(root, store) {
   // A render follows a theme switch, so the theme is read again.
   theme = null;
@@ -1064,7 +1167,7 @@ function draw(root, store) {
   requestAnimationFrame(fillWindow);
   if (!s) return;
   requestAnimationFrame(() => {
-    if (focused) s.el.out.focus({ preventScroll: true });
+    if (focused) /** @type {TermEl} */ (s.el).out.focus({ preventScroll: true });
     fit(s);
     paint(s);
   });
@@ -1072,12 +1175,12 @@ function draw(root, store) {
 
 // The page fills the window below where it starts, which moves with the top bar's wrapping and the banners above it.
 function fillWindow() {
-  const dev = document.querySelector('.dev');
+  const dev = /** @type {HTMLElement | null} */ (document.querySelector('.dev'));
   if (!dev) return;
   // offsetTop, not the bounding box: the entrance animation moves the page while it plays.
   let top = 0;
-  for (let el = dev; el; el = el.offsetParent) top += el.offsetTop;
-  const below = parseFloat(getComputedStyle(dev.parentElement).paddingBottom) || 0;
+  for (let el = /** @type {HTMLElement | null} */ (dev); el; el = /** @type {HTMLElement | null} */ (el.offsetParent)) top += el.offsetTop;
+  const below = parseFloat(getComputedStyle(/** @type {HTMLElement} */ (dev.parentElement)).paddingBottom) || 0;
   dev.style.setProperty('--dev-top', `${Math.round(top + below)}px`);
 }
 addEventListener('resize', fillWindow);
@@ -1099,7 +1202,7 @@ export default {
   // The terminal shown is in the URL, so a refresh or a shared link opens it.
   serialize: () => ({ term: view.sessions.length > 1 ? activeSession()?.n : '' }),
   // #/dev?project=<id> (from a project page) opens that project's folder, with a terminal in it.
-  restore: (p = {}) => {
+  restore: (/** @type {Record<string, string>} */ p = {}) => {
     if (p.project) view.pending = `p:${p.project}`;
     const n = Number(p.term);
     if (Number.isInteger(n) && n > 0) {
