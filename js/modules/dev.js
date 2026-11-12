@@ -574,9 +574,9 @@ export function startClaudeSession({ store, prompt, projectId = '', taskIds = []
 
 // The project's Dev command (or the default), with a name for the worktree it makes. `fallbackCwd` is the folder
 // used when the project has none.
-function claudeCommand(store, projectId, title, id, fallbackCwd) {
+function claudeCommand(store, projectId, title, id, fallbackCwd, override = '') {
   const project = store.get('projects').projects.find((p) => p.id === projectId);
-  let command = devCommandOf(store, project);
+  let command = override.trim() || devCommandOf(store, project);
   let worktree = null;
   if (BARE_WORKTREE.test(command)) {
     worktree = { name: worktreeName(title, id), cwd: project?.localPath || fallbackCwd };
@@ -588,8 +588,9 @@ function claudeCommand(store, projectId, title, id, fallbackCwd) {
 // Starts a command in a new Dev terminal and stays on the page shown, for work the board starts by itself (Cron).
 // With `claude`, `prompt` goes to claude as a task's Dev button sends it; otherwise `command` runs as typed. The
 // terminal opens in the project's folder, or the board's when there is none. Resolves to { id, n, worktree } once
-// the runner started it; fails when the runner cannot be reached or refuses.
-export async function startDevSession({ store, claude = false, prompt = '', command = '', projectId = '', taskIds = [], title = '' }) {
+// the runner started it; fails when the runner cannot be reached or refuses. `devCommand` replaces the project's Dev
+// command for this one start (a preset or a command typed in Cron).
+export async function startDevSession({ store, claude = false, prompt = '', command = '', devCommand = '', projectId = '', taskIds = [], title = '' }) {
   const base = runnerOf(store);
   const info = view.info ?? await runnerInfo(base);
   const project = store.get('projects').projects.find((p) => p.id === projectId);
@@ -597,7 +598,7 @@ export async function startDevSession({ store, claude = false, prompt = '', comm
   const id = uid();
   let worktree = null;
   if (claude) {
-    ({ command, worktree } = claudeCommand(store, projectId, title, id, cwd));
+    ({ command, worktree } = claudeCommand(store, projectId, title, id, cwd, devCommand));
     command = `${command} -- ${shellQuote(prompt)}`;
   }
   // The terminal is not on the page yet: it starts at a usual size and is fitted once shown.

@@ -7,7 +7,7 @@ import { modelChip } from '../model-picker.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import {
-  COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, DEV_MODES, TEMPLATES, daysOf,
+  COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, TEMPLATES, devRunOptions, devRunValue, devCommandPreview, daysOf,
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, makeSource, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
 } from '../cron.js';
@@ -259,7 +259,8 @@ function stepSummary(store, flow, step) {
   if (step.type === 'dev') {
     const id = withFlowProject(flow, step).projectId;
     const where = id ? projectName(store, id) : 'Task’s project or board';
-    return `${step.mode === 'command' ? step.command || 'Enter a command' : 'claude'} · ${where}`;
+    const label = Object.fromEntries(devRunOptions(store))[devRunValue(step)] ?? 'Removed preset';
+    return `${step.mode === 'command' ? step.command || 'Enter a command' : label} · ${where}`;
   }
   return step.text || 'Notification';
 }
@@ -567,20 +568,36 @@ function stepForm(store, flow, step) {
     const own = withFlowProject(flow, step).projectId;
     const folders = projectsOf(store).filter((p) => p.localPath || p.id === own);
     const hasTask = flow.steps.slice(0, flow.steps.indexOf(step)).some((s) => s.type === 'task');
+    const options = devRunOptions(store);
+    const value = devRunValue(step);
+    // A preset removed in Settings still shows as chosen, so the step does not silently change what it runs.
+    if (!options.some(([v]) => v === value)) options.splice(1, 0, [value, 'Removed preset']);
+    const run = (v) => {
+      if (v.startsWith('preset:')) return set({ mode: 'preset', preset: v.slice(7) });
+      // A custom command starts from what the step ran until now, so it only needs the change.
+      if (v === 'custom' && !String(step.devCommand ?? '').trim()) return set({ mode: v, devCommand: devCommandPreview(store, flow, { ...step, mode: 'claude' }) });
+      return set({ mode: v });
+    };
+    const preview = claude && step.mode !== 'custom' ? devCommandPreview(store, flow, step) : '';
     return h('div', { class: 'stack' },
       h('div', { class: 'row cron-fields' },
-        field('Run', select(step.mode, DEV_MODES, (mode) => set({ mode }))),
+        field('Run', select(value, options, run)),
         field('Folder', stepProjectPick(store, flow, step.projectId, (projectId) => set({ projectId }), {
           none: 'The task’s project, else this board',
           list: folders, name: (p) => (p.localPath ? p.name : `${p.name} (no local folder)`),
         }), 'Projects show here once they have a local folder.')),
+      step.mode === 'custom'
+        ? field('Dev command', h('input', { value: step.devCommand ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (e) => set({ devCommand: e.target.value }) }),
+            'The Dev prompt is passed to it as its last word. A bare --worktree gets a name, as from a task.')
+        : null,
+      preview ? h('code', { class: 'muted small' }, preview) : null,
       claude
-        ? field('Prompt for claude', h('textarea', { rows: 6, class: 'mono-text', onchange: (e) => set({ prompt: e.target.value }) }, step.prompt ?? ''))
+        ? field('Dev prompt', h('textarea', { rows: 6, class: 'mono-text', onchange: (e) => set({ prompt: e.target.value }) }, step.prompt ?? ''))
         : field('Command', h('input', { value: step.command ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, placeholder: 'npm run build', onchange: (e) => set({ command: e.target.value }) }),
             'Each {{…}} goes in as one quoted word, so text from a model never runs as a command.'),
       h('p', { class: 'muted small' }, 'Use {{input}} for the previous step’s output, {{task}} for the task made above (its title and description), {{date}} and {{flow}}.'),
       h('p', { class: 'muted small' },
-        claude ? 'claude starts with the project’s Dev command, in a worktree of its own. ' : '',
+        claude ? 'The command starts in the folder, in a worktree of its own when it asks for one. ' : '',
         hasTask
           ? 'The task made above goes with it, as from its Dev button: it moves to In progress, and the issues and PRs the terminal prints are added to it. '
           : 'Put a “Create task” step before this one to follow the work from a task. ',

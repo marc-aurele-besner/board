@@ -8,7 +8,7 @@ import { calendarEvents, calendarAccounts, eventDate } from './gcal.js';
 import { sitesOf, siteData } from './automations.js';
 import { readPageText } from './sitecheck.js';
 import { openPositions } from './modules/positions.js';
-import { startDevSession } from './modules/dev.js';
+import { startDevSession, devPresets, devCommandOf } from './modules/dev.js';
 
 export const COLLECTION = 'cron';
 export const DEFAULTS = { flows: [], runs: [] };
@@ -23,14 +23,43 @@ export const STEP_TYPES = [
   ['stop', 'Stop if', 'filter', 'Ends the run early, for example when there is nothing to report.'],
   ['task', 'Create task', 'check-square', 'Adds a task with the output as its description.'],
   ['notify', 'Notify', 'bell', 'Posts the output under the bell (and Telegram if enabled).'],
-  ['dev', 'Run in Dev', 'terminal', 'Hands the output to claude, or runs a command, in a new Dev terminal.'],
+  ['dev', 'Run in Dev', 'terminal', 'Hands a prompt to the project’s Dev command, a preset or your own, in a new Dev terminal.'],
 ];
 
-// What a "Run in Dev" step starts.
-export const DEV_MODES = [
-  ['claude', 'claude, with a prompt'],
-  ['command', 'A shell command'],
-];
+// What a "Run in Dev" step starts: the project's Dev command ('claude'), a preset from Settings → Dev environment
+// ('preset', step.preset), a Dev command typed on the step ('custom', step.devCommand), each with the Dev prompt,
+// or a plain shell command with no prompt ('command').
+export function devRunOptions(store) {
+  return [
+    ['claude', 'Project’s Dev command'],
+    ...devPresets(store).map((p) => [`preset:${p.id}`, `Preset: ${p.name}`]),
+    ['custom', 'Custom Dev command'],
+    ['command', 'Shell command (no prompt)'],
+  ];
+}
+export const devRunValue = (step) => (step.mode === 'preset' ? `preset:${step.preset}` : step.mode || 'claude');
+
+// The Dev command a step starts with its prompt, or '' for the project's own.
+function stepDevCommand(store, step) {
+  if (step.mode === 'custom') {
+    if (!String(step.devCommand ?? '').trim()) throw new Error('Enter the Dev command to run.');
+    return step.devCommand;
+  }
+  if (step.mode !== 'preset') return '';
+  const preset = devPresets(store).find((p) => p.id === step.preset);
+  if (!preset?.command?.trim()) throw new Error('The preset of this step was removed. Choose another in Settings → Dev environment.');
+  return preset.command;
+}
+
+// The command a Dev step runs before its prompt, to show it in the editor.
+export function devCommandPreview(store, flow, step) {
+  if (step.mode === 'command') return '';
+  try {
+    return stepDevCommand(store, step) || devCommandOf(store, store.get('projects').projects.find((p) => p.id === withFlowProject(flow, step).projectId));
+  } catch (err) {
+    return err.message;
+  }
+}
 
 export const STOP_WHEN = [
   ['nothing', 'The data step found nothing'],
@@ -131,7 +160,7 @@ export function makeStep(type) {
   if (type === 'ai') return { ...base, prompt: 'Summarize this in five bullet points:\n\n{{input}}', system: '', model: '' };
   if (type === 'task') return { ...base, title: '{{flow}} · {{date}}', projectId: '', priority: 'none', due: '' };
   if (type === 'stop') return { ...base, when: 'nothing', text: '' };
-  if (type === 'dev') return { ...base, mode: 'claude', projectId: '', prompt: '{{input}}', command: '' };
+  if (type === 'dev') return { ...base, mode: 'claude', preset: '', devCommand: '', projectId: '', prompt: '{{input}}', command: '' };
   return { ...base, text: '{{flow}}: {{input}}' };
 }
 
@@ -830,13 +859,15 @@ async function runDev(store, flow, step, input, vars, ctx) {
   const prompt = claude ? fill(step.prompt || '{{input}}', v).trim() : '';
   // Values go into a command as one quoted word each, so text from a model cannot run as shell.
   const command = claude ? '' : String(step.command ?? '').replace(/\{\{\s*(\w+)\s*\}\}/g, (m, k) => (k in v ? shellQuote(v[k]) : m)).trim();
-  if (claude ? !prompt : !command) throw new Error(claude ? 'Write the prompt for claude.' : 'Enter the command to run.');
+  if (claude ? !prompt : !command) throw new Error(claude ? 'Write the Dev prompt.' : 'Enter the command to run.');
+  const devCommand = claude ? stepDevCommand(store, step) : '';
   const where = project ? `${project.name}’s folder` : 'the board’s folder';
   if (ctx.dry) {
-    ctx.note = `Test run: would ${claude ? 'hand this prompt to claude' : 'run this command'} in a new Dev terminal, in ${where}.`;
+    const how = devCommand ? `start “${devCommand.trim()}” with this prompt` : claude ? 'hand this prompt to the project’s Dev command' : 'run this command';
+    ctx.note = `Test run: would ${how} in a new Dev terminal, in ${where}.`;
     return claude ? prompt : command;
   }
-  const { id, n, worktree } = await startDevSession({ store, claude, prompt, command, projectId, taskIds: task ? [task.id] : [], title: task?.text || flow.name });
+  const { id, n, worktree } = await startDevSession({ store, claude, prompt, command, devCommand, projectId, taskIds: task ? [task.id] : [], title: task?.text || flow.name });
   if (task) {
     store.update('todos', (d) => {
       const t = d.items.find((x) => x.id === task.id);
