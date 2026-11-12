@@ -13,7 +13,7 @@ import { TERMINAL_RUNNER, runnerInfo, listSessions, saveSessionList, attachSessi
 import { imageFiles, dragsFiles } from '../images.js';
 import { createTerminal, styleOf, colorOf } from '../vt.js';
 import { readTheme, themedColors } from '../term-colors.js';
-import { explorer, editor, setRoot, hasOpenFiles, baseName } from './dev-files.js';
+import { explorer, editor, setRoot, hasOpenFiles, baseName, panelHead, panelAction } from './dev-files.js';
 import { sourceControl, refreshGit, decorOf, changeCount } from './dev-git.js';
 import { searchPanel } from './dev-search.js';
 import { worktreesPanel, refreshWorktrees } from './dev-worktrees.js';
@@ -31,7 +31,7 @@ const RECENT_SHOWN = 8;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 // Where this browser kept the open terminals before the runner did; read once, then removed.
 const OLD_SESSIONS_KEY = 'board:dev-sessions';
-// The side panel shown: 'files', 'search', 'git' or 'worktrees'.
+// The side panel shown: 'files', 'search', 'git', 'worktrees' or 'terminals'.
 const SIDE_KEY = 'board:dev-side';
 
 // View state: the workspace, the sessions, the one shown, and what the runner said about itself.
@@ -41,7 +41,7 @@ let currentStore = null;
 function readSide() {
   try {
     const side = localStorage.getItem(SIDE_KEY);
-    return ['git', 'search', 'worktrees'].includes(side) ? side : 'files';
+    return ['git', 'search', 'worktrees', 'terminals'].includes(side) ? side : 'files';
   } catch {
     return 'files';
   }
@@ -787,12 +787,68 @@ function sideSwitcher(store) {
     },
   }, icon(name), badge);
   const count = changeCount();
+  const running = view.sessions.filter((x) => x.running).length;
   return h('nav', { class: 'ide-side-tabs', role: 'tablist', 'aria-label': 'Side panel' },
     tab('files', 'files', 'Explorer'),
     tab('search', 'search', 'Search'),
     tab('git', 'git-branch', count ? `Source control · ${count} changed ${count === 1 ? 'file' : 'files'}` : 'Source control',
       count ? h('span', { class: 'ide-side-badge' }, count > 99 ? '99+' : count) : null),
-    tab('worktrees', 'worktree', 'Worktrees'));
+    tab('worktrees', 'worktree', 'Worktrees'),
+    tab('terminals', 'terminal', running ? `Terminals · ${running} running` : 'Terminals',
+      running ? h('span', { class: 'ide-side-badge' }, running) : null));
+}
+
+// Shows a terminal and gives it the keys.
+function jumpTo(store, s) {
+  view.active = s.id;
+  saveSessions();
+  store.refresh();
+  requestAnimationFrame(() => s.el?.out.focus({ preventScroll: true }));
+}
+
+// Every open terminal, running ones first, with what runs in it or the task handed to it: a click jumps in.
+function terminalsPanel(store, picker, switcher) {
+  const tasks = store.get('todos').items;
+  const shown = activeSession()?.id;
+  const list = [...view.sessions].sort((a, b) => (b.running - a.running) || a.n - b.n);
+  const running = list.filter((s) => s.running).length;
+  const row = (s) => {
+    const titles = s.tasks.map((id) => tasks.find((t) => t.id === id)?.text).filter(Boolean);
+    const what = s.running ? oneLine(s.command) : exitText(s.exit) || 'Ready';
+    const state = s.running ? 'Running' : 'Idle';
+    return h('div', { class: s.id === shown ? 'tree-row scm-row term-list-row active' : 'tree-row scm-row term-list-row' },
+      h('button', {
+        type: 'button',
+        class: 'tree-item',
+        title: [`Terminal ${s.n} · ${s.cwd || 'board'}`, s.running ? s.command : '', ...titles].filter(Boolean).join('\n'),
+        'aria-current': s.id === shown ? 'true' : null,
+        onclick: () => jumpTo(store, s),
+      },
+        h('span', { class: `wt-dot ${s.running ? 'running' : 'idle'}`, role: 'img', 'aria-label': state, title: state }),
+        h('span', { class: 'term-list-text' },
+          h('span', { class: 'tree-name' }, `${s.n} · ${s.cwd ? baseName(s.cwd) : 'board'}`),
+          h('span', { class: 'term-list-sub muted' }, titles[0] ? `${titles[0]}${titles.length > 1 ? ` +${titles.length - 1}` : ''}` : what))),
+      h('button', {
+        type: 'button',
+        class: 'tree-action',
+        title: s.running ? 'Stop and close this terminal' : 'Close this terminal',
+        'aria-label': `Close terminal ${s.n}`,
+        onclick: () => {
+          closeSession(s);
+          store.refresh();
+        },
+      }, icon('x')));
+  };
+  return h('aside', { class: 'card ide-explorer scm', 'aria-label': 'Terminals' },
+    switcher,
+    panelHead('Terminals', panelAction('plus', 'Open a new terminal in the workspace folder', () => {
+      if (newSession(store)) store.refresh();
+    }, view.sessions.length >= maxSessions())),
+    h('div', { class: 'ide-explorer-head' }, picker),
+    list.length ? h('div', { class: 'tree-root muted small' }, `${list.length} OPEN · ${running} RUNNING`) : null,
+    list.length
+      ? h('div', { class: 'tree scm-list', role: 'list' }, list.map(row))
+      : h('p', { class: 'muted small' }, 'No terminals open.'));
 }
 
 function sessionTabs(store) {
@@ -973,7 +1029,9 @@ function draw(root, store) {
             ? searchPanel(ctx, workspacePicker(store), sideSwitcher(store), rootPath(store, view.workspace))
             : view.side === 'worktrees'
               ? worktreesPanel(ctx, workspacePicker(store), sideSwitcher(store), rootPath(store, view.workspace))
-              : explorer(ctx, workspacePicker(store), sideSwitcher(store)),
+              : view.side === 'terminals'
+                ? terminalsPanel(store, workspacePicker(store), sideSwitcher(store))
+                : explorer(ctx, workspacePicker(store), sideSwitcher(store)),
         h('div', { class: hasOpenFiles() ? 'ide-main has-file' : 'ide-main' },
           editor(ctx),
           s ? terminal(store, s) : h('section', { class: 'card term' }, h('p', { class: 'muted small' }, 'Asking the runner for the open terminals…'))))));
