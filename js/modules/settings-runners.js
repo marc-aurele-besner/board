@@ -16,7 +16,7 @@ const head = (title, intro, right) =>
   h('header', { class: 'panel-head' }, h('div', null, h('h2', null, title), h('p', { class: 'muted' }, intro)), right ? h('div', { class: 'row' }, right) : null);
 
 // "3 minutes ago", "in 2 hours".
-function when(at) {
+export function when(at) {
   if (!at) return '—';
   const diff = Date.parse(at) - Date.now();
   const abs = Math.abs(diff);
@@ -24,7 +24,7 @@ function when(at) {
   const [n, unit] = abs < 3600000 ? [Math.round(abs / 60000), 'min'] : abs < 86400000 ? [Math.round(abs / 3600000), 'h'] : [Math.round(abs / 86400000), 'd'];
   return diff > 0 ? `in ${n} ${unit}` : `${n} ${unit} ago`;
 }
-const exact = (at) => (at ? new Date(at).toLocaleString() : '');
+export const exact = (at) => (at ? new Date(at).toLocaleString() : '');
 
 function loadStatus(store) {
   if (view.loading || Date.now() - view.statusAt < STATUS_TTL_MS) return;
@@ -44,7 +44,9 @@ function setJob(store, id, patch) {
   });
 }
 
-async function runNow(store, job) {
+// Shared with Monitoring → Board runners, so a job started on one page shows as running on the other.
+export const runningNow = (id) => view.running.has(id);
+export async function runNow(store, job) {
   view.running.add(job.id);
   store.refresh();
   try {
@@ -111,7 +113,7 @@ function browse(store) {
   });
 }
 
-function outcome(state, on) {
+export function outcome(state, on) {
   if (!on) return badge('Off', 'plain');
   if (!state?.lastRunAt) return badge(state?.running ? 'Running' : 'Not run yet', 'todo');
   if (state.running) return badge('Running', 'doing');

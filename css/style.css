@@ -398,6 +398,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* Monitoring */
 .mon-scroll { overflow-x: auto; }
+.runner-procs { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.runner-proc p { margin: 0; overflow-wrap: anywhere; }
 .mon-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .mon-table th, .mon-table td { text-align: left; padding: 6px 6px; border-bottom: 1px solid var(--border); }
 .mon-sort { display: inline-flex; align-items: center; gap: 2px; background: none; border: none; padding: 0; min-height: 0; font: inherit; font-weight: inherit; color: inherit; cursor: pointer; }
