@@ -4,6 +4,8 @@
 
 export const JOBS = [
   { id: 'google', label: 'Google sign-ins', every: 1, description: 'Renews each Google account’s access token before it expires.' },
+  { id: 'gmail', label: 'Gmail', every: 2, description: 'Reads new mail of every connected Gmail account into the Inbox.' },
+  { id: 'resend', label: 'Resend', every: 5, description: 'Reads the emails each project sends and receives through Resend.' },
 ];
 
 export const WORKER_URL = 'http://127.0.0.1:8420';
