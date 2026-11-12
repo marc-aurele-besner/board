@@ -17,7 +17,8 @@ export const DEFAULTS = {
   notifications: { items: [], prefs: {} },
   google: { tokens: {}, pictures: {} },
   inbox: { emails: [], syncedAt: '' },
-  tools: { sites: {} },
+  tools: { sites: {}, every: 60, providers: [], status: {} },
+  finance: { entries: [], budgets: {}, recurring: [] },
   usage: { entries: [] },
   calendar: { calendars: {} },
 };

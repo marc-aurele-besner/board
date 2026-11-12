@@ -4,5 +4,6 @@ import google from './google.js';
 import gmail from './gmail.js';
 import resend from './resend.js';
 import calendar from './calendar.js';
+import monitoring from './monitoring.js';
 
-export const jobs = [google, gmail, resend, calendar];
+export const jobs = [google, gmail, resend, calendar, monitoring];
