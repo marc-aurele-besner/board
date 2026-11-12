@@ -1,13 +1,26 @@
+// @ts-check
 // Three-way merge of a collection: what this tab last read from disk (base), what it holds now (ours) and what is
 // on disk now (theirs). Another tab or browser on the same folder saves whole files too, so without this the last
 // save erased whatever the other one added. Ours is changed in place, so objects the sections still hold (a task
 // open in a dialog) stay the ones in the store.
 
+/** @typedef {Record<string, unknown>} Obj */
+
+/** @param {unknown} v @returns {v is Obj} */
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+/** @param {unknown} a @param {unknown} b */
 const same = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
+/** @param {unknown[]} arr @returns {arr is Obj[]} */
 const hasIds = (arr) => arr.every((x) => isObj(x) && x.id != null);
+/** @param {unknown[]} arr */
 const isPlainList = (arr) => arr.every((x) => x === null || typeof x !== 'object') && new Set(arr).size === arr.length;
 
+/**
+ * @param {unknown} base
+ * @param {unknown} ours
+ * @param {unknown} theirs
+ * @returns {unknown}
+ */
 export function merge(base, ours, theirs) {
   if (same(ours, theirs)) return ours;
   if (isObj(ours) && isObj(theirs)) return mergeObject(base, ours, theirs);
@@ -19,8 +32,9 @@ export function merge(base, ours, theirs) {
   return same(base, ours) ? theirs : ours;
 }
 
+/** @param {unknown} base @param {Obj} ours @param {Obj} theirs */
 function mergeObject(base, ours, theirs) {
-  const b = isObj(base) ? base : {};
+  const b = isObj(base) ? base : /** @type {Obj} */ ({});
   for (const key of new Set([...Object.keys(ours), ...Object.keys(theirs)])) {
     if (key in ours && key in theirs) {
       ours[key] = merge(b[key], ours[key], theirs[key]);
@@ -36,14 +50,18 @@ function mergeObject(base, ours, theirs) {
 
 // Lists of things with an id (tasks, projects, entries) merge item by item. Order follows ours, and an item only
 // the other side has goes after the item it follows there.
+/** @param {unknown} base @param {Obj[]} ours @param {Obj[]} theirs */
 function mergeById(base, ours, theirs) {
+  /** @param {Obj[]} arr */
   const index = (arr) => new Map(arr.map((x) => [x.id, x]));
   const b = index(Array.isArray(base) ? base.filter(isObj) : []);
   const o = index(ours);
   const t = index(theirs);
+  /** @type {Obj[]} */
   const kept = [];
   for (const item of ours) {
-    if (t.has(item.id)) kept.push(merge(b.get(item.id), item, t.get(item.id)));
+    // Two objects merge into ours.
+    if (t.has(item.id)) kept.push(/** @type {Obj} */ (merge(b.get(item.id), item, t.get(item.id))));
     else if (!b.has(item.id) || !same(b.get(item.id), item)) kept.push(item); // new here, or edited here
   }
   theirs.forEach((item, i) => {
@@ -64,6 +82,7 @@ function mergeById(base, ours, theirs) {
 }
 
 // Lists of names (categories, hidden ids) merge as sets: keep what either side added, drop what either removed.
+/** @param {unknown} base @param {unknown[]} ours @param {unknown[]} theirs */
 function mergeList(base, ours, theirs) {
   const b = Array.isArray(base) ? base : [];
   const kept = ours.filter((x) => theirs.includes(x) || !b.includes(x));

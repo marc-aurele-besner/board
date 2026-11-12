@@ -1,3 +1,4 @@
+// @ts-check
 // Keyboard shortcuts that work outside a field, and the sheet that lists them ("?").
 import { h } from './ui.js';
 import { openDialog } from './modal.js';
@@ -20,9 +21,12 @@ export const JUMPS = [
 ];
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+/** @type {{ close: () => void } | null} */
 let sheet = null;
 
+/** @param {...string} names */
 const keys = (...names) => h('span', { class: 'keys' }, names.map((k) => h('kbd', null, k)));
+/** @param {HTMLElement} combo @param {string} text */
 const row = (combo, text) => h('li', null, combo, h('span', null, text));
 
 export function openShortcuts() {

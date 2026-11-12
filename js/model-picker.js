@@ -1,16 +1,27 @@
+// @ts-check
 // Model chip and the model dialog: searchable by name, filterable by provider, reads-images and free,
 // sortable by price or context, with per-million-token costs and a details panel.
 import { h, icon } from './ui.js';
 import { openDialog } from './modal.js';
 
 const MODELS_URL = 'https://openrouter.ai/api/v1/models';
+/** @type {Promise<CatalogModel[]> | null} */
 let catalog = null; // Promise<model[]>, loaded once per page
 
+/**
+ * A model as OpenRouter lists it: the fields read here.
+ * @typedef {{ id: string, name?: string, description?: string, context_length?: number,
+ *   architecture?: { input_modalities?: string[] }, pricing?: { prompt?: string, completion?: string } }} OpenRouterModel
+ */
+/** @typedef {ReturnType<typeof normalize>} CatalogModel */
+
+/** @param {unknown} v */
 const perMillion = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n * 1e6 : null;
 };
 
+/** @param {OpenRouterModel} m */
 function normalize(m) {
   const inputs = m.architecture?.input_modalities ?? ['text'];
   const prompt = perMillion(m.pricing?.prompt);
@@ -29,11 +40,12 @@ function normalize(m) {
   };
 }
 
+/** @returns {Promise<CatalogModel[]>} */
 export function getCatalog() {
   catalog ??= fetch(MODELS_URL)
     .then((res) => {
       if (!res.ok) throw new Error(`OpenRouter error ${res.status}`);
-      return res.json();
+      return /** @type {Promise<{ data: OpenRouterModel[] }>} */ (res.json());
     })
     .then(({ data }) => data.map(normalize))
     .catch((err) => {
@@ -43,9 +55,12 @@ export function getCatalog() {
   return catalog;
 }
 
+/** @param {number | null} v */
 const money = (v) => (v === null ? '—' : v === 0 ? 'Free' : v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`);
-const countBy = (list, key) => list.reduce((acc, x) => ((acc[key(x)] = (acc[key(x)] ?? 0) + 1), acc), {});
+/** @template T @param {T[]} list @param {(x: T) => string} key */
+const countBy = (list, key) => list.reduce((acc, x) => ((acc[key(x)] = (acc[key(x)] ?? 0) + 1), acc), /** @type {Record<string, number>} */ ({}));
 
+/** @type {Record<string, (a: CatalogModel, b: CatalogModel) => number>} */
 const SORTERS = {
   name: (a, b) => a.name.localeCompare(b.name),
   price: (a, b) => (a.prompt ?? Infinity) - (b.prompt ?? Infinity) || a.name.localeCompare(b.name),
@@ -53,6 +68,11 @@ const SORTERS = {
 };
 
 // A button that shows the chosen model id and opens the dialog.
+/**
+ * @typedef {{ value?: string | null, nullable?: boolean, nullLabel?: string, requireImages?: boolean, onPick: (id: string | null) => void }} PickerOptions
+ */
+
+/** @param {PickerOptions & { placeholder?: string }} options */
 export function modelChip({ value = '', placeholder = 'Choose a model', nullable = false, nullLabel = 'Use default', requireImages = false, onPick }) {
   const empty = !value;
   return h('button', {
@@ -65,8 +85,10 @@ export function modelChip({ value = '', placeholder = 'Choose a model', nullable
     icon('chevron-down'));
 }
 
+/** @param {PickerOptions} options */
 export function openModelPicker({ value = '', nullable = false, nullLabel = 'Use default', requireImages = false, onPick }) {
   const state = { q: '', provider: '', sort: 'name', images: requireImages, free: false, selected: value || '' };
+  /** @type {CatalogModel[]} */
   let models = [];
   const status = h('p', { class: 'muted small' }, 'Loading models from OpenRouter…');
   const toolbar = h('div', { class: 'mp-toolbar' });
@@ -78,6 +100,7 @@ export function openModelPicker({ value = '', nullable = false, nullLabel = 'Use
     body: h('div', { class: 'mp' }, toolbar, status, table, details),
   });
 
+  /** @param {string | null} id */
   const choose = (id) => {
     dialog.close();
     onPick(id || null);
@@ -156,6 +179,7 @@ export function openModelPicker({ value = '', nullable = false, nullLabel = 'Use
         placeholder: 'Search name, id or description',
         'aria-label': 'Search models',
         value: state.q,
+        /** @param {{ target: HTMLInputElement }} e */
         oninput: (e) => {
           state.q = e.target.value;
           paintTable();
@@ -164,6 +188,7 @@ export function openModelPicker({ value = '', nullable = false, nullLabel = 'Use
       h('select', {
         value: state.provider,
         'aria-label': 'Provider',
+        /** @param {{ target: HTMLSelectElement }} e */
         onchange: (e) => {
           state.provider = e.target.value;
           paint();
@@ -174,6 +199,7 @@ export function openModelPicker({ value = '', nullable = false, nullLabel = 'Use
       h('select', {
         value: state.sort,
         'aria-label': 'Sort',
+        /** @param {{ target: HTMLSelectElement }} e */
         onchange: (e) => {
           state.sort = e.target.value;
           paint();
@@ -183,10 +209,10 @@ export function openModelPicker({ value = '', nullable = false, nullLabel = 'Use
         h('option', { value: 'price' }, 'Sort: cheapest input'),
         h('option', { value: 'context' }, 'Sort: largest context')),
       h('label', { class: 'check' },
-        h('input', { type: 'checkbox', checked: state.images, onchange: (e) => { state.images = e.target.checked; paint(); } }),
+        h('input', { type: 'checkbox', checked: state.images, onchange: (/** @type {{ target: HTMLInputElement }} */ e) => { state.images = e.target.checked; paint(); } }),
         ' Reads images'),
       h('label', { class: 'check' },
-        h('input', { type: 'checkbox', checked: state.free, onchange: (e) => { state.free = e.target.checked; paint(); } }),
+        h('input', { type: 'checkbox', checked: state.free, onchange: (/** @type {{ target: HTMLInputElement }} */ e) => { state.free = e.target.checked; paint(); } }),
         ' Free only'));
     paintTable();
     paintDetails();
@@ -198,7 +224,7 @@ export function openModelPicker({ value = '', nullable = false, nullLabel = 'Use
       status.remove();
       paint();
     })
-    .catch((err) => {
+    .catch((/** @type {Error} */ err) => {
       status.textContent = `Could not load models: ${err.message}. Check your connection and try again.`;
       status.className = 'error';
     });

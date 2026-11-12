@@ -1,3 +1,4 @@
+// @ts-check
 // Notifications: one list under the bell for deadlines, automated tasks, site checks, Telegram and pools.
 // They are saved in notifications.json. Each kind can be switched off, or also sent to Telegram, in Settings.
 import { h, icon, empty } from './ui.js';
@@ -5,6 +6,9 @@ import { COLLECTION, DEFAULTS, KINDS, prefOf, setPref, notify, unreadCount, chec
 
 export { COLLECTION, DEFAULTS, KINDS, prefOf, setPref, notify, unreadCount, checkDeadlines };
 
+/** @import { Store, Notification, IconName } from '../types/data' */
+
+/** @param {string} isoTime */
 function when(isoTime) {
   const mins = Math.round((Date.now() - Date.parse(isoTime)) / 60000);
   if (mins < 1) return 'Just now';
@@ -13,6 +17,7 @@ function when(isoTime) {
   return isoTime.slice(0, 10);
 }
 
+/** @type {HTMLElement | null} */
 let drawer = null;
 
 function closeDrawer() {
@@ -20,16 +25,20 @@ function closeDrawer() {
   drawer = null;
   document.removeEventListener('keydown', onKey);
 }
+/** @param {KeyboardEvent} e */
 function onKey(e) {
   if (e.key === 'Escape') closeDrawer();
 }
 
 // The panel that slides in from the right. It is redrawn in place when a notification is read.
+/** @param {Store} store */
 export function openNotifications(store) {
   closeDrawer();
+  /** @param {string} kind @returns {IconName} */
   const iconOf = (kind) => KINDS.find(([k]) => k === kind)?.[2] ?? 'bell';
   const paint = () => {
     const { items } = store.get(COLLECTION);
+    /** @param {Notification} n */
     const open = (n) => {
       store.update(COLLECTION, (d) => {
         const item = d.items.find((x) => x.id === n.id);
@@ -78,6 +87,7 @@ export function openNotifications(store) {
   const panel = h('aside', { class: 'drawer', role: 'dialog', 'aria-label': 'Notifications' });
   drawer = h('div', {
     class: 'drawer-overlay',
+    /** @param {MouseEvent} e */
     onclick: (e) => {
       if (e.target === drawer) closeDrawer();
     },
@@ -89,6 +99,7 @@ export function openNotifications(store) {
 }
 
 // The bell in the top bar, with the number of unread notifications.
+/** @param {Store} store */
 export function bell(store) {
   const n = unreadCount(store);
   return h('button', {

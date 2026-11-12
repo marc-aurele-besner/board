@@ -1,5 +1,7 @@
+// @ts-check
 // The system prompts behind every AI feature. Settings → Prompts can replace any of them; an empty override means the default.
 // {{name}} placeholders are filled at call time with values the feature knows (the currency, the categories, ...).
+/** @import { DataStore } from '../types/data' */
 
 export const GLOBAL_PROMPT = 'global';
 
@@ -135,11 +137,14 @@ Reply with JSON only:
   },
 ];
 
+/** @param {string | undefined} template @param {Record<string, unknown>} vars */
 const fill = (template, vars) => String(template ?? '').replace(/\{\{\s*(\w+)\s*\}\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
 
+/** @param {DataStore} store */
 export const overrides = (store) => store.get('settings').prompts ?? {};
 
 // The prompt a feature sends: the saved override, else the default, with its placeholders filled.
+/** @param {DataStore} store @param {string} id @param {Record<string, unknown>} [vars] */
 export function systemPrompt(store, id, vars = {}) {
   const def = PROMPTS.find((p) => p.id === id);
   const text = overrides(store)[id]?.trim() || def?.text || '';
@@ -147,4 +152,5 @@ export function systemPrompt(store, id, vars = {}) {
 }
 
 // Instructions added to every call, Cron steps included. Empty when none are set.
+/** @param {DataStore} store */
 export const globalPrompt = (store) => overrides(store)[GLOBAL_PROMPT]?.trim() ?? '';

@@ -1,8 +1,13 @@
+// @ts-check
 // A simple modal dialog. Closes on Escape, on a click outside it, or with the close button.
 import { h, icon } from './ui.js';
 
+/** @import { Child } from '../types/ui' */
+
+/** @param {{ title: string, body: Child, wide?: boolean }} options */
 export function openDialog({ title, body, wide = false }) {
-  const previous = document.activeElement;
+  const previous = /** @type {HTMLElement | null} */ (document.activeElement);
+  /** @param {KeyboardEvent} e */
   const onKey = (e) => {
     if (e.key === 'Escape') close();
   };
@@ -13,6 +18,7 @@ export function openDialog({ title, body, wide = false }) {
   };
   const overlay = h('div', {
     class: 'modal-overlay',
+    /** @param {MouseEvent} e */
     onclick: (e) => {
       if (e.target === overlay) close();
     },
@@ -25,6 +31,6 @@ export function openDialog({ title, body, wide = false }) {
 
   document.body.append(overlay);
   document.addEventListener('keydown', onKey);
-  overlay.querySelector('input, select, button')?.focus();
+  /** @type {HTMLElement | null} */ (overlay.querySelector('input, select, button'))?.focus();
   return { close };
 }

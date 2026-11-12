@@ -1,3 +1,4 @@
+// @ts-check
 // Shows a description the way Notion does: links become link chips, "- " lines become bullets,
 // and "[ ]" / "[x]" lines become checkboxes. The text itself is never changed; the view is only rendered.
 import { h, icon } from './ui.js';
@@ -6,6 +7,7 @@ const URL_RE = /https?:\/\/[^\s<>"']+/g;
 const TRAILING = /[.,;:!?)\]]+$/; // punctuation after a link is not part of it
 
 // A link as a chip: the site name, then the path if there is one. Clicking opens it in a new tab.
+/** @param {string} raw */
 function linkChip(raw) {
   const url = raw.replace(TRAILING, '');
   const tail = raw.slice(url.length);
@@ -33,7 +35,9 @@ function linkChip(raw) {
 }
 
 // Text with its links turned into chips.
+/** @param {string} text */
 function inline(text) {
+  /** @type {(HTMLElement | string)[]} */
   const out = [];
   let last = 0;
   for (const m of text.matchAll(URL_RE)) {
@@ -46,6 +50,7 @@ function inline(text) {
 }
 
 // The rendered description, one row per line of the text.
+/** @param {unknown} [text] */
 export function richText(text = '') {
   return String(text).split('\n').map((line) => {
     const task = line.match(/^\s*\[( |x|X)\]\s+(.*)$/);

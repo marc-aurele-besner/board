@@ -1,13 +1,17 @@
+// @ts-check
 // Notifications without the DOM: the kinds, each kind's preferences, notify() and the deadline check. The bell and its
 // drawer are in notifications.js; the runners load this file to notify from their jobs.
 import { uid, now, todayISO, statusOf } from './ui.js';
 import { sendTelegram } from './telegram.js';
+
+/** @import { DataStore, IconName, NotificationPref } from '../types/data' */
 
 export const COLLECTION = 'notifications';
 export const DEFAULTS = { items: [], prefs: {} };
 const MAX_ITEMS = 200;
 
 // [key, label in Settings, icon]
+/** @type {[string, string, IconName][]} */
 export const KINDS = [
   ['deadline', 'Task deadlines', 'clock'],
   ['auto', 'Automated tasks', 'zap'],
@@ -22,8 +26,10 @@ export const KINDS = [
 ];
 
 // A kind that was never changed shows in the board and is not sent to Telegram.
-export const prefOf = (store, kind) => ({ app: true, telegram: false, ...(store.get(COLLECTION).prefs?.[kind] ?? {}) });
+/** @param {DataStore} store @param {string} kind @returns {NotificationPref} */
+export const prefOf = (store, kind) => ({ app: true, telegram: false, ...(/** @type {Partial<NotificationPref> | undefined} */ (store.get(COLLECTION).prefs?.[kind]) ?? {}) });
 
+/** @param {DataStore} store @param {string} kind @param {Partial<NotificationPref>} patch */
 export function setPref(store, kind, patch) {
   store.update(COLLECTION, (d) => {
     d.prefs = { ...d.prefs, [kind]: { ...prefOf(store, kind), ...patch } };
@@ -31,6 +37,7 @@ export function setPref(store, kind, patch) {
 }
 
 // Adds a notification. `key` names the event, so the same event is not announced twice.
+/** @param {DataStore} store @param {{ kind: string, text: string, href?: string, key?: string }} notification */
 export function notify(store, { kind, text, href = '', key = '' }) {
   const data = store.get(COLLECTION);
   if (key && data.items.some((n) => n.key === key)) return false;
@@ -45,9 +52,11 @@ export function notify(store, { kind, text, href = '', key = '' }) {
   return true;
 }
 
+/** @param {DataStore} store */
 export const unreadCount = (store) => store.get(COLLECTION).items.filter((n) => !n.read).length;
 
 // Announces tasks whose deadline is today or has passed. Once per task and day.
+/** @param {DataStore} store */
 export function checkDeadlines(store) {
   const today = todayISO();
   for (const t of store.get('todos').items) {

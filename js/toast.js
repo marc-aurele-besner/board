@@ -1,8 +1,14 @@
+// @ts-check
 // Short messages at the bottom of the screen. One with `undo` offers to take the action back for a few seconds.
 import { h } from './ui.js';
 
+/** @type {HTMLElement | null} */
 let box = null;
 
+/**
+ * @param {string} text
+ * @param {{ undo?: (() => void) | null }} [options]
+ */
 export function toast(text, { undo = null } = {}) {
   // The runners load shared modules that toast (a PR link added to a task by a Cron step); there is no page there.
   if (typeof document === 'undefined') return;
