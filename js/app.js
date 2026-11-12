@@ -216,7 +216,11 @@ async function open(handle) {
   currentModule().restore?.(readRoute().params);
   render();
   if (!sample) startBackground(store);
+  // Another tab or browser may save to the same folder: bring its changes in while this one is in view.
+  setInterval(() => document.hidden || store.sync(), SYNC_MS);
 }
+
+const SYNC_MS = 3000;
 
 const CHORD_MS = 1500;
 let chordAt = 0; // when "g" was pressed, waiting for the letter of a section
@@ -278,11 +282,21 @@ async function boot() {
     currentModule().restore?.(readRoute().params);
     render();
   });
-  window.addEventListener('beforeunload', () => store?.flush());
+  // A reload right after adding a task used to drop it while the save was still waiting: save now, and have the
+  // browser ask before leaving while it is not on disk yet.
+  window.addEventListener('beforeunload', (e) => {
+    if (!store?.pending) return;
+    store.flush();
+    e.preventDefault();
+    e.returnValue = '';
+  });
+  window.addEventListener('pagehide', () => store?.flush());
+  window.addEventListener('focus', () => store?.sync());
   document.addEventListener('keydown', onShortcut);
   watchCommits(app, settle);
   // Background renders skipped while the tab was hidden are drawn once it shows again.
   document.addEventListener('visibilitychange', settle);
+  document.addEventListener('visibilitychange', () => (document.hidden ? store?.flush() : store?.sync()));
   // Settings › Data folder asks for another folder.
   // The page reloads on the new folder, so timers and caches that belong to the old one are dropped with it.
   window.addEventListener('board:pick-folder', async () => {
