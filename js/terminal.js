@@ -1,49 +1,66 @@
+// @ts-check
 // The Dev section's calls to the command runner on this machine (tools/terminal.js, started by `bun start`).
+/** @import { RunnerInfo, RunnerSessionList, RunnerStatus, RunnerFolder, RunnerFile, RunnerEvent, RunnerRun, RunnerRemoved, RunnerClaudeExit, RunnerWorktrees, RunnerOutcome, WorktreeUsage, GitStatus, GitDiff, RunnerSearch } from '../types/terminal' */
+/** @import { DevSessionList } from '../types/data' */
 export const TERMINAL_RUNNER = 'http://127.0.0.1:8419';
 
-const unreachable = (base) => new Error(`Could not reach the terminal runner at ${base}. In the board folder, run bun start (or bun dev) and keep it open.`);
+const unreachable = (/** @type {string} */ base) => new Error(`Could not reach the terminal runner at ${base}. In the board folder, run bun start (or bun dev) and keep it open.`);
 
 // The runner answers only requests with a local Origin. A page sends one by itself; the runners (Node) set it here.
+/** @type {string | null} */
 let origin = null;
-export const useRunnerOrigin = (value) => {
+export const useRunnerOrigin = (/** @type {string} */ value) => {
   origin = value;
 };
 
+/** @param {string} base @param {string} path @param {RequestInit} [init] */
 async function call(base, path, init) {
   let res;
   try {
     res = await fetch(`${base}${path}`, origin ? { ...init, headers: { ...init?.headers, origin } } : init);
   } catch (err) {
-    throw err.name === 'AbortError' ? err : unreachable(base);
+    throw /** @type {Error} */ (err).name === 'AbortError' ? err : unreachable(base);
   }
   if (!res.ok) throw new Error((await res.text()) || `The runner answered ${res.status}.`);
   return res;
 }
+/** @param {unknown} body @param {AbortSignal} [signal] */
 const post = (body, signal) => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal });
 
 // The board's folder, the home folder, the shell, and how many commands may run at once.
+/** @type {(base: string) => Promise<RunnerInfo>} */
 export const runnerInfo = async (base) => (await call(base, '/info')).json();
 
 // The open terminals, kept by the runner so every browser shows the same ones: { active, sessions: [{ id, n, cwd,
 // tasks?, prompt? }] }, sessions being null before any were saved.
+/** @type {(base: string) => Promise<RunnerSessionList>} */
 export const listSessions = async (base) => (await call(base, '/sessions')).json();
-export const saveSessionList = (base, list) => call(base, '/sessions', post(list));
+export const saveSessionList = (/** @type {string} */ base, /** @type {DevSessionList} */ list) => call(base, '/sessions', post(list));
 
 // What sessions are doing, by id: { state, code?, cwd }, state being working, waiting (running but quiet: the
 // program waits for its user), done, failed, stopped or idle. Sessions the runner no longer has are left out.
+/** @type {(base: string, ids: string[]) => Promise<Record<string, RunnerStatus>>} */
 export const sessionStatus = async (base, ids) => (ids.length ? (await call(base, `/status?sessions=${ids.map(encodeURIComponent).join(',')}`)).json() : {});
 
 // A folder's entries ({ name, dir }), folders first.
+/** @type {(base: string, path: string) => Promise<RunnerFolder>} */
 export const listFolder = async (base, path) => (await call(base, `/files?path=${encodeURIComponent(path)}`)).json();
 
 // One file: { path, size, text }, or { binary } / { tooLarge } instead of text.
+/** @type {(base: string, path: string) => Promise<RunnerFile>} */
 export const readFile = async (base, path) => (await call(base, `/file?path=${encodeURIComponent(path)}`)).json();
 
 // Every terminal of the page is read through one stream from the runner: a browser opens only six connections to
 // a host, and a stream per terminal used them up, so a third or fourth terminal's command never reached the runner.
 // The page attaches and detaches sessions on its stream; each event names its session as `s`.
+/**
+ * @typedef {{ onEvent: (event: RunnerEvent) => void, started: boolean, done: () => void }} Sub
+ * @typedef {{ client: string, ctl: AbortController, subs: Map<string, Sub>, queue: Promise<unknown>, ready?: Promise<Response> }} Hub
+ */
+/** @type {Map<string, Hub>} */
 const hubs = new Map();
 
+/** @param {string} base @returns {Hub} */
 function hubOf(base) {
   let hub = hubs.get(base);
   if (hub) return hub;
@@ -56,8 +73,9 @@ function hubOf(base) {
   return hub;
 }
 
+/** @param {Hub} hub @param {Response} res */
 async function readStream(hub, res) {
-  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  const reader = /** @type {ReadableStream<Uint8Array<ArrayBuffer>>} */ (res.body).pipeThrough(new TextDecoderStream()).getReader();
   let buffer = '';
   for (;;) {
     const { value, done } = await reader.read();
@@ -80,6 +98,7 @@ async function readStream(hub, res) {
 }
 
 // The stream ended (the runner stopped, or no terminal is attached any more): every attach ends with it.
+/** @param {string} base @param {Hub} hub */
 function endStream(base, hub) {
   if (hubs.get(base) === hub) hubs.delete(base);
   hub.ctl.abort();
@@ -87,6 +106,7 @@ function endStream(base, hub) {
 }
 
 // Attach and detach calls of one stream are sent one after another, so a quick detach then attach keep their order.
+/** @param {string} base @param {Hub} hub @param {string} path @param {string} session */
 function control(base, hub, path, session) {
   hub.queue = hub.queue
     .then(() => hub.ready)
@@ -98,11 +118,17 @@ function control(base, hub, path, session) {
 // Attaches to a terminal session and calls onEvent for each of its events: `session` (known: whether the runner had
 // it), the events so far (start, out, err, size, cwd, exit), `live`, then new events as they come. Resolves when
 // `signal` is aborted, the session is closed, or the runner stops.
+/**
+ * @param {string} base
+ * @param {{ session: string, signal?: AbortSignal, onEvent: (event: RunnerEvent) => void }} options
+ * @returns {Promise<void>}
+ */
 export function attachSession(base, { session, signal, onEvent }) {
   return new Promise((resolve) => {
     if (signal?.aborted) return resolve();
     const hub = hubOf(base);
-    const sub = { onEvent, started: false };
+    // done is set below, before the sub is listed.
+    const sub = /** @type {Sub} */ ({ onEvent, started: false });
     const onAbort = () => {
       if (hub.subs.get(session) !== sub) return resolve();
       sub.done();
@@ -123,42 +149,51 @@ export function attachSession(base, { session, signal, onEvent }) {
 
 // Runs one command in a session's terminal of `cols` × `rows`, telling it the theme ('light' or 'dark'). Its output
 // reaches the session's attached stream; the command keeps running if the page goes away.
+/** @type {(base: string, options: { session: string, command: string, cwd: string, cols: number, rows: number, theme: string }) => Promise<RunnerRun>} */
 export const runCommand = async (base, { session, command, cwd, cols, rows, theme }) => (await call(base, '/run', post({ session, command, cwd, cols, rows, theme }))).json();
 
 // Stops the session's command; empties its kept output; or stops it and forgets the session.
-export const stopCommand = (base, session) => call(base, '/stop', post({ session }));
-export const clearSession = (base, session) => call(base, '/clear', post({ session }));
-export const closeSession = (base, session) => call(base, '/close', post({ session }));
+export const stopCommand = (/** @type {string} */ base, /** @type {string} */ session) => call(base, '/stop', post({ session }));
+export const clearSession = (/** @type {string} */ base, /** @type {string} */ session) => call(base, '/clear', post({ session }));
+export const closeSession = (/** @type {string} */ base, /** @type {string} */ session) => call(base, '/close', post({ session }));
 
 // Stops the session and removes the worktree `name` that claude made in the repo at `cwd`, or the worktree at `path`
 // (any but the main checkout): { removed } or { missing }. Fails when git refuses (changes or untracked files in it)
 // or claude still runs there.
+/** @type {(base: string, options: { cwd?: string, name?: string, path?: string, session?: string }) => Promise<RunnerRemoved>} */
 export const removeWorktree = async (base, { cwd, name, path, session }) => (await call(base, '/worktree/remove', post({ cwd, name, path, session }))).json();
 
 // Ends a claude that is done in its worktree: /exit, then Remove worktree when nothing in it would be lost (no
 // uncommitted file, every commit on a remote), else Keep. { ended, removed, path, kept?: why }.
+/** @type {(base: string, session: string) => Promise<RunnerClaudeExit>} */
 export const exitClaude = async (base, session) => (await call(base, '/claude/exit', post({ session }))).json();
 
 // The worktrees of the repository holding `path`, but its main checkout: { repo: false }, or { root, worktrees:
 // [{ path, name, branch, head, claude, locked, prunable, pid, running, commands, changes }] }.
+/** @type {(base: string, path: string) => Promise<RunnerWorktrees>} */
 export const listWorktrees = async (base, path) => (await call(base, `/worktrees?path=${encodeURIComponent(path)}`)).json();
 
 // What a terminal left behind, for the Cron step after it: { output } (the end of its raw output), and when `path`
 // is in a repository { repo: true, root, branch, upstream, ahead, behind, base, commit, short, subject, commits:
 // [{ hash, short, subject }], files: [{ status, path, from? }], more, uncommitted }.
+/** @type {(base: string, options: { session: string, path: string }) => Promise<RunnerOutcome>} */
 export const sessionOutcome = async (base, { session, path }) => (await call(base, `/outcome?${new URLSearchParams({ session, path })}`)).json();
 
 // What the claude sessions in worktrees [{ name, cwd }] used, from Claude Code's transcripts: { [name]: { sessions,
 // models: { [id]: { provider, input, output, thinking, cacheRead, cacheWrite, cost } }, cost, duration, apiDuration,
 // linesAdded, linesRemoved, efforts, replies, start, end } }. Worktrees with no transcript are left out.
+/** @type {(base: string, worktrees: { name: string, cwd: string }[]) => Promise<Record<string, WorktreeUsage>>} */
 export const worktreeUsage = async (base, worktrees) => (await call(base, '/usage', post({ worktrees }))).json();
 
 // Saves an image (a Blob of a PNG, JPEG, GIF or WebP) on this machine for claude to read: { path }.
+/** @type {(base: string, blob: Blob) => Promise<{ path: string }>} */
 export const saveImage = async (base, blob) => (await call(base, '/image', { method: 'POST', headers: { 'content-type': blob.type }, body: blob })).json();
 
 // Keys for a running command, or its terminal's new size. Calls for one command are sent one after another,
 // so fast typing arrives in order.
+/** @type {Map<number, Promise<unknown>>} */
 const queues = new Map();
+/** @param {string} base @param {number} pid @param {{ data?: string, cols?: number, rows?: number }} body */
 export function sendInput(base, pid, body) {
   const next = (queues.get(pid) ?? Promise.resolve()).then(() => call(base, '/input', post({ pid, ...body }))).catch(() => {});
   queues.set(pid, next);
@@ -168,14 +203,18 @@ export function sendInput(base, pid, body) {
 
 // Source control. A folder's repository: { repo: false } outside one, else its branch, ahead/behind its upstream,
 // changed files ({ path, orig?, index, work, untracked?, conflict? }, git's status letters), branches and recent commits.
+/** @type {(base: string, path: string) => Promise<GitStatus>} */
 export const gitStatus = async (base, path) => (await call(base, `/git?path=${encodeURIComponent(path)}`)).json();
 
 // A file's changes as a unified diff ({ diff }), staged or not; or a commit's, with { commit } describing it.
+/** @type {(base: string, params: Record<string, string>) => Promise<GitDiff>} */
 export const gitDiff = async (base, params) => (await call(base, `/git/diff?${new URLSearchParams(params)}`)).json();
 
 // Changes the repository: stage, unstage, discard, commit, fetch, pull, push, checkout, branch or init.
+/** @type {(base: string, path: string, action: string, body?: object) => Promise<{ ok: boolean }>} */
 export const gitAction = async (base, path, action, body = {}) => (await call(base, '/git', post({ path, action, ...body }))).json();
 
 // Search in files: the lines holding `q` under `path` ({ path, matches: [{ path, line, col, text }], more }).
 // Options: case, word, regex ('1' to turn on), include and exclude (comma-separated globs).
+/** @type {(base: string, params: Record<string, string>) => Promise<RunnerSearch>} */
 export const searchFiles = async (base, params) => (await call(base, `/search?${new URLSearchParams(params)}`)).json();
