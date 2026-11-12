@@ -998,6 +998,16 @@ button.danger { color: var(--danger); }
 .icon-btn.done-btn:hover { color: var(--income); }
 .icon-btn.done-btn.on { color: var(--income); }
 .icon-btn.copy-btn:hover { color: var(--accent); }
+/* A task's Dev button takes the colour of what its terminal is doing. */
+.icon-btn.dev-btn { position: relative; }
+.icon-btn.dev-btn::after { content: ""; position: absolute; top: 3px; right: 2px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.icon-btn.dev-btn.dev-working { color: var(--accent); }
+.icon-btn.dev-btn.dev-working::after { animation: pulse 1.4s ease-in-out infinite; }
+.icon-btn.dev-btn.dev-waiting { color: var(--warn); }
+.icon-btn.dev-btn.dev-done { color: var(--income); }
+.icon-btn.dev-btn.dev-failed { color: var(--danger); }
+.icon-btn.dev-btn.dev-stopped, .icon-btn.dev-btn.dev-idle { color: var(--text); }
+.icon-btn.dev-btn:hover { filter: brightness(1.15); }
 .kanban-card.selected { box-shadow: inset 0 0 0 2px var(--accent); }
 .kanban-title { gap: 8px; align-items: flex-start; flex-wrap: nowrap; }
 .kanban-title .todo-select { margin-top: 3px; flex: none; }

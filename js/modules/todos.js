@@ -7,7 +7,8 @@ import { editText, pickChip, pickButton, pickMulti, pill } from '../inline.js';
 import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
 import { openDialog } from '../modal.js';
 import { issuesOf, prsOf } from '../task-links.js';
-import { startClaudeSession } from './dev.js';
+import { startClaudeSession, openSession, runnerOf } from './dev.js';
+import { sessionStatus } from '../terminal.js';
 import { ask, parseJson } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
@@ -490,16 +491,68 @@ function devTasks(store, items) {
   for (const i of items) view.selected.delete(i.id);
   const moving = items.filter((i) => !['done', 'doing'].includes(statusOf(i))).map((i) => i.id);
   if (moving.length) updateItems(store, moving, { status: 'doing' });
-  startClaudeSession({ prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}`, projectId: folder?.id, taskIds: items.map((i) => i.id) });
+  const ids = items.map((i) => i.id);
+  const session = startClaudeSession({ prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}`, projectId: folder?.id, taskIds: ids });
+  // The task keeps its terminal: its Dev button shows what the terminal is doing and opens it.
+  updateItems(store, ids, { devSession: session });
 }
 
+// What each task's terminal is doing, asked of the runner every few seconds while Tasks is shown.
+// A task whose terminal the runner no longer has (closed, or forgotten after a month) has no entry.
+const DEV_POLL_MS = 4000;
+const devWatch = { status: {}, timer: 0 };
+const DEV_STATES = {
+  working: 'claude is working',
+  waiting: 'Waiting for you',
+  done: 'Finished',
+  failed: 'Ended with an error',
+  stopped: 'Stopped',
+  idle: 'Nothing running',
+};
+
+function watchDevSessions(store) {
+  if (devWatch.timer || !store.get(COLLECTION).items.some((t) => t.devSession)) return;
+  const poll = async () => {
+    devWatch.timer = 0;
+    if (!location.hash.startsWith('#/todos')) return;
+    const ids = [...new Set(store.get(COLLECTION).items.map((t) => t.devSession).filter(Boolean))];
+    let status = {};
+    try {
+      status = await sessionStatus(runnerOf(store), ids);
+    } catch {}
+    devWatch.timer ||= setTimeout(poll, DEV_POLL_MS);
+    if (JSON.stringify(status) === JSON.stringify(devWatch.status)) return;
+    devWatch.status = status;
+    store.refresh();
+  };
+  devWatch.timer = setTimeout(poll, 0);
+}
+
+// Starts a Dev session on the task, or, once it has one, opens it in Dev; the colour says what the terminal is doing.
+// Shift-click starts a new session anyway.
 function devButton(store, item) {
+  const status = item.devSession ? devWatch.status[item.devSession] : null;
+  if (!status) {
+    return h('button', {
+      type: 'button',
+      class: 'icon-btn copy-btn',
+      title: 'Start a Dev session on this task',
+      'aria-label': `Start a Dev session on "${item.text}"`,
+      onclick: () => devTasks(store, [item]),
+    }, icon('terminal'));
+  }
+  const state = DEV_STATES[status.state] ? status.state : 'idle';
+  const label = state === 'failed' && status.code != null ? `${DEV_STATES.failed} (exit ${status.code})` : DEV_STATES[state];
   return h('button', {
     type: 'button',
-    class: 'icon-btn copy-btn',
-    title: 'Start a Dev session on this task',
-    'aria-label': `Start a Dev session on "${item.text}"`,
-    onclick: () => devTasks(store, [item]),
+    class: `icon-btn dev-btn dev-${state}`,
+    title: `Dev: ${label}. Click to open its terminal; Shift-click to start a new session.`,
+    'aria-label': `Open the Dev terminal of "${item.text}" (${label})`,
+    onclick: (e) => {
+      if (e.shiftKey) return devTasks(store, [item]);
+      const taskIds = store.get(COLLECTION).items.filter((t) => t.devSession === item.devSession).map((t) => t.id);
+      openSession({ id: item.devSession, cwd: status.cwd, taskIds });
+    },
   }, icon('terminal'));
 }
 
@@ -1112,6 +1165,7 @@ function searchBox(store) {
 }
 
 function draw(root, store) {
+  watchDevSessions(store);
   const projects = projectsOf(store);
   const { items } = store.get(COLLECTION);
   if (isProjectFilter(view.filter) && !projects.some((p) => p.id === view.filter)) view.filter = 'all';
