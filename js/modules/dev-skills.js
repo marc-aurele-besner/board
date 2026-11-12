@@ -11,27 +11,40 @@ import { baseName, panelHead, panelAction, openFile } from './dev-files.js';
 // The list is read again when the panel is drawn after this long: a skill added on disk shows on the next visit.
 const STALE_MS = 30000;
 
+// `list` is the drawn list, kept across the Dev page's rebuilds (they come up to once a second) so it keeps its
+// scroll and is not drawn again; `drawn` is the data it was drawn from. `loading` is the path being read.
 /**
- * @type {{ path: string, data: RunnerSkills | null, loadError: string, loading: boolean, at: number, filter: string,
- *   folded: Set<string> }}
+ * @type {{ path: string, data: RunnerSkills | null, json: string, loadError: string, loading: string | null, at: number,
+ *   filter: string, folded: Set<string>, list: HTMLElement | null, drawn: RunnerSkills | null, top: number }}
  */
-const state = { path: '', data: null, loadError: '', loading: false, at: 0, filter: '', folded: new Set() };
+const state = { path: '', data: null, json: '', loadError: '', loading: null, at: 0, filter: '', folded: new Set(), list: null, drawn: null, top: 0 };
 
-// Reads the skills for the folder at `path`, unless they were read a moment ago. `force` reads them now.
+// Reads the skills for the folder at `path`, unless they were read a moment ago. `force` reads them now. The page
+// is redrawn only when what it shows changed: a re-read that finds the same skills leaves it alone.
 /** @param {DevContext} ctx @param {string} path @param {{ force?: boolean }} [options] */
 export async function refreshSkills(ctx, path, { force = false } = {}) {
-  if (path !== state.path) Object.assign(state, { path, data: null, loadError: '', at: 0 });
-  if (!ctx.ready() || state.loading || (!force && Date.now() - state.at < STALE_MS)) return;
-  state.loading = true;
+  if (path !== state.path) Object.assign(state, { path, data: null, json: '', loadError: '', at: 0 });
+  if (!ctx.ready() || state.loading === path || (!force && Date.now() - state.at < STALE_MS)) return;
+  state.loading = path;
+  let changed = false;
   try {
     const data = await listSkills(ctx.base(), path);
-    if (path === state.path) Object.assign(state, { data, loadError: '' });
+    const json = JSON.stringify(data);
+    if (path === state.path && (json !== state.json || state.loadError)) {
+      Object.assign(state, { data, json, loadError: '' });
+      changed = true;
+    }
   } catch (err) {
-    if (path === state.path) state.loadError = /** @type {Error} */ (err).message;
+    const message = /** @type {Error} */ (err).message;
+    if (path === state.path && message !== state.loadError) {
+      state.loadError = message;
+      changed = true;
+    }
   } finally {
-    state.loading = false;
-    state.at = Date.now();
-    ctx.refresh();
+    if (state.loading === path) state.loading = null;
+    // A read for a folder no longer shown leaves the time alone, so the shown one is read at once.
+    if (path === state.path) state.at = Date.now();
+    if (changed || force || path !== state.path) ctx.refresh();
   }
 }
 
@@ -74,7 +87,7 @@ function group(ctx, key, title, all, empty) {
         onclick: () => {
           if (open) state.folded.add(key);
           else state.folded.delete(key);
-          ctx.refresh();
+          redrawList(ctx);
         },
       }, h('span', { class: open ? 'tree-chevron open' : 'tree-chevron' }, icon('chevron-right')), h('span', { class: 'tree-name' }, title)),
       h('span', { class: 'scm-count' }, rows.length)),
@@ -91,19 +104,44 @@ const groups = (ctx, data) => [
   group(ctx, 'project', `${baseName(data.root)} skills`, data.project, 'None in this project’s .claude/skills.'),
 ];
 
+// The list, drawn again only when the skills changed; otherwise the one on screen is moved into the new page as it
+// is, keeping its scroll.
+/** @param {DevContext} ctx @param {RunnerSkills} data */
+function skillList(ctx, data) {
+  if (state.list && state.drawn === data) {
+    // A list moved out of the page and back may lose its place: it is put back once it is on screen.
+    const list = state.list;
+    const top = state.top;
+    requestAnimationFrame(() => {
+      if (list.isConnected && list.scrollTop !== top) list.scrollTop = top;
+    });
+    return list;
+  }
+  Object.assign(state, { drawn: data, top: 0 });
+  state.list = h('div', {
+    class: 'tree scm-list',
+    onscroll: (/** @type {Event} */ e) => (state.top = /** @type {HTMLElement} */ (e.currentTarget).scrollTop),
+  }, groups(ctx, data));
+  return state.list;
+}
+
+// Draws the groups again in the list on screen (a fold, the filter) without rebuilding the page.
+/** @param {DevContext} ctx */
+function redrawList(ctx) {
+  if (state.list && state.data) state.list.replaceChildren(...groups(ctx, state.data));
+}
+
 /** @param {DevContext} ctx @param {Child} picker @param {Child} switcher @param {string} path */
 export function skillsPanel(ctx, picker, switcher, path) {
   const data = state.data;
   let body;
   if (!ctx.ready()) body = h('p', { class: 'muted small' }, 'Skills show once the runner answers.');
+  else if (data) body = skillList(ctx, data);
   else if (state.loadError) body = h('p', { class: 'small tree-error' }, state.loadError);
-  else if (!data) body = h('p', { class: 'muted small' }, 'Reading the skills…');
-  else {
-    body = h('div', { class: 'tree scm-list' }, groups(ctx, data));
-  }
+  else body = h('p', { class: 'muted small' }, 'Reading the skills…');
   return h('aside', { class: 'card ide-explorer scm', 'aria-label': 'Skills' },
     switcher,
-    panelHead('Skills', panelAction('refresh', 'Read the skills again', () => refreshSkills(ctx, path, { force: true }), !ctx.ready() || state.loading)),
+    panelHead('Skills', panelAction('refresh', 'Read the skills again', () => refreshSkills(ctx, path, { force: true }), !ctx.ready() || state.loading === path)),
     h('div', { class: 'ide-explorer-head' }, picker),
     h('label', { class: 'search-field' },
       h('input', {
@@ -117,9 +155,10 @@ export function skillsPanel(ctx, picker, switcher, path) {
         oninput: (/** @type {Event} */ e) => {
           state.filter = /** @type {HTMLInputElement} */ (e.target).value;
           // Only the list changes, so the field keeps its focus.
-          const list = /** @type {HTMLElement} */ (e.target).closest('aside')?.querySelector('.scm-list');
-          if (list && state.data) list.replaceChildren(...groups(ctx, state.data));
+          redrawList(ctx);
         },
       })),
+    // A failed re-read keeps the skills read before, with the error above them.
+    data && state.loadError ? h('p', { class: 'small tree-error' }, state.loadError) : null,
     body);
 }

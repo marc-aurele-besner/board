@@ -1195,7 +1195,8 @@ function draw(root, store) {
   // The tree's change colours and the panel's count come from git, read again when stale.
   if (view.info) refreshGit(ctx, rootPath(store, view.workspace));
   if (view.info && view.side === 'worktrees') refreshWorktrees(ctx, rootPath(store, view.workspace));
-  if (view.info && view.side === 'skills') refreshSkills(ctx, rootPath(store, view.workspace));
+  // Skills are read before their panel is opened, so it shows them at once; a re-read redraws only on a change.
+  if (view.info) refreshSkills(ctx, rootPath(store, view.workspace));
 
   root.replaceChildren(
     h('div', { class: 'stack-lg dev' },
