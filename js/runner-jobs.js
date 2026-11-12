@@ -2,7 +2,9 @@
 // `every` is the default interval in minutes. settings.json `runners.<id>` holds the user's { every, on }.
 // No DOM here: the worker imports this file under Node.
 
-export const JOBS = [];
+export const JOBS = [
+  { id: 'google', label: 'Google sign-ins', every: 1, description: 'Renews each Google account’s access token before it expires.' },
+];
 
 export const WORKER_URL = 'http://127.0.0.1:8420';
 

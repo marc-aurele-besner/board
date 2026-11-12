@@ -1,5 +1,5 @@
 // Runs each job on its interval and keeps runners.json, the heartbeat the board reads.
-// A job is { id, every, timeout, delay, run(ctx) }; `every` comes from settings.json runners.<id> when set there.
+// A job is { id, timeout, delay, setup(store), run(ctx) }; `every` comes from settings.json runners.<id> when set there.
 // A job still running at its next tick is skipped, not queued. A failure doubles the wait, up to 30 minutes, and one
 // success resets it. A Mac that slept finds its jobs overdue on wake and runs each once.
 import { jobConfig } from '../../js/runner-jobs.js';
@@ -68,14 +68,14 @@ export function createScheduler({ jobs, log }) {
     ])
       .then((result = {}) => {
         l.failures = 0;
-        l.state = { ...l.state, lastRunAt: iso(started), lastOkAt: iso(Date.now()), durationMs: Date.now() - started, ok: true, error: null, ...result };
+        l.state = { lastRunAt: iso(started), lastOkAt: iso(Date.now()), durationMs: Date.now() - started, ok: true, error: null, ...result };
         const said = Object.entries(result).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${k} ${v}`).join(', ');
         log.info(`${job.id} ok in ${Date.now() - started} ms${said ? ` (${said})` : ''}`);
         return { ok: true, error: null, ...result };
       })
       .catch((err) => {
         l.failures += 1;
-        l.state = { ...l.state, lastRunAt: iso(started), durationMs: Date.now() - started, ok: false, error: err.message };
+        l.state = { lastOkAt: l.state.lastOkAt ?? null, lastRunAt: iso(started), durationMs: Date.now() - started, ok: false, error: err.message };
         log.error(`${job.id} failed in ${Date.now() - started} ms: ${err.message}`);
         return { ok: false, error: err.message };
       })
@@ -111,7 +111,10 @@ export function createScheduler({ jobs, log }) {
       clearInterval(beatTimer);
       if (!store) return;
       const now = Date.now();
-      for (const job of jobs) live.get(job.id).nextAt = now + (job.delay ?? 2000);
+      for (const job of jobs) {
+        job.setup?.(store);
+        live.get(job.id).nextAt = now + (job.delay ?? 2000);
+      }
       beat();
       tickTimer = setInterval(tick, TICK_MS);
       beatTimer = setInterval(beat, BEAT_MS);
