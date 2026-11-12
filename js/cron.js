@@ -789,12 +789,42 @@ const fill = (template, vars, quote = (x) => x) =>
     return v === undefined ? m : quote(v);
   });
 
-// The variables a step sees: its input, the run's date and flow, and every earlier step's output by number.
-// $data holds what each name reads into with a path: parsed JSON, or what the step made.
-function varsFor(flow, ctx) {
+// A project as {{project}} reads it: its name as text, and with a path its parts ({{project.website}},
+// {{project.repo}}, {{project.directory}}). Empty fields stay as '' so a template reads the same for every project.
+export function projectVars(project) {
+  if (!project) return null;
+  const repos = project.github?.repos ?? [];
+  let domain = '';
+  try {
+    domain = project.website ? new URL(project.website).hostname.replace(/^www\./, '') : '';
+  } catch {}
+  return {
+    name: project.name ?? '',
+    description: project.description ?? '',
+    website: project.website ?? '',
+    domain,
+    repo: repos[0] ?? '',
+    repoUrl: repos[0] ? `https://github.com/${repos[0]}` : '',
+    repos,
+    org: project.github?.org || (repos[0] ?? '').split('/')[0] || '',
+    directory: project.localPath ?? '',
+    labels: project.labels ?? [],
+  };
+}
+
+// The variables a step sees: its input, the run's date and flow, the project, and every earlier step's output by
+// number. $data holds what each name reads into with a path: parsed JSON, or what the step made.
+// The project is the step's or source's own when it has one, else the flow's. A data step's sources each choose theirs.
+function varsFor(flow, ctx, step = null, store = ctx.store) {
   const results = ctx.results ?? [];
   const prev = results.at(-1);
   const vars = { input: prev?.output ?? '', date: todayISO(), flow: flow.name, $data: { input: prev?.data ?? null } };
+  const projectId = (step?.type !== 'gather' && step?.projectId) || flowProjectId(flow);
+  const project = projectVars(projectId && store ? store.get('projects').projects.find((p) => p.id === projectId) : null);
+  if (project) {
+    vars.project = project.name;
+    vars.$data.project = project;
+  }
   results.forEach((r, i) => {
     vars[`step${i + 1}`] = r.output;
     vars.$data[`step${i + 1}`] = r.data;
@@ -869,10 +899,11 @@ function moneyTotals(store, type, month) {
   return Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([k, v]) => `- ${k}: ${v.toFixed(2)}`).join('\n');
 }
 
-// One source's data as plain text, or '' when it found nothing.
-async function gather(store, step, flow) {
+// One source's data as plain text, or '' when it found nothing. A page address and fixed text take variables, so
+// a source can read {{project.repoUrl}} or quote {{project.description}}.
+async function gather(store, step, flow, vars = {}) {
   if (step.source === 'page') {
-    const url = pageUrl(store, step);
+    const url = pageUrl(store, { ...step, url: fill(step.url, vars) });
     const { title, text: raw } = await readPageText(url);
     const text = dropImages(raw);
     const main = text ? `Page: ${title || url} (${url})\n\n${cutPage(text, PAGE_CHARS)}` : '';
@@ -949,7 +980,7 @@ async function gather(store, step, flow) {
     const rows = openPositions(store).filter((r) => step.source === 'pools' || !r.inRange);
     return rows.map((r) => `- ${r.pair} on ${r.chain} #${r.tokenId}: ${r.inRange ? 'in range' : 'out of range'}, value ${usd(r.value)}, unclaimed fees ${usd(r.fees)}`).join('\n');
   }
-  return step.text || '';
+  return fill(step.text, vars);
 }
 
 function projectsOverview(store, open) {
@@ -992,8 +1023,10 @@ export function stopLabel(step) {
   return step.when === 'contains' || step.when === 'lacks' ? `${label} “${step.text || '…'}”` : label;
 }
 
-// A shell word: single quotes keep newlines, quotes and $ as they are.
-const shellQuote = (text) => `'${String(text).replace(/'/g, `'\\''`)}'`;
+// A shell word: single quotes keep newlines, quotes and $ as they are. A leading ~/ (a project's folder) stays
+// outside them, so the shell still expands it.
+const quoteWord = (text) => `'${String(text).replace(/'/g, `'\\''`)}'`;
+const shellQuote = (text) => (/^~\//.test(text) ? `~/${quoteWord(text.slice(2))}` : quoteWord(text));
 
 // The task a "Create task" step made in this run, as claude gets a task from its Dev button: a checklist line,
 // then its description indented. In a test run no task is made, so it is the title the step would give it.
@@ -1020,7 +1053,8 @@ async function runDev(store, flow, step, input, vars, ctx) {
   if (claude ? !prompt : !command) throw new Error(claude ? 'Write the Dev prompt.' : 'Enter the command to run.');
   const devCommand = claude ? stepDevCommand(store, step) : '';
   const where = project ? `${project.name}’s folder` : 'the board’s folder';
-  if (ctx.dry) {
+  // A step tested "in a terminal" starts it for real, so its output can be watched; it has no task to go with.
+  if (ctx.dry && !ctx.live) {
     const how = devCommand ? `start “${devCommand.trim()}” with this prompt` : claude ? 'hand this prompt to the project’s Dev command' : 'run this command';
     ctx.note = `Test run: would ${how} in a new Dev terminal, in ${where}.`;
     ctx.data = claude ? { devCommand: devCommand || null, prompt, folder: where } : { command, folder: where };
@@ -1036,23 +1070,24 @@ async function runDev(store, flow, step, input, vars, ctx) {
       if (worktree && statusOf(t) !== 'done') t.worktrees = [...(t.worktrees ?? []), { ...worktree, session: id }];
     });
   }
-  ctx.note = `Started in Dev terminal ${n}, in ${where}${task ? `, on the task “${task.text}”` : ''}.`;
-  ctx.data = { terminal: n, folder: where, ...(claude ? { prompt } : { command }) };
-  return input;
+  ctx.note = `${ctx.dry ? 'Test: started' : 'Started'} in Dev terminal ${n}, in ${where}${task ? `, on the task “${task.text}”` : ''}.`;
+  // session and cwd let the editor show the terminal's output, which the runner keeps, and open it in Dev.
+  ctx.data = { terminal: n, session: id, cwd: project?.localPath || '', folder: where, ...(claude ? { prompt } : { command }) };
+  return ctx.dry ? (claude ? prompt : command) : input;
 }
 
 // ctx carries what passes between steps besides the text: whether the last data step found nothing, whether this is
 // a test run, and a note a step leaves for the run log (what it would have done, or why the run stopped).
 // A step may set ctx.data to what it made, for paths such as {{step3.title}}; by default its output is read as JSON.
 async function runStep(store, flow, step, input, ctx) {
-  const vars = varsFor(flow, ctx);
+  const vars = varsFor(flow, ctx, step, store);
   if (step.type === 'gather') {
     const sources = sourcesOf(step);
     if (!sources.length) throw new Error('Add a source to this step.');
     const parts = [];
     for (const own of sources) {
       const src = withFlowProject(flow, own);
-      const text = await gather(store, src, flow);
+      const text = await gather(store, src, flow, varsFor(flow, ctx, src, store));
       parts.push({ src, text, body: text || NOTHING[src.source] || '' });
     }
     ctx.nothing = parts.every((p) => !p.text.trim());
@@ -1120,7 +1155,7 @@ async function stepOnce(store, flow, step, ctx) {
   ctx.note = '';
   ctx.data = undefined;
   const input = ctx.results.at(-1)?.output ?? '';
-  const vars = varsFor(flow, ctx);
+  const vars = varsFor(flow, ctx, step, store);
   try {
     const output = String(await runStep(store, flow, step, input, ctx) ?? '');
     const data = ctx.data !== undefined ? ctx.data : parseData(output) ?? output;
@@ -1165,7 +1200,7 @@ export function testsOf(store, flowId) {
   for (const step of flow.steps) {
     const r = saved[step.id];
     if (!r) continue;
-    const result = { ...r, data: 'data' in r ? r.data : parseData(r.output) ?? r.output, vars: varsFor(flow, { results }) };
+    const result = { ...r, data: 'data' in r ? r.data : parseData(r.output) ?? r.output, vars: varsFor(flow, { results }, step, store) };
     map.set(step.id, result);
     if (result.ok) results.push(result);
   }
@@ -1181,7 +1216,8 @@ export function clearTests(store, flowId) {
 
 // Tests one step: earlier steps with no result yet run first, then this one runs again. A "Stop if" that would stop
 // does not keep the next step from being tested, since testing it is the point.
-export async function testStep(store, flowId, stepId) {
+// With `live`, a Run in Dev step starts its terminal (the steps before it stay tests).
+export async function testStep(store, flowId, stepId, { live = false } = {}) {
   const flow = store.get(COLLECTION).flows.find((f) => f.id === flowId);
   if (!flow || running.has(flowId) || testing.has(flowId)) return null;
   const end = flow.steps.findIndex((s) => s.id === stepId);
@@ -1199,6 +1235,7 @@ export async function testStep(store, flowId, stepId) {
         ctx.nothing = kept.nothing;
         continue;
       }
+      ctx.live = live && step.id === stepId;
       last = await stepOnce(store, flow, step, ctx);
       saveTest(store, flowId, step.id, last);
       if (!last.ok) break;
@@ -1231,7 +1268,8 @@ export async function runFlow(store, flowId, { manual = false, dry = false } = {
     for (const step of flow.steps) {
       const result = await stepOnce(store, flow, step, ctx);
       if (dry) saveTest(store, flowId, step.id, result);
-      run.steps.push({ stepId: step.id, ok: result.ok, output: result.output.slice(0, 4000), note: result.note, ms: result.ms });
+      const term = step.type === 'dev' && result.data?.session ? { session: result.data.session, cwd: result.data.cwd } : {};
+      run.steps.push({ stepId: step.id, ok: result.ok, output: result.output.slice(0, 4000), note: result.note, ms: result.ms, ...term });
       if (!result.ok) throw new Error(result.output);
       if (ctx.stop) {
         run.status = 'stopped';

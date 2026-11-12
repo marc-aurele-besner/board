@@ -343,7 +343,20 @@ let frame = 0;
 const schedulePaint = () => (frame ||= requestAnimationFrame(() => {
   frame = 0;
   view.sessions.forEach(paint);
+  painted.forEach((fn) => fn());
 }));
+
+// A page reads a session through one stream, so a second reader would cut Dev's off. Elsewhere (Cron) a view of a
+// terminal Dev already reads shows Dev's copy, told of each change.
+const painted = new Set();
+export function liveSession(id) {
+  const s = view.sessions.find((x) => x.id === id && x.attach);
+  return s ? { term: s.term, running: s.running, exit: s.exit } : null;
+}
+export function onSessionPaint(fn) {
+  painted.add(fn);
+  return () => painted.delete(fn);
+}
 
 // Columns and rows that fit the terminal, from the size of one character.
 function fit(s) {
@@ -510,7 +523,7 @@ function elementsOf(store, s) {
 const oneLine = (text) => text.replace(/\s*\n\s*/g, ' ↵ ');
 
 const duration = (ms) => (ms < 1000 ? `${Math.round(ms)}ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`);
-function exitText(exit) {
+export function exitText(exit) {
   if (!exit) return '';
   if (exit.stopped) return `Stopped after ${duration(exit.ms)}`;
   if (exit.lost) return 'Ended when the runner stopped';

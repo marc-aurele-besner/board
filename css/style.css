@@ -1893,6 +1893,9 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .cron-runs > li { padding: 8px 0; border-bottom: 1px solid var(--border); }
 .cron-runs > li:last-child { border-bottom: none; }
 .cron-run-steps { margin: 8px 0 0; padding-left: 0; list-style: none; display: grid; gap: 10px; }
+/* A Run in Dev step's terminal output: lines as the program drew them, scrolled sideways rather than wrapped. */
+.cron-term-view { gap: 6px; margin-top: 6px; }
+.cron-term-view .cron-term { margin: 0; padding: 10px; max-height: 360px; overflow: auto; border-radius: 8px; background: var(--surface-2); white-space: pre; font-family: var(--mono, ui-monospace, monospace); font-size: 0.78rem; line-height: 1.35; }
 /* Variables under a {{…}} field, and a step's test data as JSON trees. */
 .cron-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .cron-vars { display: flex; flex-wrap: wrap; gap: 4px; }
