@@ -20,6 +20,7 @@ import { worktreesPanel, refreshWorktrees } from './dev-worktrees.js';
 import { pickChip } from '../inline.js';
 import { projectIcon } from './projects.js';
 import { linkWatcher, moveToReview } from '../task-links.js';
+import { watchDevSessions } from './todos.js';
 import { recordOfSession, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand } from '../dev-core.js';
 
@@ -113,8 +114,12 @@ function makeSession({ id = uid(), n = ++view.count, cwd = '', tasks = [], promp
     reply: (data) => !s.replaying && s.running && s.pid && sendInput(runnerOf(currentStore), s.pid, { data }),
     background: themeColor,
   });
-  // Issue and PR links the session prints are added to its tasks.
-  if (tasks.length) s.watch = linkWatcher(currentStore, tasks, prompt);
+  // Issue and PR links the session prints are added to its tasks. Tasks moves them on to review once claude waits,
+  // and watches for that even when it was not shown.
+  if (tasks.length) {
+    s.watch = linkWatcher(currentStore, tasks, prompt);
+    if (currentStore) watchDevSessions(currentStore);
+  }
   view.sessions.push(s);
   return s;
 }

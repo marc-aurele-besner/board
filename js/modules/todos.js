@@ -585,10 +585,10 @@ async function devTasks(store, items) {
 
 // What each task's terminal is doing, asked of the runner every few seconds once Tasks has been shown.
 // A task whose terminal the runner no longer has (closed, or forgotten after a month) has no entry.
-// claude ends its turn by waiting for its user (or by quitting): the tasks it was handed then wait for review.
+// A task waits for review once claude quits, or once it has a PR and claude waits for its user: the runner says
+// waiting only when claude's turn ended and no subagent still works, so a PR opened mid-turn does not count yet.
 const DEV_POLL_MS = 4000;
-const DEV_FINISHED = ['waiting', 'done'];
-const devWatch = { status: {}, timer: 0 };
+const devWatch = { status: {}, withPr: new Set(), timer: 0 };
 const DEV_STATES = {
   working: 'claude is working',
   waiting: 'Waiting for you',
@@ -598,7 +598,7 @@ const DEV_STATES = {
   idle: 'Nothing running',
 };
 
-function watchDevSessions(store) {
+export function watchDevSessions(store) {
   if (devWatch.timer || !store.get(COLLECTION).items.some((t) => t.devSession)) return;
   const poll = async () => {
     devWatch.timer = 0;
@@ -610,11 +610,21 @@ function watchDevSessions(store) {
     } catch {}
     devWatch.timer ||= setTimeout(poll, DEV_POLL_MS);
     // An unreachable runner says nothing about the sessions, so nothing moves.
-    if (!status || JSON.stringify(status) === JSON.stringify(devWatch.status)) return;
-    // Only on the change into a finished state, so a task put back in progress while claude waits stays there.
-    const finished = ids.filter((id) => DEV_FINISHED.includes(status[id]?.state) && !DEV_FINISHED.includes(devWatch.status[id]?.state));
+    if (!status) return;
+    const withPr = new Set(items.filter((t) => prsOf(t).length).map((t) => t.id));
+    const { status: was, withPr: hadPr } = devWatch;
+    devWatch.withPr = withPr;
+    if (JSON.stringify(status) === JSON.stringify(was) && [...withPr].every((id) => hadPr.has(id))) return;
     devWatch.status = status;
-    if (finished.length) moveToReview(store, items.filter((t) => finished.includes(t.devSession)).map((t) => t.id));
+    // Only on a change (claude quit, started waiting, or a PR came while it waits), so a task put back in progress
+    // while claude waits stays there.
+    const ready = items.filter((t) => {
+      const now = status[t.devSession]?.state;
+      const before = was[t.devSession]?.state;
+      if (now === 'done') return before !== 'done';
+      return now === 'waiting' && withPr.has(t.id) && (before !== 'waiting' || !hadPr.has(t.id));
+    });
+    if (ready.length) moveToReview(store, ready.map((t) => t.id));
     if (location.hash.startsWith('#/todos')) store.refresh();
   };
   devWatch.timer = setTimeout(poll, 0);
