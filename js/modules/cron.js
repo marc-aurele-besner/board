@@ -1595,7 +1595,7 @@ function testPanel(store, flow, step, index) {
       h('strong', null, 'Test data'),
       h('div', { class: 'row' },
         result?.pending ? h('span', { class: 'pill tone-doing' }, 'Waiting for the terminal…')
-          : result ? h('span', { class: `pill tone-${result.ok ? 'done' : 'high'}` }, result.ok ? `Tested · ${result.ms} ms` : 'Failed') : null,
+          : result ? h('span', { class: `pill tone-${result.ok ? 'done' : 'high'}` }, result.ok ? `Tested · ${duration(result.ms)}` : 'Failed') : null,
         result?.ok && !result.pending && next
           ? h('button', {
               type: 'button',
@@ -1670,7 +1670,7 @@ function inspector(store, flow) {
     testPanel(store, flow, step, index),
     output
       ? h('details', { class: 'cron-output', open: !output.ok },
-          h('summary', null, output.ok ? `Output of the last run (${output.ms} ms)` : 'Last run failed here'),
+          h('summary', null, output.ok ? `Output of the last run (${duration(output.ms)})` : 'Last run failed here'),
           output.note ? h('p', { class: 'muted small' }, output.note) : null,
           h('pre', { class: output.ok ? '' : 'error' }, output.output || '(empty)'),
           output.session ? terminalFold(store, output.session, output.cwd) : null)
