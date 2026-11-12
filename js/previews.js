@@ -118,7 +118,7 @@ export function trackedPrs(store, at = Date.now()) {
   const runs = (store.get('cron')?.runs ?? [])
     .filter((r) => at - Date.parse(r.at) < RUNS_WITHIN)
     .flatMap((r) => [...r.steps, ...(r.current ? [r.current] : [])])
-    // The run's current terminal has neither field; stepRecord() in js/cron.js writes `pr` and never `prs`.
+    // The run's current terminal has neither field; runs saved before stepRecord() wrote `prs` have only `pr`.
     .flatMap((/** @type {Partial<CronRunStep>} */ s) => s.prs?.length ? s.prs : s.pr ? [s.pr] : []);
   return uniquePrs([...tasks, ...runs]).map((p) => ({ repo: p.repo, number: p.number }));
 }

@@ -21,7 +21,7 @@ import { previewChips } from '../previews.js';
 import { attachSession, sessionStatus, listSkills } from '../terminal.js';
 import { createTerminal } from '../vt.js';
 import { hasProfileSources } from '../profile.js';
-/** @import { Store, CronFlow, CronStep, CronSource, CronFormatField, CronSchedule, CronTemplate, CronRun, CronRunStep, CronPr, Project, Task, IconName } from '../../types/data' */
+/** @import { Store, CronFlow, CronStep, CronSource, CronFormatField, CronSchedule, CronTemplate, CronRun, CronRunStep, CronRunTerminal, CronPr, Project, Task, IconName } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @import { Vars } from '../cron.js' */
 /** @import { Exit } from './dev.js' */
@@ -2022,17 +2022,23 @@ const RUN_STATUS = {
 /** @param {number} ms */
 const duration = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : ms < 3600000 ? `${Math.floor(ms / 60000)} min ${Math.round((ms % 60000) / 1000)} s` : `${Math.floor(ms / 3600000)} h ${Math.round((ms % 3600000) / 60000)} min`);
 
-// The things a run made, gathered from its steps (and the step running now), newest last.
+// The things a run made, gathered from its steps (and the step running now), newest last. A step in a loop made
+// one per item and keeps them all in its lists; older runs, and a step that made one, have only the single fields.
 // Each list keeps the steps that have the field, so the casts only drop undefined.
 /** @param {CronRun} r */
 function runOutcomes(r) {
   /** @type {Partial<CronRunStep>[]} */
   const steps = [...r.steps, ...(r.current ? [r.current] : [])];
+  const terms = steps.flatMap((s) => s.terminals?.length ? s.terminals : s.session ? [/** @type {CronRunTerminal} */ ({ ...s })] : [])
+    .map((t) => ({ session: t.session, cwd: t.cwd ?? '', terminal: t.terminal, taskId: t.taskId ?? '', branch: t.branch ?? '' }));
+  /** @param {CronPr[]} list */
+  const unique = (list) => [...new Map(list.map((p) => [p.url.toLowerCase(), p])).values()];
   return {
-    tasks: [...new Set(/** @type {string[]} */ (steps.map((s) => s.taskId).filter(Boolean)))],
-    terms: steps.filter((s) => s.session).map((s) => ({ session: /** @type {string} */ (s.session), cwd: s.cwd ?? '', terminal: s.terminal, taskId: s.taskId ?? '' })),
-    prs: steps.filter((s) => s.pr?.url).map((s) => /** @type {CronPr} */ (s.pr)),
-    branches: [...new Set(/** @type {string[]} */ (steps.map((s) => s.branch).filter(Boolean)))],
+    tasks: [...new Set(/** @type {string[]} */ (steps.flatMap((s) => s.taskIds?.length ? s.taskIds : [s.taskId]).filter(Boolean)))],
+    terms: [...new Map(terms.map((t) => [t.session, t])).values()],
+    prs: unique(steps.flatMap((s) => s.prs?.length ? s.prs : s.pr?.url ? [s.pr] : [])),
+    issues: unique(steps.flatMap((s) => s.issues ?? [])),
+    branches: [...new Set(terms.map((t) => t.branch).filter(Boolean))],
   };
 }
 
@@ -2072,6 +2078,8 @@ function terminalChip(store, term) {
 
 /** @param {CronPr} pr */
 const prChip = (pr) => h('a', { class: 'run-chip', href: pr.url, target: '_blank', rel: 'noopener noreferrer', title: `${pr.repo} #${pr.number}` }, icon('git-pull-request'), `PR #${pr.number}`);
+/** @param {CronPr} issue */
+const issueChip = (issue) => h('a', { class: 'run-chip', href: issue.url, target: '_blank', rel: 'noopener noreferrer', title: `Issue ${issue.repo} #${issue.number}` }, icon('repo'), `Issue #${issue.number}`);
 /** @param {string} name */
 const branchChip = (name) => h('span', { class: 'run-chip mono', title: 'The branch the Dev step worked on' }, icon('git-branch'), name);
 
@@ -2123,7 +2131,9 @@ function runSteps(store, flow, r, state) {
     [
       s.note ? h('p', { class: 'muted small' }, s.note) : null,
       stepOutput(s),
-      s.session ? terminalFold(store, s.session, s.cwd, { taskIds: s.taskId ? [s.taskId] : [] }) : null,
+      // A Dev step in a loop started one terminal per item.
+      (s.terminals?.length ? s.terminals : s.session ? [/** @type {CronRunTerminal} */ ({ ...s })] : [])
+        .map((t) => terminalFold(store, t.session, t.cwd, { taskIds: t.taskId ? [t.taskId] : [] })),
     ]));
   const ran = new Set(r.steps.map((s) => s.stepId));
   const rest = flow ? flow.steps.filter((s) => !ran.has(s.id)) : [];
@@ -2138,7 +2148,7 @@ function runSteps(store, flow, r, state) {
 }
 
 // One run: a header that opens it (status dot, flow, time, how it started, how long it took), then what it made
-// (its task, terminals, PR, its preview and branch) as links, then, once opened, each step.
+// (its tasks, terminals, PRs, issues, previews and branches) as links, then, once opened, each step.
 /**
  * @param {Store} store
  * @param {CronFlow | null} flow
@@ -2157,8 +2167,8 @@ function runCard(store, flow, r, { showFlow = false } = {}) {
   // Runs saved before runs kept their end have no duration.
   const end = r.ended ? Date.parse(r.ended) : state === 'running' ? Date.now() : NaN;
   const took = end - Date.parse(r.at);
-  const { tasks, terms, prs, branches } = runOutcomes(r);
-  const links = [...tasks.map((id) => taskChip(store, id)), ...terms.map((t) => terminalChip(store, t)), ...prs.map(prChip), ...previewChips(store, prs, 'run-chip'), ...branches.map(branchChip)];
+  const { tasks, terms, prs, issues, branches } = runOutcomes(r);
+  const links = [...tasks.map((id) => taskChip(store, id)), ...terms.map((t) => terminalChip(store, t)), ...prs.map(prChip), ...issues.map(issueChip), ...previewChips(store, prs, 'run-chip'), ...branches.map(branchChip)];
   return h('li', { class: `cron-run${view.focusRun === r.id ? ' focus' : ''}`, 'data-run': r.id },
     h('div', { class: 'cron-run-head' },
       h('button', { type: 'button', class: 'cron-run-toggle', 'aria-expanded': String(open), onclick: toggle },

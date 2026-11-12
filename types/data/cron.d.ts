@@ -135,6 +135,16 @@ export interface CronPr {
   url: string;
 }
 
+// One Dev terminal a step started; a step in a loop starts one per item.
+export interface CronRunTerminal {
+  session: string;
+  cwd: string;
+  terminal: number;
+  taskId?: string;
+  worktree?: string;
+  branch?: string;
+}
+
 // The Dev terminal a run is waiting on.
 export interface CronRunCurrent {
   stepId: string;
@@ -156,8 +166,10 @@ export interface CronRunStep {
   output: string;
   note: string;
   ms: number;
-  // task: the task it made.
+  // task: the task it made, the last one in a loop; taskIds has every one when it made more.
+  // dev: the task the terminal worked on.
   taskId?: string;
+  taskIds?: string[];
   // dev: the terminal, and what the session left.
   session?: string;
   cwd?: string;
@@ -168,8 +180,11 @@ export interface CronRunStep {
   pr?: CronPr;
   // Number of changed files.
   files?: number;
-  // Read by js/previews.js; nothing writes it now.
+  // Every terminal, when a loop started more than one.
+  terminals?: CronRunTerminal[];
+  // Every PR and issue the step's terminals printed.
   prs?: CronPr[];
+  issues?: CronPr[];
 }
 
 export interface CronRun {
