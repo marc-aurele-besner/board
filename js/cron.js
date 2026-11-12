@@ -685,7 +685,86 @@ export function scheduleLabel(s) {
 
 // --- Steps ---
 
-const fill = (template, vars) => String(template ?? '').replace(/\{\{\s*(\w+)\s*\}\}/g, (m, k) => (k in vars ? vars[k] : m));
+// --- Variables ---
+// {{input}}, {{date}}, {{flow}} and {{task}} as before; {{step2}} is the output of step 2, and a path after a name
+// ({{step2.items[0].title}}, {{input.title}}) reads into that output when it is JSON, or into what the step made.
+const VAR = /\{\{\s*([A-Za-z_]\w*)((?:\.[\w-]+|\[\d+\])*)\s*\}\}/g;
+
+// A model often wraps JSON in a code fence; anything else that is not JSON stays text.
+export function parseData(text) {
+  const t = String(text ?? '').trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n?```$/, '$1').trim();
+  if (!/^[[{]/.test(t)) return null;
+  try {
+    return JSON.parse(t);
+  } catch {
+    return null;
+  }
+}
+
+const asText = (v) => (v == null ? '' : typeof v === 'string' ? v : JSON.stringify(v, null, 2));
+
+function walk(value, path) {
+  let v = value;
+  for (const [, key, index] of path.matchAll(/\.([\w-]+)|\[(\d+)\]/g)) {
+    if (v == null || typeof v !== 'object') return undefined;
+    v = v[key ?? Number(index)];
+  }
+  return v;
+}
+
+// The value of one {{name.path}}, or undefined when there is none, so the placeholder stays as written.
+function lookup(vars, name, path) {
+  if (!(name in vars) || name === '$data') return undefined;
+  if (!path) return asText(vars[name]);
+  const v = walk(vars.$data?.[name], path);
+  return v === undefined ? undefined : asText(v);
+}
+
+const fill = (template, vars, quote = (x) => x) =>
+  String(template ?? '').replace(VAR, (m, name, path) => {
+    const v = lookup(vars, name, path);
+    return v === undefined ? m : quote(v);
+  });
+
+// The variables a step sees: its input, the run's date and flow, and every earlier step's output by number.
+// $data holds what each name reads into with a path: parsed JSON, or what the step made.
+function varsFor(flow, ctx) {
+  const results = ctx.results ?? [];
+  const prev = results.at(-1);
+  const vars = { input: prev?.output ?? '', date: todayISO(), flow: flow.name, $data: { input: prev?.data ?? null } };
+  results.forEach((r, i) => {
+    vars[`step${i + 1}`] = r.output;
+    vars.$data[`step${i + 1}`] = r.data;
+  });
+  return vars;
+}
+
+// The variables as one JSON tree for the editor: a key's path is what a click on it puts in a field.
+export function varsTree(vars) {
+  const tree = {};
+  for (const [k, v] of Object.entries(vars ?? {})) {
+    if (k === '$data') continue;
+    const data = vars.$data?.[k];
+    tree[k] = data != null && typeof data === 'object' ? data : v;
+  }
+  return tree;
+}
+
+// Moving, adding or removing a step changes the numbers after it, so references follow their step.
+// `map` turns an old 1-based number into the new one, or null for a removed step.
+export function remapStepRefs(steps, map) {
+  const fix = (text) => text.replace(/(\{\{\s*)step(\d+)(?=[.[\s}])/g, (m, open, n) => {
+    const to = map(Number(n));
+    return to == null ? `${open}removedStep` : `${open}step${to}`;
+  });
+  const visit = (o) => {
+    for (const [k, v] of Object.entries(o)) {
+      if (typeof v === 'string' && v.includes('{{')) o[k] = fix(v);
+      else if (Array.isArray(v)) v.forEach((x) => x && typeof x === 'object' && visit(x));
+    }
+  };
+  steps.forEach(visit);
+}
 
 function taskLines(store, list) {
   const projects = store.get('projects').projects;
@@ -858,13 +937,14 @@ async function runDev(store, flow, step, input, vars, ctx) {
   const v = { ...vars, task: taskText(task, input) };
   const prompt = claude ? fill(step.prompt || '{{input}}', v).trim() : '';
   // Values go into a command as one quoted word each, so text from a model cannot run as shell.
-  const command = claude ? '' : String(step.command ?? '').replace(/\{\{\s*(\w+)\s*\}\}/g, (m, k) => (k in v ? shellQuote(v[k]) : m)).trim();
+  const command = claude ? '' : fill(step.command, v, shellQuote).trim();
   if (claude ? !prompt : !command) throw new Error(claude ? 'Write the Dev prompt.' : 'Enter the command to run.');
   const devCommand = claude ? stepDevCommand(store, step) : '';
   const where = project ? `${project.name}’s folder` : 'the board’s folder';
   if (ctx.dry) {
     const how = devCommand ? `start “${devCommand.trim()}” with this prompt` : claude ? 'hand this prompt to the project’s Dev command' : 'run this command';
     ctx.note = `Test run: would ${how} in a new Dev terminal, in ${where}.`;
+    ctx.data = claude ? { devCommand: devCommand || null, prompt, folder: where } : { command, folder: where };
     return claude ? prompt : command;
   }
   const { id, n, worktree } = await startDevSession({ store, claude, prompt, command, devCommand, projectId, taskIds: task ? [task.id] : [], title: task?.text || flow.name });
@@ -878,13 +958,15 @@ async function runDev(store, flow, step, input, vars, ctx) {
     });
   }
   ctx.note = `Started in Dev terminal ${n}, in ${where}${task ? `, on the task “${task.text}”` : ''}.`;
+  ctx.data = { terminal: n, folder: where, ...(claude ? { prompt } : { command }) };
   return input;
 }
 
 // ctx carries what passes between steps besides the text: whether the last data step found nothing, whether this is
 // a test run, and a note a step leaves for the run log (what it would have done, or why the run stopped).
+// A step may set ctx.data to what it made, for paths such as {{step3.title}}; by default its output is read as JSON.
 async function runStep(store, flow, step, input, ctx) {
-  const vars = { input, date: todayISO(), flow: flow.name };
+  const vars = varsFor(flow, ctx);
   if (step.type === 'gather') {
     const sources = sourcesOf(step);
     if (!sources.length) throw new Error('Add a source to this step.');
@@ -897,6 +979,7 @@ async function runStep(store, flow, step, input, ctx) {
     ctx.nothing = parts.every((p) => !p.text.trim());
     const appending = step.append && input.trim();
     // Several sources, or data added to earlier data, go under headings so a prompt can tell them apart.
+    if (parts.length > 1) ctx.data = Object.fromEntries(parts.map((p) => [sourceLabel(store, p.src), parseData(p.body) ?? p.body]));
     if (parts.length === 1 && !appending) return parts[0].body;
     const sections = parts.map((p) => `## ${sourceLabel(store, p.src)}\n\n${p.body}`).join('\n\n');
     return appending ? `${input}\n\n${sections}` : sections;
@@ -915,6 +998,8 @@ async function runStep(store, flow, step, input, ctx) {
   if (step.type === 'task') {
     const title = fill(step.title || '{{input}}', vars).split('\n')[0].slice(0, 200).trim() || flow.name;
     const due = step.due === 'today' ? todayISO() : step.due === 'tomorrow' ? new Date(Date.now() + 24 * 60 * MINUTE).toISOString().slice(0, 10) : '';
+    const projectId = withFlowProject(flow, step).projectId || null;
+    ctx.data = { title, description: input, projectId, priority: step.priority || 'none', due };
     if (ctx.dry) {
       ctx.note = `Test run: would create the task “${title}”${due ? ` due ${due}` : ''}.`;
       return input;
@@ -922,13 +1007,14 @@ async function runStep(store, flow, step, input, ctx) {
     const task = makeTask({
       text: title,
       description: input,
-      projectId: withFlowProject(flow, step).projectId || null,
+      projectId,
       priority: step.priority || 'none',
       due,
       auto: 'cron',
       autoRef: flow.id,
     });
     store.update('todos', (d) => d.items.push(task));
+    ctx.data.id = task.id;
     // A "Run in Dev" step later in the run works on this task.
     ctx.task = task;
     return input;
@@ -947,13 +1033,72 @@ async function runStep(store, flow, step, input, ctx) {
 }
 
 const running = new Set();
-export const isRunning = (id) => running.has(id);
+export const isRunning = (id) => running.has(id) || testing.has(id);
+
+// Runs one step on what ctx holds from the steps before it, and adds its result to ctx.results.
+async function stepOnce(store, flow, step, ctx) {
+  const started = Date.now();
+  ctx.note = '';
+  ctx.data = undefined;
+  const input = ctx.results.at(-1)?.output ?? '';
+  const vars = varsFor(flow, ctx);
+  try {
+    const output = String(await runStep(store, flow, step, input, ctx) ?? '');
+    const data = ctx.data !== undefined ? ctx.data : parseData(output) ?? output;
+    const result = { ok: true, vars, output, data, note: ctx.note, ms: Date.now() - started, at: now(), nothing: ctx.nothing };
+    ctx.results.push(result);
+    return result;
+  } catch (err) {
+    return { ok: false, vars, output: err.message, data: null, note: '', ms: Date.now() - started, at: now() };
+  }
+}
+
+// --- Step by step tests ---
+// As in n8n, a step can run on its own, as a test (no task, no notification, no terminal), on the results the steps
+// before it left. They last while the page is open: flowId → Map(stepId → result).
+const tests = new Map();
+const testing = new Set();
+export const testsOf = (flowId) => tests.get(flowId) ?? new Map();
+export const isTesting = (flowId) => testing.has(flowId);
+export const clearTests = (flowId) => tests.delete(flowId);
+
+// Tests one step: earlier steps with no result yet run first, then this one runs again. A "Stop if" that would stop
+// does not keep the next step from being tested, since testing it is the point.
+export async function testStep(store, flowId, stepId) {
+  const flow = store.get(COLLECTION).flows.find((f) => f.id === flowId);
+  if (!flow || running.has(flowId) || testing.has(flowId)) return null;
+  const end = flow.steps.findIndex((s) => s.id === stepId);
+  if (end < 0) return null;
+  testing.add(flowId);
+  store.refresh();
+  if (!tests.has(flowId)) tests.set(flowId, new Map());
+  const saved = tests.get(flowId);
+  const ctx = { dry: true, nothing: false, stop: false, note: '', results: [] };
+  let last = null;
+  try {
+    for (const step of flow.steps.slice(0, end + 1)) {
+      const kept = saved.get(step.id);
+      if (kept?.ok && step.id !== stepId) {
+        ctx.results.push(kept);
+        ctx.nothing = kept.nothing;
+        continue;
+      }
+      last = await stepOnce(store, flow, step, ctx);
+      saved.set(step.id, last);
+      if (!last.ok) break;
+    }
+  } finally {
+    testing.delete(flowId);
+    store.refresh();
+  }
+  return last;
+}
 
 // Runs the steps in order and keeps each step's output, so the editor can show what passed between them.
 // A test run (dry) creates no task and sends no notification, and leaves the schedule alone. AI steps still call the model.
 export async function runFlow(store, flowId, { manual = false, dry = false } = {}) {
   const flow = store.get(COLLECTION).flows.find((f) => f.id === flowId);
-  if (!flow || running.has(flowId)) return null;
+  if (!flow || isRunning(flowId)) return null;
   running.add(flowId);
   const run = { id: uid(), flowId, at: now(), manual: manual || dry, dry, status: 'ok', steps: [], error: '' };
   // Mark the run at its start, so a slow model call is not started twice by the next tick.
@@ -963,19 +1108,15 @@ export async function runFlow(store, flowId, { manual = false, dry = false } = {
       if (f) f.lastRun = run.at;
     });
   }
-  let input = '';
-  const ctx = { dry, nothing: false, stop: false, note: '' };
+  const ctx = { dry, nothing: false, stop: false, note: '', results: [] };
+  // A test run of the whole flow also fills the step tests, so its data can be looked at and picked from.
+  if (dry) tests.set(flowId, new Map());
   try {
     for (const step of flow.steps) {
-      const started = Date.now();
-      ctx.note = '';
-      try {
-        input = String(await runStep(store, flow, step, input, ctx) ?? '');
-        run.steps.push({ stepId: step.id, ok: true, output: input.slice(0, 4000), note: ctx.note, ms: Date.now() - started });
-      } catch (err) {
-        run.steps.push({ stepId: step.id, ok: false, output: err.message, ms: Date.now() - started });
-        throw err;
-      }
+      const result = await stepOnce(store, flow, step, ctx);
+      if (dry) tests.get(flowId)?.set(step.id, result);
+      run.steps.push({ stepId: step.id, ok: result.ok, output: result.output.slice(0, 4000), note: result.note, ms: result.ms });
+      if (!result.ok) throw new Error(result.output);
       if (ctx.stop) {
         run.status = 'stopped';
         run.error = ctx.note;
