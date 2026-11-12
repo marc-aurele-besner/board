@@ -11,7 +11,8 @@ A personal command center that runs locally. It is plain HTML, CSS and JavaScrip
 - Start the board with `bun start` (or `node tools/start.js`): it runs the static server, the API relays and the command runner together, each logging with its name as prefix. `bun dev` runs the same and restarts them when a file in `tools/` changes. `bun run serve` alone serves the folder. Then open `http://localhost:8000` in Chrome or Edge. The File System Access API needs a secure context (`localhost` counts) and does not work in Firefox or Safari.
 - A changed module is not always picked up: `python3 -m http.server` sends no cache headers, so the browser reuses the module it cached and keeps running the old code. `tools/serve.js` marks every file `no-cache`, so a reload runs the new code. With the Python server, ask the user for a hard reload (Cmd+Shift+R) before checking a change in the browser.
 - Syntax check every module before committing:
-  `for f in js/*.js js/modules/*.js; do node --experimental-default-type=module --check "$f" || echo "FAIL $f"; done`
+  `for f in js/*.js js/modules/*.js tools/*.js tools/*/*.js; do node --experimental-default-type=module --check "$f" || echo "FAIL $f"; done`
+- The worker imports modules from `js/` under Node, so those must not touch `document`, `window`, `localStorage` or `location` when they load, nor import a module that does. `node tools/check-imports.js` loads every job and catches both a missing import and a DOM call at load time. `node tools/check-merge.js` checks that the worker's writes and a tab's merge without losing either.
 - Test real behavior in the browser when you can. Folder picking needs a user click, so ask the user to drive that step if you cannot.
 
 ## Layout
@@ -52,6 +53,9 @@ js/google.js          every Google sign-in, kept in google.json and renewed befo
 js/gmail.js           the Inbox's Gmail reads: one sign-in per account, its email list, and one email's body
 js/gcal.js            Calendar's Google reads: one sign-in per account, its calendar list, and the events of a range
 js/background.js      timers for the above; started once the data folder is open
+js/runner-jobs.js     the jobs the runners do, with their labels and default intervals (shared by the worker and Settings)
+js/runners.js         the board's side of the runners: their heartbeat in runners.json, Run now, their data folder's path
+js/modules/settings-runners.js  Settings → Runners: the worker's status and folder, and each job's switch, interval and Run now
 js/task-links.js      a task's GitHub issues and PRs; finds the links a Dev session prints and adds them to its tasks
 js/images.js          which pasted or dropped files are images claude reads
 js/task-images.js     a task's images: kept in the data folder, shown on the task, saved through the runner for claude
@@ -66,11 +70,18 @@ js/shortcuts.js       the single-key shortcuts ("g" then a letter) and the sheet
 js/sample.js          "Explore with sample data": a data folder in memory with placeholder content
 fonts/                bundled typefaces (SIL Open Font License)
 package.json          scripts only (start, serve, relays); no dependencies
-tools/start.js        one command for the board: starts serve.js and relays.js together
+tools/start.js        one command for the board: starts serve.js, relays.js, terminal.js and worker.js together
 tools/log.js          terminal lines prefixed with each runner's name
 tools/serve.js        local static server with no-cache headers; no dependencies
 tools/relays.js       local relays for Bing's and Resend's APIs (Inbox), which send no CORS header
 tools/terminal.js     the Dev section's runner: terminal sessions that outlive the page (output and the list of open terminals kept on disk), typed keys, read-only file reads, git for Source control, listing worktrees and removing one (a done task's, or any from Dev's Worktrees panel), saving images for claude; localhost only
+tools/worker.js       the runners: one worker that runs the background jobs on a schedule and writes into the data folder; localhost API on 8420
+tools/worker/store.js the store for Node (get, update, save over node:fs), merged with what the tabs write through js/merge.js
+tools/worker/schedule.js  intervals, no overlap, timeouts, backoff, and the runners.json heartbeat
+tools/worker/http.js  the worker's localhost API: status, Run now, data folder
+tools/jobs/*.js       one file per job: { id, every, timeout, delay, run(ctx) }; listed in tools/jobs/index.js
+tools/check-imports.js  loads every worker module under plain Node, to catch a missing import or a DOM call at load time
+tools/check-merge.js  the worker and a tab change two fields of one file; both must survive
 tools/usage.js        reads Claude Code's transcripts for the runner: a task worktree's models, tokens, cost and effort
 ```
 
@@ -106,4 +117,4 @@ tools/usage.js        reads Claude Code's transcripts for the runner: a task wor
 - Keep PR titles short. The description lists what changed and how it was checked, in a few lines.
 - **Never leave a PR unmerged.** Every PR you open is merged in the same turn, as soon as the strict syntax check passes and the change is complete. Do not ask whether to merge, do not wait for approval, and do not end a turn with an open PR. If a merge is blocked (conflict, failing check), fix it in the same turn and merge; if that is impossible, say so explicitly and stop.
 - Before finishing any turn, list open PRs (`gh pr list --state open`). If any are open, merge them now.
-- Run the strict syntax check before every commit, and stop if it fails: `for f in js/*.js js/modules/*.js; do node --experimental-default-type=module --check "$f" || { echo "FAIL $f"; exit 1; }; done`
+- Run the strict syntax check before every commit, and stop if it fails: `for f in js/*.js js/modules/*.js tools/*.js tools/*/*.js; do node --experimental-default-type=module --check "$f" || { echo "FAIL $f"; exit 1; }; done && node tools/check-imports.js && node tools/check-merge.js`
