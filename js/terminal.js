@@ -135,6 +135,10 @@ export const closeSession = (base, session) => call(base, '/close', post({ sessi
 // or claude still runs there.
 export const removeWorktree = async (base, { cwd, name, path, session }) => (await call(base, '/worktree/remove', post({ cwd, name, path, session }))).json();
 
+// Ends a claude that is done in its worktree: /exit, then Remove worktree when nothing in it would be lost (no
+// uncommitted file, every commit on a remote), else Keep. { ended, removed, path, kept?: why }.
+export const exitClaude = async (base, session) => (await call(base, '/claude/exit', post({ session }))).json();
+
 // The worktrees of the repository holding `path`, but its main checkout: { repo: false }, or { root, worktrees:
 // [{ path, name, branch, head, claude, locked, prunable, pid, running, commands, changes }] }.
 export const listWorktrees = async (base, path) => (await call(base, `/worktrees?path=${encodeURIComponent(path)}`)).json();
