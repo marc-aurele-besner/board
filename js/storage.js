@@ -47,20 +47,26 @@ export async function hasPermission(handle, request = false) {
   return (await handle.requestPermission(opts)) === 'granted';
 }
 
-export async function readJSON(dir, name, fallback) {
+// A collection's file as it is on disk, or null when there is none yet. `stamp` changes when the file does; the
+// sample folder's files have no date, so theirs is null and the text is compared instead.
+export async function readSnapshot(dir, name) {
   try {
-    const fh = await dir.getFileHandle(`${name}.json`);
-    const text = await (await fh.getFile()).text();
-    return text.trim() ? JSON.parse(text) : structuredClone(fallback);
+    const file = await (await dir.getFileHandle(`${name}.json`)).getFile();
+    const stamp = file.lastModified == null ? null : `${file.lastModified}:${file.size}`;
+    return { stamp, file };
   } catch (err) {
-    if (err.name === 'NotFoundError') return structuredClone(fallback);
+    if (err.name === 'NotFoundError') return null;
     throw err;
   }
 }
 
+// Returns the text it wrote and the file's new stamp, so the store knows what is on disk.
 export async function writeJSON(dir, name, data) {
   const fh = await dir.getFileHandle(`${name}.json`, { create: true });
+  const text = JSON.stringify({ ...data, schemaVersion: SCHEMA_VERSION }, null, 2);
   const writable = await fh.createWritable(); // browsers swap in the new file on close()
-  await writable.write(JSON.stringify({ ...data, schemaVersion: SCHEMA_VERSION }, null, 2));
+  await writable.write(text);
   await writable.close();
+  const file = await fh.getFile();
+  return { text, stamp: file.lastModified == null ? null : `${file.lastModified}:${file.size}` };
 }
