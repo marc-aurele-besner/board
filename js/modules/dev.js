@@ -4,10 +4,11 @@
 // Commands run in a real pseudo-terminal through the runner `bun start` starts, so interactive programs such as
 // the Claude CLI work: keys typed in the terminal go to the program, and vt.js draws what it prints.
 // The runner owns the sessions: a command keeps running through a reload, and the page attaches to each terminal
-// again (listed in localStorage), getting its whole output back.
+// again, getting its whole output back. The runner also keeps the list of open terminals, so the list does not
+// depend on this browser: another browser, or one whose site data was cleared, opens the same terminals.
 import { h, icon, notice, uid } from '../ui.js';
 import { toast } from '../toast.js';
-import { TERMINAL_RUNNER, runnerInfo, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput } from '../terminal.js';
+import { TERMINAL_RUNNER, runnerInfo, listSessions, saveSessionList, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput } from '../terminal.js';
 import { createTerminal, styleOf, colorOf } from '../vt.js';
 import { readTheme, themedColors } from '../term-colors.js';
 import { explorer, editor, setRoot, hasOpenFiles, baseName } from './dev-files.js';
@@ -21,8 +22,8 @@ const DEFAULTS = { history: [], runner: '' };
 const HISTORY_MAX = 100;
 const RECENT_SHOWN = 8;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
-// The open terminals (id, number, folder, the tasks handed to claude in it) and the one shown, so a reload attaches to them again.
-const SESSIONS_KEY = 'board:dev-sessions';
+// Where this browser kept the open terminals before the runner did; read once, then removed.
+const OLD_SESSIONS_KEY = 'board:dev-sessions';
 // The side panel shown: 'files' or 'git'.
 const SIDE_KEY = 'board:dev-side';
 
@@ -74,10 +75,17 @@ function themeColor(which) {
   return m ? `rgb:${m[1]}${m[1]}/${m[2]}${m[2]}/${m[3]}${m[3]}` : '';
 }
 
+// The open terminals (id, number, folder, the tasks handed to claude in it) and the one shown go to the runner, so
+// a reload, or another browser, attaches to them again. Saves wait until the runner's list was read, so a blank
+// terminal drawn before it answered does not replace that list; changes close together are sent once.
+let saveTimer = 0;
 function saveSessions() {
-  try {
-    localStorage.setItem(SESSIONS_KEY, JSON.stringify({ active: view.active, sessions: view.sessions.map(({ id, n, cwd, tasks, prompt }) => ({ id, n, cwd, ...(tasks.length ? { tasks, prompt } : {}) })) }));
-  } catch {}
+  if (!view.restored || saveTimer) return;
+  saveTimer = setTimeout(() => {
+    saveTimer = 0;
+    const list = { active: view.active, sessions: view.sessions.map(({ id, n, cwd, tasks, prompt }) => ({ id, n, cwd, ...(tasks.length ? { tasks, prompt } : {}) })) };
+    saveSessionList(runnerOf(currentStore), list).catch(() => {});
+  }, 150);
 }
 
 function makeSession({ id = uid(), n = ++view.count, cwd = '', tasks = [], prompt = '' }) {
@@ -93,14 +101,28 @@ function makeSession({ id = uid(), n = ++view.count, cwd = '', tasks = [], promp
   return s;
 }
 
-// The terminals open before the reload, attached again once the runner answers.
-function restoreSessions() {
-  view.restored = true;
-  let saved = null;
+// The terminals the runner lists, read once it answers. A list this browser kept before the runner did is moved
+// to the runner. Blank terminals drawn while the runner could not be reached give way to the listed ones.
+async function restoreSessions(store) {
+  // A runner started before it kept the list has none to give, and the old list stays until one does.
+  let saved = await listSessions(runnerOf(store)).catch(() => null);
+  let old = null;
   try {
-    saved = JSON.parse(localStorage.getItem(SESSIONS_KEY) ?? 'null');
+    old = JSON.parse(localStorage.getItem(OLD_SESSIONS_KEY) ?? 'null');
+    if (saved) localStorage.removeItem(OLD_SESSIONS_KEY);
   } catch {}
-  for (const x of saved?.sessions ?? []) {
+  if (!saved) saved = { sessions: null };
+  if (!saved.sessions) saved = old ?? { sessions: [] };
+  view.restored = true;
+  if (saved.sessions?.length) {
+    for (const s of view.sessions) {
+      s.attach?.abort();
+      s.observer?.disconnect();
+    }
+    view.sessions = [];
+    view.count = 0;
+  }
+  for (const x of saved.sessions ?? []) {
     if (typeof x?.id === 'string' && !view.sessions.some((s) => s.id === x.id)) makeSession({
       id: x.id,
       n: Number(x.n) || ++view.count,
@@ -110,7 +132,8 @@ function restoreSessions() {
     });
   }
   view.count = Math.max(view.count, ...view.sessions.map((s) => s.n));
-  if (view.sessions.some((s) => s.id === saved?.active)) view.active = saved.active;
+  if (view.sessions.some((s) => s.id === saved.active)) view.active = saved.active;
+  saveSessions();
 }
 
 // The terminal the URL names (#/dev?term=<number>) is shown, over the one saved last.
@@ -423,6 +446,7 @@ async function checkRunner(store) {
   view.checking = true;
   try {
     view.info = await runnerInfo(runnerOf(store));
+    if (!view.restored) await restoreSessions(store);
     view.infoError = '';
     // Terminals opened before the runner answered learn their folder now, and every terminal gets its output.
     for (const s of view.sessions) if (!s.cwd && !s.command) s.cwd = rootPath(store, view.workspace);
@@ -433,6 +457,8 @@ async function checkRunner(store) {
     view.infoError = err.message;
   } finally {
     view.checking = false;
+    // The terminals the runner listed are known now: the one the URL or a task names can be shown.
+    if (view.restored && view.wanted) showWanted();
     store.refresh();
   }
 }
@@ -736,9 +762,9 @@ function draw(root, store) {
   // A render follows a theme switch, so the theme is read again.
   theme = null;
   currentStore = store;
-  if (!view.restored) restoreSessions();
-  if (view.wanted) showWanted();
-  if (view.opening) showOpening(store);
+  // Until the runner said which terminals are open, the address's terminal and a task's wait.
+  if (view.restored && view.wanted) showWanted();
+  if (view.restored && view.opening) showOpening(store);
   if (!view.info && !view.infoError && !view.checking) checkRunner(store);
   if (view.pending) {
     view.workspace = view.pending;
@@ -748,11 +774,11 @@ function draw(root, store) {
     if (open) view.active = open.id;
     else newSession(store);
   }
-  if (view.queued && view.info) startQueued(store);
-  if (!view.sessions.length) newSession(store);
+  if (view.queued && view.info && view.restored) startQueued(store);
+  if (!view.sessions.length && (view.restored || view.infoError)) newSession(store);
   const s = activeSession();
   // The page is rebuilt around the terminal; it keeps the keys if it had them.
-  const focused = document.activeElement === s.el?.out;
+  const focused = !!s && document.activeElement === s.el?.out;
   const ctx = filesCtx(store);
   // The tree's change colours and the panel's count come from git, read again when stale.
   if (view.info) refreshGit(ctx, rootPath(store, view.workspace));
@@ -766,7 +792,8 @@ function draw(root, store) {
           : explorer(ctx, workspacePicker(store), sideSwitcher(store)),
         h('div', { class: hasOpenFiles() ? 'ide-main has-file' : 'ide-main' },
           editor(ctx),
-          terminal(store, s)))));
+          s ? terminal(store, s) : h('section', { class: 'card term' }, h('p', { class: 'muted small' }, 'Asking the runner for the open terminals…'))))));
+  if (!s) return;
   requestAnimationFrame(() => {
     if (focused) s.el.out.focus({ preventScroll: true });
     fit(s);

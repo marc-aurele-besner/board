@@ -18,6 +18,11 @@ const post = (body, signal) => ({ method: 'POST', headers: { 'content-type': 'ap
 // The board's folder, the home folder, the shell, and how many commands may run at once.
 export const runnerInfo = async (base) => (await call(base, '/info')).json();
 
+// The open terminals, kept by the runner so every browser shows the same ones: { active, sessions: [{ id, n, cwd,
+// tasks?, prompt? }] }, sessions being null before any were saved.
+export const listSessions = async (base) => (await call(base, '/sessions')).json();
+export const saveSessionList = (base, list) => call(base, '/sessions', post(list));
+
 // What sessions are doing, by id: { state, code?, cwd }, state being working, waiting (running but quiet: the
 // program waits for its user), done, failed, stopped or idle. Sessions the runner no longer has are left out.
 export const sessionStatus = async (base, ids) => (ids.length ? (await call(base, `/status?sessions=${ids.map(encodeURIComponent).join(',')}`)).json() : {});
