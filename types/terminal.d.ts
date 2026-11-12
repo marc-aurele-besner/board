@@ -43,28 +43,21 @@ export interface RunnerFile {
   tooLarge?: boolean;
 }
 
-// One event of a session's stream: session, start, out, err, size, cwd, exit, live or closed.
-export interface RunnerEvent {
-  t: string;
-  // Output (out, err) or the folder (cwd).
-  d?: string;
-  // session: whether the runner had it.
-  known?: boolean;
-  // start.
-  pid?: number;
-  cwd?: string;
-  command?: string;
-  at?: number;
-  // start and size.
-  cols?: number;
-  rows?: number;
-  // exit.
-  code?: number | null;
-  signal?: string | null;
-  ms?: number;
-  stopped?: boolean;
-  lost?: boolean;
-}
+// One event of a session's stream, as attachSession() hands it on.
+export type RunnerEvent =
+  // Whether the runner had the session; its events so far are replayed next.
+  | { t: 'session'; known: boolean }
+  // The replay is over: new events follow as they come.
+  | { t: 'live' }
+  | { t: 'closed' }
+  | { t: 'size'; cols: number; rows: number }
+  // Starts written before the runner noted sizes lack cols and rows.
+  | ({ t: 'start'; pid: number; cwd: string; command: string; at: number } & ({ cols: number; rows: number } | { cols?: undefined; rows?: undefined }))
+  | { t: 'out' | 'err'; d: string }
+  // The folder the command ended in.
+  | { t: 'cwd'; d: string }
+  // lost: the runner stopped while the command ran.
+  | { t: 'exit'; code: number | null; signal: string | null; ms?: number; stopped?: boolean; lost?: boolean };
 
 // POST /run.
 export interface RunnerRun {
