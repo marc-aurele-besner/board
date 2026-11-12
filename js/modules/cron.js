@@ -124,6 +124,9 @@ function startRun(store, flow, { dry = false } = {}) {
     return;
   }
   const run = runFlow(store, flow.id, { manual: true, dry });
+  // The run is saved before its first step, so it is the newest; it opens in Runs, with its terminals as they start.
+  const id = store.get(COLLECTION).runs[0]?.id;
+  if (id) view.openRuns.add(id);
   store.refresh();
   run.then((r) => toast(
     r?.status === 'ok' ? `Test run of “${flow.name}” finished`
@@ -1037,8 +1040,11 @@ function moveStep(store, flow, id, by) {
 }
 
 // A test that fails on an earlier step leaves this one without data, so it says where it stopped.
-function runTest(store, flow, stepId, opts) {
-  testStep(store, flow.id, stepId, opts).then((r) => {
+// A Dev step's test starts its terminal, so its work can be watched; a test that only said what it would start
+// would tell little.
+function runTest(store, flow, stepId) {
+  const live = flow.steps.find((s) => s.id === stepId)?.type === 'dev';
+  testStep(store, flow.id, stepId, { live }).then((r) => {
     if (r && !r.ok) toast(`Test failed: ${r.output}`);
   });
 }
@@ -1116,7 +1122,7 @@ function testPanel(store, flow, step, index) {
           ? h('button', { type: 'button', class: 'btn-link small', onclick: () => { clearTests(store, flow.id); store.refresh(); } }, 'Clear test data')
           : null)),
     result?.note ? h('p', { class: 'muted small' }, result.note) : null,
-    // A Dev step tested in a terminal shows it here as it runs.
+    // A Dev step's test, or a test run of the flow, shows its terminal here as it runs.
     step.type === 'dev' && result?.ok && result.data?.session ? terminalViewer(store, result.data.session, result.data.cwd) : null,
     h('div', { class: 'cron-test-grid' },
       h('div', { class: 'cron-col' },
@@ -1145,18 +1151,11 @@ function inspector(store, flow) {
           type: 'button',
           class: 'btn-small',
           disabled: isRunning(flow.id),
-          title: 'Runs the steps before this one that have no test data yet, then this one, as tests: no task, no notification, no terminal.',
+          title: step.type === 'dev'
+            ? 'Tests the steps before this one that have no test data yet, then starts this terminal for real in Dev and shows its output here. No task goes with it.'
+            : 'Runs the steps before this one that have no test data yet, then this one, as tests: no task, no notification, no terminal.',
           onclick: () => runTest(store, flow, step.id),
-        }, icon('play'), isTesting(flow.id) ? 'Testing…' : 'Test step'),
-        step.type === 'dev'
-          ? h('button', {
-              type: 'button',
-              class: 'btn-small',
-              disabled: isRunning(flow.id),
-              title: 'Tests the steps before this one, then starts this terminal for real in Dev and shows its output here. No task goes with it.',
-              onclick: () => runTest(store, flow, step.id, { live: true }),
-            }, icon('terminal'), 'Test in a terminal')
-          : null,
+        }, icon(step.type === 'dev' ? 'terminal' : 'play'), isTesting(flow.id) ? 'Testing…' : 'Test step'),
         h('button', { type: 'button', class: 'icon-btn', title: 'Move earlier', 'aria-label': 'Move earlier', disabled: index === 0, onclick: () => moveStep(store, flow, step.id, -1) }, icon('chevron-left')),
         h('button', { type: 'button', class: 'icon-btn', title: 'Move later', 'aria-label': 'Move later', disabled: index === flow.steps.length - 1, onclick: () => moveStep(store, flow, step.id, 1) }, icon('chevron-right')),
         h('button', {
