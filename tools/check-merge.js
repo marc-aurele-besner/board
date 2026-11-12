@@ -1,6 +1,8 @@
+// @ts-check
 // The worker and a board tab write the same file: each changes its own field, and both changes must survive.
 // The tab is played the way js/store.js saves: read, change in memory, then merge what is on disk and write.
 // `node tools/check-merge.js`: exits 1 when a change is lost.
+/** @import { InboxMessage } from '../types/data' */
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +13,7 @@ const dir = mkdtempSync(join(tmpdir(), 'board-merge-'));
 const file = join(dir, 'inbox.json');
 const read = () => JSON.parse(readFileSync(file, 'utf8'));
 let failed = 0;
+/** @param {boolean} ok @param {string} text */
 const expect = (ok, text) => {
   if (!ok) failed += 1;
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${text}`);
@@ -27,7 +30,7 @@ try {
   const store = createNodeStore(dir);
   store.update('inbox', (d) => {
     d.emails[0].status = 'delivered';
-    d.emails.push({ id: 'b', subject: 'New', status: 'received' });
+    d.emails.push(/** @type {InboxMessage} */ ({ id: 'b', subject: 'New', status: 'received' })); // only the fields this test reads
     d.syncedAt = 'now';
   });
   store.flush();

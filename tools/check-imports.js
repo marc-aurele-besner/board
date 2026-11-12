@@ -1,3 +1,4 @@
+// @ts-check
 // Loads every module the worker runs under plain Node, with no browser globals. `node --check` does not catch a
 // missing import, or a module that touches document, window or localStorage when it loads; this does.
 // `node tools/check-imports.js`: prints each failure and exits 1 when there is one.
@@ -22,7 +23,7 @@ for (const file of files) {
     await import(pathToFileURL(join(ROOT, file)).href);
   } catch (err) {
     failed += 1;
-    console.error(`FAIL ${file}: ${err.message.split('\n')[0]}`);
+    console.error(`FAIL ${file}: ${/** @type {Error} */ (err).message.split('\n')[0]}`);
   }
 }
 console.log(`${files.length - failed} of ${files.length} worker modules load under Node.`);

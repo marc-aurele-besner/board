@@ -1,3 +1,4 @@
+// @ts-check
 // Starts everything the board runs on this machine, side by side in one process: the static server, the Dev
 // section's command runner and the runners (the worker that does the background work). Each prints its own lines, prefixed with its name.
 // `bun start` (or `node tools/start.js`).
