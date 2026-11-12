@@ -12,7 +12,7 @@ import {
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, templateFromFlow, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
   testStep, testsOf, isTesting, clearTests, resumeDevTests, useDevStarter, varsTree, fillParts, pathTo, parseData, INPUT_NONE, reorderSteps, projectVars, runState, devWaits, DEV_WAIT_MINUTES, devJsonOffered, devJson, DEV_JSON_PROMPT,
-  FORMAT_MODES, SEPARATOR_OPTIONS, LOOP_LIMIT, makeField, loopSpan, loopOf, loopMax, valueOf, listOf, withItem,
+  FORMAT_MODES, PARSE_MODES, SEPARATOR_OPTIONS, LOOP_LIMIT, makeField, loopSpan, loopOf, loopMax, valueOf, listOf, withItem,
 } from '../cron.js';
 import { modelForTask } from '../models.js';
 import { openSession, runnerOf, liveSession, onSessionPaint, exitText, terminalView, terminalBackground, startDevSession } from './dev.js';
@@ -451,6 +451,10 @@ function stepSummary(store, flow, step) {
     if (step.mode === 'fields') return (step.fields ?? []).map((f) => f.name.trim()).filter(Boolean).join(', ') || 'Name a field';
     if (step.mode === 'list') return `${step.itemText || '{{item}}'} · each of ${step.items || '{{input}}'}`;
     return String(step.text ?? '').split('\n').find((l) => l.trim()) ?? 'Empty';
+  }
+  if (step.type === 'parse') {
+    const which = /** @type {Record<string, string>} */ ({ largest: 'Largest', last: 'Last', first: 'First', all: 'All' })[step.mode || 'largest'] ?? 'Largest';
+    return `${which} JSON in ${step.text || '{{input}}'}`;
   }
   if (step.type === 'loop') {
     const n = loopSpan(flow, flow.steps.indexOf(step));
@@ -1295,6 +1299,7 @@ function stepForm(store, flow, step) {
       h('p', { class: 'muted small' }, 'The run ends here without counting as a failure, and the steps after this one are skipped. Put it after a data step to stay quiet when there is nothing to report.'));
   }
   if (step.type === 'format') return formatForm(store, flow, step, set);
+  if (step.type === 'parse') return parseForm(flow, step, set);
   if (step.type === 'loop') return loopForm(flow, step, set);
   if (step.type === 'profile') {
     const own = withFlowProject(flow, step).projectId;
@@ -1461,6 +1466,24 @@ function formatForm(store, flow, step, set) {
             'A value that is a single variable keeps it whole: {{step2.items}} stays a list. Other values are text.'),
         ]
       : null);
+}
+
+/**
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {(patch: Partial<CronStep>) => void} set
+ */
+function parseForm(flow, step, set) {
+  const index = flow.steps.indexOf(step);
+  const n = String(index + 1);
+  return h('div', { class: 'stack' },
+    varField('Text', h('input', { value: step.text ?? '{{input}}', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (/** @type {FieldEvent} */ e) => set({ text: e.target.value.trim() }) }),
+      `${step.id}:text`, varNames(flow, index), 'The text to read, such as {{input}} or {{step2.answer}}.'),
+    h('div', { class: 'row cron-fields' },
+      field('When it holds several', select(step.mode || 'largest', PARSE_MODES, (mode) => set({ mode })))),
+    h('p', { class: 'muted small' },
+      'Reads the JSON out of text that is not only JSON: a code fence, prose around it, lines a terminal wrapped, or a copy cut off at either end, of which it keeps the whole parts (the items of a list, without the one cut in half). ',
+      `Later steps read it as {{step${n}}} and its parts as {{step${n}.title}} or {{step${n}[0].title}}, and a Loop can go over its list. With no JSON in the text, the step fails.`));
 }
 
 /**
