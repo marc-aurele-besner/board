@@ -2007,6 +2007,13 @@ a.run-chip:hover, button.run-chip:hover { border-color: var(--accent); }
 .cron-vars { display: flex; flex-wrap: wrap; gap: 4px; }
 .cron-var { min-height: 0; padding: 2px 8px; border-radius: 999px; font-family: var(--mono, ui-monospace, monospace); font-size: 0.75rem; color: var(--muted); background: var(--surface-2); border: 1px solid transparent; }
 .cron-var:hover { color: var(--accent); border-color: var(--accent); }
+.cron-field-head { align-items: flex-end; gap: 8px; }
+.cron-field-label { font-size: 0.9rem; color: var(--muted); }
+.cron-field-tabs { border-bottom: none; }
+.cron-field-tabs .sub-tab { padding: 2px 10px; font-size: 0.85rem; }
+.cron-preview { margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; font-size: 0.9rem; }
+.cron-fill { border-radius: 4px; padding: 0 2px; background: var(--surface); color: var(--accent); box-shadow: inset 0 -1px 0 var(--accent); }
+.cron-fill.missing { color: var(--muted); background: none; border: 1px dashed var(--border); }
 .cron-test { padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .cron-test-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 @media (max-width: 720px) { .cron-test-grid { grid-template-columns: minmax(0, 1fr); } }

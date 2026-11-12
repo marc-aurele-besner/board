@@ -11,7 +11,7 @@ import {
   COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, PROFILE_EDITED, profileEditedMode, TEMPLATES, devRunOptions, devRunValue, devCommandPreview, daysOf,
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, templateFromFlow, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
-  testStep, testsOf, isTesting, clearTests, useDevStarter, varsTree, pathTo, parseData, INPUT_NONE, reorderSteps, projectVars, runState, devWaits, DEV_WAIT_MINUTES,
+  testStep, testsOf, isTesting, clearTests, useDevStarter, varsTree, fillParts, pathTo, parseData, INPUT_NONE, reorderSteps, projectVars, runState, devWaits, DEV_WAIT_MINUTES,
 } from '../cron.js';
 import { modelForTask } from '../models.js';
 import { openSession, runnerOf, liveSession, onSessionPaint, exitText, terminalView, terminalBackground, startDevSession } from './dev.js';
@@ -23,9 +23,10 @@ import { hasProfileSources } from '../profile.js';
 // View state: the tab, the open flow, the selected node ('trigger' or a step id), the Runs tab's filter and the
 // flow list's project filter ('' for all, NO_PROJECT for flows without one).
 // field and cursor: the {{…}} field last focused and where its cursor was, for the variable chips and the test data.
+// preview: the {{…}} text fields showing their Preview tab instead of the text.
 // terms: the terminals unfolded under runs (seenTerms: those drawn once, so one folded by hand stays folded).
 // openRuns: the runs unfolded; focusRun: the run a link opened (#/cron?tab=runs&run=…), scrolled to once.
-const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', project: '', field: '', cursor: null, terms: new Set(), seenTerms: new Set(), openRuns: new Set(), focusRun: '', scrollTo: '' };
+const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', project: '', field: '', cursor: null, preview: new Set(), terms: new Set(), seenTerms: new Set(), openRuns: new Set(), focusRun: '', scrollTo: '' };
 const NO_PROJECT = 'none';
 const TABS = [['flows', 'Flows'], ['runs', 'Runs'], ['templates', 'Templates']];
 const SUBTITLES = {
@@ -556,6 +557,8 @@ const field = (label, control, hint) => h('label', null, label, control, hint ? 
 function insertVar(key, name) {
   const el = document.querySelector(`[data-var-field="${CSS.escape(key)}"]`);
   if (!el) return false;
+  // A field on its Preview tab goes back to Edit, so the variable is seen going in.
+  if (el.hidden) el.closest('.cron-col')?.querySelector('[data-tab="edit"]')?.click();
   const token = `{{${name}}}`;
   const at = view.cursor?.key === key ? view.cursor : { start: el.value.length, end: el.value.length };
   el.focus();
@@ -600,20 +603,68 @@ function varNames(flow, index, extra = [], projectId = withFlowProject(flow, flo
   ];
 }
 
-// A field that takes variables, with its variables under it as chips.
-function varField(label, control, key, names, hint) {
+// A field that takes variables, with its variables under it as chips. A text area given `vars` (a function, so
+// the values are only worked out when asked) gets Edit and Preview tabs: Preview shows the text with each {{…}}
+// filled from the test data or the last run.
+function varField(label, control, key, names, hint, vars) {
   control.dataset.varField = key;
   const remember = () => {
     view.cursor = { key, start: control.selectionStart ?? control.value.length, end: control.selectionEnd ?? control.value.length };
     view.field = key;
   };
   for (const ev of ['focus', 'keyup', 'mouseup', 'select']) control.addEventListener(ev, remember);
-  return h('div', { class: 'cron-col' },
-    field(label, control, hint),
-    h('div', { class: 'cron-vars', role: 'group', 'aria-label': `Variables for ${label}` },
-      names.map(([name, title]) => h('button', {
-        type: 'button', class: 'cron-var', title, onmousedown: keepFocus, onclick: () => insertVar(key, name),
-      }, `{{${name}}}`))));
+  const chips = h('div', { class: 'cron-vars', role: 'group', 'aria-label': `Variables for ${label}` },
+    names.map(([name, title]) => h('button', {
+      type: 'button', class: 'cron-var', title, onmousedown: keepFocus, onclick: () => insertVar(key, name),
+    }, `{{${name}}}`)));
+  if (!vars || control.tagName !== 'TEXTAREA') return h('div', { class: 'cron-col' }, field(label, control, hint), chips);
+
+  control.setAttribute('aria-label', label);
+  const box = h('div', { class: 'cron-preview-wrap stack' });
+  const tabs = [['edit', 'Edit'], ['preview', 'Preview']].map(([tab, text]) =>
+    h('button', { type: 'button', role: 'tab', class: 'sub-tab', 'data-tab': tab, onclick: () => show(tab === 'preview') }, text));
+  // Switched in place: a re-render would save the field first and lose its cursor.
+  const sync = (on) => {
+    control.hidden = on;
+    box.hidden = !on;
+    tabs.forEach((b) => {
+      const active = (b.dataset.tab === 'preview') === on;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-selected', String(active));
+    });
+    if (on) box.replaceChildren(...previewOf(control.value, vars()));
+  };
+  const show = (on) => {
+    if (on) view.preview.add(key);
+    else view.preview.delete(key);
+    sync(on);
+    if (!on) control.focus();
+  };
+  const out = h('div', { class: 'cron-col' },
+    h('div', { class: 'row between cron-field-head' },
+      h('span', { class: 'cron-field-label' }, label),
+      h('div', { class: 'sub-tabs cron-field-tabs', role: 'tablist', 'aria-label': `${label} view` }, tabs)),
+    control, box,
+    hint ? h('span', { class: 'muted small' }, hint) : null,
+    chips);
+  sync(view.preview.has(key));
+  return out;
+}
+
+// The text as a step would send it: filled variables marked, the ones with no value yet left as written.
+function previewOf(text, vars) {
+  const parts = fillParts(text, vars);
+  const missing = [...new Set(parts.filter((p) => p.missing).map((p) => p.name))];
+  return [
+    h('pre', { class: 'cron-preview' }, parts.length
+      ? parts.map((p) => (p.name
+        ? h('span', { class: p.missing ? 'cron-fill missing' : 'cron-fill', title: p.missing ? `${p.name}: no value yet` : p.name }, p.text || ' ')
+        : p.text))
+      : h('span', { class: 'muted' }, 'Empty')),
+    missing.length
+      ? h('p', { class: 'muted small' }, `No value yet for ${missing.join(', ')}. Test the steps before this one to fill ${missing.length > 1 ? 'them' : 'it'}.`)
+      : h('p', { class: 'muted small' }, 'Filled with the test data, else the last run.'),
+  ];
 }
 
 // A JSON value as a folding tree. A key's click gives its variable path to `pick`; with no path it is not clickable.
@@ -825,7 +876,8 @@ function sourceCard(store, flow, own, { setSource, remove }) {
       : null,
     src.source === 'text'
       ? varField('Text', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, src.text ?? ''), `${own.id}:text`,
-          varNames(flow, flow.steps.findIndex((s) => sourcesOf(s).some((x) => x.id === own.id)), [], src.projectId))
+          varNames(flow, flow.steps.findIndex((s) => sourcesOf(s).some((x) => x.id === own.id)), [], src.projectId), null,
+          () => previewVars(store, flow, flow.steps.find((s) => sourcesOf(s).some((x) => x.id === own.id)), src.projectId))
       : null,
     field('Label (optional)',
       h('input', { value: src.label ?? '', autocomplete: 'off', placeholder: sourceLabel(store, { ...src, label: '' }), onchange: (e) => set({ label: e.target.value.trim() }) })),
@@ -863,12 +915,13 @@ function stepForm(store, flow, step) {
   const set = (patch) => updateFlow(store, flow.id, (f) => Object.assign(f.steps.find((x) => x.id === step.id) ?? {}, patch));
   const names = varNames(flow, flow.steps.indexOf(step));
   const key = (name) => `${step.id}:${name}`;
+  const vars = () => previewVars(store, flow, step);
   if (step.type === 'gather') return gatherForm(store, flow, step);
   if (step.type === 'ai') {
     return h('div', { class: 'stack' },
       varField('Prompt', h('textarea', { rows: 6, class: 'mono-text', onchange: (e) => set({ prompt: e.target.value }) }, step.prompt), key('prompt'), names,
-        'Ask for JSON to pick its parts in later steps, such as {{step2.title}}.'),
-      varField('System instructions (optional)', h('textarea', { rows: 2, onchange: (e) => set({ system: e.target.value }) }, step.system ?? ''), key('system'), names),
+        'Ask for JSON to pick its parts in later steps, such as {{step2.title}}.', vars),
+      varField('System instructions (optional)', h('textarea', { rows: 2, onchange: (e) => set({ system: e.target.value }) }, step.system ?? ''), key('system'), names, null, vars),
       h('div', { class: 'row' },
         h('span', { class: 'muted small' }, 'Model'),
         modelChip({ value: step.model, nullable: true, nullLabel: `Default (${modelForTask(store, AI_TASK) || 'not set'})`, onPick: (model) => set({ model: model ?? '' }) })),
@@ -943,7 +996,7 @@ function stepForm(store, flow, step) {
         : null,
       preview ? h('code', { class: 'muted small' }, preview) : null,
       claude
-        ? varField('Dev prompt', h('textarea', { rows: 6, class: 'mono-text', onchange: (e) => set({ prompt: e.target.value }) }, step.prompt ?? ''), key('prompt'), devNames)
+        ? varField('Dev prompt', h('textarea', { rows: 6, class: 'mono-text', onchange: (e) => set({ prompt: e.target.value }) }, step.prompt ?? ''), key('prompt'), devNames, null, vars)
         : varField('Command', h('input', { value: step.command ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, placeholder: 'npm run build', onchange: (e) => set({ command: e.target.value }) }), key('command'), devNames,
             'Each {{…}} goes in as one quoted word, so text from a model never runs as a command.'),
       h('div', { class: 'row cron-fields' },
@@ -969,7 +1022,7 @@ function stepForm(store, flow, step) {
         'Needs the runner that bun start starts.'));
   }
   return h('div', { class: 'stack' },
-    varField('Message', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, step.text), key('text'), names),
+    varField('Message', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, step.text), key('text'), names, null, vars),
     h('p', { class: 'muted small' }, 'Sent to the bell, and to Telegram when Settings › Notifications says so for Cron flows.'));
 }
 
@@ -1016,6 +1069,15 @@ function knownVars(store, flow, index) {
     vars.$data.input = piped.data;
   }
   return vars;
+}
+
+// What a field's Preview fills its variables with: the step's own test, else what it could read before it.
+// A data step's source may have a project of its own.
+function previewVars(store, flow, step, projectId = '') {
+  const index = flow.steps.indexOf(step);
+  const vars = testsOf(store, flow.id).get(step?.id)?.vars ?? knownVars(store, flow, index);
+  const project = projectId ? projectVars(store.get('projects').projects.find((p) => p.id === projectId)) : null;
+  return project ? { ...vars, project: project.name, $data: { ...vars.$data, project } } : vars;
 }
 
 // The step's test, as n8n shows a node: what it read and what it gave, as JSON. A key in the input goes into the
