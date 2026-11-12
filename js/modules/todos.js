@@ -1435,6 +1435,22 @@ const projectWebsiteButton = (p) => p?.website
   ? h('a', { href: p.website, target: '_blank', rel: 'noopener', class: 'icon-btn', title: `Open ${p.website}`, 'aria-label': 'Open project website' }, icon('globe'))
   : null;
 
+// After the website: each repo on GitHub (the org when there is no repo), then Dev's Explorer and a terminal in the
+// project's local folder.
+/** @param {Project | undefined} p */
+function projectLinkButtons(p) {
+  if (!p) return [];
+  const gh = (/** @type {string} */ path) => h('a', {
+    href: `https://github.com/${path}`, target: '_blank', rel: 'noopener', class: 'icon-btn', title: `Open ${path} on GitHub`, 'aria-label': `Open ${path} on GitHub`,
+  }, icon('github'));
+  const repos = p.github.repos.length ? p.github.repos : p.github.org ? [p.github.org] : [];
+  return [
+    ...repos.map(gh),
+    p.localPath ? h('a', { href: `#/dev?project=${p.id}&side=files`, class: 'icon-btn', title: `Browse ${p.localPath} in Dev`, 'aria-label': 'Open the project folder in Dev' }, icon('folder')) : null,
+    p.localPath ? h('a', { href: `#/dev?project=${p.id}`, class: 'icon-btn', title: `Open a terminal in ${p.localPath}`, 'aria-label': 'Open a terminal in the project folder' }, icon('terminal')) : null,
+  ];
+}
+
 // Inline after the title: labels, open count, and a toggle for the details panel.
 /** @param {Store} store @param {Project | undefined} p */
 function projectMeta(store, p) {
@@ -1702,6 +1718,7 @@ function draw(root, store) {
               ? h('a', { href: `#/projects?project=${view.filter}`, class: 'icon-btn', title: 'Open project', 'aria-label': 'Open project' }, icon('pencil'))
               : null,
             projectWebsiteButton(projects.find((p) => p.id === view.filter)),
+            projectLinkButtons(projects.find((p) => p.id === view.filter)),
             isProjectFilter(view.filter) ? projectMeta(store, projects.find((p) => p.id === view.filter)) : null),
           h('div', { class: 'row head-actions' },
             searchBox(store),
