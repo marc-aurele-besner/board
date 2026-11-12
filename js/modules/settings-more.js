@@ -3,7 +3,7 @@ import { h, icon, empty, notice, statusOf, copyable } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { connect, isConnected, accountAvatar } from '../google.js';
 import { checkBot, findChat, hasTelegram } from '../telegram.js';
-import { propertyName, checkBing, BING_RELAY } from '../webstats.js';
+import { propertyName, checkBing } from '../webstats.js';
 import { checkResend, resendSettings } from '../resend.js';
 import { connectGmail, disconnectGmail, isGmailConnected, gmailAccounts } from '../gmail.js';
 import { calendarAccounts, connectCalendar, disconnectCalendar, isCalendarConnected, syncCalendarList, removeCalendarAccount, setCalendar, setCalendarAccount } from '../gcal.js';
@@ -274,9 +274,8 @@ export function analyticsCard(store) {
 
 export function searchCard(store) {
   const bingKey = store.get('settings').bing?.key ?? '';
-  const bingRelay = store.get('settings').bing?.relay ?? '';
-  const saveBing = (key, relay = bingRelay) => store.update('settings', (d) => {
-    d.bing = { key, relay };
+  const saveBing = (key) => store.update('settings', (d) => {
+    d.bing = { key };
   });
   return h('div', { class: 'stack-lg' },
     h('section', { class: 'card panel' },
@@ -291,29 +290,28 @@ export function searchCard(store) {
         ]),
         googleConnect(store, 'search', 'Search Console', 'search'))),
     h('section', { class: 'card panel' },
-      head('Bing Webmaster Tools', 'Bing uses an API key instead of a sign-in. The key is saved in settings.json and goes only to Bing, through a relay on this machine.', badge(bingKey ? 'Saved' : 'Not set', bingKey ? 'doing' : 'plain')),
+      head('Bing Webmaster Tools', 'Bing uses an API key instead of a sign-in. The key is saved in settings.json and goes only to Bing, from the runners on this machine.', badge(bingKey ? 'Saved' : 'Not set', bingKey ? 'doing' : 'plain')),
       h('div', { class: 'cred-body' },
         h('div', { class: 'svc-section' },
           h('h3', null, 'Setup'),
           steps([
             ['Add and verify each website in ', link('https://www.bing.com/webmasters', 'Bing Webmaster Tools'), '. You can import them from Search Console.'],
             'Open Settings → API access → API key, and generate a key.',
-            ['In the board folder, run ', h('code', null, 'bun start'), ', which starts the board with its relays, and keep it open while you use Bing data.'],
+            ['In the board folder, run ', h('code', null, 'bun start'), ', which starts the runners. They read each site’s Bing data every 6 hours.'],
             'Paste the key here, save, and test it.',
           ]),
-          notice({ tone: 'info', text: 'Bing’s API does not let a web page read its answers, so the board asks a small relay on this machine to fetch them. The relay only forwards to Bing and only answers pages served from this machine.' })),
+          notice({ tone: 'info', text: 'Bing’s API does not let a web page read its answers, so the runners read them into webstats.json, and Monitoring shows that file.' })),
         h('form', {
           class: 'svc-section',
           onsubmit: (e) => {
             e.preventDefault();
             const form = new FormData(e.currentTarget);
-            saveBing(String(form.get('key') ?? '').trim(), String(form.get('relay') ?? '').trim());
+            saveBing(String(form.get('key') ?? '').trim());
             say(store, 'bing', 'Saved.');
           },
         },
           h('h3', null, 'API key'),
           h('input', { name: 'key', type: 'password', value: bingKey, placeholder: 'Bing Webmaster API key', autocomplete: 'off', spellcheck: false, 'aria-label': 'Bing Webmaster API key' }),
-          h('input', { name: 'relay', type: 'url', value: bingRelay, placeholder: `Relay address (default ${BING_RELAY})`, autocomplete: 'off', spellcheck: false, 'aria-label': 'Bing relay address' }),
           h('div', { class: 'svc-actions' },
             h('button', { class: 'primary', type: 'submit' }, 'Save'),
             h('button', {
@@ -321,10 +319,10 @@ export function searchCard(store) {
               disabled: !bingKey,
               onclick: () => {
                 say(store, 'bing', 'Testing…');
-                checkBing(bingKey, bingRelay).then((text) => say(store, 'bing', text)).catch((err) => say(store, 'bing', err.message, false));
+                checkBing(bingKey).then((text) => say(store, 'bing', text)).catch((err) => say(store, 'bing', err.message, false));
               },
             }, 'Test connection'),
-            bingKey ? h('button', { type: 'button', class: 'danger', onclick: () => { saveBing('', ''); say(store, 'bing', ''); } }, icon('x'), 'Clear') : null),
+            bingKey ? h('button', { type: 'button', class: 'danger', onclick: () => { saveBing(''); say(store, 'bing', ''); } }, icon('x'), 'Clear') : null),
           result('bing')))));
 }
 
@@ -560,7 +558,7 @@ export function gmailCard(store) {
 
 // --- Data folder ---
 
-const DATA_FILES = ['projects', 'todos', 'recipes', 'finance', 'tools', 'inbox', 'calendar', 'notifications', 'usage', 'settings', 'runners'];
+const DATA_FILES = ['projects', 'todos', 'recipes', 'finance', 'tools', 'inbox', 'calendar', 'github', 'webstats', 'fx', 'notifications', 'usage', 'settings', 'runners'];
 
 export function dataCard(store) {
   return h('section', { class: 'card panel' },

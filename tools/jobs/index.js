@@ -6,5 +6,10 @@ import resend from './resend.js';
 import calendar from './calendar.js';
 import monitoring from './monitoring.js';
 import telegram from './telegram.js';
+import github from './github.js';
+import webstats from './webstats.js';
+import fx from './fx.js';
+import devUsage from './dev-usage.js';
+import worktrees from './worktrees.js';
 
-export const jobs = [google, gmail, resend, calendar, monitoring, telegram];
+export const jobs = [google, gmail, resend, calendar, monitoring, telegram, github, webstats, fx, devUsage, worktrees];

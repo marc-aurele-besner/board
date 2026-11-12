@@ -12,6 +12,9 @@ import { startBackground } from './background.js';
 import { watchRunners, runnersOnline, runnersKnown } from './runners.js';
 import { GOOGLE, GOOGLE_DEFAULTS, useGoogleStore } from './google.js';
 import { CALENDAR, CALENDAR_DEFAULTS } from './gcal.js';
+import { GITHUB, GITHUB_DEFAULTS, useGithubStore } from './github.js';
+import { WEBSTATS, WEBSTATS_DEFAULTS } from './webstats.js';
+import { FX, FX_DEFAULTS, useFxStore } from './fx.js';
 import { JUMPS, openShortcuts } from './shortcuts.js';
 import { sampleFolder } from './sample.js';
 import { toast } from './toast.js';
@@ -54,6 +57,10 @@ const collectionDefaults = () => ({
   [GOOGLE]: GOOGLE_DEFAULTS,
   // The events the runners read, shared by Calendar, Home and Cron.
   [CALENDAR]: CALENDAR_DEFAULTS,
+  // What the runners read for Projects (GitHub), Monitoring (Bing) and Money (exchange rates).
+  [GITHUB]: GITHUB_DEFAULTS,
+  [WEBSTATS]: WEBSTATS_DEFAULTS,
+  [FX]: FX_DEFAULTS,
 });
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 // The URL is #/<section>?<view params>. The params restore each section's view after a refresh.
@@ -225,6 +232,8 @@ async function open(handle) {
   }
   store = next;
   useGoogleStore(store);
+  useGithubStore(store);
+  useFxStore(store);
   configure(store.get('settings').github);
   migrateLegacyProjects(store);
   migrateProjectShape(store);

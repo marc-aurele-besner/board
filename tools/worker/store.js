@@ -21,6 +21,9 @@ export const DEFAULTS = {
   finance: { entries: [], budgets: {}, recurring: [] },
   usage: { entries: [] },
   calendar: { calendars: {} },
+  github: { repos: {} },
+  webstats: { bing: {} },
+  fx: { days: {} },
 };
 
 export function createNodeStore(dir, { log } = {}) {
