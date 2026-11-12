@@ -245,7 +245,8 @@ async function readFile(url) {
 // A page's readable content as Markdown, so headings and links (a blog's post list) survive. For Cron's web page step.
 export async function readPageText(url) {
   for (let attempt = 0; ; attempt += 1) {
-    const res = await inTurn(() => timed(`${READER}${url}`, { headers: { accept: 'application/json', 'X-Return-Format': 'markdown' } }));
+    // Images only take room in a prompt: their alt text and addresses say little about the page.
+    const res = await inTurn(() => timed(`${READER}${url}`, { headers: { accept: 'application/json', 'X-Return-Format': 'markdown', 'X-Retain-Images': 'none' } }));
     if (res.status === 429 && attempt < 2) {
       await new Promise((resolve) => setTimeout(resolve, 4000 * (attempt + 1)));
       continue;
