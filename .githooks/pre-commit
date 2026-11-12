@@ -1,0 +1,4 @@
+#!/bin/sh
+# Blocks a commit that fails the syntax check, the import and merge checks, or the type check.
+# Turned on by `bun install` (the "prepare" script sets core.hooksPath). Never bypass it with --no-verify.
+exec bun run check
