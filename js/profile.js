@@ -175,23 +175,32 @@ export function profileInput(project, { read, gaps }) {
 // A reply wrapped in a code fence is unwrapped; the profile itself is Markdown.
 const unfence = (text) => text.trim().replace(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/i, '$1').trim();
 
+// A profile edited by hand goes to the model as the base, so a rebuild updates it without losing what the user wrote.
+const EDITED_NOTE = 'The current profile below was edited by hand. Keep its wording, facts and any sections the user added; '
+  + 'change only what the sources show is out of date or missing, and keep the six headings.';
+
 // Reads the sources, asks the model once, and saves the profile on the project. Returns the saved profile.
-// onStep(text) tells the caller what is being done, for a busy line.
-export async function buildProfile(store, project, { onStep = () => {} } = {}) {
+// onStep(text) tells the caller what is being done, for a busy line. keepEdits: a profile edited by hand is updated
+// from its own text instead of replaced, and stays marked as edited.
+export async function buildProfile(store, project, { onStep = () => {}, keepEdits = false } = {}) {
   if (!hasProfileSources(project)) throw new Error('Add a local folder, a repository or a website to the project first.');
   onStep('Reading README, commits and website…');
   const sources = await readProfileSources(store, project);
   if (!sources.read.length) throw new Error(`None of the sources could be read: ${sources.gaps.join('; ')}.`);
   onStep('Writing the profile…');
   const usageId = uid();
+  const current = profileOf(project);
+  const merge = keepEdits && current.edited && current.text.trim();
+  const input = profileInput(project, sources);
   const reply = await ask(store, 'task-summary', [
     { role: 'system', content: systemPrompt(store, 'project-profile') },
-    { role: 'user', content: profileInput(project, sources) },
+    { role: 'user', content: merge ? `${input}\n\n${EDITED_NOTE}\n\n<current-profile>\n${current.text}\n</current-profile>` : input },
   ], { usageId });
-  const profile = { ...profileOf(project), text: unfence(reply), updated: now(), edited: false, usageId };
+  const edited = Boolean(merge);
+  const profile = { ...current, text: unfence(reply), updated: now(), edited, usageId };
   store.update('projects', (d) => {
     const p = d.projects.find((x) => x.id === project.id);
-    if (p) p.profile = { ...profileOf(p), text: profile.text, updated: profile.updated, edited: false, usageId };
+    if (p) p.profile = { ...profileOf(p), text: profile.text, updated: profile.updated, edited, usageId };
   });
   return profile;
 }
