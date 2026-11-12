@@ -22,6 +22,7 @@ import { summaryTab } from './defi-summary.js';
  * @typedef {PositionRow & { apr?: number | null, aprLeft?: number | null, aprSecs?: number, aprFull?: boolean, aprPrev?: number | null, move?: number | null }} Row
  * @typedef {{ min: number, max: number, current: number, marker: number | null, unit: string, base: string }} Side
  * @typedef {string | number | bigint} Sortable
+ * @typedef {NonNullable<ReturnType<typeof parsePosition>>} Entry
  * @typedef {HTMLFormElement & { elements: { position: HTMLInputElement, chain: HTMLSelectElement, version: HTMLSelectElement } }} AddForm
  * @typedef {{ value: string, label: string, count: number, logo: string | null }} PickerOption
  * @typedef {(label: string, value: Child, hint?: string | null) => HTMLElement} Stat
@@ -167,10 +168,9 @@ function feeApr(r, baselines) {
   const b = baselineOf(baselines, r);
   const elapsed = Date.now() - (b?.at ?? Date.now());
   // null > 0 is false, so a row with no value stops here.
-  const value = /** @type {number} */ (r.value);
-  if (!b || elapsed < APR_MIN_MS || !(value > 0) || r.p0 == null || r.p1 == null || typeof r.fee0 !== 'number') return null;
+  if (!b || elapsed < APR_MIN_MS || !(/** @type {number} */ (r.value) > 0) || r.p0 == null || r.p1 == null || typeof r.fee0 !== 'number') return null;
   const earned = Math.max(0, r.fee0 - b.f0) * r.p0 + Math.max(0, r.fee1 - b.f1) * r.p1;
-  return (earned / value) * (YEAR_MS / elapsed);
+  return (earned / /** @type {number} */ (r.value)) * (YEAR_MS / elapsed);
 }
 
 // How safely a position sits in its range: full range first, then the room to the nearer edge, out of range last.
@@ -831,9 +831,8 @@ function addForm(store) {
       return form.elements.position.focus();
     }
     // No error means the entry was read.
-    const added = /** @type {NonNullable<typeof entry>} */ (entry);
-    const chain = chainOf(added.chainId)?.name ?? `Chain ${added.chainId}`;
-    say('ok', `Added ${chain} ${added.version} #${added.tokenId}. It shows here once it is read.`);
+    const chain = chainOf(/** @type {Entry} */ (entry).chainId)?.name ?? `Chain ${/** @type {Entry} */ (entry).chainId}`;
+    say('ok', `Added ${chain} ${/** @type {Entry} */ (entry).version} #${/** @type {Entry} */ (entry).tokenId}. It shows here once it is read.`);
     form.elements.position.value = '';
     form.elements.position.dispatchEvent(new Event('input'));
     form.elements.position.focus();
@@ -1868,8 +1867,8 @@ function earnedOver(store, r, secs) {
   }
   if (!n) return null;
   const covered = n * HOUR;
-  const value = /** @type {number} */ (r.value); // null > 0 is false
-  return { usd, covered, apr: value > 0 ? (usd / value) * (YEAR_MS / (covered * 1000)) : null };
+  // null > 0 is false.
+  return { usd, covered, apr: /** @type {number} */ (r.value) > 0 ? (usd / /** @type {number} */ (r.value)) * (YEAR_MS / (covered * 1000)) : null };
 }
 
 // What a position earned per day over the last 30 days, from the saved hours, at today's prices.
@@ -1877,7 +1876,6 @@ function earnedOver(store, r, secs) {
 function earnedChart(store, r) {
   const hours = store.get(COLLECTION)?.earned?.[r.ref];
   if (!hours || r.p0 == null || r.p1 == null) return null;
-  const { p0, p1 } = r;
   /** @type {Map<string, { a0: number, a1: number, hours: number }>} */
   const days = new Map();
   const since = Date.now() - 30 * DAY_MS;
@@ -1892,7 +1890,8 @@ function earnedChart(store, r) {
   const first = [...days.keys()].sort()[0];
   const keys = bucketsBetween(new Date(`${first}T00:00`), new Date(), 'day');
   /** @param {{ a0: number, a1: number } | undefined} d */
-  const usd = (d) => (d ? d.a0 * p0 + d.a1 * p1 : 0);
+  // Both prices were checked above.
+  const usd = (d) => (d ? d.a0 * /** @type {number} */ (r.p0) + d.a1 * /** @type {number} */ (r.p1) : 0);
   const total = [...days.values()].reduce((s, d) => s + usd(d), 0);
   const chart = barChart(keys.map((k) => bucketLabel(k, 'day')), [{ name: 'Earned', color: 'var(--income)', values: keys.map((k) => usd(days.get(k))) }], {
     format: (v) => cash(v),

@@ -13,12 +13,12 @@ import { readPositions, poolState, tokenMeta, isAddressSymbol, usdPrices, positi
 import { etherscanKey } from '../chains.js';
 import { poolsChanged } from '../automations.js';
 /** @import { DataStore, UniswapSettings, Wallet, PoolsData, PoolRow, PoolCachePart, ChainPrices, FeeBaseline, CollectEntry, EarnedHours, V4Scan, AprEntry, PositionsReadState, PositionHistory } from '../../types/data' */
-/** @import { Chain, PositionRow } from '../../types/defi' */
+/** @import { PositionRow } from '../../types/defi' */
+/** @import { Chain, Position, PoolState } from '../../types/uniswap' */
 /**
- * A position as read from the chain, with its wallet's label: what buildRow() reads of it.
- * @typedef {{ version: string, tokenId: string, owner: string, label: string, token0: string, token1: string, fee: number, tickLower: number, tickUpper: number, liquidity: bigint, owed0: bigint, owed1: bigint, feesFull?: boolean }} Position
- * @typedef {{ pool: string, sqrtPrice: number, tick: number }} Pool
- * @typedef {{ position: Position, pool?: Pool | null }} PositionRead
+ * A position as read from the chain, with its wallet's label.
+ * @typedef {Position & { label: string }} LabeledPosition
+ * @typedef {{ position: LabeledPosition, pool?: PoolState | null }} PositionRead
  * @typedef {NonNullable<Awaited<ReturnType<typeof readV4Position>>>} V4Read
  * @typedef {{ symbol: string, decimals: number, guessed?: boolean }} TokenInfo
  * @typedef {Awaited<ReturnType<typeof chainClock>>} Clock
@@ -46,7 +46,7 @@ export const refOf = (version, chainId, tokenId) => (version === 'v3' ? `${chain
 
 // Builds one row from a position, its pool's current state and the token prices on its chain.
 /**
- * @param {Position} p @param {Pool | null | undefined} pool @param {Record<string, number>} prices @param {Chain} chain
+ * @param {LabeledPosition} p @param {PoolState | null | undefined} pool @param {Record<string, number>} prices @param {Chain} chain
  * @param {number | null} [pricesAt]
  * @returns {PoolRow | null}
  */
@@ -226,11 +226,11 @@ async function readV3(chain, node, wallets, cfg) {
   const labels = new Map(wallets.map((w) => [w.address.toLowerCase(), w.label || w.address]));
   const have = new Set(owned.map((p) => p.tokenId));
   const added = addedPositions(cfg).filter((x) => x.version === 'v3' && x.chainId === chain.id && !have.has(String(x.tokenId)));
-  const extra = (await Promise.all(added.map((x) => readV3Position(chain, node, x.tokenId))))
-    .filter(Boolean)
+  const extra = /** @type {Position[]} */ ((await Promise.all(added.map((x) => readV3Position(chain, node, x.tokenId))))
+    .filter(Boolean))
     .map((p) => ({ ...p, label: labels.get(p.owner) ?? shortAddress(p.owner) }));
   const positions = [...owned, ...extra];
-  /** @type {Map<string, Pool | null>} */
+  /** @type {Map<string, PoolState | null>} */
   const pools = new Map();
   const poolKeys = [...new Set(positions.map((p) => `${p.token0}|${p.token1}|${p.fee}`))];
   await Promise.all(poolKeys.map(async (key) => {
@@ -266,8 +266,7 @@ async function toRows(chain, node, items, savedPrices) {
       warning = `${chain.name} token prices are unavailable (${/** @type {Error} */ (err).message}), so values are not shown.`;
     }
   }
-  const rows = /** @type {PoolRow[]} */ (items.map((x) => buildRow(x.position, x.pool, prices, chain, pricesAt)).filter(Boolean));
-  return { rows, prices: fresh, warning };
+  return { rows: /** @type {PoolRow[]} */ (items.map((x) => buildRow(x.position, x.pool, prices, chain, pricesAt)).filter(Boolean)), prices: fresh, warning };
 }
 
 
@@ -333,7 +332,8 @@ export async function readAprs(store, rows, win = '24h') {
   const byChain = new Map();
   for (const r of rows.filter((x) => x.liq != null && x.pool && !x.closed)) byChain.set(r.chainId, [...(byChain.get(r.chainId) ?? []), r]);
   await Promise.all([...byChain].map(async ([chainId, rows]) => {
-    const chain = chainOf(chainId);
+    // The rows are those of the chains in CHAINS (cachedRows).
+    const chain = /** @type {Chain} */ (chainOf(chainId));
     const { node } = chainSettings(cfg, chain);
     let clock;
     try {
@@ -612,7 +612,7 @@ async function nodeCollects(store, chain, node, r, step, lanes = 1) {
   } else {
     // Transactions read before and found to collect nothing are not read again.
     const checked = new Set(nodeKey(prev?.node) === nodeKey(node) ? /** @type {PositionHistory} */ (prev).checked ?? [] : []);
-    const txs = [...new Map(s.events.filter((e) => e.kind !== 'add' && e.time).map((e) => [e.tx, e.time]))]
+    const txs = [...new Map(s.events.filter((e) => e.kind !== 'add' && e.time).map((e) => /** @type {[string, number]} */ ([e.tx, e.time])))]
       .filter(([tx]) => !checked.has(tx) && wanted(store, r.ref, tx, 3));
     let read = 0;
     await eachLimit(txs, lanes, async ([tx, time]) => {
