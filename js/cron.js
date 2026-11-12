@@ -13,13 +13,15 @@ import { sessionStatus, sessionOutcome, exitClaude } from './terminal.js';
 import { forgetWorktree } from './task-worktrees.js';
 import { findGithubLinks, plainOutput, addTaskLinks, prsOf } from './task-links.js';
 import { buildProfile, profileOf, hasProfileSources } from './profile.js';
-/** @import { DataStore, Store, CronStep, CronSource, CronFlow, CronSchedule, CronTemplate, CronRun, CronRunStep, CronRunCurrent, CronTest, CronPr, Project, Task, DevPreset, SiteLogEntry, TaskLink, IconName } from '../types/data' */
+/** @import { DataStore, Store, CronStep, CronSource, CronFlow, CronSchedule, CronTemplate, CronRun, CronRunStep, CronRunCurrent, CronTest, CronPr, CronFormatField, Project, Task, DevPreset, SiteLogEntry, TaskLink, IconName } from '../types/data' */
 // The variables a step's templates read; $data holds what a name reads into with a path.
 /** @typedef {{ [name: string]: unknown, $data?: Record<string, unknown> }} Vars */
 // A step's result: what a test saves, with the variables the step saw.
 /** @typedef {CronTest & { vars: Vars }} StepResult */
 // The Dev terminal a step started (ctx.started).
 /** @typedef {Omit<CronRunCurrent, 'stepId'>} StartedInfo */
+// The item a loop is on: index counts from 0.
+/** @typedef {{ item: unknown, index: number, count: number }} LoopItem */
 /**
  * What passes between the steps of a run or a test (see runStep()).
  * @typedef {object} RunCtx
@@ -36,6 +38,7 @@ import { buildProfile, profileOf, hasProfileSources } from './profile.js';
  * @property {(info: StartedInfo) => void} [started]
  * @property {() => void} [beat]
  * @property {DataStore} [store]
+ * @property {LoopItem} [loop]
  */
 
 export const COLLECTION = 'cron';
@@ -50,7 +53,9 @@ const MINUTE = 60000;
 export const STEP_TYPES = [
   ['gather', 'Gather data', 'list', 'Reads tasks, projects, money, calendar, web pages and more; several sources at once.'],
   ['ai', 'AI generate', 'cpu', 'Sends a prompt to a model through OpenRouter.'],
-  ['stop', 'Stop if', 'filter', 'Ends the run early, for example when there is nothing to report.'],
+  ['stop', 'Stop if', 'filter', 'Ends the run early, for example when there is nothing to report. In a loop, skips the item.'],
+  ['format', 'Format', 'align-left', 'Reshapes the input into cleaner text, a list with one line per item, or named JSON fields.'],
+  ['loop', 'Loop over items', 'repeat', 'Runs the next steps once for each item of a list, then passes on what they gave for all of them.'],
   ['task', 'Create task', 'check-square', 'Adds a task with the output as its description.'],
   ['notify', 'Notify', 'bell', 'Posts the output under the bell (and Telegram if enabled).'],
   ['profile', 'Refresh project profile', 'refresh', 'Rebuilds a project’s profile from its folder, repos and website, as Projects does.'],
@@ -297,6 +302,8 @@ export function makeStep(type) {
   if (type === 'task') return { ...base, title: '{{flow}} · {{date}}', projectId: '', priority: 'none', due: '' };
   if (type === 'stop') return { ...base, when: 'nothing', text: '' };
   if (type === 'profile') return { ...base, projectId: '', onEdited: 'merge' };
+  if (type === 'format') return { ...base, mode: 'text', text: '{{input}}', items: '{{input}}', itemText: '- {{item}}', separator: 'line', fields: [makeField()] };
+  if (type === 'loop') return { ...base, items: '{{input}}', span: 1, max: LOOP_MAX };
   if (type === 'dev') return { ...base, mode: 'claude', preset: '', devCommand: '', projectId: '', prompt: '{{input}}', command: '', waitMinutes: DEV_WAIT_MINUTES };
   return { ...base, text: '{{flow}}: {{input}}' };
 }
@@ -1051,7 +1058,7 @@ export function projectVars(project) {
 // The project is the step's or source's own when it has one, else the flow's. A data step's sources each choose theirs.
 /**
  * @param {CronFlow} flow
- * @param {Pick<RunCtx, 'results' | 'from' | 'store'>} ctx
+ * @param {Pick<RunCtx, 'results' | 'from' | 'store' | 'loop'>} ctx
  * @param {{ type?: string, from?: string, projectId?: string } | null} [step]
  * @param {DataStore} [store]
  */
@@ -1070,7 +1077,7 @@ function varsFor(flow, ctx, step = null, store = ctx.store) {
     vars[`step${i + 1}`] = r.output;
     vars.$data[`step${i + 1}`] = r.data;
   });
-  return vars;
+  return ctx.loop ? withItem(vars, ctx.loop) : vars;
 }
 
 // What a step reads as {{input}}: the step before it by default, a chosen earlier step (its id), or nothing ('none'),
@@ -1352,6 +1359,224 @@ function stopsOn(step, input, nothing) {
 export function stopLabel(step) {
   const label = STOP_WHEN.find(([k]) => k === step.when)?.[1] ?? STOP_WHEN[0][1];
   return step.when === 'contains' || step.when === 'lacks' ? `${label} “${step.text || '…'}”` : label;
+}
+
+// --- Format and Loop ---
+// A Format step reshapes its input, as n8n's Set and template nodes do: a text template, one line per item of a
+// list, or named fields that make a JSON object. A Loop step runs the `span` steps after it once per item of a
+// list, as n8n's Loop Over Items does; after it, each of those steps reads as the list of what it gave per item.
+
+export const FORMAT_MODES = [
+  ['text', 'Text from a template'],
+  ['list', 'One line per item of a list'],
+  ['fields', 'JSON fields'],
+];
+/** @type {Record<string, string>} */
+const SEPARATORS = { line: '\n', blank: '\n\n', comma: ', ', space: ' ' };
+export const SEPARATOR_OPTIONS = [
+  ['line', 'New line'],
+  ['blank', 'Blank line'],
+  ['comma', 'Comma'],
+  ['space', 'Space'],
+];
+// How many items one loop runs by default and at most, so a long list cannot start hundreds of model calls or terminals.
+export const LOOP_MAX = 20;
+export const LOOP_LIMIT = 200;
+
+/**
+ * @param {Partial<CronFormatField>} [fields]
+ * @returns {CronFormatField}
+ */
+export const makeField = (fields = {}) => ({ id: uid(), name: '', value: '', ...fields });
+
+// The value a field holding a single {{name.path}} points at, kept whole (a list stays a list, a number a number);
+// any other text is filled as usual. Undefined when that one variable has no value.
+const ONE_VAR = new RegExp(`^${VAR.source}$`);
+/**
+ * @param {string | undefined} template
+ * @param {Vars} vars
+ * @returns {unknown}
+ */
+export function valueOf(template, vars) {
+  const m = String(template ?? '').trim().match(ONE_VAR);
+  if (!m) return fill(template, vars);
+  const [, name, path] = m;
+  if (!(name in vars) || name === '$data') return undefined;
+  const data = vars.$data?.[name];
+  if (!path) return data != null && typeof data === 'object' ? data : vars[name];
+  return walk(data, path);
+}
+
+// A value as a list of items: a list as it is, JSON text holding a list, else one item per non-empty line with its
+// bullet or number taken off, so a data step's "- task" lines loop too.
+/**
+ * @param {unknown} value
+ * @returns {unknown[]}
+ */
+export function listOf(value) {
+  if (Array.isArray(value)) return value;
+  if (value == null || value === '') return [];
+  if (typeof value !== 'string') return [value];
+  const parsed = parseData(value);
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed) return [parsed];
+  return value.split(/\r?\n/).map((l) => l.trim().replace(/^(?:[-*•]|\d+[.)])\s+/, '')).filter(Boolean);
+}
+
+// The items a Loop or a list Format reads. A variable with no value fails the step, so a typo is not a quiet empty loop.
+/**
+ * @param {string | undefined} template
+ * @param {Vars} vars
+ */
+function itemsOf(template, vars) {
+  const t = String(template ?? '').trim() || '{{input}}';
+  const value = valueOf(t, vars);
+  if (value === undefined) throw new Error(`${t} has no value here.`);
+  return listOf(value);
+}
+
+// The variables of one item: {{item}} (with paths into it when it is JSON), {{index}} from 1 and {{count}}.
+/**
+ * @param {Vars} vars
+ * @param {LoopItem} loop
+ * @returns {Vars}
+ */
+export function withItem(vars, { item, index, count }) {
+  return { ...vars, item: asText(item), index: String(index + 1), count: String(count), $data: { ...vars.$data, item } };
+}
+
+/**
+ * @param {CronStep} step
+ * @param {Vars} vars
+ * @param {RunCtx} ctx
+ */
+function formatStep(step, vars, ctx) {
+  if (step.mode === 'fields') {
+    /** @type {Record<string, unknown>} */
+    const out = {};
+    for (const f of step.fields ?? []) {
+      const name = String(f.name ?? '').trim();
+      if (!name) continue;
+      const v = valueOf(f.value, vars);
+      // A variable with no value stays as written, as in any other field.
+      out[name] = v === undefined ? fill(f.value, vars) : v;
+    }
+    if (!Object.keys(out).length) throw new Error('Name at least one field.');
+    ctx.data = out;
+    return JSON.stringify(out, null, 2);
+  }
+  if (step.mode === 'list') {
+    const items = itemsOf(step.items, vars);
+    const lines = items.map((item, index) => fill(step.itemText || '{{item}}', withItem(vars, { item, index, count: items.length })));
+    ctx.data = lines;
+    ctx.note = `${items.length} item${items.length === 1 ? '' : 's'}.`;
+    return lines.join(SEPARATORS[step.separator ?? 'line'] ?? '\n');
+  }
+  return fill(step.text ?? '{{input}}', vars).trim();
+}
+
+/** @param {CronStep} step */
+export const loopMax = (step) => Math.min(LOOP_LIMIT, Math.max(1, Math.round(Number(step.max) || LOOP_MAX)));
+
+// How many steps after the loop at `index` it repeats: its span, cut at the end of the flow and before another loop,
+// since loops do not nest.
+/**
+ * @param {CronFlow} flow
+ * @param {number} index
+ */
+export function loopSpan(flow, index) {
+  const step = flow.steps[index];
+  if (step?.type !== 'loop') return 0;
+  const want = Math.max(1, Math.round(Number(step.span) || 1));
+  let n = 0;
+  while (n < want && flow.steps[index + 1 + n] && flow.steps[index + 1 + n].type !== 'loop') n++;
+  return n;
+}
+
+// The index of the loop that repeats the step at `index`, or -1.
+/**
+ * @param {CronFlow} flow
+ * @param {number} index
+ */
+export function loopOf(flow, index) {
+  for (let i = index - 1; i >= 0; i--) {
+    if (flow.steps[i].type === 'loop') return index - i <= loopSpan(flow, i) ? i : -1;
+  }
+  return -1;
+}
+
+// What one step gave over all the items it ran on: the list of its data, and its outputs as one text (a JSON list
+// when every item gave JSON, else the texts one after the other).
+/**
+ * @param {CronStep} step
+ * @param {StepResult[]} list
+ * @param {number} count
+ * @param {Vars} vars
+ * @returns {StepResult}
+ */
+function gathered(step, list, count, vars) {
+  const data = list.map((r) => r.data);
+  const json = data.length > 0 && data.every((d) => d != null && typeof d === 'object');
+  const notes = [...new Set(list.map((r) => r.note).filter(Boolean))];
+  return {
+    ok: true,
+    stepId: step.id,
+    vars: list[0]?.vars ?? vars,
+    output: json ? JSON.stringify(data, null, 2) : list.map((r) => r.output).join('\n\n'),
+    data,
+    note: [`Ran for ${list.length} of ${count} item${count === 1 ? '' : 's'}.`, ...notes.slice(0, 3)].join(' '),
+    ms: list.reduce((n, r) => n + r.ms, 0),
+    at: now(),
+  };
+}
+
+// Runs the loop at `index`, then its steps once per item, each item on its own copy of the run: its first step
+// reads the item as {{input}}, and {{stepN}} of a step in the loop is what it gave for this item. A "Stop if" that
+// stops skips the rest of the loop for that item only. `until` ends early, at a step being tested; `prepare` sets
+// up the run before each step, as the caller does for steps outside a loop.
+// Returns the loop's result and each step's gathered result, ending at a failure; the good ones go in ctx.results.
+/**
+ * @param {DataStore} store
+ * @param {CronFlow} flow
+ * @param {number} index
+ * @param {RunCtx} ctx
+ * @param {{ until?: string, prepare?: (step: CronStep, ctx: RunCtx) => void }} [options]
+ * @returns {Promise<StepResult[]>}
+ */
+async function runLoop(store, flow, index, ctx, { until = '', prepare } = {}) {
+  const loop = flow.steps[index];
+  prepare?.(loop, ctx);
+  const head = await stepOnce(store, flow, loop, ctx);
+  if (!head.ok || until === loop.id) return [head];
+  let body = flow.steps.slice(index + 1, index + 1 + loopSpan(flow, index));
+  const end = body.findIndex((s) => s.id === until);
+  if (end >= 0) body = body.slice(0, end + 1);
+  const items = /** @type {unknown[]} */ (head.data);
+  const before = ctx.results.slice(0, -1);
+  /** @type {StepResult[][]} */
+  const per = body.map(() => []);
+  for (const [i, item] of items.entries()) {
+    /** @type {RunCtx} */
+    const one = { ...ctx, loop: { item, index: i, count: items.length }, stop: false, results: [...before, { ...head, output: asText(item), data: item }] };
+    for (const [j, step] of body.entries()) {
+      prepare?.(step, one);
+      const r = await stepOnce(store, flow, step, one);
+      if (!r.ok) {
+        const done = body.slice(0, j).map((s, k) => gathered(s, per[k], items.length, head.vars));
+        ctx.results.push(...done);
+        return [head, ...done, { ...r, stepId: step.id, output: `Item ${i + 1} of ${items.length}: ${r.output}` }];
+      }
+      ctx.beat?.();
+      if (one.stop) break;
+      per[j].push(r);
+    }
+    // A Run in Dev after the loop works on the task its last item made.
+    ctx.task = one.task;
+  }
+  const done = body.map((s, k) => gathered(s, per[k], items.length, head.vars));
+  ctx.results.push(...done);
+  ctx.note = '';
+  return [head, ...done];
 }
 
 // A shell word: single quotes keep newlines, quotes and $ as they are. A leading ~/ (a project's folder) stays
@@ -1793,6 +2018,14 @@ async function runStep(store, flow, step, input, ctx) {
     ctx.task = task;
     return input;
   }
+  if (step.type === 'format') return formatStep(step, vars, ctx);
+  if (step.type === 'loop') {
+    const all = itemsOf(step.items, vars);
+    const items = all.slice(0, loopMax(step));
+    ctx.data = items;
+    ctx.note = `${items.length} item${items.length === 1 ? '' : 's'}${all.length > items.length ? `: the first ${items.length} of ${all.length}` : ''}.`;
+    return JSON.stringify(items, null, 2);
+  }
   if (step.type === 'dev') return runDev(store, flow, step, input, vars, ctx);
   if (step.type === 'profile') return runProfile(store, flow, step, ctx);
   if (step.type === 'notify') {
@@ -1890,14 +2123,35 @@ export function testsOf(store, flowId) {
   if (!saved || !flow) return map;
   /** @type {StepResult[]} */
   const results = [];
-  for (const step of flow.steps) {
+  for (const [index, step] of flow.steps.entries()) {
     const r = saved[step.id];
     if (!r) continue;
-    const result = { ...r, stepId: step.id, data: 'data' in r ? r.data : parseData(r.output) ?? r.output, vars: varsFor(flow, { results }, step, store) };
+    const result = { ...r, stepId: step.id, data: 'data' in r ? r.data : parseData(r.output) ?? r.output, vars: varsFor(flow, firstItem(flow, index, results), step, store) };
     map.set(step.id, result);
     if (result.ok) results.push(result);
   }
   return map;
+}
+
+// The results a step in a loop saw on the loop's first item, so its variables show {{item}} and what the steps
+// before it in the loop gave for that item. A step outside a loop sees the results as they are.
+/**
+ * @param {CronFlow} flow
+ * @param {number} index
+ * @param {StepResult[]} results
+ * @returns {Pick<RunCtx, 'results' | 'loop'>}
+ */
+function firstItem(flow, index, results) {
+  const loop = flow.steps[loopOf(flow, index)];
+  const at = loop ? results.findIndex((r) => r.stepId === loop.id) : -1;
+  const items = at >= 0 ? results[at].data : null;
+  if (!Array.isArray(items) || !items.length) return { results };
+  /** @param {StepResult} r */
+  const first = (r) => (Array.isArray(r.data) && r.data.length ? { ...r, output: asText(r.data[0]), data: r.data[0] } : r);
+  return {
+    results: results.map((r, i) => (i === at ? { ...r, output: asText(items[0]), data: items[0] } : i > at ? first(r) : r)),
+    loop: { item: items[0], index: 0, count: items.length },
+  };
 }
 
 // Drops flowId's test results: all of them, or only those of the steps in `stepIds`.
@@ -1936,18 +2190,38 @@ export async function testStep(store, flowId, stepId, { live = false } = {}) {
   /** @type {RunCtx} */
   const ctx = { dry: true, nothing: false, stop: false, note: '', results: [] };
   let last = null;
+  /**
+   * @param {CronStep} step
+   * @param {RunCtx} c
+   */
+  const prepare = (step, c) => {
+    c.live = live && step.id === stepId;
+    c.started = (info) => saveTest(store, flowId, step.id, {
+      ok: true, pending: true, output: '', data: info, note: `Started in Dev terminal ${info.terminal}; waiting for it to finish.`, ms: 0, at: now(),
+    });
+  };
   try {
-    for (const step of flow.steps.slice(0, end + 1)) {
-      const kept = saved.get(step.id);
-      if (kept?.ok && step.id !== stepId) {
-        ctx.results.push(kept);
-        ctx.nothing = kept.nothing;
+    for (let i = 0; i <= end; i++) {
+      const step = flow.steps[i];
+      // A loop and its steps run as one: their kept results are used only when all are there and none is tested.
+      const span = loopSpan(flow, i);
+      const group = flow.steps.slice(i, i + 1 + span);
+      const kept = group.map((s) => saved.get(s.id));
+      if (kept.every((k) => k?.ok) && !group.some((s) => s.id === stepId)) {
+        ctx.results.push(.../** @type {StepResult[]} */ (kept));
+        ctx.nothing = kept.at(-1)?.nothing;
+        i += span;
         continue;
       }
-      ctx.live = live && step.id === stepId;
-      ctx.started = (info) => saveTest(store, flowId, step.id, {
-        ok: true, pending: true, output: '', data: info, note: `Started in Dev terminal ${info.terminal}; waiting for it to finish.`, ms: 0, at: now(),
-      });
+      if (step.type === 'loop') {
+        const results = await runLoop(store, flow, i, ctx, { until: stepId, prepare });
+        results.forEach((r, k) => saveTest(store, flowId, flow.steps[i + k].id, r));
+        last = /** @type {StepResult} */ (results.at(-1));
+        if (!last.ok) break;
+        i += span;
+        continue;
+      }
+      prepare(step, ctx);
       last = await stepOnce(store, flow, step, ctx);
       saveTest(store, flowId, step.id, last);
       if (!last.ok) break;
@@ -1981,7 +2255,9 @@ export async function testStep(store, flowId, stepId, { live = false } = {}) {
  * @param {StepResult} result
  */
 function stepRecord(step, result) {
-  const d = result.ok && result.data && typeof result.data === 'object' ? /** @type {StepMade} */ (result.data) : null;
+  // A step in a loop made one per item: the last one is kept.
+  const made = Array.isArray(result.data) && step.type !== 'loop' ? result.data.at(-1) : result.data;
+  const d = result.ok && made && typeof made === 'object' ? /** @type {StepMade} */ (made) : null;
   /** @type {CronRunStep} */
   const out = { stepId: step.id, type: step.type, ok: result.ok, output: result.output.slice(0, 4000), note: result.note, ms: result.ms };
   if (step.type === 'task' && d?.id) out.taskId = d.id;
@@ -2043,22 +2319,36 @@ export async function runFlow(store, flowId, { manual = false, dry = false } = {
   };
   // A test run of the whole flow also fills the step tests, so its data can be looked at and picked from.
   if (dry) clearTests(store, flowId);
-  try {
-    for (const step of flow.steps) {
-      ctx.started = (info) => {
-        run.current = { stepId: step.id, ...info };
-        run.beat = now();
-        save();
-        // A test run shows the terminal in the step's test data too, while it waits for it.
-        if (dry) saveTest(store, flowId, step.id, { ok: true, pending: true, output: '', data: info, note: `Started in Dev terminal ${info.terminal}; waiting for it to finish.`, ms: 0, at: now() });
-      };
-      const result = await stepOnce(store, flow, step, ctx);
-      if (dry) saveTest(store, flowId, step.id, result);
-      delete run.current;
-      run.steps.push(stepRecord(step, result));
+  /**
+   * @param {CronStep} step
+   * @param {RunCtx} c
+   */
+  const prepare = (step, c) => {
+    c.started = (info) => {
+      run.current = { stepId: step.id, ...info };
       run.beat = now();
+      save();
+      // A test run shows the terminal in the step's test data too, while it waits for it.
+      if (dry) saveTest(store, flowId, step.id, { ok: true, pending: true, output: '', data: info, note: `Started in Dev terminal ${info.terminal}; waiting for it to finish.`, ms: 0, at: now() });
+    };
+  };
+  try {
+    for (let i = 0; i < flow.steps.length; i++) {
+      const step = flow.steps[i];
+      const span = loopSpan(flow, i);
+      prepare(step, ctx);
+      // A loop gives its own result and one for each step it repeats.
+      const results = step.type === 'loop' ? await runLoop(store, flow, i, ctx, { prepare }) : [await stepOnce(store, flow, step, ctx)];
+      delete run.current;
+      for (const [k, result] of results.entries()) {
+        if (dry) saveTest(store, flowId, flow.steps[i + k].id, result);
+        run.steps.push(stepRecord(flow.steps[i + k], result));
+      }
+      run.beat = now();
+      const result = /** @type {StepResult} */ (results.at(-1));
       if (!result.ok) throw new Error(result.output);
       save();
+      i += span;
       if (ctx.stop) {
         run.status = 'stopped';
         run.error = ctx.note;

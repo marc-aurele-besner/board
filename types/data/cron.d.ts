@@ -38,7 +38,16 @@ export interface CronSource {
   flowId: string;
 }
 
-// A step (makeStep()). type: 'gather', 'ai', 'stop', 'task', 'notify', 'profile' or 'dev'; each type uses some fields.
+// One named field of a 'format' step in 'fields' mode (makeField()). value takes variables; a single {{name.path}}
+// keeps the value whole.
+export interface CronFormatField {
+  id: string;
+  name: string;
+  value: string;
+}
+
+// A step (makeStep()). type: 'gather', 'ai', 'stop', 'format', 'loop', 'task', 'notify', 'profile' or 'dev'; each
+// type uses some fields.
 export interface CronStep {
   id: string;
   type: string;
@@ -70,8 +79,18 @@ export interface CronStep {
   // profile: 'merge', 'replace' or 'keep'. Older steps have keepEdited instead.
   onEdited?: string;
   keepEdited?: boolean;
-  // dev: 'claude', 'preset', 'custom' or 'command'.
+  // dev: 'claude', 'preset', 'custom' or 'command'. format: 'text' (uses `text`), 'list' or 'fields'.
   mode?: string;
+  // format 'list' and loop: the list to read, as a variable ('{{input}}', '{{step2.items}}').
+  items?: string;
+  // format 'list': each item's text, and what goes between them ('line', 'blank', 'comma' or 'space').
+  itemText?: string;
+  separator?: string;
+  // format 'fields'
+  fields?: CronFormatField[];
+  // loop: how many steps after it run once per item, and the most items it runs.
+  span?: number;
+  max?: number;
   preset?: string;
   devCommand?: string;
   command?: string;
