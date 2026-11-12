@@ -2556,3 +2556,28 @@ button.sum-line:hover { background: var(--surface-2); }
 .fp-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
 .fp-chosen { overflow-wrap: anywhere; min-width: 0; }
 .pp-icon-row > :first-child:not(.project-icon) { flex: 1; min-width: 0; }
+/* Settings: Dev environment, presets and each project's folder and command */
+.dev-env-list { list-style: none; margin: 0; padding: 0; }
+.dev-env-row { display: grid; align-items: center; gap: 6px 20px; padding: 10px 4px; border-bottom: 1px solid var(--border); }
+.dev-env-row:last-child { border-bottom: none; }
+.dev-preset-row { grid-template-columns: minmax(0, 220px) minmax(0, 1fr) auto; }
+.dev-project-row { grid-template-columns: minmax(0, 220px) repeat(2, minmax(0, 1fr)); align-items: start; }
+.dev-env-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dev-preset-row .dev-env-name { flex-direction: column; align-items: flex-start; gap: 2px; }
+.dev-env-name .project-icon { flex: none; }
+.dev-env-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dev-env-field { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.dev-env-field > .pp-icon-row { align-self: stretch; }
+.dev-env-label { color: var(--muted); font-weight: 600; }
+.dev-env-command, .dev-env-preview { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.dev-preset-add { display: flex; gap: 8px; flex-wrap: wrap; }
+.dev-preset-add input { flex: 1 1 200px; min-width: 0; }
+.dev-preset-add input[name="command"] { flex-grow: 2; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* Narrow screens: one column per row. */
+@media (max-width: 720px) {
+  .dev-project-row { grid-template-columns: minmax(0, 1fr); padding: 12px 0; }
+  .dev-preset-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name remove" "command command"; padding: 12px 0; }
+  .dev-preset-row .dev-env-name { grid-area: name; }
+  .dev-preset-row .dev-env-command { grid-area: command; }
+  .dev-preset-row > button { grid-area: remove; }
+}

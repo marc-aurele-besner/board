@@ -12,6 +12,7 @@ import { promptsCard } from './settings-prompts.js';
 import { labelsCard } from './settings-labels.js';
 import { chainsCard } from './settings-chains.js';
 import { contractsCard } from './settings-contracts.js';
+import { devEnvironmentCard } from './settings-dev.js';
 import { logo } from './positions.js';
 
 const COLLECTION = 'settings';
@@ -71,6 +72,7 @@ const SECTION_GROUPS = [
       ['categories', 'Labels', 'tag'],
       ['notifications', 'Notifications', 'bell'],
       ['automations', 'Automations', 'zap'],
+      ['dev', 'Dev environment', 'terminal'],
       ['data', 'Data folder', 'folder'],
     ],
   },
@@ -911,6 +913,7 @@ function draw(root, store) {
         : view.section === 'gmail' ? gmailCard(store)
         : view.section === 'notifications' ? notificationsCard(store)
         : view.section === 'automations' ? automationsCard(store)
+        : view.section === 'dev' ? devEnvironmentCard(store)
         : view.section === 'data' ? dataCard(store)
         : h('div', { class: 'stack-lg' }, tokenGuide(), github, orgKeysCard(store));
 
