@@ -832,6 +832,55 @@ async function repoOf(path) {
   return top.trim() || null;
 }
 
+// A SKILL.md's frontmatter: its name, its description (plain, quoted, or folded over indented lines), and
+// whether it can be typed as a slash command.
+/** @param {string} text @param {string} fallback */
+function skillMeta(text, fallback) {
+  const head = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? '';
+  const lines = head.split(/\r?\n/);
+  /** @type {Record<string, string>} */
+  const fields = {};
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^([\w-]+):\s*(.*)$/.exec(lines[i]);
+    if (!m) continue;
+    let value = m[2].trim();
+    if (/^[>|][+-]?$/.test(value)) {
+      const more = [];
+      while (i + 1 < lines.length && (/^\s/.test(lines[i + 1]) || !lines[i + 1].trim())) more.push(lines[++i].trim());
+      value = more.join(' ').trim();
+    }
+    fields[m[1]] = value.replace(/^(['"])(.*)\1$/, '$2');
+  }
+  return { name: fields.name || fallback, description: fields.description ?? '', invocable: fields['user-invocable'] !== 'false' };
+}
+
+// The skills in one `skills` folder: each sub-folder (or link to one) holding a SKILL.md.
+/** @param {string} dir */
+async function skillsIn(dir) {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  const skills = await Promise.all(entries.filter((e) => e.isDirectory() || e.isSymbolicLink()).map(async (e) => {
+    const file = join(dir, e.name, 'SKILL.md');
+    const text = await readFile(file, 'utf8').catch(() => null);
+    if (text === null) return null;
+    const meta = skillMeta(text.slice(0, 8000), e.name);
+    return meta.invocable ? { name: meta.name, description: meta.description, path: file } : null;
+  }));
+  return skills.filter((s) => !!s).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// Claude Code's skills for Dev's Skills panel: the user's own (~/.claude/skills) and the project's, from the
+// folder's .claude/skills and its repository's. { global, project, root }.
+/** @param {string} path */
+async function listSkills(path) {
+  const dir = await folderOf(path);
+  const root = (await git(dir, ['rev-parse', '--show-toplevel']).catch(() => '')).trim() || dir;
+  const own = join(homedir(), '.claude', 'skills');
+  // In the home folder, the project's folder is the user's own: listed once, as theirs.
+  const folders = [...new Set([dir, root])].map((d) => join(d, '.claude', 'skills')).filter((f) => f !== own);
+  const project = (await Promise.all(folders.map(skillsIn))).flat().filter((s, i, all) => all.findIndex((x) => x.name === s.name) === i);
+  return { global: await skillsIn(own), project, root };
+}
+
 // `git status --porcelain=v2 -z`: the branch lines, then one record per file. A rename carries its old path in
 // the record after it.
 /** @param {string} text */
@@ -1268,6 +1317,15 @@ createServer(async (req, res) => {
   if (req.method === 'GET' && path === '/worktrees') {
     try {
       const body = await listWorktrees(new URL(/** @type {string} */ (req.url), 'http://terminal').searchParams.get('path') ?? '');
+      res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(body));
+    } catch (err) {
+      res.writeHead(400, cors).end(/** @type {Error} */ (err).message);
+    }
+    return;
+  }
+  if (req.method === 'GET' && path === '/skills') {
+    try {
+      const body = await listSkills(new URL(/** @type {string} */ (req.url), 'http://terminal').searchParams.get('path') ?? '');
       res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(body));
     } catch (err) {
       res.writeHead(400, cors).end(/** @type {Error} */ (err).message);
