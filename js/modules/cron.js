@@ -10,7 +10,7 @@ import {
   COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, TEMPLATES, devRunOptions, devRunValue, devCommandPreview, daysOf,
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, templateFromFlow, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
-  testStep, testsOf, isTesting, clearTests, varsTree, pathTo, remapStepRefs, parseData,
+  testStep, testsOf, isTesting, clearTests, varsTree, pathTo, remapStepRefs, parseData, projectVars,
 } from '../cron.js';
 import { modelForTask } from './settings.js';
 
@@ -404,12 +404,22 @@ function insertVar(key, name) {
 // Chips and tree keys keep the field's focus: a click that blurred it would save and re-render first, losing the click.
 const keepFocus = (e) => e.preventDefault();
 
-// The variables a step can use: the usual ones, then every earlier step by number.
-function varNames(flow, index, extra = []) {
+// The project's parts a field offers as chips; the test input lists the rest ({{project.domain}}, {{project.repos}}…).
+const PROJECT_NAMES = [
+  ['project', 'The project’s name'],
+  ['project.website', 'The project’s website'],
+  ['project.repo', 'The project’s first GitHub repo, as owner/repo'],
+  ['project.directory', 'The project’s local folder'],
+  ['project.description', 'The project’s description'],
+];
+
+// The variables a step can use: the usual ones, the project's when it has one, then every earlier step by number.
+function varNames(flow, index, extra = [], projectId = withFlowProject(flow, flow.steps[index] ?? {}).projectId) {
   return [
     ['input', 'The previous step’s output'],
     ['date', 'The day of the run'],
     ['flow', 'The flow’s name'],
+    ...(projectId ? PROJECT_NAMES : []),
     ...extra,
     ...flow.steps.slice(0, index).map((s, i) => [`step${i + 1}`, `Output of step ${i + 1}, ${typeOf(s.type)[1]}`]),
   ];
@@ -628,16 +638,20 @@ function sourceCard(store, flow, own, { setSource, remove }) {
         : null,
       remove ? h('button', { type: 'button', class: 'icon-btn', title: 'Remove source', 'aria-label': 'Remove source', onclick: remove }, icon('trash')) : null),
     src.source === 'page'
-      ? field(src.projectId ? 'Path or link (optional)' : 'Link',
+      ? varField(src.projectId ? 'Path or link (optional)' : 'Link',
           h('input', { value: src.url ?? '', autocomplete: 'off', placeholder: src.projectId ? '/blog or https://docs.example.com' : 'example.com/blog', onchange: (e) => set({ url: e.target.value.trim() }) }),
-          src.projectId ? 'Empty reads the project’s website. A path such as /blog reads that page of it; a full link reads any page.' : null)
+          `${own.id}:url`, src.projectId ? PROJECT_NAMES.slice(1, 3).concat([['project.repoUrl', 'The project’s first GitHub repo, as a link']]) : [],
+          src.projectId ? 'Empty reads the project’s website. A path such as /blog reads that page of it; a full link reads any page, such as {{project.repoUrl}}.' : null)
       : null,
     src.source === 'page'
       ? field('Linked pages to read too',
           h('input', { type: 'number', min: 0, max: MAX_FOLLOW, value: String(src.follow ?? 0), onchange: (e) => set({ follow: Math.min(MAX_FOLLOW, Math.max(0, Math.round(Number(e.target.value) || 0))) }) }),
           'Also reads the best pages of the same site it links to, such as a blog’s latest posts or a site’s main sections, so the next step gets their content and not only a list of links. 0 reads this page alone.')
       : null,
-    src.source === 'text' ? field('Text', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, src.text ?? '')) : null,
+    src.source === 'text'
+      ? varField('Text', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, src.text ?? ''), `${own.id}:text`,
+          varNames(flow, flow.steps.findIndex((s) => sourcesOf(s).some((x) => x.id === own.id)), [], src.projectId))
+      : null,
     field('Label (optional)',
       h('input', { value: src.label ?? '', autocomplete: 'off', placeholder: sourceLabel(store, { ...src, label: '' }), onchange: (e) => set({ label: e.target.value.trim() }) })),
     about ? h('p', { class: 'muted small' }, about) : null);
@@ -776,6 +790,13 @@ function knownVars(store, flow, index) {
   const tested = testsOf(store, flow.id);
   const last = lastRunOf(store, flow.id);
   const vars = { input: '', date: todayISO(), flow: flow.name, $data: {} };
+  const step = flow.steps[index];
+  const projectId = (step?.type !== 'gather' && step?.projectId) || flowProjectId(flow);
+  const project = projectVars(store.get('projects').projects.find((p) => p.id === projectId));
+  if (project) {
+    vars.project = project.name;
+    vars.$data.project = project;
+  }
   flow.steps.slice(0, index).forEach((s, i) => {
     const t = tested.get(s.id);
     const r = t?.ok ? t : last?.steps.find((x) => x.stepId === s.id && x.ok);
