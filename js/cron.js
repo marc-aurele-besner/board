@@ -9,7 +9,8 @@ import { sitesOf, siteData } from './automations.js';
 import { readPageText } from './sitecheck.js';
 import { openPositions } from './defi/positions-read.js';
 import { devPresets, devCommandOf, runnerOf, startRunnerSession } from './dev-core.js';
-import { sessionStatus, sessionOutcome } from './terminal.js';
+import { sessionStatus, sessionOutcome, exitClaude } from './terminal.js';
+import { forgetWorktree } from './task-worktrees.js';
 import { findGithubLinks, plainOutput, addTaskLinks, prsOf } from './task-links.js';
 import { buildProfile, profileOf, hasProfileSources } from './profile.js';
 
@@ -1098,6 +1099,22 @@ async function waitForSession(store, session, minutes, beat) {
   }
 }
 
+// claude stays open once done. It is sent /exit and asked to remove its worktree when nothing in it would be lost
+// (tools/terminal.js decides); the task forgets a removed worktree. Says what happened, for the step's note.
+async function endClaude(store, session, worktree) {
+  try {
+    const r = await exitClaude(runnerOf(store), session);
+    if (r.removed) {
+      forgetWorktree(store, worktree.name);
+      return 'claude exited and its worktree was removed';
+    }
+    if (r.kept) return `claude exited; its worktree was kept (${r.kept})`;
+    return r.ended ? 'claude exited' : 'claude did not exit';
+  } catch (err) {
+    return `claude was left open (${err.message})`;
+  }
+}
+
 const STATE_TEXT = { waiting: 'finished, waiting for input', done: 'finished', failed: 'ended with an error', stopped: 'was stopped', idle: 'ended' };
 const FILE_STATUS = { A: 'added', M: 'modified', D: 'deleted', R: 'renamed', C: 'copied', T: 'type changed', '?': 'untracked' };
 const OUTPUT_KEPT = 4000;
@@ -1211,6 +1228,12 @@ async function runDev(store, flow, step, input, vars, ctx) {
   ctx.started?.({ session: id, cwd, terminal: n, ...(task ? { taskId: task.id } : {}) });
   if (!waits) {
     ctx.note = `${ctx.dry ? 'Test: started' : 'Started'} in ${on}.`;
+    // Nothing waits for it, but claude is still ended once it is done, in the background.
+    if (worktree) {
+      waitForSession(store, id, step.waitMinutes ?? DEV_WAIT_MINUTES)
+        .then((status) => status.state === 'waiting' && endClaude(store, id, worktree))
+        .catch(() => {});
+    }
     return input;
   }
   const status = await waitForSession(store, id, step.waitMinutes ?? DEV_WAIT_MINUTES, ctx.beat);
@@ -1221,7 +1244,9 @@ async function runDev(store, flow, step, input, vars, ctx) {
   // The session has ended or waits for its user by now, so a PR moves the task on to review.
   if (task && links.length) addTaskLinks(store, [task.id], links, { review: true });
   ctx.data = { ...ctx.data, ...data };
-  ctx.note = `${ctx.dry ? 'Test: ran' : 'Ran'} in ${on}; it ${STATE_TEXT[status.state] ?? 'ended'}${data.pr ? `, PR #${data.pr.number}` : ''}.`;
+  // Its work was read above, so claude can go, and its worktree with it.
+  const ended = worktree && status.state === 'waiting' ? await endClaude(store, id, worktree) : '';
+  ctx.note = `${ctx.dry ? 'Test: ran' : 'Ran'} in ${on}; it ${STATE_TEXT[status.state] ?? 'ended'}${data.pr ? `, PR #${data.pr.number}` : ''}${ended ? `; ${ended}` : ''}.`;
   return outcomeText(data, { terminal: n, where, state: status.state });
 }
 
