@@ -1,12 +1,16 @@
+// @ts-check
 // A task search that doubles as a filter. Plain words must all appear in the title, description, category or
 // project name. Tokens narrow further: #project (or #personal), !high, is:doing (or is:open), cat:design, due:today.
+/** @import { Task } from '../types/data' */
 import { statusOf, todayISO } from './ui.js';
 
 const STATUS_KEYS = ['todo', 'blocked', 'paused', 'ondeck', 'doing', 'review', 'done'];
+/** @type {Record<string, string>} */
 const STATUS_ALIASES = { open: 'open', progress: 'doing', inprogress: 'doing', deck: 'ondeck', completed: 'done', closed: 'done' };
 const PRIORITY_KEYS = ['high', 'medium', 'low', 'none'];
 export const QUERY_HINT = 'words, #project, !high, is:doing, cat:name, due:today';
 
+/** @param {string} iso @param {number} n */
 const addDays = (iso, n) => {
   // Noon UTC, so adding days never crosses a date line.
   const d = new Date(`${iso}T12:00:00Z`);
@@ -14,6 +18,7 @@ const addDays = (iso, n) => {
   return d.toISOString().slice(0, 10);
 };
 
+/** @param {Task} item @param {string} when */
 function dueMatches(item, when) {
   const today = todayISO();
   if (when === 'none') return !item.due;
@@ -26,10 +31,14 @@ function dueMatches(item, when) {
 
 // Reads the query once; the returned function tests one task. `hasStatus` says the query names a status itself,
 // so a list's own status filter can step aside.
+/** @param {string} query @param {{ id: string, name: string }[]} projects */
 export function taskMatcher(query, projects) {
+  /** @type {((i: Task) => boolean)[]} */
   const tests = [];
+  /** @type {string[]} */
   const words = [];
   let hasStatus = false;
+  /** @param {string | null} id */
   const projectName = (id) => projects.find((p) => p.id === id)?.name ?? 'Personal';
   for (const raw of query.trim().toLowerCase().split(/\s+/).filter(Boolean)) {
     const [, key, value] = raw.match(/^(is|status|cat|category|due):(.+)$/) ?? [];
@@ -37,6 +46,7 @@ export function taskMatcher(query, projects) {
       const name = raw.slice(1);
       if (name === 'personal') tests.push((i) => !i.projectId);
       else {
+        /** @type {Set<string | null>} */
         const ids = new Set(projects.filter((p) => p.name.toLowerCase().replace(/\s+/g, '').includes(name)).map((p) => p.id));
         tests.push((i) => ids.has(i.projectId));
       }
@@ -58,6 +68,7 @@ export function taskMatcher(query, projects) {
       words.push(raw);
     }
   }
+  /** @param {Task} item */
   const match = (item) => {
     if (!tests.every((t) => t(item))) return false;
     if (!words.length) return true;
