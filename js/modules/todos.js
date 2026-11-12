@@ -7,7 +7,7 @@
 /** @typedef {{ status: string, issues: number, prs: number, error?: string | null }} RepoState */
 import { h, uid, icon, statusOf, notice, todayISO } from '../ui.js';
 import { makeTask } from '../capture.js';
-import { AUTO_SOURCES } from '../automations.js';
+import { AUTO_SOURCES, autoSourceLink } from '../automations.js';
 import { toast } from '../toast.js';
 import { createProject, projectIcon, labelsOf, projectTree, moveProject, labelColor } from './projects.js';
 import { editText, pickChip, pickButton, pickMulti, pill } from '../inline.js';
@@ -763,6 +763,19 @@ function cronButton(store, item) {
   }, icon('repeat'));
 }
 
+// On a task a rule made: opens the page that shows what the check found (a site's health, Money, Liquidity Pools).
+/** @param {Task} item */
+function sourceButton(item) {
+  const link = autoSourceLink(item);
+  if (!link) return null;
+  return h('a', {
+    class: 'icon-btn cron-btn',
+    href: link.href,
+    title: `Made by ${/** @type {Record<string, string>} */ (AUTO_SOURCES)[/** @type {string} */ (item.auto)]}. Open ${link.label}.`,
+    'aria-label': `Open ${link.label} for "${item.text}"`,
+  }, icon(link.icon));
+}
+
 // Marks a task done, or back to "To do" when it already is.
 /** @param {Store} store @param {Task} item */
 function doneButton(store, item) {
@@ -1049,6 +1062,7 @@ function todoRow(store, item, ctx) {
         ctx.showDue ? null : dueControl(store, item),
         repos.length || issuesOf(item).length || prsOf(item).length ? issueControl(store, item, repos) : null,
         cronButton(store, item),
+        sourceButton(item),
         devButton(store, item),
         item.email
           ? h('a', { href: `#/inbox?email=${encodeURIComponent(item.email.id)}`, class: 'icon-btn', title: 'Open the email', 'aria-label': 'Open the email this task came from' }, icon('mail'))
@@ -1158,6 +1172,7 @@ function boardCard(store, item, projects, order) {
         item.description ? h('span', { class: 'desc-indicator', title: 'Has a description', 'aria-label': 'Has a description' }, icon('align-left')) : null,
         imageCount(item),
         cronButton(store, item),
+        sourceButton(item),
         devButton(store, item),
         copyButton(store, item),
         h('button', {

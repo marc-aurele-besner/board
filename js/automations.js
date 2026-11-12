@@ -7,6 +7,7 @@ import { notify } from './notify-core.js';
 import { checkHealth, checkDomain, checkCertificate, checkDns, readMeta, readCrawlFiles, checkProvider, hostOf, daysUntil } from './sitecheck.js';
 import { nextRecurringDue, overBudget } from './money-core.js';
 /** @import { AutomationRule, CrawlCheck, DataStore, Project, Provider, Site, SiteDns, SiteLogEntry, ToolsData, ProviderStatus } from '../types/data' */
+/** @import { IconName } from './ui.js' */
 
 // [key, title, description, has a "days before" setting]
 export const RULES = [
@@ -26,6 +27,26 @@ export const ruleOf = (/** @type {DataStore} */ store, /** @type {string} */ key
 
 // What each source is called on a task's "Auto" flag.
 export const AUTO_SOURCES = { domain: 'the domain check', ssl: 'the SSL check', health: 'the website health check', email: 'the DNS check', crawl: 'the crawl files check', recurring: 'a recurring bill', pools: 'Liquidity Pools', lending: 'Aave lending', telegram: 'a Telegram message', cron: 'a Cron flow' };
+
+// Where a rule's task leads back to: the page that shows what the check found, with the icon and name of that page.
+// Telegram and Cron tasks have their own links on the task.
+/** @param {{ auto?: string, projectId?: string | null }} task @returns {{ href: string, icon: IconName, label: string } | null} */
+export function autoSourceLink({ auto, projectId }) {
+  const project = projectId ? `&project=${encodeURIComponent(projectId)}` : '';
+  /** @type {Record<string, [string, IconName, string]>} */
+  const links = {
+    health: [`#/tools?tab=health${project}`, 'wrench', 'Tools → Website health'],
+    ssl: ['#/tools?tab=ssl', 'wrench', 'Tools → SSL and domains'],
+    domain: ['#/tools?tab=ssl', 'wrench', 'Tools → SSL and domains'],
+    email: ['#/tools?tab=dns', 'wrench', 'Tools → DNS and email'],
+    crawl: [`#/tools?tab=crawl${project}`, 'wrench', 'Tools → Crawl files'],
+    recurring: ['#/money', 'wallet', 'Money'],
+    pools: ['#/positions?tab=positions&filter=out', 'droplet', 'Liquidity Pools'],
+    lending: ['#/positions?tab=lending', 'droplet', 'Aave lending'],
+  };
+  const link = auto ? links[auto] : null;
+  return link ? { href: link[0], icon: link[1], label: link[2] } : null;
+}
 
 // `every`: minutes between automatic checks. `providers`: the status pages followed in Provider status, and `status` their last answer.
 /** @type {ToolsData} */
