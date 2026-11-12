@@ -1,13 +1,17 @@
+// @ts-check
 // Projects without the DOM: a project's shape, and finding or creating one by name. Tasks, the palette, Telegram (in
 // the runners too) create a project from a #tag through createProject.
+/** @import { Project, DataStore } from '../types/data' */
 import { uid, now } from './ui.js';
 
 const COLLECTION = 'projects';
 export const PALETTE = ['#2f6f4e', '#3b6ea8', '#a3432b', '#8a5a9e', '#b08416', '#2e8a8a'];
+/** @param {string} a @param {string} b */
 const sameName = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 // Shared by the todos module, so a #tag can create a project on the fly.
 // Every project has the same shape; fields are optional and default to empty.
+/** @param {number} existingCount @param {Partial<Project>} [fields] @returns {Project} */
 export function makeProject(existingCount, fields = {}) {
   return {
     id: uid(),
@@ -35,6 +39,7 @@ export function makeProject(existingCount, fields = {}) {
 
 // Creates a project unless one with the same name exists. Returns { project, created }.
 // The caller sets any view state it needs, then calls store.refresh().
+/** @param {DataStore} store @param {string} name @param {Partial<Project>} [fields] */
 export function createProject(store, name, fields = {}) {
   const { projects } = store.get(COLLECTION);
   const existing = projects.find((p) => sameName(p.name, name));
