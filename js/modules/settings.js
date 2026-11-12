@@ -382,8 +382,8 @@ function exchangeCard(store) {
         : results.some((r) => r.status === 'error')
           ? h('span', { class: 'pill tone-high' }, 'Failed')
           : h('span', { class: 'pill tone-plain' }, 'Not checked');
-  // providerId() is always one of them, and the last source is one too.
-  const used = /** @type {typeof PROVIDERS[number]} */ (PROVIDERS.find((p) => p.id === (lastSource.id ?? first)));
+  // The saved last source may name a provider since removed; providerId() is always one of them.
+  const used = /** @type {typeof PROVIDERS[number]} */ (PROVIDERS.find((p) => p.id === lastSource.id) ?? PROVIDERS.find((p) => p.id === first));
 
   return h('section', { class: 'card panel' },
     h('header', { class: 'panel-head' },
