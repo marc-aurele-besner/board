@@ -48,7 +48,7 @@ js/pool-insights.js   the Liquidity Pools AI insights: in and out of range posit
 js/multicall.js       Multicall3: many read-only calls in one request
 js/balances.js        native and token balances of the DeFi wallets (DeFi → Wallets)
 js/aave.js            Aave v3 supply, debt and health factor of the DeFi wallets (DeFi → Lending / Borrowing)
-js/resend.js          the Inbox's Resend reads: email lists per project key, and one email's body
+js/resend.js          the Inbox's Resend reads: email lists per project key (runners), and one email's body (asked of the runners)
 js/google.js          every Google sign-in, kept in google.json; the sign-in popup and account pictures
 js/google-core.js     Google tokens without the DOM: live access tokens, googleFetch; only the runners renew a token
 js/gmail.js           the Inbox's Gmail reads: one sign-in per account, its email list, and one email's body
@@ -74,13 +74,14 @@ package.json          scripts only (start, serve, relays); no dependencies
 tools/start.js        one command for the board: starts serve.js, relays.js, terminal.js and worker.js together
 tools/log.js          terminal lines prefixed with each runner's name
 tools/serve.js        local static server with no-cache headers; no dependencies
-tools/relays.js       local relays for Bing's and Resend's APIs (Inbox), which send no CORS header
+tools/relays.js       local relay for Bing's API, which sends no CORS header
 tools/terminal.js     the Dev section's runner: terminal sessions that outlive the page (output and the list of open terminals kept on disk), typed keys, read-only file reads, git for Source control, listing worktrees and removing one (a done task's, or any from Dev's Worktrees panel), saving images for claude; localhost only
 tools/worker.js       the runners: one worker that runs the background jobs on a schedule and writes into the data folder; localhost API on 8420
 tools/worker/store.js the store for Node (get, update, save over node:fs), merged with what the tabs write through js/merge.js
 tools/worker/schedule.js  intervals, no overlap, timeouts, backoff, and the runners.json heartbeat
 tools/worker/http.js  the worker's localhost API: status, Run now, data folder
 tools/jobs/*.js       one file per job: { id, timeout, delay, setup(store), run(ctx) }; listed in tools/jobs/index.js
+tools/jobs/gmail.js, resend.js  read new mail into inbox.json; resend.js also answers GET /resend/email/<id> and POST /resend/check
 tools/jobs/google.js  renews Google access tokens; a tab that finds one expired asks it through POST /run/google
 tools/check-imports.js  loads every worker module under plain Node, to catch a missing import or a DOM call at load time
 tools/check-merge.js  the worker and a tab change two fields of one file; both must survive

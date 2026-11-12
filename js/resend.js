@@ -1,8 +1,10 @@
 // Emails sent and received through Resend, one API key per project. Read-only.
-// Resend sends no CORS header, so requests go through tools/relays.js running on this machine.
+// Resend sends no CORS header, so a web page cannot read its answers: the runners (tools/jobs/resend.js) read the
+// lists into inbox.json, and the board asks them for one email's body or a key check.
 import { hostOf } from './sitecheck.js';
+import { workerCall } from './runners.js';
 
-export const RESEND_RELAY = 'http://127.0.0.1:8418';
+const API = 'https://api.resend.com';
 const PAGE = 100;
 // The first read of a key goes back this many pages per direction; later reads stop at the newest email already saved.
 const FIRST_PAGES = 5;
@@ -14,7 +16,7 @@ const GAP_MS = 550;
 let queue = Promise.resolve();
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export const resendSettings = (store) => store.get('settings').resend ?? { relay: '', keys: {} };
+export const resendSettings = (store) => store.get('settings').resend ?? { keys: {} };
 // Projects that have a key, in project order.
 export const keyedProjects = (store) => {
   const { keys = {} } = resendSettings(store);
@@ -28,16 +30,15 @@ function explain(status, body) {
   return body?.message ? `Resend: ${body.message}` : `Resend error ${status}`;
 }
 
-// One GET through the relay, queued behind every other Resend request.
-function get(key, path, relay) {
+// One GET to Resend, queued behind every other Resend request. Runs in the runners only.
+function get(key, path) {
   const run = async () => {
-    const base = (relay || RESEND_RELAY).replace(/\/+$/, '');
     for (let attempt = 0; ; attempt++) {
       let res;
       try {
-        res = await fetch(base + path, { headers: { Authorization: `Bearer ${key}` } });
+        res = await fetch(API + path, { headers: { Authorization: `Bearer ${key}`, 'user-agent': 'board-runners' } });
       } catch {
-        throw new Error(`Could not reach the Resend relay at ${base}. Start it with: bun start`);
+        throw new Error('Could not reach Resend. Check the connection.');
       }
       const body = await res.json().catch(() => null);
       if (res.ok) return body;
@@ -53,19 +54,23 @@ function get(key, path, relay) {
   return result;
 }
 
-export async function checkResend(key, relay) {
-  const { data = [] } = await get(key, '/emails?limit=1', relay);
+// Runners side of Settings' key check.
+export async function checkResendKey(key) {
+  const { data = [] } = await get(key, '/emails?limit=1');
   return data.length ? 'Connected. Emails can be read.' : 'Connected. No emails sent yet.';
 }
+
+// Settings → Resend: checks a key through the runners.
+export const checkResend = async (key) => (await workerCall('POST', '/resend/check', { key }, 30000)).text;
 
 const listPath = (dir) => (dir === 'sent' ? '/emails' : '/emails/receiving');
 
 // Newest first, until a page reaches an email already known, or the page limit.
-async function listNew(key, dir, relay, known) {
+async function listNew(key, dir, known) {
   const out = [];
   let after = '';
   for (let page = 0; page < (known.size ? 50 : FIRST_PAGES); page++) {
-    const { data = [], has_more: more } = await get(key, `${listPath(dir)}?limit=${PAGE}${after ? `&after=${after}` : ''}`, relay);
+    const { data = [], has_more: more } = await get(key, `${listPath(dir)}?limit=${PAGE}${after ? `&after=${after}` : ''}`);
     out.push(...data);
     if (!more || !data.length || data.some((e) => known.has(e.id))) break;
     after = data[data.length - 1].id;
@@ -100,9 +105,9 @@ const rowOf = (e, dir) => ({
   status: dir === 'sent' ? (e.scheduled_at && !e.last_event ? 'scheduled' : e.last_event ?? '') : '',
 });
 
-// Reads every key's new emails into inbox.json. Returns { added, errors: [{ projectId, text }] }.
+// Reads every key's new emails into inbox.json. Returns { added, errors: [{ projectIds, text }] }. Runners only.
 export async function syncInbox(store) {
-  const { keys = {}, relay = '' } = resendSettings(store);
+  const { keys = {} } = resendSettings(store);
   const projects = keyedProjects(store);
   const groups = new Map();
   for (const p of projects) groups.set(keys[p.id], [...(groups.get(keys[p.id]) ?? []), p]);
@@ -115,7 +120,7 @@ export async function syncInbox(store) {
     for (const dir of ['sent', 'received']) {
       const known = new Set(saved.filter((e) => e.dir === dir && ids.has(e.projectId)).map((e) => e.id));
       try {
-        const rows = (await listNew(key, dir, relay, known)).map((e) => rowOf(e, dir));
+        const rows = (await listNew(key, dir, known)).map((e) => rowOf(e, dir));
         // A key's first read brings in its history; only mail that arrives after it counts as unread.
         const unread = dir === 'received' && known.size > 0;
         fresh.push(...rows.map((r) => ({ ...r, projectId: ownerOf(group, r), unread })));
@@ -153,15 +158,21 @@ export async function syncInbox(store) {
   return { added, errors };
 }
 
-// The full email (html and text), read when it is opened. Not saved: bodies can be large.
-const bodies = new Map();
-export async function readEmail(store, row) {
-  if (bodies.has(row.id)) return bodies.get(row.id);
-  const { keys = {}, relay = '' } = resendSettings(store);
-  const key = keys[row.projectId];
+// The full email (html and text) as the runners read it, by the id of its row in inbox.json.
+export async function readEmailOf(store, id) {
+  const row = store.get('inbox').emails.find((e) => e.id === id && !e.source);
+  if (!row) throw new Error('This email is not in the Inbox any more.');
+  const key = resendSettings(store).keys?.[row.projectId];
   if (!key) throw new Error('This project has no Resend key any more.');
-  const e = await get(key, `${listPath(row.dir)}/${encodeURIComponent(row.id)}`, relay);
-  const body = { html: e.html ?? '', text: e.text ?? '', replyTo: addresses(e.reply_to), bcc: addresses(e.bcc) };
+  const e = await get(key, `${listPath(row.dir)}/${encodeURIComponent(row.id)}`);
+  return { html: e.html ?? '', text: e.text ?? '', replyTo: addresses(e.reply_to), bcc: addresses(e.bcc) };
+}
+
+// The full email, read when it is opened, through the runners. Not saved: bodies can be large.
+const bodies = new Map();
+export async function readEmail(_store, row) {
+  if (bodies.has(row.id)) return bodies.get(row.id);
+  const body = await workerCall('GET', `/resend/email/${encodeURIComponent(row.id)}`, null, 60000);
   bodies.set(row.id, body);
   return body;
 }

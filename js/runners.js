@@ -41,7 +41,8 @@ export function watchRunners(store, onChange) {
 
 export const readRunnersNow = (store) => read(store);
 
-async function call(method, path, body, timeoutMs = 10 * 60000) {
+// A request to the runners' API. Throws with their error, or with how to start them when they do not answer.
+export async function workerCall(method, path, body, timeoutMs = 10 * 60000) {
   let res;
   try {
     res = await fetch(`${WORKER_URL}${path}`, {
@@ -60,12 +61,12 @@ async function call(method, path, body, timeoutMs = 10 * 60000) {
 
 // Runs a job now and waits for it. Its results arrive through the data folder; the answer is { ok, error, … }.
 export async function runJob(id, params) {
-  const answer = await call('POST', `/run/${encodeURIComponent(id)}`, params ?? {});
+  const answer = await workerCall('POST', `/run/${encodeURIComponent(id)}`, params ?? {});
   if (!answer.ok) throw new Error(answer.error || `${id} failed.`);
   return answer;
 }
 
 // The worker's live status, including the data folder it uses. Null when it does not answer.
-export const workerStatus = () => call('GET', '/status', null, 3000).catch(() => null);
+export const workerStatus = () => workerCall('GET', '/status', null, 3000).catch(() => null);
 
-export const setWorkerFolder = (path) => call('POST', '/config', { dataFolder: path });
+export const setWorkerFolder = (path) => workerCall('POST', '/config', { dataFolder: path });

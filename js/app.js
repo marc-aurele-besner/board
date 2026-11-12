@@ -168,7 +168,7 @@ const runnersBadgeHidden = () => sample || !runnersKnown() || runnersOnline();
 function onRunners() {
   const badge = document.getElementById('runners-offline');
   if (badge) badge.hidden = runnersBadgeHidden();
-  if (currentModule().id === 'settings') store.refresh();
+  if (currentModule().readsRunners) store.refresh();
 }
 
 function updateStatus(status) {

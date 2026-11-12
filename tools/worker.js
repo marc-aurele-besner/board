@@ -57,10 +57,18 @@ function open() {
   scheduler.use(createNodeStore(dir, { log }));
 }
 
+// Routes a job adds, such as reading one Resend email's body: (body, rest, store).
+const jobRoutes = Object.fromEntries(jobs.flatMap((job) => Object.entries(job.routes ?? {})).map(([key, fn]) => [key, (body, rest) => {
+  const store = scheduler.store();
+  if (!store) throw new Error('The runners have no data folder. Set it in Settings → Runners.');
+  return fn(body, rest, store);
+}]));
+
 serve({
   port: PORT,
   log,
   routes: {
+    ...jobRoutes,
     'GET /status': () => ({ ...scheduler.status(), folder: { path: folder.path, from: folder.from, error: folder.error } }),
     'POST /run/*': (body, id) => scheduler.run(id, { params: body ?? {} }),
     'POST /config': (body) => {

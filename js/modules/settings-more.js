@@ -4,7 +4,7 @@ import { editText, pickChip } from '../inline.js';
 import { connect, isConnected, accountAvatar } from '../google.js';
 import { checkBot, findChat, pollTelegram, hasTelegram } from '../telegram.js';
 import { propertyName, checkBing, BING_RELAY } from '../webstats.js';
-import { checkResend, resendSettings, RESEND_RELAY } from '../resend.js';
+import { checkResend, resendSettings } from '../resend.js';
 import { connectGmail, disconnectGmail, isGmailConnected, gmailAccounts } from '../gmail.js';
 import { calendarAccounts, connectCalendar, disconnectCalendar, isCalendarConnected, syncCalendarList, removeCalendarAccount, setCalendar, setCalendarAccount } from '../gcal.js';
 import { KINDS, prefOf, setPref } from '../notifications.js';
@@ -337,14 +337,14 @@ const resendView = { editing: null, query: '' };
 // "re_AbCd…wxyz": enough to tell keys apart without showing them.
 const maskKey = (key) => (key.length > 12 ? `${key.slice(0, 7)}…${key.slice(-4)}` : 're_…');
 
-function resendRow(store, p, keys, relay, setKey) {
+function resendRow(store, p, keys, setKey) {
   const key = keys[p.id] ?? '';
   const msg = messages[`resend:${p.id}`];
   const editing = resendView.editing === p.id;
   const shared = key ? Object.entries(keys).filter(([id, k]) => k === key && id !== p.id).length : 0;
   const test = () => {
     say(store, `resend:${p.id}`, 'Testing…');
-    checkResend(key, relay).then((text) => say(store, `resend:${p.id}`, text)).catch((err) => say(store, `resend:${p.id}`, err.message, false));
+    checkResend(key).then((text) => say(store, `resend:${p.id}`, text)).catch((err) => say(store, `resend:${p.id}`, err.message, false));
   };
   const edit = (id) => {
     resendView.editing = id;
@@ -396,7 +396,8 @@ export function resendCard(store) {
   const cfg = resendSettings(store);
   const keys = cfg.keys ?? {};
   const save = (patch) => store.update('settings', (d) => {
-    d.resend = { relay: '', keys: {}, ...d.resend, ...patch };
+    const { relay: _relay, ...rest } = d.resend ?? {};
+    d.resend = { keys: {}, ...rest, ...patch };
   });
   const setKey = (id, key) => save({ keys: Object.fromEntries(Object.entries({ ...keys, [id]: key }).filter(([, v]) => v)) });
   // Projects with a key first, each group by name.
@@ -410,38 +411,24 @@ export function resendCard(store) {
     const shown = projects.filter((p) => !q || p.name.toLowerCase().includes(q));
     list.replaceChildren(...(shown.length
       ? [h('li', { class: 'resend-row resend-head', 'aria-hidden': 'true' }, h('span', null, 'Project'), h('span', null, 'API key'), h('span')),
-          ...shown.map((p) => resendRow(store, p, keys, cfg.relay, setKey))]
+          ...shown.map((p) => resendRow(store, p, keys, setKey))]
       : [h('li', { class: 'empty' }, all.length ? 'No project matches.' : 'No projects yet. Add one in Projects.')]));
   };
   paint();
 
   return h('div', { class: 'stack-lg' },
     h('section', { class: 'card panel' },
-      head('Resend', 'The Inbox lists the emails each project sends and receives through Resend. Keys are saved in settings.json and go only to Resend, through a relay on this machine.',
+      head('Resend', 'The Inbox lists the emails each project sends and receives through Resend. Keys are saved in settings.json and go only to Resend, from the runners on this machine.',
         badge(count ? `${count} of ${all.length} project${all.length === 1 ? '' : 's'}` : 'Not set', count ? 'doing' : 'plain')),
       h('div', { class: 'cred-body' },
         h('div', { class: 'svc-section' },
           h('h3', null, 'Setup'),
           steps([
             ['In each Resend account, open ', link('https://resend.com/api-keys', 'API Keys'), ' and create a key with Full access. A sending-only key cannot read emails.'],
-            ['In the board folder, run ', h('code', null, 'bun start'), ', which starts the board with its relays, and keep it open while you use the Inbox.'],
+            ['In the board folder, run ', h('code', null, 'bun start'), ', which starts the runners. They read new emails every few minutes, with or without a board tab open.'],
             'Add each key to its project below, then test it.',
           ])),
-        h('form', {
-          class: 'svc-section',
-          onsubmit: (e) => {
-            e.preventDefault();
-            save({ relay: String(new FormData(e.currentTarget).get('relay') ?? '').trim() });
-            say(store, 'resend', 'Relay address saved.');
-          },
-        },
-          h('h3', null, 'Relay'),
-          h('p', { class: 'muted small' }, `Leave empty to use ${RESEND_RELAY}. Change it only if you started the relay on another port.`),
-          h('div', { class: 'row resend-relay' },
-            h('input', { name: 'relay', type: 'url', value: cfg.relay ?? '', placeholder: RESEND_RELAY, autocomplete: 'off', spellcheck: false, 'aria-label': 'Resend relay address' }),
-            h('button', { type: 'submit' }, 'Save')),
-          result('resend'),
-          notice({ tone: 'info', text: 'Resend’s API does not let a web page read its answers, so a small relay on this machine fetches them. It only reads emails, only forwards to Resend, and only answers pages served from this machine.' })))),
+        notice({ tone: 'info', text: 'Resend’s API does not let a web page read its answers, so the runners read them: the lists into inbox.json, and an email’s body when you open it.' }))),
     h('section', { class: 'card panel' },
       h('header', { class: 'panel-head' },
         h('div', null,
