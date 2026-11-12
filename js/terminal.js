@@ -124,9 +124,14 @@ export const stopCommand = (base, session) => call(base, '/stop', post({ session
 export const clearSession = (base, session) => call(base, '/clear', post({ session }));
 export const closeSession = (base, session) => call(base, '/close', post({ session }));
 
-// Stops the session and removes the worktree `name` that claude made in the repo at `cwd`: { removed } or { missing }.
-// Fails when git refuses (changes or untracked files in it) or claude still runs there.
-export const removeWorktree = async (base, { cwd, name, session }) => (await call(base, '/worktree/remove', post({ cwd, name, session }))).json();
+// Stops the session and removes the worktree `name` that claude made in the repo at `cwd`, or the worktree at `path`
+// (any but the main checkout): { removed } or { missing }. Fails when git refuses (changes or untracked files in it)
+// or claude still runs there.
+export const removeWorktree = async (base, { cwd, name, path, session }) => (await call(base, '/worktree/remove', post({ cwd, name, path, session }))).json();
+
+// The worktrees of the repository holding `path`, but its main checkout: { repo: false }, or { root, worktrees:
+// [{ path, name, branch, head, claude, locked, prunable, pid, running, commands, changes }] }.
+export const listWorktrees = async (base, path) => (await call(base, `/worktrees?path=${encodeURIComponent(path)}`)).json();
 
 // What the claude sessions in worktrees [{ name, cwd }] used, from Claude Code's transcripts: { [name]: { sessions,
 // models: { [id]: { provider, input, output, thinking, cacheRead, cacheWrite, cost } }, cost, duration, apiDuration,
