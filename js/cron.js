@@ -114,7 +114,7 @@ export const SOURCES = [
   ['text', 'Fixed text', 'align-left'],
 ];
 
-export const makeSource = (source = 'open', fields = {}) => ({ id: uid(), source, label: '', projectId: '', url: '', text: '', count: 5, flowId: '', ...fields });
+export const makeSource = (source = 'open', fields = {}) => ({ id: uid(), source, label: '', projectId: '', url: '', text: '', count: 5, follow: 3, flowId: '', ...fields });
 
 // A data step's sources. Steps saved before a step could hold several kept one source in the step itself.
 export function sourcesOf(step) {
@@ -151,6 +151,51 @@ export function sourceLabel(store, src) {
 
 // How much of a page is passed on, so one long page does not crowd out the rest of the prompt.
 const PAGE_CHARS = 12000;
+// A page read because the first one links to it gets less room, so several fit.
+const LINKED_CHARS = 4000;
+export const MAX_FOLLOW = 10;
+
+const cutPage = (text, max) => (text.length > max ? `${text.slice(0, max)}\n\n[The rest of the page was cut.]` : text);
+// Images the reader still leaves in, as ![alt](src) or a link around one, only take room.
+const dropImages = (text) => text.replace(/\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)/g, '').replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/\n{3,}/g, '\n\n');
+
+// The pages of the same site a page links to, best first: a page under this one (a post under /blog) before one
+// elsewhere, a link with a title or a summary before a one-word menu entry, and an article before a section.
+// Files, sign-in and legal pages are left out.
+export function pageLinks(markdown, pageUrl) {
+  let base;
+  try { base = new URL(pageUrl); } catch { return []; }
+  const own = base.pathname.replace(/\/+$/, '');
+  const skip = /\.(png|jpe?g|gif|svg|webp|ico|pdf|zip|xml|json|css|js|mp4|mp3)$|\/(login|log-in|signin|sign-in|signup|sign-up|register|account|cart|checkout|privacy|terms|cookies?|legal)(\/|$)|\/(cdn-cgi|wp-admin|wp-json)\//i;
+  const host = (u) => u.hostname.replace(/^www\./, '');
+  const byKey = new Map();
+  for (const [, text, href] of markdown.matchAll(/\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
+    let u;
+    try { u = new URL(href, base); } catch { continue; }
+    if (!/^https?:$/.test(u.protocol) || host(u) !== host(base)) continue;
+    const path = u.pathname.replace(/\/+$/, '');
+    if (path === own || skip.test(path)) continue;
+    const label = text.trim();
+    // Menus name a page in a word or two; content links carry a title or a summary.
+    const words = label.split(/\s+/).filter(Boolean).length;
+    const under = own && path.startsWith(`${own}/`);
+    const score = (under ? 4 : 0) + (words >= 4 ? 2 : words >= 2 ? 0.5 : 0) + Math.min(path.split('/').filter(Boolean).length, 3) * 0.5;
+    // A page linked from a menu and from the content counts as a content link.
+    const key = u.origin + path;
+    const known = byKey.get(key);
+    if (!known) byKey.set(key, { url: u.origin + u.pathname + u.search, text: label, score, at: byKey.size });
+    else if (score > known.score) Object.assign(known, { text: label, score });
+  }
+  const ranked = [...byKey.values()].sort((a, b) => b.score - a.score || a.at - b.at);
+  // Taken in turns across the site's sections (a guide, a combo, an emoji…), so a home page's few reads cover
+  // more than its first list of cards. Under one section, as a blog's posts are, the order stays as ranked.
+  const section = (l) => new URL(l.url).pathname.slice(own.length).split('/').filter(Boolean)[0] ?? '';
+  const groups = new Map();
+  for (const l of ranked) groups.set(section(l), [...(groups.get(section(l)) ?? []), l]);
+  const spread = [];
+  for (let i = 0; spread.length < ranked.length; i++) for (const g of groups.values()) if (g[i]) spread.push(g[i]);
+  return spread;
+}
 
 export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -811,9 +856,21 @@ function moneyTotals(store, type, month) {
 async function gather(store, step, flow) {
   if (step.source === 'page') {
     const url = pageUrl(store, step);
-    const { title, text } = await readPageText(url);
-    const cut = text.length > PAGE_CHARS ? `${text.slice(0, PAGE_CHARS)}\n\n[The rest of the page was cut.]` : text;
-    return cut ? `Page: ${title || url} (${url})\n\n${cut}` : '';
+    const { title, text: raw } = await readPageText(url);
+    const text = dropImages(raw);
+    const main = text ? `Page: ${title || url} (${url})\n\n${cutPage(text, PAGE_CHARS)}` : '';
+    const follow = Math.min(MAX_FOLLOW, Math.max(0, Number(step.follow) || 0));
+    if (!follow || !text) return main;
+    // A page that fails to read is skipped, so one dead link does not fail the step.
+    const linked = [];
+    for (const link of pageLinks(text, url).slice(0, follow)) {
+      try {
+        const page = await readPageText(link.url);
+        const body = dropImages(page.text);
+        if (body) linked.push(`### Linked page: ${page.title || link.text || link.url} (${link.url})\n\n${cutPage(body, LINKED_CHARS)}`);
+      } catch { /* skipped */ }
+    }
+    return linked.length ? `${main}\n\n## Pages it links to\n\n${linked.join('\n\n')}` : main;
   }
   if (step.source === 'history') {
     const count = Math.min(20, Math.max(1, Number(step.count) || 5));

@@ -1840,6 +1840,8 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .cron-template.row { flex-direction: row; align-items: center; gap: 12px; }
 .cron-template .grow { display: flex; flex-direction: column; }
 .cron-fields { align-items: flex-end; }
+/* A label is muted, and its fields would inherit that, so typed values read like placeholders. */
+.cron-layout label :is(input, select, textarea), .cron-layout label .chip-pick.field-pick { color: var(--text); }
 .cron-source { padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .cron-source .icon-btn { flex: none; }
 .cron-fields label { flex: 1 1 160px; }

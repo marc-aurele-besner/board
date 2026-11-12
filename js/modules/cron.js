@@ -9,7 +9,7 @@ import { toast } from '../toast.js';
 import {
   COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, TEMPLATES, devRunOptions, devRunValue, devCommandPreview, daysOf,
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
-  makeFlow, makeStep, makeSource, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
+  makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
   testStep, testsOf, isTesting, clearTests, varsTree, pathTo, remapStepRefs, parseData,
 } from '../cron.js';
 import { modelForTask } from './settings.js';
@@ -536,7 +536,7 @@ function triggerForm(store, flow) {
 }
 
 const SOURCE_ABOUT = {
-  page: 'Read through the r.jina.ai page reader when the flow runs, as text with its headings and links. Long pages are cut at about 12,000 characters.',
+  page: 'Read through the r.jina.ai page reader when the flow runs, as text with its headings and links, without images. Long pages are cut at about 12,000 characters, linked pages at about 4,000 each.',
   history: 'The final output of this flow’s last successful runs (not test runs), so the AI can avoid repeating itself.',
   flow: 'The final output of that flow’s last successful run (not a test run).',
   text: null,
@@ -578,6 +578,11 @@ function sourceCard(store, flow, own, { setSource, remove }) {
       ? field(src.projectId ? 'Path or link (optional)' : 'Link',
           h('input', { value: src.url ?? '', autocomplete: 'off', placeholder: src.projectId ? '/blog or https://docs.example.com' : 'example.com/blog', onchange: (e) => set({ url: e.target.value.trim() }) }),
           src.projectId ? 'Empty reads the project’s website. A path such as /blog reads that page of it; a full link reads any page.' : null)
+      : null,
+    src.source === 'page'
+      ? field('Linked pages to read too',
+          h('input', { type: 'number', min: 0, max: MAX_FOLLOW, value: String(src.follow ?? 0), onchange: (e) => set({ follow: Math.min(MAX_FOLLOW, Math.max(0, Math.round(Number(e.target.value) || 0))) }) }),
+          'Also reads the best pages of the same site it links to, such as a blog’s latest posts or a site’s main sections, so the next step gets their content and not only a list of links. 0 reads this page alone.')
       : null,
     src.source === 'text' ? field('Text', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, src.text ?? '')) : null,
     field('Label (optional)',
@@ -663,7 +668,12 @@ function stepForm(store, flow, step) {
     const devNames = varNames(flow, flow.steps.indexOf(step), [['task', 'The task made above: its title and description']]);
     return h('div', { class: 'stack' },
       h('div', { class: 'row cron-fields' },
-        field('Run', select(value, options, run)),
+        field('Run', pickChip({
+          value,
+          options: options.map(([v, label]) => ({ value: v, label, plainIcon: () => icon(v === 'command' ? 'terminal' : v === 'custom' ? 'code' : v.startsWith('preset:') ? 'sparkle' : 'play') })),
+          className: 'field-pick',
+          onPick: (v) => v && run(v),
+        })),
         field('Folder', stepProjectPick(store, flow, step.projectId, (projectId) => set({ projectId }), {
           none: 'The task’s project, else this board',
           list: folders, name: (p) => (p.localPath ? p.name : `${p.name} (no local folder)`),
