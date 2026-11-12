@@ -1,14 +1,14 @@
 // Cron flows: a schedule that starts a chain of steps (gather data → AI → task or notification).
-// Each step gets the previous step's output as {{input}}. Flows run only while the board is open.
+// Each step gets the previous step's output as {{input}}. The runners (tools/jobs/cron.js) run due flows, whether or not the board is open.
 import { uid, now, todayISO, statusOf } from './ui.js';
 import { ask } from './ai.js';
 import { makeTask } from './capture.js';
-import { notify } from './notifications.js';
+import { notify } from './notify-core.js';
 import { calendarEvents, calendarAccounts, eventDate } from './gcal.js';
 import { sitesOf, siteData } from './automations.js';
 import { readPageText } from './sitecheck.js';
-import { openPositions } from './modules/positions.js';
-import { startDevSession, devPresets, devCommandOf, runnerOf } from './modules/dev.js';
+import { openPositions } from './defi/positions-read.js';
+import { devPresets, devCommandOf, runnerOf, startRunnerSession } from './dev-core.js';
 import { sessionStatus, sessionOutcome } from './terminal.js';
 import { findGithubLinks, plainOutput, addTaskLinks, prsOf } from './task-links.js';
 import { buildProfile, profileOf, hasProfileSources } from './profile.js';
@@ -1182,7 +1182,7 @@ async function runDev(store, flow, step, input, vars, ctx) {
     ctx.data = { ...(claude ? { devCommand: devCommand || null, prompt } : { command }), folder: where, ...(waits ? OUTCOME_SHAPE : {}) };
     return claude ? prompt : command;
   }
-  const { id, n, worktree } = await startDevSession({ store, claude, prompt, command, devCommand, projectId, taskIds: task ? [task.id] : [], title: task?.text || flow.name });
+  const { id, n, worktree } = await devStarter({ store, claude, prompt, command, devCommand, projectId, taskIds: task ? [task.id] : [], title: task?.text || flow.name });
   if (task) {
     store.update('todos', (d) => {
       const t = d.items.find((x) => x.id === task.id);
@@ -1509,13 +1509,15 @@ export async function runFlow(store, flowId, { manual = false, dry = false } = {
   return run;
 }
 
-// A run marked running that no page has touched for a while was cut short: the board was closed or reloaded.
+// How a Dev step starts its terminal. The runners start it on the command runner and add it to its list of open
+// terminals; the board's Cron page (a step tested in a terminal) opens it in Dev at once (modules/dev.js).
+let devStarter = startRunnerSession;
+export const useDevStarter = (fn) => {
+  devStarter = fn;
+};
+
+// A run marked running that nothing has touched for a while was cut short: the runners stopped, or the tab closed.
 const STALE_MS = 3 * MINUTE;
 export const runState = (r) => (r.status === 'running' && !running.has(r.flowId) && Date.now() - Date.parse(r.beat || r.at) > STALE_MS ? 'lost' : r.status);
 
-export async function runDueFlows(store) {
-  const at = new Date();
-  for (const f of store.get(COLLECTION).flows) {
-    if (isDue(f, at)) await runFlow(store, f.id);
-  }
-}
+// Due flows are started by the runners only (tools/jobs/cron.js), so a due flow runs once, however many tabs are open.

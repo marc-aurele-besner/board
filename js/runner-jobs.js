@@ -14,6 +14,7 @@ export const JOBS = [
   { id: 'fx', label: 'Exchange rates', every: 1440, description: 'Reads the USD to CAD rate of every day Money needs.' },
   { id: 'dev-usage', label: 'Dev usage', every: 1, description: 'Reads what each task’s claude session used from Claude Code’s transcripts.' },
   { id: 'worktrees', label: 'Done-task worktrees', every: 5, description: 'Removes the worktree a Dev session made once its tasks are done. Also runs as soon as a task changes.' },
+  { id: 'cron', label: 'Cron flows', every: 1, description: 'Starts the Cron flows that are due. A flow missed while the runners were stopped runs once.' },
 ];
 
 export const WORKER_URL = 'http://127.0.0.1:8420';
