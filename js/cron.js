@@ -1552,7 +1552,8 @@ async function devOutcome(store, { session, path, prompt, task, json }) {
   const known = new Set(findGithubLinks(prompt).map((l) => l.url.toLowerCase()));
   const links = findGithubLinks(text).filter((l) => !known.has(l.url.toLowerCase()));
   // A PR Dev already added to the task (its link watcher reads the terminal while Dev shows it) counts too.
-  const saved = task ? prsOf(store.get('todos').items.find((t) => t.id === task.id) ?? {}) : [];
+  // A task removed since has no PRs: prsOf() reads only its prs.
+  const saved = task ? prsOf(store.get('todos').items.find((t) => t.id === task.id) ?? /** @type {Task} */ ({})) : [];
   const fresh = links.filter((l) => l.kind === 'pr');
   const prs = [...saved.filter((/** @type {TaskLink} */ p) => !fresh.some((l) => l.url.toLowerCase() === p.url.toLowerCase())), ...fresh];
   /** @param {CronPr} pr */
@@ -1572,7 +1573,7 @@ async function devOutcome(store, { session, path, prompt, task, json }) {
       uncommitted: raw.uncommitted ?? 0,
       pushed: Boolean(raw.upstream) && !raw.ahead,
       // The PR opened last is the one the work ended on.
-      pr: prs.length ? pick(prs.at(-1)) : null,
+      pr: prs.length ? pick(/** @type {CronPr} */ (prs.at(-1))) : null,
       prs: prs.map(pick),
       issues: links.filter((l) => l.kind === 'issue').map(pick),
       output: text.slice(-OUTPUT_KEPT),
