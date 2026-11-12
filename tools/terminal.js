@@ -1,6 +1,6 @@
 // Local command runner for the Dev section: `bun run terminal` (or `node tools/terminal.js`), or with the board
 // through `bun start`. It runs a command in the user's shell and streams its output back as it comes, and lists
-// folders and reads files for the Dev file explorer (read only: it writes no file of yours).
+// folders and reads files for the Dev file explorer (read only), and runs git for Dev's Source Control.
 // The runner owns each terminal session: a command keeps running when the page reloads or closes, and the session's
 // output is kept (in memory and in TERMINAL_STATE, a folder in the system's temp folder by default) so the page
 // shows it again when it comes back, even after the runner restarted.
@@ -8,7 +8,7 @@
 // It can run anything on this machine, so it listens on 127.0.0.1 only and answers only pages served from this
 // machine: the Origin check keeps other websites out, the Host check keeps out DNS rebinding.
 import { createServer } from 'node:http';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { appendFile, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
@@ -341,6 +341,206 @@ async function input(req, res, cors) {
   res.writeHead(204, cors).end();
 }
 
+// Source control for Dev: git runs as a program (no shell), in the workspace's repository. Network commands may not
+// ask for a password (there is nobody to type it): they fail and say so instead.
+const GIT_MAX = 4 * 1024 * 1024;
+const COMMIT = /^[0-9a-f]{4,40}$/i;
+const LOG_SHOWN = 30;
+const FILES_SHOWN = 2000;
+
+function git(cwd, args, { timeout = 15000, ok = [0] } = {}) {
+  return new Promise((done, fail) => {
+    execFile('git', ['-c', 'core.quotePath=false', '-c', 'color.ui=false', ...args], {
+      cwd,
+      timeout,
+      maxBuffer: GIT_MAX,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', GIT_PAGER: 'cat', GCM_INTERACTIVE: 'never' },
+    }, (err, stdout, stderr) => {
+      const code = err ? (typeof err.code === 'number' ? err.code : -1) : 0;
+      if (ok.includes(code)) return done(stdout);
+      if (err?.code === 'ENOENT') return fail(new Error('git is not installed on this machine.'));
+      if (err?.killed) return fail(new Error(`git ${args[0]} took too long and was stopped.`));
+      if (err?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return fail(new Error('The answer is too large to show.'));
+      fail(new Error((stderr || stdout || err.message).trim()));
+    });
+  });
+}
+
+// The repository holding a folder, or null.
+async function repoOf(path) {
+  const dir = await folderOf(path);
+  const top = await git(dir, ['rev-parse', '--show-toplevel']).catch(() => '');
+  return top.trim() || null;
+}
+
+// `git status --porcelain=v2 -z`: the branch lines, then one record per file. A rename carries its old path in
+// the record after it.
+function parseStatus(text) {
+  const out = { branch: '', oid: '', upstream: '', ahead: 0, behind: 0, files: [] };
+  const records = text.split('\0');
+  for (let i = 0; i < records.length; i++) {
+    const r = records[i];
+    if (!r) continue;
+    if (r.startsWith('# ')) {
+      const [key, ...rest] = r.slice(2).split(' ');
+      if (key === 'branch.head') out.branch = rest.join(' ') === '(detached)' ? '' : rest.join(' ');
+      else if (key === 'branch.oid') out.oid = rest[0] === '(initial)' ? '' : rest[0];
+      else if (key === 'branch.upstream') out.upstream = rest.join(' ');
+      else if (key === 'branch.ab') {
+        out.ahead = Math.abs(Number(rest[0]) || 0);
+        out.behind = Math.abs(Number(rest[1]) || 0);
+      }
+      continue;
+    }
+    const kind = r[0];
+    const split = (n) => {
+      const parts = r.split(' ');
+      return { xy: parts[1], path: parts.slice(n).join(' ') };
+    };
+    let file;
+    if (kind === '1') file = split(8);
+    else if (kind === '2') file = { ...split(9), orig: records[++i] };
+    else if (kind === 'u') file = { ...split(10), conflict: true };
+    else if (kind === '?') file = { xy: '?? ', path: r.slice(2), untracked: true };
+    else continue;
+    const [index, work] = file.untracked ? ['?', '?'] : [file.xy[0], file.xy[1]];
+    out.files.push({ path: file.path, ...(file.orig ? { orig: file.orig } : {}), index, work, ...(file.conflict ? { conflict: true } : {}), ...(file.untracked ? { untracked: true } : {}) });
+  }
+  return out;
+}
+
+async function gitStatus(path) {
+  const root = await repoOf(path);
+  if (!root) return { repo: false, path: await folderOf(path) };
+  const [status, log, branches, remotes] = await Promise.all([
+    git(root, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all']),
+    git(root, ['log', `-n${LOG_SHOWN}`, '--format=%H%x1f%h%x1f%an%x1f%at%x1f%s%x1f%D%x1e'], { ok: [0, 128] }).catch(() => ''),
+    git(root, ['for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads']).catch(() => ''),
+    git(root, ['remote']).catch(() => ''),
+  ]);
+  const parsed = parseStatus(status);
+  return {
+    repo: true,
+    root,
+    ...parsed,
+    files: parsed.files.slice(0, FILES_SHOWN),
+    more: Math.max(0, parsed.files.length - FILES_SHOWN),
+    branches: branches.split('\n').filter(Boolean),
+    remotes: remotes.split('\n').filter(Boolean),
+    log: log.split('\x1e').map((l) => l.replace(/^\n/, '')).filter(Boolean).map((l) => {
+      const [hash, short, author, at, subject, refs] = l.split('\x1f');
+      return { hash, short, author, at: Number(at) * 1000, subject, refs: refs ? refs.split(', ').filter(Boolean) : [] };
+    }),
+  };
+}
+
+// A file's changes (staged, or in the working folder), or a commit's.
+async function gitDiff(params) {
+  const root = await repoOf(params.get('path') ?? '');
+  if (!root) throw new Error('Not a git repository.');
+  const commit = params.get('commit') ?? '';
+  if (commit) {
+    if (!COMMIT.test(commit)) throw new Error('Not a commit.');
+    const [meta, diff] = await Promise.all([
+      git(root, ['show', '-s', '--format=%H%x1f%an%x1f%ae%x1f%at%x1f%B', commit]),
+      git(root, ['show', '--format=', '--patch', '-M', '--no-ext-diff', commit]),
+    ]);
+    const [hash, author, email, at, body] = meta.split('\x1f');
+    return { commit: { hash, author, email, at: Number(at) * 1000, message: body.trim() }, diff };
+  }
+  const file = params.get('file') ?? '';
+  if (!file) throw new Error('No file.');
+  const orig = params.get('orig') ?? '';
+  const paths = ['--', ...(orig ? [orig] : []), file];
+  if (params.get('untracked')) return { diff: await git(root, ['diff', '--no-index', '--no-ext-diff', '--', '/dev/null', file], { ok: [0, 1] }) };
+  const staged = params.get('staged') ? ['--cached'] : [];
+  return { diff: await git(root, ['diff', ...staged, '-M', '--no-ext-diff', ...paths]) };
+}
+
+const validFiles = (files) => Array.isArray(files) && files.length && files.every((f) => typeof f === 'string' && f && !f.includes('\0'));
+
+// Changes to the repository: the page names the action and what it applies to.
+async function gitAction(body) {
+  const path = String(body.path ?? '');
+  const action = String(body.action ?? '');
+  if (action === 'init') {
+    const dir = await folderOf(path);
+    await git(dir, ['init']);
+    return { ok: true };
+  }
+  const root = await repoOf(path);
+  if (!root) throw new Error('Not a git repository.');
+  const files = body.files;
+  const net = { timeout: 120000 };
+  switch (action) {
+    case 'stage':
+      if (!validFiles(files)) throw new Error('No files.');
+      await git(root, ['add', '-A', '--', ...files]);
+      break;
+    case 'stage-all':
+      await git(root, ['add', '-A']);
+      break;
+    case 'unstage': {
+      if (!validFiles(files)) throw new Error('No files.');
+      // Before the first commit there is no HEAD to restore from.
+      const head = await git(root, ['rev-parse', '--verify', '-q', 'HEAD'], { ok: [0, 1] });
+      await git(root, head.trim() ? ['restore', '--staged', '--', ...files] : ['rm', '--cached', '-r', '-q', '--', ...files]);
+      break;
+    }
+    case 'unstage-all': {
+      const head = await git(root, ['rev-parse', '--verify', '-q', 'HEAD'], { ok: [0, 1] });
+      await git(root, head.trim() ? ['reset', '-q'] : ['rm', '--cached', '-r', '-q', '.']);
+      break;
+    }
+    case 'discard': {
+      // Tracked files go back to what is staged (or committed); new files are deleted.
+      if (!validFiles(files)) throw new Error('No files.');
+      const untracked = Array.isArray(body.untracked) ? body.untracked.filter((f) => files.includes(f)) : [];
+      const tracked = files.filter((f) => !untracked.includes(f));
+      if (tracked.length) await git(root, ['restore', '--', ...tracked]);
+      if (untracked.length) await git(root, ['clean', '-f', '-q', '--', ...untracked]);
+      break;
+    }
+    case 'commit': {
+      const message = String(body.message ?? '').trim();
+      if (!message) throw new Error('Write a commit message first.');
+      if (body.all) await git(root, ['add', '-A']);
+      await git(root, ['commit', '-q', '-m', message], { timeout: 60000 });
+      break;
+    }
+    case 'fetch':
+      await git(root, ['fetch', '--all', '--prune'], net);
+      break;
+    case 'pull':
+      await git(root, ['pull', '--ff-only'], net);
+      break;
+    case 'push': {
+      // A branch with no upstream yet is pushed to the first remote and tracks it, as Publish Branch does.
+      const upstream = await git(root, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { ok: [0, 128] });
+      if (upstream.trim()) await git(root, ['push'], net);
+      else {
+        const remote = (await git(root, ['remote'])).split('\n').filter(Boolean);
+        if (!remote.length) throw new Error('This repository has no remote to push to.');
+        await git(root, ['push', '-u', remote.includes('origin') ? 'origin' : remote[0], 'HEAD'], net);
+      }
+      break;
+    }
+    case 'checkout':
+    case 'branch': {
+      const name = String(body.branch ?? '').trim();
+      if (!name || name.startsWith('-')) throw new Error('Not a branch name.');
+      await git(root, ['check-ref-format', '--branch', name]).catch(() => {
+        throw new Error(`“${name}” is not a valid branch name.`);
+      });
+      await git(root, action === 'branch' ? ['switch', '-c', name] : ['switch', name]);
+      break;
+    }
+    default:
+      throw new Error('Not a git action.');
+  }
+  return { ok: true };
+}
+
 createServer(async (req, res) => {
   const origin = req.headers.origin ?? '';
   // Unlike the relays, a request with no Origin is refused too: only the board's pages may run commands.
@@ -384,9 +584,31 @@ createServer(async (req, res) => {
     }
     return;
   }
+  if (req.method === 'GET' && (path === '/git' || path === '/git/diff')) {
+    const params = new URL(req.url, 'http://terminal').searchParams;
+    try {
+      const body = path === '/git' ? await gitStatus(params.get('path') ?? '') : await gitDiff(params);
+      res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(body));
+    } catch (err) {
+      res.writeHead(400, cors).end(err.message);
+    }
+    return;
+  }
   // JSON only: a page from elsewhere cannot send it without a preflight, which the Origin check refuses.
   const json = /^application\/json\b/.test(req.headers['content-type'] ?? '');
   if (req.method === 'POST' && path === '/run' && json) return run(req, res, cors);
+  if (req.method === 'POST' && path === '/git' && json) {
+    const body = await jsonBody(req, res, cors);
+    if (!body) return;
+    try {
+      const result = await gitAction(body);
+      log.info(`git ${body.action}`);
+      res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(result));
+    } catch (err) {
+      res.writeHead(400, cors).end(err.message);
+    }
+    return;
+  }
   if (req.method === 'POST' && path === '/input' && json) return input(req, res, cors);
   if (req.method === 'POST' && ['/stop', '/clear', '/close'].includes(path) && json) return control(req, res, cors, path.slice(1));
   res.writeHead(404, cors).end('Not a terminal request.');
