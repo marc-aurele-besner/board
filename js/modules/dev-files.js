@@ -1,5 +1,6 @@
 // Dev's file explorer and file reader, Cursor style: a folder tree on the left, open files as tabs, each shown
 // with line numbers and syntax colours. Read only; files come through the runner on this machine.
+// A tab can also show a diff (a changed file, or a commit) from Source Control.
 import { h, icon } from '../ui.js';
 import { toast } from '../toast.js';
 import { listFolder, readFile } from '../terminal.js';
@@ -56,22 +57,31 @@ function reloadAll(ctx) {
   for (const file of state.tabs) openFile(ctx, file.path, { reload: true });
 }
 
-export async function openFile(ctx, path, { reload = false } = {}) {
-  let file = state.tabs.find((f) => f.path === path);
+export const openFile = (ctx, path, { reload = false } = {}) => openTab(ctx, { path, name: baseName(path) }, { reload });
+
+// A diff in a tab. `key` names the tab (opening it again reads it again); `load` answers { diff, commit? }; `file`
+// is the changed file's full path, for the button that opens it.
+export const openDiff = (ctx, { key, name, title, file = '', load }) => openTab(ctx, { path: key, name, title, file, load }, { reload: true });
+
+async function openTab(ctx, tab, { reload }) {
+  let file = state.tabs.find((f) => f.path === tab.path);
   if (file && !reload) {
-    state.active = path;
+    state.active = tab.path;
     return ctx.refresh();
   }
   if (!file) {
-    file = { path, name: baseName(path), loading: true, scroll: 0 };
+    file = { ...tab, loading: true, scroll: 0 };
     state.tabs.push(file);
   }
-  state.active = path;
+  state.active = file.path;
   file.loading = true;
   ctx.refresh();
   try {
-    const read = await readFile(ctx.base(), path);
-    Object.assign(file, { size: read.size, text: read.text, binary: read.binary, tooLarge: read.tooLarge, error: '', el: null });
+    if (file.load) Object.assign(file, await file.load(), { error: '', el: null });
+    else {
+      const read = await readFile(ctx.base(), file.path);
+      Object.assign(file, { size: read.size, text: read.text, binary: read.binary, tooLarge: read.tooLarge, error: '', el: null });
+    }
   } catch (err) {
     file.error = err.message;
   }
@@ -97,27 +107,32 @@ function treeRows(ctx, path, depth) {
       const open = state.expanded.has(full);
       return [
         h('div', { class: 'tree-row', style: { '--depth': depth } },
-          h('button', { type: 'button', class: 'tree-item', 'aria-expanded': String(open), title: full, onclick: () => toggle(ctx, full) },
+          h('button', { type: 'button', class: ['tree-item', ctx.decor?.(full)?.tone].filter(Boolean).join(' '), 'aria-expanded': String(open), title: full, onclick: () => toggle(ctx, full) },
             h('span', { class: open ? 'tree-chevron open' : 'tree-chevron' }, icon('chevron-right')),
             icon('folder'),
-            h('span', { class: 'tree-name' }, entry.name)),
+            h('span', { class: 'tree-name' }, entry.name),
+            ctx.decor?.(full) ? h('span', { class: 'tree-dot', title: 'Has changes' }) : null),
           h('button', { type: 'button', class: 'tree-action', title: `Open a terminal in ${entry.name}`, 'aria-label': `Open a terminal in ${entry.name}`, onclick: () => ctx.openTerminal(full) }, icon('terminal'))),
         ...(open ? treeRows(ctx, full, depth + 1) : []),
       ];
     }
     const active = state.active === full;
+    // Git's letter for a changed file, as editors show it (M modified, U untracked, A added, D deleted, ! conflict).
+    const decor = ctx.decor?.(full);
     return [h('div', { class: active ? 'tree-row active' : 'tree-row', style: { '--depth': depth } },
-      h('button', { type: 'button', class: 'tree-item', title: full, onclick: () => openFile(ctx, full) },
+      h('button', { type: 'button', class: ['tree-item', decor?.tone].filter(Boolean).join(' '), title: decor ? `${full} · ${decor.label}` : full, onclick: () => openFile(ctx, full) },
         h('span', { class: 'tree-chevron' }),
         icon('file'),
-        h('span', { class: 'tree-name' }, entry.name)))];
+        h('span', { class: 'tree-name' }, entry.name),
+        decor ? h('span', { class: 'tree-letter', 'aria-hidden': 'true' }, decor.letter) : null))];
   });
 }
 
-// `picker` chooses the workspace; it sits above the tree.
-export function explorer(ctx, picker) {
+// `picker` chooses the workspace; it sits above the tree, under `switcher`, which picks the side panel.
+export function explorer(ctx, picker, switcher) {
   const root = state.folders.get(state.root);
   return h('aside', { class: 'card ide-explorer', 'aria-label': 'Files' },
+    switcher,
     h('div', { class: 'ide-explorer-head' },
       picker,
       h('button', { type: 'button', class: 'icon-btn', title: 'Read the folders and open files again', 'aria-label': 'Refresh files', disabled: !ctx.ready(), onclick: () => reloadAll(ctx) }, icon('refresh'))),
@@ -139,9 +154,64 @@ function codeView(file) {
   return file.el;
 }
 
+// A unified diff as rows: each file's name (in a commit), its hunks, and lines with their old and new numbers.
+const DIFF_MAX_LINES = 20000;
+const DIFF_HEADER = /^(index |--- |\+\+\+ |old mode|new mode|similarity index|dissimilarity index|copy from|copy to)/;
+function diffView(file) {
+  if (file.el) return file.el;
+  const rows = [];
+  const lines = file.diff.split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  let oldN = 0;
+  let newN = 0;
+  let lang = languageOf(file.name);
+  let files = 0;
+  const row = (cls, a, b, sign, content) => h('div', { class: `code-line ${cls}` },
+    h('span', { class: 'ln', 'aria-hidden': 'true' }, a),
+    h('span', { class: 'ln', 'aria-hidden': 'true' }, b),
+    h('span', { class: 'lc' }, h('span', { class: 'diff-sign', 'aria-hidden': 'true' }, sign), content));
+  // Each line is coloured on its own: a hunk starts anywhere, so a comment opened above it is not seen.
+  const coloured = (text) => (highlight(text, lang)[0] ?? []).map(([cls, t]) => (cls ? h('span', { class: `tok-${cls}` }, t) : t));
+  for (const line of lines.slice(0, DIFF_MAX_LINES)) {
+    if (line.startsWith('diff --')) {
+      files++;
+      const name = / b\/(.*)$/.exec(line)?.[1] ?? line;
+      lang = languageOf(baseName(name));
+      if (file.commit) rows.push(h('div', { class: 'code-line diff-file' }, h('span', { class: 'ln' }), h('span', { class: 'ln' }), h('span', { class: 'lc' }, name)));
+    } else if (line.startsWith('@@')) {
+      const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(line);
+      if (m) [oldN, newN] = [Number(m[1]), Number(m[2])];
+      rows.push(row('diff-hunk', '', '', '', line));
+    } else if (DIFF_HEADER.test(line)) {
+      continue;
+    } else if (line.startsWith('+')) rows.push(row('diff-add', '', newN++, '+', coloured(line.slice(1))));
+    else if (line.startsWith('-')) rows.push(row('diff-del', oldN++, '', '-', coloured(line.slice(1))));
+    else if (line.startsWith(' ')) rows.push(row('diff-ctx', oldN++, newN++, ' ', coloured(line.slice(1))));
+    else if (line) rows.push(row('diff-meta', '', '', '', line));
+  }
+  if (lines.length > DIFF_MAX_LINES) rows.push(row('diff-meta', '', '', '', `${lines.length - DIFF_MAX_LINES} more lines not shown.`));
+  file.lines = lines.length;
+  file.files = files;
+  const head = file.commit
+    ? h('div', { class: 'diff-commit' },
+        h('p', { class: 'diff-commit-message' }, file.commit.message),
+        h('p', { class: 'muted small' }, `${file.commit.author} · ${new Date(file.commit.at).toLocaleString()} · `, h('code', null, file.commit.hash.slice(0, 10))))
+    : null;
+  const body = rows.length
+    ? h('div', { class: 'code diff', style: { '--gutter': `${String(Math.max(oldN, newN)).length + 1}ch` } }, rows)
+    : h('p', { class: 'muted small ide-msg' }, 'No changes to show.');
+  file.el = h('div', { class: 'code-view', tabindex: '0', onscroll: (e) => (file.scroll = e.currentTarget.scrollTop) }, head, body);
+  return file.el;
+}
+
 function fileBody(file) {
   if (file.loading && !file.el) return h('p', { class: 'muted small ide-msg' }, 'Reading…');
   if (file.error) return h('p', { class: 'small ide-msg tree-error' }, file.error);
+  if (file.diff !== undefined) {
+    const el = diffView(file);
+    requestAnimationFrame(() => (el.scrollTop = file.scroll));
+    return el;
+  }
   if (file.binary) return h('p', { class: 'muted small ide-msg' }, `A binary file (${sizeText(file.size)}). The reader shows text files.`);
   if (file.tooLarge) return h('p', { class: 'muted small ide-msg' }, `${sizeText(file.size)} is over the 1 MB the reader shows.`);
   const el = codeView(file);
@@ -157,6 +227,13 @@ export function editor(ctx) {
   const root = state.folders.get(state.root)?.full ?? '';
   const shown = root && file.path.startsWith(root) ? file.path.slice(root.length).replace(/^[\\/]/, '') : file.path;
   const lang = languageOf(file.name);
+  const diffBar = file.load
+    ? h('div', { class: 'file-bar' },
+        h('code', { class: 'file-path', title: file.title }, file.title),
+        h('span', { class: 'muted small file-meta' }, file.commit ? `${file.files ?? 0} ${file.files === 1 ? 'file' : 'files'}` : ''),
+        file.file ? h('button', { type: 'button', class: 'icon-btn', title: 'Open the file', 'aria-label': 'Open the file', onclick: () => openFile(ctx, file.file) }, icon('file')) : null,
+        h('button', { type: 'button', class: 'icon-btn', title: 'Read the changes again', 'aria-label': 'Reload the changes', onclick: () => openTab(ctx, file, { reload: true }) }, icon('refresh')))
+    : null;
   return h('section', { class: 'card ide-editor' },
     h('nav', { class: 'file-tabs', role: 'tablist', 'aria-label': 'Open files' },
       state.tabs.map((f) =>
@@ -170,9 +247,9 @@ export function editor(ctx) {
               state.active = f.path;
               ctx.refresh();
             },
-          }, icon('file'), f.name),
+          }, icon(f.load ? 'diff' : 'file'), f.name),
           h('button', { type: 'button', class: 'term-close', title: `Close ${f.name}`, 'aria-label': `Close ${f.name}`, onclick: () => closeFile(ctx, f) }, icon('x'))))),
-    h('div', { class: 'file-bar' },
+    diffBar ?? h('div', { class: 'file-bar' },
       h('code', { class: 'file-path', title: file.path }, shown.split(/[\\/]/).join(' › ')),
       h('span', { class: 'muted small file-meta' },
         [languageLabel(lang, file.name), file.lines ? `${file.lines} lines` : '', file.size !== undefined ? sizeText(file.size) : ''].filter(Boolean).join(' · ')),
