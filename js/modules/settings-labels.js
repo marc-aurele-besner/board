@@ -1,3 +1,4 @@
+// @ts-check
 // Settings → Labels: task statuses and categories, project labels and Money categories in one place. Each can be
 // recoloured, renamed and reordered (the order is the one every picker shows); deleting one that is in use moves
 // what uses it to another label or category first.
@@ -8,9 +9,16 @@ import { colorPicker, SWATCHES } from '../color-picker.js';
 import { labelsOf, labelColor, projectIcon } from './projects.js';
 import { taskStatuses, statusLook, ALWAYS_SHOWN, categoryLabelIds, withoutLabel } from '../task-labels.js';
 
+/** @import { Store, TaskCategory, ProjectLabel, StatusOverride } from '../../types/data' */
+/** @import { Child } from '../../types/ui' */
+/** @typedef {DragEvent & { currentTarget: HTMLElement }} RowDrag */
+
 const UNCATEGORIZED = 'Uncategorized';
+/** @param {string} a @param {string} b */
 const sameName = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
+/** @param {number} n @param {string} one @param {string} [many] */
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** @param {string[]} parts */
 const list = (parts) => (parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0] ?? '');
 
 // The last error per section, shown above its list.
@@ -21,9 +29,11 @@ let newTaskCategoryScope = 'all';
 // --- Reordering ---
 
 // The row being dragged, and its list, so a row of another list is not a drop target.
+/** @type {{ list: string, key: string } | null} */
 let drag = null;
 
 // `keys` with `from` moved before or after `to`.
+/** @param {string[]} keys @param {string} from @param {string} to @param {boolean} after */
 function moveKey(keys, from, to, after) {
   const rest = keys.filter((k) => k !== from);
   const at = rest.indexOf(to);
@@ -32,31 +42,40 @@ function moveKey(keys, from, to, after) {
   return rest;
 }
 
+/** @param {RowDrag} e */
 const dropAfter = (e) => {
   const r = e.currentTarget.getBoundingClientRect();
   return e.clientY > r.top + r.height / 2;
 };
+/** @param {HTMLElement} el */
 const clearDrop = (el) => el.classList.remove('drop-before', 'drop-after');
 
 // Row props and grip for a reorderable list. `keys` is the list's order; `save(nextKeys)` stores a new one.
 // The grip also moves its row with the up and down arrow keys, and keeps focus after the re-render.
+/** @param {string} list @param {string[]} keys @param {(keys: string[]) => void} save */
 function sortable(list, keys, save) {
+  /** @param {string} from @param {string} to @param {boolean} after */
   const move = (from, to, after) => {
     const next = moveKey(keys, from, to, after);
     if (next.some((k, i) => k !== keys[i])) save(next);
   };
+  /** @param {string} key */
   const row = (key) => ({
+    /** @param {RowDrag} e */
     ondragstart: (e) => {
       drag = { list, key };
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', key); // Firefox needs data to start a drag
+      // A drag that starts always carries a dataTransfer.
+      /** @type {DataTransfer} */ (e.dataTransfer).effectAllowed = 'move';
+      /** @type {DataTransfer} */ (e.dataTransfer).setData('text/plain', key); // Firefox needs data to start a drag
       e.currentTarget.classList.add('dragging');
     },
+    /** @param {RowDrag} e */
     ondragend: (e) => {
       drag = null;
       e.currentTarget.draggable = false;
       e.currentTarget.classList.remove('dragging');
     },
+    /** @param {RowDrag} e */
     ondragover: (e) => {
       if (drag?.list !== list || drag.key === key) return;
       e.preventDefault();
@@ -64,7 +83,9 @@ function sortable(list, keys, save) {
       e.currentTarget.classList.toggle('drop-before', !after);
       e.currentTarget.classList.toggle('drop-after', after);
     },
+    /** @param {RowDrag} e */
     ondragleave: (e) => clearDrop(e.currentTarget),
+    /** @param {RowDrag} e */
     ondrop: (e) => {
       if (drag?.list !== list) return;
       e.preventDefault();
@@ -73,6 +94,7 @@ function sortable(list, keys, save) {
       drag = null;
     },
   });
+  /** @param {string} key @param {string} name */
   const grip = (key, name) => h('button', {
     type: 'button',
     class: 'grip',
@@ -80,8 +102,9 @@ function sortable(list, keys, save) {
     title: 'Drag to reorder, or press the up and down arrows',
     'aria-label': `Move ${name}`,
     // Only the grip makes the row draggable, so the name field stays editable.
-    onpointerdown: (e) => { e.currentTarget.closest('li').draggable = true; },
-    onpointerup: (e) => { e.currentTarget.closest('li').draggable = false; },
+    onpointerdown: (/** @type {PointerEvent & { currentTarget: HTMLElement }} */ e) => { /** @type {HTMLLIElement} */ (e.currentTarget.closest('li')).draggable = true; },
+    onpointerup: (/** @type {PointerEvent & { currentTarget: HTMLElement }} */ e) => { /** @type {HTMLLIElement} */ (e.currentTarget.closest('li')).draggable = false; },
+    /** @param {KeyboardEvent} e */
     onkeydown: (e) => {
       if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
       e.preventDefault();
@@ -89,29 +112,33 @@ function sortable(list, keys, save) {
       if (to === undefined) return;
       move(key, to, e.key === 'ArrowDown');
       // The store re-renders on the next frame; this callback runs after it.
-      requestAnimationFrame(() => document.querySelector(`[data-grip="${CSS.escape(`${list}:${key}`)}"]`)?.focus());
+      requestAnimationFrame(() => /** @type {HTMLElement | null} */ (document.querySelector(`[data-grip="${CSS.escape(`${list}:${key}`)}"]`))?.focus());
     },
   }, icon('grip'));
   return { row, grip };
 }
 
 // A section title with an optional button beside it, such as "Sort A–Z".
+/** @param {string} title @param {Child} action */
 const sectionHead = (title, action) => h('div', { class: 'row label-head' }, h('h3', null, title), h('span', { class: 'grow' }), action);
+/** @param {string} label @param {string} title @param {() => void} onclick */
 const sortButton = (label, title, onclick) => h('button', { type: 'button', class: 'btn-small', title, onclick }, label);
 
 // --- Task statuses ---
 
 // Saves one status's override, and drops it once it is back to the defaults so todos.json stays small.
+/** @param {Store} store @param {string} key @param {StatusOverride} patch */
 function setStatus(store, key, patch) {
   store.update('todos', (d) => {
     const next = { ...(d.statuses?.[key] ?? {}), ...patch };
-    for (const k of Object.keys(next)) if (!next[k]) delete next[k];
+    for (const k of /** @type {(keyof StatusOverride)[]} */ (Object.keys(next))) if (!next[k]) delete next[k];
     d.statuses = { ...(d.statuses ?? {}) };
     if (Object.keys(next).length) d.statuses[key] = next;
     else delete d.statuses[key];
   });
 }
 
+/** @param {Store} store */
 function taskStatusesSection(store) {
   const { items, statusOrder } = store.get('todos');
   const statuses = taskStatuses(store);
@@ -143,7 +170,7 @@ function taskStatusesSection(store) {
             checked: !st.hidden,
             disabled: fixed,
             'aria-label': `Offer ${st.name} in pickers`,
-            onchange: (e) => setStatus(store, st.key, { hidden: !e.target.checked }),
+            onchange: (/** @type {{ target: HTMLInputElement }} */ e) => setStatus(store, st.key, { hidden: !e.target.checked }),
           }),
           'In pickers'));
     })));
@@ -152,16 +179,20 @@ function taskStatusesSection(store) {
 // --- Task categories ---
 
 // Tasks store a category by name, so renaming or deleting one also rewrites the tasks that carry it.
+/** @param {Store} store */
 const taskCategories = (store) => store.get('todos').categories ?? [];
+/** @param {Store} store @param {string} name */
 const taskCategoryUse = (store, name) => store.get('todos').items.filter((i) => i.category && sameName(i.category, name)).length;
 
 // Select values: "all", "project:<id>", "category:<project label id>". A label scope can hold several labels;
 // the picker sets the first one and the others are added beside it.
+/** @param {string} value */
 function parseScope(value) {
   if (value.startsWith('project:')) return { scope: 'project', projectId: value.slice(8), projectCategoryIds: [] };
   if (value.startsWith('category:')) return { scope: 'projectCategory', projectId: null, projectCategoryIds: [value.slice(9)] };
   return { scope: 'all', projectId: null, projectCategoryIds: [] };
 }
+/** @param {TaskCategory} c */
 function scopeValue(c) {
   if (c.scope === 'project') return `project:${c.projectId}`;
   if (c.scope === 'projectCategory') return `category:${categoryLabelIds(c)[0]}`;
@@ -170,10 +201,12 @@ function scopeValue(c) {
 
 // Where a category applies. A label scope shows every label as a pill in one field, with a + to add another and
 // a chevron to change the scope; any other scope is the plain picker.
+/** @param {Store} store @param {TaskCategory} c */
 function scopeField(store, c) {
   const ids = categoryLabelIds(c);
   if (!ids.length) return scopePicker(store, scopeValue(c), (v) => editTaskCategory(store, c, parseScope(v)));
   const labels = store.get('projects').categories ?? [];
+  /** @param {string[]} next */
   const setIds = (next) => editTaskCategory(store, c, { projectCategoryIds: next });
   const free = labels.filter((l) => !ids.includes(l.id));
   return h('div', { class: 'scope-field' },
@@ -213,6 +246,7 @@ function scopeField(store, c) {
 }
 
 // Options for the searchable scope picker: every project label in its colour, and every project with its icon.
+/** @param {Store} store */
 function scopeOptions(store) {
   const { projects, categories } = store.get('projects');
   return [
@@ -223,17 +257,19 @@ function scopeOptions(store) {
   ];
 }
 
+/** @param {Store} store @param {string} value @param {(value: string) => void} onPick */
 function scopePicker(store, value, onPick) {
   return pickChip({ value, options: scopeOptions(store), placeholder: 'Where it applies', className: 'scope-pick', onPick });
 }
 
 // The wider scopes a category can move up to: from one project to one of that project's labels or to all
 // projects, and from a label to all projects.
+/** @param {Store} store @param {TaskCategory} c */
 function promoteTargets(store, c) {
   const options = scopeOptions(store);
   if (c.scope === 'project') {
     const project = store.get('projects').projects.find((p) => p.id === c.projectId);
-    const labels = project ? labelsOf(project).map((id) => `category:${id}`) : [];
+    const labels = project ? labelsOf(project).map((/** @type {string} */ id) => `category:${id}`) : [];
     // The project's labels come first: they are the next level up, before all projects.
     return [...options.filter((o) => labels.includes(o.value)), ...options.filter((o) => o.value === 'all')];
   }
@@ -241,9 +277,11 @@ function promoteTargets(store, c) {
   return [];
 }
 
+/** @param {Store} store @param {TaskCategory} c */
 function promoteControl(store, c) {
   const targets = promoteTargets(store, c);
   if (!targets.length) return null;
+  /** @param {string} value */
   const promote = (value) => editTaskCategory(store, c, parseScope(value));
   if (targets.length === 1) {
     const [only] = targets;
@@ -257,6 +295,7 @@ function promoteControl(store, c) {
   return pickButton({ label: 'Promote', title: `Make ${c.name} apply more widely`, options: targets, onPick: promote });
 }
 
+/** @param {Store} store @param {string} name @param {string} scope */
 function addTaskCategory(store, name, scope) {
   if (taskCategories(store).some((c) => sameName(c.name, name))) {
     labelsView.tasks = `"${name}" already exists.`;
@@ -268,6 +307,7 @@ function addTaskCategory(store, name, scope) {
   });
 }
 
+/** @param {Store} store @param {TaskCategory} cat @param {Partial<TaskCategory>} patch */
 function editTaskCategory(store, cat, patch) {
   const name = patch.name ?? cat.name;
   if (!name) return;
@@ -290,6 +330,7 @@ function editTaskCategory(store, cat, patch) {
   });
 }
 
+/** @param {Store} store @param {TaskCategory} cat */
 function confirmDeleteTaskCategory(store, cat) {
   const count = taskCategoryUse(store, cat.name);
   const others = taskCategories(store).filter((c) => c.id !== cat.id);
@@ -310,9 +351,12 @@ function confirmDeleteTaskCategory(store, cat) {
 }
 
 // Task categories and project labels are both `{ id, name }` objects, saved in the order of `ids`.
-const byIds = (list, ids) => ids.map((id) => list.find((c) => c.id === id)).filter(Boolean);
+/** @template {{ id: string }} T @param {T[]} list @param {string[]} ids */
+const byIds = (list, ids) => /** @type {T[]} */ (ids.map((id) => list.find((c) => c.id === id)).filter(Boolean));
+/** @param {{ name: string }} a @param {{ name: string }} b */
 const byName = (a, b) => a.name.localeCompare(b.name);
 
+/** @param {Store} store */
 function taskCategoriesSection(store) {
   const cats = taskCategories(store);
   const order = sortable('task-categories', cats.map((c) => c.id), (ids) => store.update('todos', (d) => { d.categories = byIds(d.categories, ids); }));
@@ -345,12 +389,14 @@ function taskCategoriesSection(store) {
 // --- Project labels ---
 
 // What uses a project label: the projects that carry it and the task categories scoped to it.
+/** @param {Store} store @param {string} id */
 function projectLabelUse(store, id) {
   const projects = store.get('projects').projects.filter((p) => labelsOf(p).includes(id)).length;
   const taskCategories = (store.get('todos').categories ?? []).filter((c) => categoryLabelIds(c).includes(id)).length;
   return { projects, taskCategories, total: projects + taskCategories };
 }
 
+/** @param {Store} store @param {string} name */
 function addProjectLabel(store, name) {
   const { categories } = store.get('projects');
   if (categories.some((c) => sameName(c.name, name))) {
@@ -361,6 +407,7 @@ function addProjectLabel(store, name) {
   store.update('projects', (d) => d.categories.push({ id: uid(), name, color: SWATCHES[d.categories.length % SWATCHES.length] }));
 }
 
+/** @param {Store} store @param {ProjectLabel} label @param {string} name */
 function renameProjectLabel(store, label, name) {
   if (!name || name === label.name) return;
   if (store.get('projects').categories.some((c) => c.id !== label.id && sameName(c.name, name))) {
@@ -376,10 +423,12 @@ function renameProjectLabel(store, label, name) {
 
 // Deletes a label. With a target, its projects get the target label and its scoped task categories follow it;
 // without one, the label is removed from its projects and task categories, and a category left with no label goes.
+/** @param {Store} store @param {ProjectLabel} label @param {string | null} targetId */
 function deleteProjectLabel(store, label, targetId) {
   store.update('projects', (d) => {
     d.categories = d.categories.filter((c) => c.id !== label.id);
     for (const p of d.projects) {
+      /** @type {string[]} */
       const own = labelsOf(p);
       if (!own.includes(label.id)) continue;
       p.labels = own.filter((x) => x !== label.id);
@@ -393,6 +442,7 @@ function deleteProjectLabel(store, label, targetId) {
   }
 }
 
+/** @param {Store} store @param {ProjectLabel} label */
 function confirmDeleteProjectLabel(store, label) {
   const use = projectLabelUse(store, label.id);
   const others = store.get('projects').categories.filter((c) => c.id !== label.id);
@@ -410,9 +460,11 @@ function confirmDeleteProjectLabel(store, label) {
   });
 }
 
+/** @param {Store} store */
 function projectLabelsSection(store) {
   const labels = store.get('projects').categories ?? [];
   const order = sortable('project-labels', labels.map((l) => l.id), (ids) => store.update('projects', (d) => { d.categories = byIds(d.categories, ids); }));
+  /** @param {string} id @param {string} color */
   const setColor = (id, color) => store.update('projects', (d) => {
     const c = d.categories.find((x) => x.id === id);
     if (c) c.color = color;
@@ -443,6 +495,7 @@ function projectLabelsSection(store) {
 // --- Money categories ---
 
 // Every Money category: the saved list in its order, then any other name an entry or a recurring item uses, A to Z.
+/** @param {Store} store */
 function moneyCategories(store) {
   const fin = store.get('finance');
   const used = [...fin.entries.map((e) => e.category), ...(fin.recurring ?? []).map((r) => r.category)];
@@ -450,6 +503,7 @@ function moneyCategories(store) {
   return [...fin.categories, ...extra];
 }
 
+/** @param {Store} store @param {string} name */
 function moneyCategoryUse(store, name) {
   const fin = store.get('finance');
   const entries = fin.entries.filter((e) => e.category === name).length;
@@ -460,6 +514,7 @@ function moneyCategoryUse(store, name) {
 
 // Moves everything filed under `from` to `to` and forgets `from`. Used by rename (to a new name) and delete.
 // A budget follows unless the target already has one; a colour follows only to a name that has none.
+/** @param {Store} store @param {string} from @param {string} to */
 function moveMoneyCategory(store, from, to) {
   store.update('finance', (d) => {
     for (const e of d.entries) if (e.category === from) e.category = to;
@@ -475,6 +530,7 @@ function moveMoneyCategory(store, from, to) {
   });
 }
 
+/** @param {Store} store @param {string} name */
 function addMoneyCategory(store, name) {
   if (moneyCategories(store).some((c) => sameName(c, name))) {
     labelsView.money = `"${name}" already exists.`;
@@ -484,6 +540,7 @@ function addMoneyCategory(store, name) {
   store.update('finance', (d) => d.categories.push(name));
 }
 
+/** @param {Store} store @param {string} from @param {string} name */
 function renameMoneyCategory(store, from, name) {
   if (!name || name === from) return;
   const existing = moneyCategories(store).find((c) => c !== from && sameName(c, name));
@@ -492,6 +549,7 @@ function renameMoneyCategory(store, from, name) {
   moveMoneyCategory(store, from, existing ?? name);
 }
 
+/** @param {Store} store @param {string} name */
 function confirmDeleteMoneyCategory(store, name) {
   const use = moneyCategoryUse(store, name);
   const others = moneyCategories(store).filter((c) => c !== name && c !== UNCATEGORIZED);
@@ -514,12 +572,15 @@ function confirmDeleteMoneyCategory(store, name) {
   });
 }
 
+/** @param {Store} store */
 function moneyCategoriesSection(store) {
   const names = moneyCategories(store);
   const colors = store.get('finance').categoryColors ?? {};
+  /** @param {string} name @param {string} color */
   const setColor = (name, color) => store.update('finance', (d) => {
     d.categoryColors = { ...(d.categoryColors ?? {}), [name]: color };
   });
+  /** @param {string} name */
   const clearColor = (name) => store.update('finance', (d) => {
     const next = { ...(d.categoryColors ?? {}) };
     delete next[name];
@@ -554,9 +615,11 @@ function moneyCategoriesSection(store) {
 // --- Shared pieces ---
 
 // `extra` is any other field the form needs, such as a task category's scope; onAdd gets the form to read it.
+/** @param {string} placeholder @param {(name: string, form: HTMLFormElement) => void} onAdd @param {Child} [extra] */
 function addForm(placeholder, onAdd, extra = null) {
   return h('form', {
     class: 'row label-add',
+    /** @param {SubmitEvent & { currentTarget: HTMLFormElement & { elements: { name: HTMLInputElement } } }} e */
     onsubmit: (e) => {
       e.preventDefault();
       const input = e.currentTarget.elements.name;
@@ -570,6 +633,7 @@ function addForm(placeholder, onAdd, extra = null) {
 }
 
 // A small dialog: what uses the item, where to move it, and Delete.
+/** @param {{ title: string, text: string, target: HTMLSelectElement | null, onDelete: () => void }} options */
 function deleteDialog({ title, text, target, onDelete }) {
   const dialog = openDialog({
     title,
@@ -589,6 +653,7 @@ function deleteDialog({ title, text, target, onDelete }) {
   });
 }
 
+/** @param {Store} store */
 export function labelsCard(store) {
   return h('section', { class: 'card panel' },
     h('header', { class: 'panel-head' },
