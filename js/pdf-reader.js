@@ -1,19 +1,24 @@
+// @ts-check
 // Reads a PDF in the browser with pdf.js. Text is taken when the PDF has a text layer; scanned
 // pages are drawn to images so a vision model can read them.
 const LIB = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
 const WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 const MAX_TEXT_PAGES = 60; // text is cheap, so read the whole document up to this many pages
 const MAX_IMAGE_PAGES = 6; // page images are expensive; only used when there is no text layer
+/** @import { PdfJs } from '../types/pdfjs' */
+/** @type {Promise<PdfJs> | null} */
 let loading = null;
 
+/** @returns {Promise<PdfJs>} */
 function loadPdfJs() {
   if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
   loading ??= new Promise((resolve, reject) => {
     const script = document.createElement('script');
     script.src = LIB;
     script.onload = () => {
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER;
-      resolve(window.pdfjsLib);
+      // The script just loaded sets it.
+      /** @type {PdfJs} */ (window.pdfjsLib).GlobalWorkerOptions.workerSrc = WORKER;
+      resolve(/** @type {PdfJs} */ (window.pdfjsLib));
     };
     script.onerror = () => {
       loading = null;
@@ -25,6 +30,7 @@ function loadPdfJs() {
 }
 
 // Returns { text, images, pages, truncated }. `truncated` is true when some pages were not read.
+/** @param {Blob} file */
 export async function readPdf(file) {
   const pdfjs = await loadPdfJs();
   const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
