@@ -1,3 +1,4 @@
+// @ts-check
 import { h, icon, money, monthKey, todayISO, statusOf, empty, notice } from '../ui.js';
 import { projectIcon, labelsOf, labelColor } from './projects.js';
 import { repoStats } from '../github.js';
@@ -13,14 +14,19 @@ import { hostOf, daysUntil } from '../sitecheck.js';
 import { overBudget } from './money.js';
 import { outOfRange } from './positions.js';
 import { unreadCount } from './inbox.js';
+/** @import { Store, Task, Project, ProjectLabel, CalendarEvent, IconName } from '../../types/data' */
+/** @import { Child } from '../../types/ui' */
 
+/** @type {Record<string, number>} */
 const PRIORITY_RANK = { high: 0, medium: 1, low: 2, none: 3 };
+/** @type {Record<string, string>} */
 const RECIPE_LABEL = { testing: 'Testing', idea: 'Ideas', final: 'Final' };
 
 // --- Plan my day (AI) ---
 
 const plan = { status: 'idle', text: '' };
 
+/** @param {Store} store */
 async function runPlan(store) {
   const projects = store.get('projects').projects;
   const open = store.get('todos').items.filter((i) => statusOf(i) !== 'done').slice(0, 40);
@@ -43,18 +49,20 @@ async function runPlan(store) {
             projectId: i.projectId ?? null,
             category: i.category || '',
           })),
-          profiles: profilesFor(projects, open.map((i) => i.projectId)),
+          // A task without a project matches none.
+          profiles: profilesFor(projects, /** @type {string[]} */ (open.map((i) => i.projectId))),
         }),
       },
     ])).trim();
     plan.status = 'ok';
   } catch (err) {
     plan.status = 'error';
-    plan.text = err.message;
+    plan.text = /** @type {Error} */ (err).message;
   }
   store.refresh();
 }
 
+/** @param {Store} store */
 function planPanel(store) {
   if (!hasOpenRouter(store)) return setupBanner('openrouter', 'Plan my day needs an OpenRouter key.');
   const button = h('button', { type: 'button', class: 'btn-small primary', disabled: plan.status === 'loading', onclick: () => runPlan(store) },
@@ -71,7 +79,9 @@ function planPanel(store) {
 // status: 'loading' only while the runners are asked for days calendar.json does not hold yet.
 const cal = { status: 'idle', error: '' };
 
+/** @param {CalendarEvent} e */
 const timeLabel = (e) => (e.allDay ? 'All day' : eventDate(e.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+/** @param {CalendarEvent} e */
 const dayLabel = (e) => {
   const d = eventDate(e.start);
   return d.toDateString() === new Date().toDateString() ? '' : d.toLocaleDateString([], { weekday: 'short' });
@@ -82,12 +92,14 @@ function nextTwoDays() {
   const from = new Date(new Date().setHours(0, 0, 0, 0));
   return [from, new Date(from.getFullYear(), from.getMonth(), from.getDate() + 3)];
 }
+/** @param {CalendarEvent[]} events */
 const upcoming = (events) => {
   const now = new Date();
   const until = new Date(now.getTime() + 2 * 86400000);
   return events.filter((e) => eventDate(e.end || e.start) > now && eventDate(e.start) < until);
 };
 
+/** @param {Store} store */
 function loadCalendar(store) {
   const [from, to] = nextTwoDays();
   cal.status = 'loading';
@@ -104,6 +116,11 @@ function loadCalendar(store) {
     .finally(() => store.refresh());
 }
 
+/**
+ * @param {Store} store
+ * @param {string} clientId
+ * @param {string} email
+ */
 function connectAccount(store, clientId, email) {
   connectCalendar(clientId, email)
     .then(() => loadCalendar(store))
@@ -114,6 +131,7 @@ function connectAccount(store, clientId, email) {
     });
 }
 
+/** @param {Store} store */
 function calendarBlock(store) {
   const clientId = store.get('settings').google?.clientId ?? '';
   const accounts = calendarAccounts(store);
@@ -163,6 +181,11 @@ function calendarBlock(store) {
 // --- Board sections ---
 
 // A titled panel. `more` is the link to the full section.
+/**
+ * @param {string} title
+ * @param {string | null} more
+ * @param {...Child} children
+ */
 function panel(title, more, ...children) {
   return h('section', { class: 'card board-panel' },
     h('div', { class: 'row between board-panel-head' },
@@ -172,18 +195,30 @@ function panel(title, more, ...children) {
 }
 
 // The stat strip at the top of the page.
+/**
+ * @param {Store} store
+ * @param {number} open
+ * @param {number} doing
+ * @param {Project[]} projects
+ */
 function statStrip(store, open, doing, projects) {
   const github = projects.flatMap((p) => p.github.repos);
   let prs = 0;
   let pending = false;
   for (const r of new Set(github)) {
-    const s = repoStats(r, () => {
+    // A good read always has both counts.
+    const s = /** @type {{ status: string, issues: number, prs: number }} */ (repoStats(r, () => {
       if (location.hash === '#/home' || location.hash === '') store.refresh();
-    });
+    }));
     if (s.status === 'ok') prs += s.prs;
     else if (s.status === 'loading') pending = true;
   }
   const testing = store.get('recipes').recipes.filter((r) => r.status === 'testing').length;
+  /**
+   * @param {string} n
+   * @param {string} label
+   * @param {string} href
+   */
   const cell = (n, label, href) =>
     h('a', { href, class: 'stat-cell' }, h('strong', null, n), h('span', { class: 'muted small' }, label));
   return h('div', { class: 'stat-strip' },
@@ -195,13 +230,20 @@ function statStrip(store, open, doing, projects) {
 }
 
 // A tile per project: icon, name, labels, and open tasks.
+/**
+ * @param {Store} store
+ * @param {Project[]} projects
+ * @param {Task[]} open
+ */
 function projectTiles(store, projects, open) {
   if (!projects.length) return empty('No projects yet. Create one in Projects to see it here.');
+  /** @param {string} id */
   const label = (id) => store.get('projects').categories?.find((c) => c.id === id);
   return h('div', { class: 'tiles' },
     [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => {
       const n = open.filter((i) => i.projectId === p.id).length;
-      const names = labelsOf(p).map(label).filter(Boolean);
+      // filter(Boolean) drops the labels that are gone.
+      const names = /** @type {ProjectLabel[]} */ (labelsOf(p).map(label).filter(Boolean));
       return h('a', { href: `#/projects?project=${p.id}`, class: 'tile' },
         h('div', { class: 'tile-head' }, projectIcon(p), h('strong', null, p.name)),
         h('div', { class: 'tile-meta' },
@@ -212,6 +254,7 @@ function projectTiles(store, projects, open) {
     }));
 }
 
+/** @param {Store} store */
 function kitchenPanel(store) {
   const recipes = store.get('recipes').recipes;
   const testing = recipes.filter((r) => r.status === 'testing')
@@ -227,11 +270,13 @@ function kitchenPanel(store) {
       : h('p', { class: 'muted small' }, 'Nothing in testing right now.'));
 }
 
+/** @param {Store} store */
 function moneyPanel(store) {
   const entries = store.get('finance').entries;
   const month = monthKey(todayISO());
   const monthEntries = entries.filter((e) => monthKey(e.date) === month);
   // Totals in USD; entries in CAD are shown as they were recorded, so the page never guesses a rate.
+  /** @param {string} type */
   const usdSum = (type) => monthEntries.filter((e) => e.type === type && (e.currency ?? 'USD') === 'USD').reduce((s, e) => s + e.amount, 0);
   const cadCount = monthEntries.filter((e) => (e.currency ?? 'USD') === 'CAD').length;
   const income = usdSum('income');
@@ -245,6 +290,10 @@ function moneyPanel(store) {
     cadCount ? h('p', { class: 'muted small' }, `${cadCount} CAD ${cadCount === 1 ? 'entry is' : 'entries are'} not in these totals. Open Money to convert.`) : null);
 }
 
+/**
+ * @param {Store} store
+ * @param {Project[]} projects
+ */
 function githubPanel(store, projects) {
   const repos = [...new Set(projects.flatMap((p) => p.github.repos))];
   if (!repos.length) {
@@ -252,7 +301,8 @@ function githubPanel(store, projects) {
   }
   const totals = { issues: 0, prs: 0, loading: 0, failed: 0 };
   for (const r of repos) {
-    const s = repoStats(r, () => {});
+    // A good read always has both counts.
+    const s = /** @type {{ status: string, issues: number, prs: number }} */ (repoStats(r, () => {}));
     if (s.status === 'ok') {
       totals.issues += s.issues;
       totals.prs += s.prs;
@@ -268,8 +318,10 @@ function githubPanel(store, projects) {
 }
 
 // What still needs connecting, in one place. Hidden once everything is set up.
+/** @param {Store} store */
 function setupCard(store) {
   const s = store.get('settings');
+  /** @type {[string, string, unknown][]} */
   const rows = [
     ['github', 'GitHub token', s.github?.token],
     ['openrouter', 'OpenRouter key, for the AI features', s.openrouter?.key],
@@ -291,9 +343,20 @@ function setupCard(store) {
 }
 
 // Things from every section that want a look today. Hidden when there are none.
+/**
+ * @param {Store} store
+ * @param {Task[]} open
+ */
 function attentionCard(store, open) {
   const today = todayISO();
+  /** @type {HTMLLIElement[]} */
   const rows = [];
+  /**
+   * @param {IconName} iconName
+   * @param {string} text
+   * @param {string} href
+   * @param {string} action
+   */
   const add = (iconName, text, href, action) => rows.push(h('li', null, icon(iconName), h('span', { class: 'grow' }, text), h('a', { href, class: 'btn-link' }, action)));
   const late = open.filter((i) => i.due && i.due < today).length;
   const inbox = open.filter((i) => i.inbox).length;
@@ -301,6 +364,7 @@ function attentionCard(store, open) {
   if (inbox) add('inbox', `${inbox} task${inbox === 1 ? '' : 's'} to organize`, '#/todos?filter=organize', 'Organize');
   const mail = unreadCount(store);
   if (mail) add('mail', `${mail} unread email${mail === 1 ? '' : 's'}`, '#/inbox', 'Read');
+  /** @type {Set<string | undefined>} */
   const domains = new Set();
   for (const p of sitesOf(store)) {
     const s = siteData(store, p.id);
@@ -324,6 +388,10 @@ function attentionCard(store, open) {
 
 // --- Page ---
 
+/**
+ * @param {HTMLElement} root
+ * @param {Store} store
+ */
 function draw(root, store) {
   const items = store.get('todos').items;
   const projects = store.get('projects').projects;

@@ -211,7 +211,7 @@ export const removeCalendarAccount = (store, address) => {
 /**
  * @param {DataStore} store
  * @param {string} address
- * @param {Partial<Pick<CalendarAccount, 'projectId' | 'labelId'>>} patch
+ * @param {Partial<Omit<CalendarAccount, 'email'>>} patch
  */
 export const setCalendarAccount = (store, address, patch) => saveAccounts(store, (accounts) =>
   accounts.map((a) => (a.email === address ? { ...a, ...patch } : a)));
