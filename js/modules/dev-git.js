@@ -5,7 +5,7 @@ import { h, icon } from '../ui.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
 import { gitStatus, gitDiff, gitAction } from '../terminal.js';
-import { openDiff, openFile, baseName } from './dev-files.js';
+import { openDiff, openFile, baseName, panelHead, panelAction } from './dev-files.js';
 
 // The status is read again when the panel is drawn after this long, and after every action.
 const STALE_MS = 5000;
@@ -323,9 +323,8 @@ export function sourceControl(ctx, picker, switcher, path) {
   } else body = repoBody(ctx);
   return h('aside', { class: 'card ide-explorer scm', 'aria-label': 'Source control' },
     switcher,
-    h('div', { class: 'ide-explorer-head' },
-      picker,
-      h('button', { type: 'button', class: 'icon-btn', title: 'Read the repository again', 'aria-label': 'Refresh source control', disabled: !ctx.ready() || state.loading, onclick: () => refreshGit(ctx, path, { force: true }) }, icon('refresh'))),
+    panelHead('Source control', panelAction('refresh', 'Read the repository again', () => refreshGit(ctx, path, { force: true }), !ctx.ready() || state.loading)),
+    h('div', { class: 'ide-explorer-head' }, picker),
     st?.repo ? h('div', { class: 'tree-root muted small', title: st.root }, baseName(st.root).toUpperCase()) : null,
     body);
 }
