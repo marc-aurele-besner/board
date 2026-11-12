@@ -1,4 +1,3 @@
-// @ts-check
 // Many read-only calls in one request, through Multicall3, which sits at the same address on every chain the board
 // reads. Public nodes limit how often they are asked, so a wallet's hundreds of token balances go in a few requests.
 import { encodeCall, decodeArgs } from './abi.js';

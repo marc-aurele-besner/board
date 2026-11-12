@@ -1,4 +1,3 @@
-// @ts-check
 // Every save rebuilds the page, and background jobs save while the user is typing. This keeps what was typed but
 // not submitted across a rebuild, and tells the shell when a rebuild should wait because a changed field has focus.
 

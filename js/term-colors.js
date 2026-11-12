@@ -1,4 +1,3 @@
-// @ts-check
 // Terminal colours that follow the board's theme. Programs pick their own RGB colours for a dark or a light
 // terminal (the Claude CLI paints its prompt box dark grey and its text near white), which on the other theme
 // gives dark bars and white on white. Each colour is adapted to the current theme instead: a background made for

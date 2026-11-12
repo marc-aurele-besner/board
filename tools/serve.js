@@ -1,4 +1,3 @@
-// @ts-check
 // Static server for the board, with no dependencies: `bun run serve` (or `node tools/serve.js`). PORT changes the port.
 // Every response says `no-cache`, so the browser revalidates each module on reload and runs the code just edited.
 /** @import { IncomingMessage, ServerResponse } from 'node:http' */

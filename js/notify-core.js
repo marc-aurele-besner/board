@@ -1,4 +1,3 @@
-// @ts-check
 // Notifications without the DOM: the kinds, each kind's preferences, notify() and the deadline check. The bell and its
 // drawer are in notifications.js; the runners load this file to notify from their jobs.
 import { uid, now, todayISO, statusOf } from './ui.js';

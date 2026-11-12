@@ -1,4 +1,3 @@
-// @ts-check
 // Reads the USD to CAD rates Money needs into fx.json: every day from the oldest entry to today, once (a past day's
 // rate never changes). The board asks it for days it lacks (POST /run/fx { from, to }).
 /** @import { Job } from '../../types/runner' */

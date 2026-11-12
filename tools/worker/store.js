@@ -1,4 +1,3 @@
-// @ts-check
 // The board's store for Node: the same get / update / save the shared modules in js/ call, over node:fs.
 // The board's tabs write the same files, so every write is a read-merge-write with js/merge.js (base = what the
 // worker last read), and a file is swapped in with a rename so a tab never reads half of one.

@@ -1,4 +1,3 @@
-// @ts-check
 // What each DeFi wallet holds on a chain: its native coin and every ERC-20 on the chain's token list, plus the
 // tokens added by hand. Read from the chain's node through Multicall3; only public addresses are used.
 import { NATIVE, tokenList, usdPrices } from './uniswap.js';

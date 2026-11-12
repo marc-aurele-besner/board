@@ -1,4 +1,3 @@
-// @ts-check
 // What Claude Code sessions actually used, read from the transcripts it keeps in ~/.claude/projects: the models,
 // their tokens and cost, the effort, and how long the work took. A task's session is found by the name of the
 // worktree the board gave it (`claude --worktree <name>`), which every transcript of that session records. Claude

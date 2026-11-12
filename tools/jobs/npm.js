@@ -1,4 +1,3 @@
-// @ts-check
 // Reads every project's npm org and packages into npm.json: the org's package list, and each package's latest
 // version, last publish and weekly downloads. The board asks it for one it does not hold yet (POST /run/npm).
 /** @import { Job, NodeStore } from '../../types/runner' */

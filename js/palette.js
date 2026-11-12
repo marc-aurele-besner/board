@@ -1,4 +1,3 @@
-// @ts-check
 // The search palette (Cmd/Ctrl+K or "/"): jump to a section, a project, a recipe or a task, or capture something new:
 // a task, a Money entry ("-42.50 groceries") or a recipe link.
 /** @import { Store, Module, IconName } from '../types/data' */

@@ -1,4 +1,3 @@
-// @ts-check
 // Checks run against a project's website: is it reachable, when do its certificate and domain expire,
 // and which share tags does its home page carry.
 //

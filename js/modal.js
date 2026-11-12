@@ -1,4 +1,3 @@
-// @ts-check
 // A simple modal dialog. Closes on Escape, on a click outside it, or with the close button.
 import { h, icon } from './ui.js';
 

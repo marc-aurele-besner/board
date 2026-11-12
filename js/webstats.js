@@ -1,4 +1,3 @@
-// @ts-check
 // Visitors and search numbers for a project's website: Google Analytics, Google Search Console and Bing Webmaster Tools.
 // Each function returns { labels, series..., tables } for one site over a range of days (YYYY-MM-DD, both included).
 import { googleFetch } from './google.js';

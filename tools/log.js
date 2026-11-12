@@ -1,4 +1,3 @@
-// @ts-check
 // Terminal lines for each runner, prefixed with its name, so the board and the relays can share one terminal.
 // Colours only when the output is a terminal, and never with NO_COLOR set.
 /** @import { Logger } from '../types/runner' */

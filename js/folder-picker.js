@@ -1,4 +1,3 @@
-// @ts-check
 // A dialog to find a folder on this machine and pick it. The browser cannot read local paths, so it asks the
 // command runner (tools/terminal.js) for each folder's entries.
 import { h, icon } from './ui.js';

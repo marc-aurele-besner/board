@@ -1,4 +1,3 @@
-// @ts-check
 // Syntax colouring for the Dev file reader, IDE style, with no dependency. Each language is a list of rules tried
 // in order at each position; a word is then sorted into keyword, literal, type or function. It reads like an
 // editor's colours without parsing: good enough to read code, not to check it.

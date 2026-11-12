@@ -1,4 +1,3 @@
-// @ts-check
 // A small terminal emulator for the Dev section: enough of xterm for shells, test runners, progress bars and
 // full-screen programs such as the Claude CLI. It keeps a grid of cells and the lines that scrolled off the top;
 // modules/dev.js draws them. No dependency.

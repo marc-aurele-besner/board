@@ -1,4 +1,3 @@
-// @ts-check
 // Gmail, read-only, straight from the browser. Each account signs in on its own and may belong to a project (a
 // project can have several) and carry a project label for the Inbox filter; both are optional. Sign-ins are kept in google.json and renewed by themselves (see js/google.js).
 import { PROFILE_SCOPE, rememberPicture, signIn, saveToken, forgetToken, hasToken, accessToken } from './google.js';

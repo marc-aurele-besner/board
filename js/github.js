@@ -1,4 +1,3 @@
-// @ts-check
 // Open issue and PR counts for GitHub repos, read from the REST API. The runners (tools/jobs/github.js) read every
 // project's repos every 15 minutes into github.json: { repos: { "owner/repo": { at, issues, prs, items, error } } },
 // `items` being the newest 30 open issues and PRs. The board reads that file and asks the runners for a repo it lacks.

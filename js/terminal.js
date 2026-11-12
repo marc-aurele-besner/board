@@ -1,4 +1,3 @@
-// @ts-check
 // The Dev section's calls to the command runner on this machine (tools/terminal.js, started by `bun start`).
 /** @import { RunnerInfo, RunnerSessionList, RunnerStatus, RunnerFolder, RunnerFile, RunnerEvent, RunnerRun, RunnerRemoved, RunnerClaudeExit, RunnerWorktrees, RunnerOutcome, WorktreeUsage, GitStatus, GitDiff, RunnerSearch } from '../types/terminal' */
 /** @import { DevSessionList } from '../types/data' */

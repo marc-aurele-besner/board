@@ -1,4 +1,3 @@
-// @ts-check
 // Google sign-ins without the DOM: google.json's tokens, the token request, and live access tokens. The board and the
 // runners (tools/worker.js) both load it. Only the runners renew a token (tools/jobs/google.js): two renewers on one
 // refresh token would fight. The board asks them through `useRenewer`, see js/google.js.

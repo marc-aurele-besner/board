@@ -1,4 +1,3 @@
-// @ts-check
 // Reads what each task's claude session used (models, tokens, cost, effort) from Claude Code's transcripts into
 // usage.json `dev`. It reads them through tools/usage.js directly, with no HTTP hop to the command runner.
 /** @import { Job } from '../../types/runner' */

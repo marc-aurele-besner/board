@@ -1,4 +1,3 @@
-// @ts-check
 // Three-way merge of a collection: what this tab last read from disk (base), what it holds now (ours) and what is
 // on disk now (theirs). Another tab or browser on the same folder saves whole files too, so without this the last
 // save erased whatever the other one added. Ours is changed in place, so objects the sections still hold (a task

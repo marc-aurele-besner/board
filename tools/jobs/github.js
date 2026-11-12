@@ -1,4 +1,3 @@
-// @ts-check
 // Reads every project's GitHub repos into github.json: open issue and PR counts and the newest open items. The board
 // asks it for one repo it does not hold yet (POST /run/github { repos }).
 /** @import { Job, NodeStore } from '../../types/runner' */

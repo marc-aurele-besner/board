@@ -1,4 +1,3 @@
-// @ts-check
 // Uniswap v3 and v4 liquidity positions, read straight from each chain's node. Read-only: only public addresses are used,
 // never keys. Token prices come from DefiLlama's public price endpoint.
 import { keccak256 } from './keccak.js';

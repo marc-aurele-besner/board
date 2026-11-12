@@ -1,4 +1,3 @@
-// @ts-check
 // Preview deployments of pull requests. Repos on Vercel or Netlify get a bot comment on each PR with the link to the
 // PR's preview, edited as each push deploys again. The runners (tools/jobs/previews.js) read those comments for the
 // PRs of open tasks and recent Cron runs into github.json `previews`:

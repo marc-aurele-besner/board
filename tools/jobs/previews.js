@@ -1,4 +1,3 @@
-// @ts-check
 // Reads the Vercel and Netlify preview links of the PRs of open tasks and recent Cron runs into github.json. The
 // board asks it for PRs it has never read (POST /run/previews { prs }).
 /** @import { Job } from '../../types/runner' */

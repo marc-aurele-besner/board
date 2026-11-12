@@ -1,4 +1,3 @@
-// @ts-check
 // Reads each project website's Bing Webmaster data into webstats.json. Node is not bound by CORS, so it calls Bing
 // directly; Monitoring → Search shows the file. Also answers Settings' key check.
 /** @import { Project } from '../../types/data' */

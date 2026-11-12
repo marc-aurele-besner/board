@@ -1,4 +1,3 @@
-// @ts-check
 // One place that talks to OpenRouter. Each feature names its task; the model comes from Settings.
 import { modelForTask } from './models.js';
 import { globalPrompt } from './prompts.js';

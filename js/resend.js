@@ -1,4 +1,3 @@
-// @ts-check
 // Emails sent and received through Resend, one API key per project. Read-only.
 // Resend sends no CORS header, so a web page cannot read its answers: the runners (tools/jobs/resend.js) read the
 // lists into inbox.json, and the board asks them for one email's body or a key check.

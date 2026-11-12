@@ -1,4 +1,3 @@
-// @ts-check
 // Banners for sections that need a connection set up in Settings. Each one links to the right Settings section.
 import { h, notice } from './ui.js';
 

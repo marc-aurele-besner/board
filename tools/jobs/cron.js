@@ -1,4 +1,3 @@
-// @ts-check
 // Starts the Cron flows that are due, every minute. isDue() runs one missed slot once, not every missed slot, so a Mac
 // waking after a night runs a daily flow once. Only this job runs flows on schedule, so two open tabs and the runners
 // run a due flow once, not three times. The board's Run now asks it for one flow (POST /run/cron { flowId }).

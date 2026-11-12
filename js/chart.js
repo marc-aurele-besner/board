@@ -1,4 +1,3 @@
-// @ts-check
 // Plain SVG bar charts with a tooltip. Only numbers and escaped labels go into the markup.
 import { h } from './ui.js';
 /** @import { Child } from '../types/ui' */

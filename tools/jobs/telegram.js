@@ -1,4 +1,3 @@
-// @ts-check
 // Listens for messages to the bot and turns them into tasks. Nothing else reads the bot once setup is done, so it
 // long-polls: Telegram holds each request open up to WAIT seconds and answers as soon as a message arrives, and the
 // next request starts at once. Setup (Settings → Telegram → Find my chat) reads the bot only while no chat is saved,

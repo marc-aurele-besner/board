@@ -1,4 +1,3 @@
-// @ts-check
 // Solidity ABI encoding and decoding, enough for calls, transactions and event logs: every static and dynamic type,
 // fixed and dynamic arrays, and tuples. Hex strings without 0x inside; 0x at the edges.
 import { keccak256 } from './keccak.js';

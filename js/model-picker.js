@@ -1,4 +1,3 @@
-// @ts-check
 // Model chip and the model dialog: searchable by name, filterable by provider, reads-images and free,
 // sortable by price or context, with per-million-token costs and a details panel.
 import { h, icon } from './ui.js';
