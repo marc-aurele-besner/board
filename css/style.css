@@ -1148,6 +1148,19 @@ button.danger { color: var(--danger); }
 .todo-item.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .todo-item.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
 .todo-item.image-drop, .kanban-card.image-drop { box-shadow: inset 0 0 0 2px var(--accent); }
+/* A drop on a task's middle puts the dragged task under it. */
+.todo-item.drop-inside, .kanban-card.drop-inside { box-shadow: inset 0 0 0 2px var(--accent); }
+.kanban-card.drop-before { box-shadow: 0 -2px 0 var(--accent); }
+.kanban-card.drop-after { box-shadow: 0 2px 0 var(--accent); }
+/* Subtasks sit under their parent, indented by depth, with a line that ties them to it. */
+.todo-item.subtask .todo-title-cell { padding-left: calc(var(--depth, 1) * 20px); position: relative; }
+.todo-item.subtask .todo-title-cell::before { content: ''; position: absolute; left: calc(var(--depth, 1) * 20px - 12px); top: 0; bottom: 0; border-left: 1px solid var(--border); }
+.kanban-card.subtask { margin-left: calc(var(--depth, 1) * 14px); border-left: 2px solid var(--border); }
+.subtask-toggle { display: inline-flex; align-items: center; gap: 2px; padding: 0 4px; height: 22px; border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 12px; cursor: pointer; flex: none; }
+.subtask-toggle:hover { color: var(--text); }
+.subtask-toggle .icon { width: 14px; height: 14px; transition: transform 0.15s ease; }
+.subtask-toggle.collapsed .icon { transform: rotate(-90deg); }
+.subtask-toggle.collapsed { color: var(--accent); }
 .todo-desc:focus, .kanban-details:focus { outline: none; }
 .task-images { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .task-image { position: relative; }
