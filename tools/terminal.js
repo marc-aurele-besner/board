@@ -176,7 +176,10 @@ function record(s, event) {
   const line = lineOf(event);
   if (!s.rewrite) s.pending += line;
   s.timer ||= setTimeout(() => flush(s), FLUSH_MS);
-  for (const res of s.listeners) res.write(line);
+  if (s.listeners.size) {
+    const tagged = lineOf({ ...event, s: s.id });
+    for (const res of s.listeners) res.write(tagged);
+  }
 }
 
 // A session by id, read from disk when the runner has not seen it since it started.
@@ -212,15 +215,41 @@ async function statusOf(id) {
   return { state: exit.stopped ? 'stopped' : exit.code === 0 ? 'done' : 'failed', code: exit.code, cwd };
 }
 
-// The page attaches to a session: everything so far, a `live` marker, then events as they come.
-async function attach(req, res, cors, id) {
-  const s = await sessionOf(id);
+// Each page reads every terminal through one stream: a browser opens only six connections to a host, so a stream
+// per terminal used them all up after a few terminals and the next command never reached the runner. Events carry
+// their session's id as `s`. Streams by the page's client id.
+const streams = new Map();
+const CLIENT_ID = /^[\w-]{1,64}$/;
+
+function openStream(req, res, cors, client) {
   res.writeHead(200, { ...cors, 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' });
-  res.write(lineOf({ t: 'session', known: s.known || s.events.length > 0 }));
-  res.write(s.events.map(lineOf).join(''));
-  res.write(lineOf({ t: 'live' }));
-  s.listeners.add(res);
-  res.on('close', () => s.listeners.delete(res));
+  res.write(lineOf({ t: 'hello' }));
+  streams.get(client)?.end();
+  streams.set(client, res);
+  res.on('close', () => {
+    if (streams.get(client) === res) streams.delete(client);
+    for (const s of sessions.values()) s.listeners.delete(res);
+  });
+}
+
+// The page attaches a session to its stream: everything so far, a `live` marker, then events as they come.
+// Detaching stops them.
+async function attach(req, res, cors, action) {
+  const body = await jsonBody(req, res, cors);
+  if (!body) return;
+  const out = streams.get(String(body.client ?? ''));
+  if (!out) return res.writeHead(404, cors).end('No stream for this page.');
+  const id = String(body.session ?? '');
+  if (!SESSION_ID.test(id)) return res.writeHead(400, cors).end('No terminal session.');
+  if (action === 'detach') {
+    sessions.get(id)?.listeners.delete(out);
+    return res.writeHead(204, cors).end();
+  }
+  const s = await sessionOf(id);
+  const tag = (e) => lineOf({ ...e, s: id });
+  out.write(tag({ t: 'session', known: s.known || s.events.length > 0 }) + s.events.map(tag).join('') + tag({ t: 'live' }));
+  s.listeners.add(out);
+  res.writeHead(204, cors).end();
 }
 
 function readBody(req, max = 100_000) {
@@ -362,7 +391,8 @@ async function control(req, res, cors, action) {
     s.closed = true;
     clearTimeout(s.timer);
     sessions.delete(s.id);
-    for (const listener of s.listeners) listener.end();
+    for (const listener of s.listeners) listener.write(lineOf({ t: 'closed', s: s.id }));
+    s.listeners.clear();
     s.disk.then(() => rm(logFile(s.id), { force: true })).catch(() => {});
   }
   res.writeHead(204, cors).end();
@@ -795,10 +825,10 @@ createServer(async (req, res) => {
     res.end(JSON.stringify({ root: ROOT, home: homedir(), shell: SHELL, max: MAX, running: running.size }));
     return;
   }
-  if (req.method === 'GET' && path === '/attach') {
-    const id = new URL(req.url, 'http://terminal').searchParams.get('session') ?? '';
-    if (!SESSION_ID.test(id)) return res.writeHead(400, cors).end('No terminal session.');
-    return attach(req, res, cors, id);
+  if (req.method === 'GET' && path === '/stream') {
+    const client = new URL(req.url, 'http://terminal').searchParams.get('client') ?? '';
+    if (!CLIENT_ID.test(client)) return res.writeHead(400, cors).end('No client id.');
+    return openStream(req, res, cors, client);
   }
   if (req.method === 'GET' && path === '/sessions') {
     res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(await readList()));
@@ -858,6 +888,7 @@ createServer(async (req, res) => {
     }
     return;
   }
+  if (req.method === 'POST' && (path === '/attach' || path === '/detach') && json) return attach(req, res, cors, path.slice(1));
   if (req.method === 'POST' && path === '/input' && json) return input(req, res, cors);
   if (req.method === 'POST' && path === '/sessions' && json) return saveList(req, res, cors);
   if (req.method === 'POST' && ['/stop', '/clear', '/close'].includes(path) && json) return control(req, res, cors, path.slice(1));
