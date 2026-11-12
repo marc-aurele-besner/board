@@ -1,6 +1,6 @@
 // Local command runner for the Dev section: `bun run terminal` (or `node tools/terminal.js`), or with the board
 // through `bun start`. It runs a command in the user's shell and streams its output back as it comes, and lists
-// folders and reads files for the Dev file explorer (read only), and runs git for Dev's Source Control. It also
+// folders, reads and searches files for the Dev file explorer and Search (read only), and runs git for Dev's Source Control. It also
 // removes the git worktree a task's session made once the task is completed, and only a clean one, and saves the
 // images the page hands to claude as files.
 // The runner owns each terminal session: a command keeps running when the page reloads or closes, and the session's
@@ -590,6 +590,85 @@ async function gitStatus(path) {
   };
 }
 
+// Dev's Search: the lines holding `q` in the files under `path`, through git grep. In a repository it reads
+// tracked and untracked files and skips ignored ones; elsewhere it reads the folder as it is, still skipping what a
+// .gitignore names. Binary files and claude's worktrees are left out. `include` and `exclude` are comma-separated
+// globs, as in an editor: a name with no slash matches at any depth. Answers { matches: [{ path, line, col, text }],
+// more }, stopping at SEARCH_MAX matches.
+const SEARCH_MAX = 2000;
+const SEARCH_TEXT_MAX = 400;
+const SEARCH_MS = 15000;
+const globsOf = (list) => String(list ?? '').split(',').map((g) => g.trim().replace(/^\.\//, '').replace(/\/$/, '')).filter(Boolean)
+  .flatMap((g) => {
+    const glob = g.includes('/') ? g.replace(/^\//, '') : `**/${g}`;
+    return [glob, `${glob}/**`];
+  });
+
+async function searchFiles(params) {
+  const q = params.get('q') ?? '';
+  if (!q) return { matches: [], more: false };
+  if (q.length > 1000) throw new Error('The search is too long.');
+  const dir = await folderOf(params.get('path') ?? '');
+  const inRepo = !!(await repoOf(dir));
+  const args = ['-c', 'core.quotePath=false', 'grep', '-n', '--column', '-I', '-z', '--no-color', ...(inRepo ? ['--untracked'] : ['--no-index', '--exclude-standard'])];
+  if (params.get('case') !== '1') args.push('-i');
+  if (params.get('word') === '1') args.push('-w');
+  args.push(params.get('regex') === '1' ? '-E' : '-F', '-e', q, '--');
+  const include = globsOf(params.get('include'));
+  args.push(...(include.length ? include.map((g) => `:(glob)${g}`) : ['.']));
+  args.push(':(exclude,glob)**/.claude/worktrees/**', ...globsOf(params.get('exclude')).map((g) => `:(exclude,glob)${g}`));
+  return new Promise((done, fail) => {
+    const child = spawn('git', args, { cwd: dir, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', GIT_PAGER: 'cat' } });
+    const matches = [];
+    let buffer = '';
+    let stderr = '';
+    let more = false;
+    let stopped = false;
+    const stop = () => {
+      stopped = true;
+      child.kill();
+    };
+    const timer = setTimeout(() => {
+      more = true;
+      stop();
+    }, SEARCH_MS);
+    child.stdout.setEncoding('utf8').on('data', (chunk) => {
+      if (stopped) return;
+      buffer += chunk;
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const raw of lines) {
+        // path\0line\0column\0text, the column counted in bytes from 1.
+        const [path, line, col, ...rest] = raw.split('\0');
+        let text = rest.join('\0');
+        let at = Math.max(0, Buffer.from(text).subarray(0, Number(col) - 1).toString('utf8').length);
+        // A very long line (minified code) is cut around the match.
+        if (text.length > SEARCH_TEXT_MAX) {
+          const from = Math.max(0, at - 60);
+          text = (from ? '…' : '') + text.slice(from, from + SEARCH_TEXT_MAX);
+          at = at - from + (from ? 1 : 0);
+        }
+        matches.push({ path: join(dir, path), line: Number(line), col: at, text });
+        if (matches.length >= SEARCH_MAX) {
+          more = true;
+          return stop();
+        }
+      }
+    });
+    child.stderr.setEncoding('utf8').on('data', (chunk) => (stderr += chunk));
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      fail(new Error(err.code === 'ENOENT' ? 'git is not installed on this machine.' : err.message));
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      // git grep exits 1 when nothing matched.
+      if (stopped || code === 0 || code === 1) return done({ path: dir, matches, more });
+      fail(new Error(stderr.trim().replace(/^fatal: /, '') || `git grep stopped (${code}).`));
+    });
+  });
+}
+
 // A file's changes (staged, or in the working folder), or a commit's.
 async function gitDiff(params) {
   const root = await repoOf(params.get('path') ?? '');
@@ -749,6 +828,15 @@ createServer(async (req, res) => {
     const params = new URL(req.url, 'http://terminal').searchParams;
     try {
       const body = path === '/git' ? await gitStatus(params.get('path') ?? '') : await gitDiff(params);
+      res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(body));
+    } catch (err) {
+      res.writeHead(400, cors).end(err.message);
+    }
+    return;
+  }
+  if (req.method === 'GET' && path === '/search') {
+    try {
+      const body = await searchFiles(new URL(req.url, 'http://terminal').searchParams);
       res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(body));
     } catch (err) {
       res.writeHead(400, cors).end(err.message);

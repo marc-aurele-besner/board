@@ -88,3 +88,7 @@ export const gitDiff = async (base, params) => (await call(base, `/git/diff?${ne
 
 // Changes the repository: stage, unstage, discard, commit, fetch, pull, push, checkout, branch or init.
 export const gitAction = async (base, path, action, body = {}) => (await call(base, '/git', post({ path, action, ...body }))).json();
+
+// Search in files: the lines holding `q` under `path` ({ path, matches: [{ path, line, col, text }], more }).
+// Options: case, word, regex ('1' to turn on), include and exclude (comma-separated globs).
+export const searchFiles = async (base, params) => (await call(base, `/search?${new URLSearchParams(params)}`)).json();
