@@ -1,3 +1,4 @@
+// @ts-check
 // Calendar: the events of every connected Google account, by day, week or month, with task deadlines on the same days.
 // Events of the range on screen show from the browser's cache at once, then are read again when the cache is stale. Settings → Google Calendar lists the accounts.
 import { h, icon, refreshIcon, notice, statusOf } from '../ui.js';
@@ -10,6 +11,11 @@ import { makeTask } from '../capture.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import { runJob } from '../runners.js';
+/** @import { Store, Task, CalendarAccount, CalendarEvent } from '../../types/data' */
+/**
+ * The part of a timed event on one day, in hours from midnight; placeSegments() adds its column and the column count.
+ * @typedef {{ e: CalendarEvent, top: number, bottom: number, col?: number, cols?: number }} Segment
+ */
 
 const MODES = [['day', 'Day'], ['week', 'Week'], ['month', 'Month']];
 const MONTH_CELL = 3; // events listed in a month cell before "+N more"
@@ -17,28 +23,42 @@ const MONTH_CELL = 3; // events listed in a month cell before "+N more"
 // View state. date: the day the view is anchored on, YYYY-MM-DD.
 // mini: the month the small calendar shows when paged away from the main view. scroll: the time grid's position, kept
 // across redraws.
+/** @type {{ mode: string, date: string, project: string, tasks: boolean, mini: string, scroll: number | null }} */
 const view = { mode: 'week', date: '', project: 'all', tasks: true, mini: '', scroll: null };
 // Events come from calendar.json, which the runners keep read. key: the range and calendars last checked, so a range
 // the file does not hold yet is asked of the runners once; errors: what that ask, or Refresh, reported.
+/** @type {{ key: string, busy: boolean, errors: string[] }} */
 const read = { key: '', busy: false, errors: [] };
 
+/** @param {number} n */
 const pad = (n) => String(n).padStart(2, '0');
+/** @param {Date} d */
 const isoOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+/**
+ * @param {Date} d
+ * @param {number} n
+ */
 const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const anchor = () => (view.date ? eventDate(view.date) : new Date(new Date().setHours(0, 0, 0, 0)));
 // Weeks start on Monday.
+/** @param {Date} d */
 const weekStart = (d) => addDays(d, -((d.getDay() + 6) % 7));
 
 // [first day, day after the last] of what is on screen. A month shows whole weeks.
+/**
+ * @param {string} mode
+ * @param {Date} d
+ */
 function rangeOf(mode, d) {
   if (mode === 'day') return [d, addDays(d, 1)];
   if (mode === 'week') return [weekStart(d), addDays(weekStart(d), 7)];
   const first = weekStart(new Date(d.getFullYear(), d.getMonth(), 1));
   const last = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-  const weeks = Math.ceil((last - first) / (7 * 86400000));
+  const weeks = Math.ceil((last.getTime() - first.getTime()) / (7 * 86400000));
   return [first, addDays(first, weeks * 7)];
 }
 
+/** @param {number} dir */
 function step(dir) {
   const d = anchor();
   if (view.mode === 'day') view.date = isoOf(addDays(d, dir));
@@ -46,16 +66,21 @@ function step(dir) {
   else view.date = isoOf(new Date(d.getFullYear(), d.getMonth() + dir, 1));
 }
 
+/**
+ * @param {string} mode
+ * @param {Date} d
+ */
 function titleOf(mode, d) {
   if (mode === 'day') return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   if (mode === 'month') return d.toLocaleDateString([], { month: 'long', year: 'numeric' });
   const [from, to] = rangeOf('week', d);
   const end = addDays(to, -1);
-  const short = (x) => x.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  const short = (/** @type {Date} */ x) => x.toLocaleDateString([], { month: 'short', day: 'numeric' });
   // "Nov 9 – 15, 2026", or "Nov 30 – Dec 6, 2026" across months.
   return `${short(from)} – ${from.getMonth() === end.getMonth() ? end.getDate() : short(end)}, ${end.getFullYear()}`;
 }
 
+/** @param {number} t */
 function ago(t) {
   const min = Math.round((Date.now() - t) / 60000);
   if (min < 1) return 'just now';
@@ -64,14 +89,17 @@ function ago(t) {
   return hours < 24 ? `${hours} h ago` : new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
+/** @param {Date} d */
 const clock = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+/** @param {CalendarEvent} e */
 const timeLabel = (e) => (e.allDay ? 'All day' : clock(eventDate(e.start)));
 
 // "Wed, Nov 11 · 10:00 – 11:00", or the days of an all-day event.
+/** @param {CalendarEvent} e */
 function whenOf(e) {
   const start = eventDate(e.start);
   const end = eventDate(e.end || e.start);
-  const day = (d) => d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  const day = (/** @type {Date} */ d) => d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
   if (e.allDay) {
     const last = addDays(end, -1);
     return last > start ? `${day(start)} – ${day(last)}` : `${day(start)} · All day`;
@@ -80,6 +108,10 @@ function whenOf(e) {
 }
 
 // True when an event takes up part of the day that starts at `d`.
+/**
+ * @param {CalendarEvent} e
+ * @param {Date} d
+ */
 function onDay(e, d) {
   const next = addDays(d, 1);
   const start = eventDate(e.start);
@@ -88,6 +120,7 @@ function onDay(e, d) {
 }
 
 // Google sends descriptions as light HTML. Parsed in an inert document, so nothing in it runs; only the text is kept.
+/** @param {string} html */
 function plainText(html) {
   if (!/[<&]/.test(html)) return html;
   const marked = html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li)>/gi, '\n');
@@ -95,6 +128,10 @@ function plainText(html) {
 }
 
 // A calendar event as a task in the calendar's project, due on the event's day. Home uses it too.
+/**
+ * @param {Store} store
+ * @param {CalendarEvent} e
+ */
 export function eventAsTask(store, e) {
   const description = [whenOf(e), e.location, e.link].filter(Boolean).join('\n');
   store.update('todos', (d) =>
@@ -105,18 +142,31 @@ export function eventAsTask(store, e) {
 // --- Reading ---
 
 // What a read depends on: the range, the shown calendars and which accounts are connected.
+/**
+ * @param {Store} store
+ * @param {Date} from
+ * @param {Date} to
+ */
 function keyOf(store, from, to) {
   const shown = calendarAccounts(store).map((a) => `${a.email}:${isCalendarConnected(a.email)}:${a.calendars.filter((c) => c.on).map((c) => `${c.id}=${calendarProject(a, c) ?? ''}/${calendarLabel(a, c) ?? ''}`).join(',')}`);
   return `${isoOf(from)}|${isoOf(to)}|${shown.join(';')}`;
 }
 
 // Asks the runners for a range calendar.json does not hold, or (`force`, from Refresh) to read it again now.
+/**
+ * @param {Store} store
+ * @param {string} key
+ * @param {Date} from
+ * @param {Date} to
+ * @param {{ force?: boolean }} [options]
+ */
 function load(store, key, from, to, { force = false } = {}) {
   read.key = key;
   read.busy = true;
   store.refresh();
   const [start, end] = calendarWindow();
   const inWindow = from >= start && to <= end;
+  /** @type {Promise<{ errors: string[] }>} */
   const work = force
     ? runJob('calendar', inWindow ? {} : { from: from.toISOString(), to: to.toISOString() }).then(() => store.sync()).then(() => ({ errors: [] }))
     : calendarEvents(store, from, to);
@@ -125,7 +175,7 @@ function load(store, key, from, to, { force = false } = {}) {
       if (read.key === key) read.errors = errors;
     })
     .catch((err) => {
-      if (read.key === key) read.errors = [err.message];
+      if (read.key === key) read.errors = [/** @type {Error} */ (err).message];
     })
     .finally(() => {
       if (read.key === key) read.busy = false;
@@ -133,14 +183,23 @@ function load(store, key, from, to, { force = false } = {}) {
     });
 }
 
+/**
+ * @param {Store} store
+ * @param {string} clientId
+ * @param {string} email
+ */
 function connectAccount(store, clientId, email) {
   connectCalendar(clientId, email)
     .then(() => store.refresh())
-    .catch((err) => toast(err.message));
+    .catch((/** @type {Error} */ err) => toast(err.message));
 }
 
 // --- Pieces ---
 
+/**
+ * @param {Store} store
+ * @param {CalendarEvent} e
+ */
 function openEvent(store, e) {
   const projects = store.get('projects').projects;
   const project = projects.find((p) => p.id === e.projectId);
@@ -162,6 +221,11 @@ function openEvent(store, e) {
   });
 }
 
+/**
+ * @param {Store} store
+ * @param {CalendarEvent} e
+ * @param {{ time?: boolean }} [options]
+ */
 const eventChip = (store, e, { time = true } = {}) =>
   h('button', {
     type: 'button',
@@ -174,10 +238,15 @@ const eventChip = (store, e, { time = true } = {}) =>
     time && !e.allDay ? h('span', { class: 'cal-time' }, timeLabel(e)) : null,
     h('span', { class: 'cal-chip-text' }, e.title));
 
+/** @param {Task} t */
 const taskChip = (t) =>
   h('a', { class: 'cal-chip cal-task', href: `#/todos?filter=${t.projectId ?? 'personal'}`, title: `Task due: ${t.text}` },
     icon('check-square'), h('span', { class: 'cal-chip-text' }, t.text));
 
+/**
+ * @param {Store} store
+ * @param {Date} d
+ */
 const openDay = (store, d) => () => {
   view.mode = 'day';
   view.date = isoOf(d);
@@ -189,17 +258,31 @@ const openDay = (store, d) => () => {
 const HOUR = 48; // px per hour
 const DAY_MS = 86400000;
 // Whole-day events, and timed ones that last a day or more, go in the strip above the hours.
-const isLong = (e) => e.allDay || eventDate(e.end || e.start) - eventDate(e.start) >= DAY_MS;
+/** @param {CalendarEvent} e */
+const isLong = (e) => e.allDay || eventDate(e.end || e.start).getTime() - eventDate(e.start).getTime() >= DAY_MS;
+/** @param {Date} d */
 const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 // Days between two midnights; rounded, so a daylight-saving change does not shift a column.
-const dayIndex = (from, d) => Math.round((midnight(d) - from) / DAY_MS);
+/**
+ * @param {Date} from
+ * @param {Date} d
+ */
+const dayIndex = (from, d) => Math.round((midnight(d).getTime() - from.getTime()) / DAY_MS);
+/** @param {number} hour */
 const hourLabel = (hour) => new Date(2000, 0, 1, hour).toLocaleTimeString([], { hour: 'numeric' });
 // "2 PM" or "2:30 PM": the minutes only when there are some, as Google's grid shows them.
+/** @param {Date} d */
 const shortClock = (d) => d.toLocaleTimeString([], { hour: 'numeric', ...(d.getMinutes() ? { minute: '2-digit' } : {}) });
 
 // The part of each timed event that falls on day `d`, in hours from midnight.
+/**
+ * @param {CalendarEvent[]} timed
+ * @param {Date} d
+ * @returns {Segment[]}
+ */
 function segmentsOf(timed, d) {
   const next = addDays(d, 1);
+  /** @param {Date} x */
   const hoursOf = (x) => (x >= next ? 24 : x <= d ? 0 : x.getHours() + x.getMinutes() / 60);
   return timed.filter((e) => onDay(e, d)).map((e) => {
     const top = Math.min(hoursOf(eventDate(e.start)), 23.5);
@@ -208,9 +291,15 @@ function segmentsOf(timed, d) {
 }
 
 // Events that overlap share the width: each takes the first free column of its cluster.
+/**
+ * @param {Segment[]} segs
+ * @returns {Required<Segment>[]}
+ */
 function placeSegments(segs) {
   segs.sort((x, y) => x.top - y.top || y.bottom - x.bottom);
+  /** @type {Segment[]} */
   let cluster = [];
+  /** @type {number[]} */
   let ends = [];
   let clusterEnd = -1;
   const close = () => {
@@ -228,9 +317,13 @@ function placeSegments(segs) {
     clusterEnd = Math.max(clusterEnd, s.bottom);
   }
   close();
-  return segs;
+  return /** @type {Required<Segment>[]} */ (segs);
 }
 
+/**
+ * @param {Store} store
+ * @param {Required<Segment>} s
+ */
 function timedBlock(store, s) {
   const { e } = s;
   const short = s.bottom - s.top < 0.75;
@@ -252,6 +345,13 @@ function timedBlock(store, s) {
     e.location && !short ? h('span', { class: 'cal-event-place' }, e.location) : null);
 }
 
+/**
+ * @param {Store} store
+ * @param {Date} from
+ * @param {number} days
+ * @param {CalendarEvent[]} events
+ * @param {Task[]} tasks
+ */
 function gridView(store, from, days, events, tasks) {
   const dates = Array.from({ length: days }, (_, i) => addDays(from, i));
   const today = new Date();
@@ -274,7 +374,8 @@ function gridView(store, from, days, events, tasks) {
   });
   const due = tasks.map((t) => {
     const chip = taskChip(t);
-    chip.style.gridColumn = String(dayIndex(from, eventDate(t.due)) + 1);
+    // Only tasks with a deadline are passed in.
+    chip.style.gridColumn = String(dayIndex(from, eventDate(/** @type {string} */ (t.due))) + 1);
     return chip;
   });
   const timed = events.filter((e) => !isLong(e));
@@ -296,7 +397,7 @@ function gridView(store, from, days, events, tasks) {
           h('span', { class: 'cal-gutter-head muted small' }, 'All day'),
           h('div', { class: 'cal-strip' }, bars, due))
       : null,
-    h('div', { class: 'cal-grid-scroll', onscroll: (ev) => { view.scroll = ev.currentTarget.scrollTop; } },
+    h('div', { class: 'cal-grid-scroll', onscroll: (/** @type {Event} */ ev) => { view.scroll = /** @type {HTMLElement} */ (ev.currentTarget).scrollTop; } },
       h('div', { class: 'cal-grid-row cal-grid-body', style: { ...cols, '--hour': `${HOUR}px`, height: `${24 * HOUR}px` } },
         h('div', { class: 'cal-gutter' },
           Array.from({ length: 23 }, (_, i) => h('span', { class: 'cal-hour', style: { top: `${(i + 1) * HOUR}px` } }, hourLabel(i + 1)))),
@@ -309,6 +410,11 @@ function gridView(store, from, days, events, tasks) {
 }
 
 // Once the grid is on the page: back where it was, or two hours before now, or at 7 in the morning.
+/**
+ * @param {HTMLElement} root
+ * @param {Date} from
+ * @param {number} days
+ */
 function scrollGrid(root, from, days) {
   const el = root.querySelector('.cal-grid-scroll');
   if (!el) return;
@@ -321,7 +427,16 @@ function scrollGrid(root, from, days) {
   });
 }
 
+/**
+ * @param {Store} store
+ * @param {Date} from
+ * @param {Date} to
+ * @param {number} month
+ * @param {CalendarEvent[]} events
+ * @param {Task[]} tasks
+ */
 function monthView(store, from, to, month, events, tasks) {
+  /** @type {Date[]} */
   const days = [];
   for (let d = from; d < to; d = addDays(d, 1)) days.push(d);
   return h('div', { class: 'card cal-month' },
@@ -341,6 +456,10 @@ function monthView(store, from, to, month, events, tasks) {
 }
 
 // The calendars of every account as a searchable tree: each account (with its Google picture) and its calendars.
+/**
+ * @param {Store} store
+ * @param {CalendarAccount[]} accounts
+ */
 function calendarFilter(store, accounts) {
   const all = accounts.flatMap((a) => a.calendars);
   if (!all.length) return null;
@@ -364,7 +483,7 @@ function calendarFilter(store, accounts) {
       ];
     }),
     // Ticking an account shows or hides all of its calendars.
-    onToggle: ({ account, id }, next) => {
+    onToggle: (/** @type {{ account: string, id?: string }} */ { account, id }, /** @type {boolean} */ next) => {
       if (id) return setCalendar(store, account, id, { on: next });
       const a = calendarAccounts(store).find((x) => x.email === account);
       if (a) setCalendarAccount(store, account, { calendars: a.calendars.map((c) => ({ ...c, on: next })) });
@@ -373,12 +492,20 @@ function calendarFilter(store, accounts) {
 }
 
 // A small month to jump to any day, as in Google's side column. Its arrows page through months on their own.
+/**
+ * @param {Store} store
+ * @param {Date} d
+ * @param {Date} from
+ * @param {Date} to
+ */
 function miniMonth(store, d, from, to) {
   const month = view.mini ? eventDate(view.mini) : new Date(d.getFullYear(), d.getMonth(), 1);
   const [first, last] = rangeOf('month', month);
+  /** @type {Date[]} */
   const days = [];
   for (let x = first; x < last; x = addDays(x, 1)) days.push(x);
   const today = new Date().toDateString();
+  /** @param {number} n */
   const page = (n) => () => {
     view.mini = isoOf(new Date(month.getFullYear(), month.getMonth() + n, 1));
     store.refresh();
@@ -410,6 +537,10 @@ function miniMonth(store, d, from, to) {
 
 // --- Page ---
 
+/**
+ * @param {HTMLElement} root
+ * @param {Store} store
+ */
 function draw(root, store) {
   const settings = store.get('settings');
   const clientId = settings.google?.clientId ?? '';
@@ -428,6 +559,7 @@ function draw(root, store) {
   const cached = cachedCalendarEvents(store, from, to);
 
   // Events carry their calendar's label; tasks only have their project's.
+  /** @param {{ projectId: string | null, labelId?: string | null }} x */
   const byProject = (x) => view.project === 'all' ||
     (labelFilter ? underLabel(projects, x.projectId, x.labelId ?? null, labelFilter) : x.projectId === view.project);
   const events = cached.events.filter(byProject);
@@ -443,6 +575,7 @@ function draw(root, store) {
   ]);
 
   // Moving the main view brings the small month back to it.
+  /** @param {() => void} move */
   const go = (move) => () => {
     move();
     view.mini = '';
@@ -489,11 +622,11 @@ function draw(root, store) {
             nullable: true,
             nullLabel: 'All projects',
             className: 'cal-project-pick',
-            onPick: (v) => { view.project = v ?? 'all'; store.refresh(); },
+            onPick: (/** @type {string | null} */ v) => { view.project = v ?? 'all'; store.refresh(); },
           })
         : null,
       h('label', { class: 'check row' },
-        h('input', { type: 'checkbox', checked: view.tasks, onchange: (e) => { view.tasks = e.target.checked; store.refresh(); } }), 'Task deadlines')));
+        h('input', { type: 'checkbox', checked: view.tasks, onchange: (/** @type {Event} */ e) => { view.tasks = /** @type {HTMLInputElement} */ (e.target).checked; store.refresh(); } }), 'Task deadlines')));
 
   const offline = accounts.filter((a) => !isCalendarConnected(a.email));
   const banners = [
@@ -534,7 +667,7 @@ export default {
   collection: null,
   render: draw,
   serialize: () => ({ mode: view.mode === 'week' ? '' : view.mode, date: view.date, project: view.project === 'all' ? '' : view.project, tasks: view.tasks ? '' : '0' }),
-  restore: (p = {}) => {
+  restore: (/** @type {Record<string, string>} */ p = {}) => {
     view.mode = MODES.some(([k]) => k === p.mode) ? p.mode : 'week';
     view.date = /^\d{4}-\d{2}-\d{2}$/.test(p.date ?? '') ? p.date : '';
     view.project = p.project || 'all';
