@@ -3,8 +3,9 @@
 import { h, icon, refreshIcon, notice, statusOf } from '../ui.js';
 import { projectIcon, projectTree, labelsOf, labelColor, underLabel } from './projects.js';
 import { setupBanner, settingsHref } from '../integrations.js';
-import { syncInbox, readEmail, keyedProjects } from '../resend.js';
-import { syncGmail, readGmail, gmailAccounts, gmailProjects, connectGmail, isGmailConnected } from '../gmail.js';
+import { readEmail, keyedProjects } from '../resend.js';
+import { runJob, jobState, readRunnersNow } from '../runners.js';
+import { readGmail, gmailAccounts, gmailProjects, connectGmail, isGmailConnected } from '../gmail.js';
 import { accountAvatar } from '../google.js';
 import { makeTask } from '../capture.js';
 import { pickChip } from '../inline.js';
@@ -47,7 +48,8 @@ const STATUS = {
 // collapsed: directories whose mailboxes are folded away. dirsOpen: whether the directory list is open (null: by screen width).
 const view = { folder: 'inbox', project: 'all', mailbox: 'all', status: 'all', flagged: false, query: '', limit: STEP, open: '', collapsed: new Set(), dirsOpen: null };
 // The last read: whether one runs now, what failed, and which Gmail accounts need a sign-in first.
-const read = { busy: false, errors: [], waiting: [], asked: false };
+// errors: what the last Refresh reported, or null to show what the runners' last reads reported.
+const read = { busy: false, errors: null, waiting: [] };
 
 // The body of an email, from the service it came through.
 const readBody = (store, e) => (e.source === 'gmail' ? readGmail(e) : readEmail(store, e));
@@ -107,29 +109,36 @@ function groupOf(at) {
 
 const taskOf = (store, e) => (e.taskId ? store.get('todos').items.find((t) => t.id === e.taskId) ?? null : null);
 
+// The runners read the mail (tools/jobs/gmail.js and resend.js); Refresh asks them to read now. The new rows arrive
+// through inbox.json, and the answer only drives the button and the errors.
 function refresh(store) {
   if (read.busy) return;
   read.busy = true;
-  read.asked = true;
   store.refresh();
-  const both = async () => {
-    const resend = keyedProjects(store).length ? await syncInbox(store) : { added: 0, errors: [] };
-    const gmail = gmailAccounts(store).length ? await syncGmail(store) : { added: 0, errors: [], waiting: [] };
-    return { added: resend.added + gmail.added, errors: [...resend.errors, ...gmail.errors], waiting: gmail.waiting };
-  };
-  both()
-    .then(({ added, errors, waiting }) => {
-      read.errors = errors;
-      read.waiting = waiting;
+  const jobs = [keyedProjects(store).length ? 'resend' : '', gmailAccounts(store).length ? 'gmail' : ''].filter(Boolean);
+  Promise.allSettled(jobs.map((id) => runJob(id)))
+    .then(async (results) => {
+      const added = results.reduce((n, r) => n + (r.value?.added ?? 0), 0);
+      const failed = results.filter((r) => r.status === 'rejected').map((r) => ({ projectIds: [], text: r.reason.message }));
+      read.errors = failed.length ? failed : null;
+      await store.sync();
+      await readRunnersNow(store);
       if (added) toast(`${added} new email${added === 1 ? '' : 's'}`);
-    })
-    .catch((err) => {
-      read.errors = [{ projectIds: [], text: err.message }];
     })
     .finally(() => {
       read.busy = false;
       store.refresh();
     });
+}
+
+// What the runners' last reads reported: errors per project, and Gmail accounts not connected.
+function lastReads() {
+  const gmail = jobState('gmail');
+  const resend = jobState('resend');
+  const errors = [gmail, resend].flatMap((s) => (s?.ok === false ? [{ projectIds: [], text: s.error }] : s?.errors ?? []));
+  const waiting = String(gmail?.waiting ?? '').match(/^Not connected: (.*)\.$/)?.[1]?.split(', ') ?? [];
+  const at = [gmail?.lastOkAt, resend?.lastOkAt].filter(Boolean).sort().pop() ?? '';
+  return { errors, waiting, at };
 }
 
 // Signs in to a Gmail account from a click, then reads the mail again.
@@ -454,10 +463,11 @@ function draw(root, store) {
   const keyed = store.get('projects').projects.filter((p) => withMail.has(p.id));
   const projects = new Map(store.get('projects').projects.map((p) => [p.id, p]));
   const { emails, syncedAt } = store.get(COLLECTION);
-  // Read once on the first visit of the session; afterwards only when asked.
   // A Gmail account needs no project, so it counts on its own.
   const hasMail = keyed.length > 0 || accounts.length > 0;
-  if (hasMail && !read.asked) setTimeout(() => refresh(store), 0);
+  const last = lastReads();
+  read.waiting = last.waiting;
+  const errors = read.errors ?? last.errors;
   const hasNone = accounts.some((a) => !a.projectId) || emails.some((e) => !e.projectId);
 
   const folder = FOLDERS.find(([key]) => key === view.folder) ?? FOLDERS[0];
@@ -531,7 +541,7 @@ function draw(root, store) {
         h('h2', null, 'Inbox'),
         h('p', { class: 'muted small' },
           `Emails sent and received through ${[resendKeyed.length ? 'Resend' : '', accounts.length ? 'Gmail' : ''].filter(Boolean).join(' and ') || 'Resend or Gmail'}, for ${keyed.length} project${keyed.length === 1 ? '' : 's'}.`,
-          syncedAt ? ` Read ${dateOf(syncedAt)}.` : '')),
+          last.at || syncedAt ? ` Read ${dateOf(last.at || syncedAt)}.` : '')),
       h('button', { type: 'button', class: 'btn-small', disabled: read.busy || !hasMail, onclick: () => refresh(store) },
         refreshIcon(read.busy), read.busy ? 'Reading…' : 'Refresh')),
 
@@ -547,8 +557,8 @@ function draw(root, store) {
             h('button', { type: 'button', class: 'btn-small', onclick: () => connectAndRead(store, a) }, icon('mail'), a)),
         })
       : null,
-    read.errors.map((err) => notice({
-      text: err.projectIds.length ? `${err.projectIds.map(nameOfProject).join(', ')}: ${err.text}` : err.text,
+    errors.map((err) => notice({
+      text: err.projectIds?.length ? `${err.projectIds.map(nameOfProject).join(', ')}: ${err.text}` : err.text,
     })),
 
     hasMail || emails.length
@@ -634,6 +644,8 @@ export default {
   icon: 'mail',
   collection: COLLECTION,
   defaults: { emails: [], syncedAt: '' },
+  // Redrawn when the runners' heartbeat changes: it holds the last read's time and errors.
+  readsRunners: true,
   render: draw,
   serialize: () => ({
     folder: view.folder === 'inbox' ? '' : view.folder,
