@@ -1742,12 +1742,14 @@ const STATE_TEXT = { waiting: 'finished, waiting for input', done: 'finished', f
 const FILE_STATUS = { A: 'added', M: 'modified', D: 'deleted', R: 'renamed', C: 'copied', T: 'type changed', '?': 'untracked' };
 const OUTPUT_KEPT = 4000;
 
-// What the terminal left: the runner's git view of the folder it worked in, and the links in its output. A PR the
-// prompt already named is not counted as one it opened.
+// What the terminal left: claude's last answer and the files it wrote, the runner's git view of the folder it worked
+// in, and the links in its output and answer. A PR the prompt already named is not counted as one it opened.
 /**
  * What the runner's git view of a folder holds, as far as it is read here (tools/terminal.js).
  * @typedef {object} RawOutcome
  * @property {string} [output]
+ * @property {string} [reply]
+ * @property {string[]} [written]
  * @property {boolean} [repo]
  * @property {string} [error]
  * @property {string} [branch]
@@ -1775,8 +1777,9 @@ async function devOutcome(store, { session, path, prompt, task, json }) {
     raw.error = /** @type {Error} */ (err).message;
   }
   const text = plainOutput(raw.output ?? '').replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  const answer = (raw.reply ?? '').trim();
   const known = new Set(findGithubLinks(prompt).map((l) => l.url.toLowerCase()));
-  const links = findGithubLinks(text).filter((l) => !known.has(l.url.toLowerCase()));
+  const links = [...new Map(findGithubLinks(`${text}\n${answer}`).map((l) => [l.url.toLowerCase(), l])).values()].filter((l) => !known.has(l.url.toLowerCase()));
   // A PR Dev already added to the task (its link watcher reads the terminal while Dev shows it) counts too.
   // A task removed since has no PRs: prsOf() reads only its prs.
   const saved = task ? prsOf(store.get('todos').items.find((t) => t.id === task.id) ?? /** @type {Task} */ ({})) : [];
@@ -1802,8 +1805,11 @@ async function devOutcome(store, { session, path, prompt, task, json }) {
       pr: prs.length ? pick(/** @type {CronPr} */ (prs.at(-1))) : null,
       prs: prs.map(pick),
       issues: links.filter((l) => l.kind === 'issue').map(pick),
+      answer,
+      written: raw.written ?? [],
       output: text.slice(-OUTPUT_KEPT),
-      ...(json ? { json: lastJson(text) ?? null } : {}),
+      // The answer as claude wrote it, unwrapped by the terminal; the output when there is none.
+      ...(json ? { json: lastJson(answer) ?? lastJson(text) ?? null } : {}),
       ...(raw.error ? { error: raw.error } : {}),
     },
   };
@@ -1830,14 +1836,17 @@ function outcomeText(o, { terminal, where, state }) {
     if (rest) lines.push(`- and ${rest} more`);
   } else if (o.repo) lines.push('', 'No file changed.');
   if (o.uncommitted) lines.push(`${o.uncommitted} change${o.uncommitted === 1 ? ' is' : 's are'} not committed.`);
+  if (o.written.length) lines.push('', 'Files claude wrote:', ...o.written.map((f) => `- ${f}`));
   if ('json' in o) lines.push('', o.json == null ? 'No JSON found in its final output.' : `JSON output:\n${JSON.stringify(o.json, null, 2)}`);
   if (o.error) lines.push(`Could not read the outcome: ${o.error}`);
-  if (o.output) lines.push('', 'End of the terminal output:', o.output.split('\n').slice(-40).join('\n'));
+  // claude's answer reads better than its screen, which the terminal output is.
+  if (o.answer) lines.push('', 'Its final answer:', o.answer);
+  else if (o.output) lines.push('', 'End of the terminal output:', o.output.split('\n').slice(-40).join('\n'));
   return lines.join('\n');
 }
 
 // What a Dev step gives in a test that starts no terminal, so later steps can pick its keys already.
-const OUTCOME_SHAPE = { terminal: 0, session: '', branch: '', base: '', commit: '', commitShort: '', commitSubject: '', commits: [], files: [], pr: null, prs: [], issues: [], output: '' };
+const OUTCOME_SHAPE = { terminal: 0, session: '', branch: '', base: '', commit: '', commitShort: '', commitSubject: '', commits: [], files: [], pr: null, prs: [], issues: [], answer: '', written: [], output: '' };
 
 // Starts claude (or a command) in a new Dev terminal. With steps after it, the run waits for the terminal and passes
 // on what it did; otherwise it moves on at once. The task made earlier in the run goes with it, as when it is handed
