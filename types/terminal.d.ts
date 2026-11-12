@@ -133,21 +133,24 @@ export interface GitCommit {
 }
 
 // GET /git: { repo: false, path } outside a repository.
-export interface GitStatus {
-  repo: boolean;
-  path?: string;
-  root?: string;
-  branch?: string;
-  oid?: string;
-  upstream?: string;
-  ahead?: number;
-  behind?: number;
-  files?: GitFile[];
+export type GitStatus = { repo: false; path: string } | GitRepoStatus;
+
+export interface GitRepoStatus {
+  repo: true;
+  root: string;
+  // '' when detached.
+  branch: string;
+  // '' before the first commit.
+  oid: string;
+  upstream: string;
+  ahead: number;
+  behind: number;
+  files: GitFile[];
   // Files left out of `files`.
-  more?: number;
-  branches?: string[];
-  remotes?: string[];
-  log?: GitCommit[];
+  more: number;
+  branches: string[];
+  remotes: string[];
+  log: GitCommit[];
 }
 
 // GET /git/diff: a file's diff, or a commit's with `commit`.

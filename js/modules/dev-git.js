@@ -1,3 +1,4 @@
+// @ts-check
 // Dev's Source Control, as in VS Code or Cursor: the workspace's branch, its changes (staged, not staged, in
 // conflict), a commit box, sync with the remote, and recent commits. A changed file or a commit opens as a diff in
 // the editor. git runs through the runner on this machine, in the repository that holds the workspace folder.
@@ -6,6 +7,10 @@ import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
 import { gitStatus, gitDiff, gitAction } from '../terminal.js';
 import { openDiff, openFile, baseName, panelHead, panelAction } from './dev-files.js';
+/** @import { DevContext, FileDecor } from '../../types/dev' */
+/** @import { GitStatus, GitRepoStatus, GitFile, GitCommit } from '../../types/terminal' */
+/** @import { Child } from '../../types/ui' */
+/** @import { IconName } from '../../types/data' */
 
 // The status is read again when the panel is drawn after this long, and after every action.
 const STALE_MS = 5000;
@@ -13,12 +18,19 @@ const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
 // View state: the folder, what git said about it, the action running, its error, the commit message per folder,
 // and the folded sections.
+/**
+ * @type {{ path: string, status: GitStatus | null, loadError: string, loading: boolean, at: number, busy: string, error: string,
+ *   messages: Map<string, string>, folded: Set<string>, decor: Map<string, FileDecor> }}
+ */
 const state = { path: '', status: null, loadError: '', loading: false, at: 0, busy: '', error: '', messages: new Map(), folded: new Set(['log']), decor: new Map() };
 
-const fullPath = (rel) => `${state.status.root}/${rel}`;
-const dirOf = (rel) => rel.split('/').slice(0, -1).join('/');
+// Only called while the status is a repository's.
+const fullPath = (/** @type {string} */ rel) => `${/** @type {GitRepoStatus} */ (state.status).root}/${rel}`;
+const dirOf = (/** @type {string} */ rel) => rel.split('/').slice(0, -1).join('/');
 
 // What a status letter means, and its colour in the tree and the lists.
+/** @typedef {[string, string, string]} Letter A letter, its tone and what it means. */
+/** @type {Record<string, Letter>} */
 const LETTERS = {
   M: ['M', 'git-mod', 'Modified'],
   T: ['T', 'git-mod', 'Type changed'],
@@ -28,10 +40,12 @@ const LETTERS = {
   D: ['D', 'git-del', 'Deleted'],
   '?': ['U', 'git-new', 'Untracked'],
 };
+/** @type {Letter} */
 const CONFLICT = ['!', 'git-conflict', 'Conflict'];
-const describe = (letter) => LETTERS[letter] ?? ['M', 'git-mod', 'Modified'];
+const describe = (/** @type {string} */ letter) => LETTERS[letter] ?? ['M', 'git-mod', 'Modified'];
 
 // The tree's colours: changed files by full path, and the folders holding them.
+/** @param {GitStatus} status */
 function buildDecor(status) {
   state.decor = new Map();
   if (!status?.repo) return;
@@ -48,10 +62,11 @@ function buildDecor(status) {
   }
 }
 
-export const decorOf = (path) => state.decor.get(path) ?? null;
+export const decorOf = (/** @type {string} */ path) => state.decor.get(path) ?? null;
 export const changeCount = () => (state.status?.repo ? state.status.files.length : 0);
 
 // Reads the repository holding `path`, unless it was read a moment ago. `force` reads it now.
+/** @param {DevContext} ctx @param {string} path @param {{ force?: boolean }} [options] */
 export async function refreshGit(ctx, path, { force = false } = {}) {
   if (path !== state.path) {
     Object.assign(state, { path, status: null, loadError: '', at: 0, error: '' });
@@ -65,7 +80,7 @@ export async function refreshGit(ctx, path, { force = false } = {}) {
     Object.assign(state, { status, loadError: '' });
     buildDecor(status);
   } catch (err) {
-    if (path === state.path) state.loadError = err.message;
+    if (path === state.path) state.loadError = /** @type {Error} */ (err).message;
   } finally {
     state.loading = false;
     state.at = Date.now();
@@ -73,6 +88,7 @@ export async function refreshGit(ctx, path, { force = false } = {}) {
   }
 }
 
+/** @param {DevContext} ctx @param {string} action @param {object} [body] */
 async function act(ctx, action, body = {}, done = '') {
   if (state.busy) return;
   state.busy = action;
@@ -83,7 +99,7 @@ async function act(ctx, action, body = {}, done = '') {
     if (done) toast(done);
     return true;
   } catch (err) {
-    state.error = err.message;
+    state.error = /** @type {Error} */ (err).message;
     return false;
   } finally {
     state.busy = '';
@@ -91,10 +107,11 @@ async function act(ctx, action, body = {}, done = '') {
   }
 }
 
+/** @param {DevContext} ctx @param {GitFile} f @param {boolean} staged */
 function showDiff(ctx, f, staged) {
   const where = f.conflict ? 'Conflict' : staged ? 'Staged' : 'Working tree';
   openDiff(ctx, {
-    key: `git:${staged ? 'staged' : 'work'}:${state.status.root}/${f.path}`,
+    key: `git:${staged ? 'staged' : 'work'}:${/** @type {GitRepoStatus} */ (state.status).root}/${f.path}`,
     name: `${baseName(f.path)} (${where.toLowerCase()})`,
     title: `${f.orig ? `${f.orig} → ` : ''}${f.path} · ${where}`,
     file: (staged ? f.index : f.work) === 'D' ? '' : fullPath(f.path),
@@ -102,6 +119,7 @@ function showDiff(ctx, f, staged) {
   });
 }
 
+/** @param {DevContext} ctx @param {GitCommit} c */
 function showCommit(ctx, c) {
   openDiff(ctx, {
     key: `git:commit:${c.hash}`,
@@ -111,6 +129,7 @@ function showCommit(ctx, c) {
   });
 }
 
+/** @param {DevContext} ctx @param {GitFile[]} files */
 function confirmDiscard(ctx, files) {
   const untracked = files.filter((f) => f.untracked).map((f) => f.path);
   const one = files.length === 1;
@@ -135,10 +154,12 @@ function confirmDiscard(ctx, files) {
 }
 
 // Switch to a branch, or create one from where the repository is now.
+/** @param {DevContext} ctx */
 function branchDialog(ctx) {
-  const { branches, branch } = state.status;
+  // Opened from a repository's panel.
+  const { branches, branch } = /** @type {GitRepoStatus} */ (state.status);
   const list = h('div', { class: 'scm-branches' });
-  const draw = (q) => list.replaceChildren(...branches.filter((b) => b.toLowerCase().includes(q.toLowerCase())).map((b) =>
+  const draw = (/** @type {string} */ q) => list.replaceChildren(...branches.filter((b) => b.toLowerCase().includes(q.toLowerCase())).map((b) =>
     h('button', {
       type: 'button',
       class: b === branch ? 'fp-row active' : 'fp-row',
@@ -152,13 +173,13 @@ function branchDialog(ctx) {
   const dialog = openDialog({
     title: 'Branches',
     body: h('div', { class: 'stack' },
-      h('input', { type: 'search', placeholder: 'Find a branch', 'aria-label': 'Find a branch', oninput: (e) => draw(e.currentTarget.value) }),
+      h('input', { type: 'search', placeholder: 'Find a branch', 'aria-label': 'Find a branch', oninput: (/** @type {Event} */ e) => draw(/** @type {HTMLInputElement} */ (e.currentTarget).value) }),
       list,
       h('form', {
         class: 'row',
-        onsubmit: (e) => {
+        onsubmit: (/** @type {SubmitEvent} */ e) => {
           e.preventDefault();
-          const name = String(new FormData(e.currentTarget).get('branch') ?? '').trim();
+          const name = String(new FormData(/** @type {HTMLFormElement} */ (e.currentTarget)).get('branch') ?? '').trim();
           if (!name) return;
           dialog.close();
           act(ctx, 'branch', { branch: name }, `Created ${name}`);
@@ -170,6 +191,7 @@ function branchDialog(ctx) {
   });
 }
 
+/** @param {DevContext} ctx @param {boolean} all */
 function commit(ctx, all) {
   const message = (state.messages.get(state.path) ?? '').trim();
   if (!message) {
@@ -183,11 +205,13 @@ function commit(ctx, all) {
   });
 }
 
+/** @param {DevContext} ctx @param {GitFile} f @param {'staged' | 'work'} side */
 function fileRow(ctx, f, side) {
   const staged = side === 'staged';
   const [letter, tone, label] = f.conflict ? CONFLICT : describe(staged ? f.index : f.work === '?' ? '?' : f.work);
   const dir = dirOf(f.path);
   const busy = !!state.busy;
+  /** @type {(name: IconName, title: string, onclick: () => void) => HTMLButtonElement} */
   const button = (name, title, onclick) => h('button', { type: 'button', class: 'tree-action', title, 'aria-label': `${title}: ${f.path}`, disabled: busy, onclick }, icon(name));
   return h('div', { class: 'tree-row scm-row' },
     h('button', { type: 'button', class: `tree-item ${tone}`, title: `${f.orig ? `${f.orig} → ` : ''}${f.path} · ${label}`, onclick: () => showDiff(ctx, f, staged) },
@@ -200,6 +224,7 @@ function fileRow(ctx, f, side) {
     h('span', { class: `scm-letter ${tone}`, title: label }, letter));
 }
 
+/** @param {DevContext} ctx @param {string} key @param {string} title @param {number | null} count @param {Child} actions @param {Child} rows */
 function section(ctx, key, title, count, actions, rows) {
   const open = !state.folded.has(key);
   return h('div', { class: 'scm-section' },
@@ -219,7 +244,7 @@ function section(ctx, key, title, count, actions, rows) {
     open ? rows : null);
 }
 
-const ago = (at) => {
+const ago = (/** @type {number} */ at) => {
   const s = Math.max(0, (Date.now() - at) / 1000);
   if (s < 60) return 'now';
   if (s < 3600) return `${Math.floor(s / 60)}m`;
@@ -228,11 +253,12 @@ const ago = (at) => {
   return new Date(at).toLocaleDateString();
 };
 
+/** @param {DevContext} ctx @param {GitRepoStatus} st */
 function syncButtons(ctx, st) {
   const busy = !!state.busy;
   if (!st.remotes.length) return [];
   // The action running turns its button's icon into a spinner.
-  const glyph = (action, name) => (state.busy === action ? h('span', { class: 'spin-icon' }, icon('refresh')) : icon(name));
+  const glyph = (/** @type {string} */ action, /** @type {IconName} */ name) => (state.busy === action ? h('span', { class: 'spin-icon' }, icon('refresh')) : icon(name));
   if (!st.upstream && st.branch) {
     return [h('button', { type: 'button', class: 'btn-small', disabled: busy || !st.oid, title: `Push ${st.branch} and track it on the remote`, onclick: () => act(ctx, 'push', {}, `Published ${st.branch}`) }, glyph('push', 'arrow-up'), 'Publish')];
   }
@@ -244,8 +270,10 @@ function syncButtons(ctx, st) {
   ];
 }
 
+/** @param {DevContext} ctx */
 function repoBody(ctx) {
-  const st = state.status;
+  // Drawn only for a repository.
+  const st = /** @type {GitRepoStatus} */ (state.status);
   const conflicts = st.files.filter((f) => f.conflict);
   const staged = st.files.filter((f) => !f.conflict && !f.untracked && f.index !== '.');
   const work = st.files.filter((f) => !f.conflict && (f.untracked || f.work !== '.'));
@@ -260,8 +288,8 @@ function repoBody(ctx) {
     placeholder: `Message (${isMac ? '⌘' : 'Ctrl'}+Enter to commit on ${st.branch || 'HEAD'})`,
     'aria-label': 'Commit message',
     value: state.messages.get(state.path) ?? '',
-    oninput: (e) => state.messages.set(state.path, e.currentTarget.value),
-    onkeydown: (e) => {
+    oninput: (/** @type {Event} */ e) => state.messages.set(state.path, /** @type {HTMLTextAreaElement} */ (e.currentTarget).value),
+    onkeydown: (/** @type {KeyboardEvent} */ e) => {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && canCommit) {
         e.preventDefault();
         commit(ctx, all);
@@ -309,6 +337,7 @@ function repoBody(ctx) {
 }
 
 // The Source Control side panel. `picker` chooses the workspace, `switcher` the side panel.
+/** @param {DevContext} ctx @param {Child} picker @param {Child} switcher @param {string} path */
 export function sourceControl(ctx, picker, switcher, path) {
   const st = state.status;
   let body;
