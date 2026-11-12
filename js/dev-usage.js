@@ -9,8 +9,9 @@ import { statusOf } from './ui.js';
 
 const COLLECTION = 'usage';
 const DAY = 86400000;
-// Records read in one call to the runner, the most recent first.
-const BATCH = 40;
+// Records read in one call to the runner, the most recent first; the runner reads up to 200 (tools/usage.js), and
+// caches each transcript until it changes.
+const BATCH = 200;
 /** @type {(keyof WorktreeUsage)[]} */
 const FIELDS = ['sessions', 'billing', 'models', 'cost', 'extraCost', 'duration', 'apiDuration', 'linesAdded', 'linesRemoved', 'efforts', 'replies', 'start', 'end'];
 
@@ -75,7 +76,9 @@ export async function refreshDevUsage(store, read = (list) => worktreeUsage(runn
   // Records saved before the cost was split into included and extra are read once more for the split.
   const records = Object.values(devUsage(store)).filter((r) => r.cwd && (live(store, r) || r.billing === undefined));
   if (!records.length) return;
-  records.sort((a, b) => (b.end ?? 0) - (a.end ?? 0));
+  // A record not read yet has no `end`: its `added` stands in, so a new session is read first rather than never.
+  const recent = (/** @type {DevUsage} */ r) => Math.max(r.end ?? 0, Date.parse(r.added ?? '') || 0);
+  records.sort((a, b) => recent(b) - recent(a));
   busy = true;
   try {
     const asked = records.slice(0, BATCH);
