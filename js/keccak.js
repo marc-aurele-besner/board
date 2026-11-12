@@ -1,3 +1,4 @@
+// @ts-check
 // Keccak-256, the hash Ethereum uses. Uniswap v4 names each pool by the hash of its key, and nothing on chain
 // returns that id from a position, so the board computes it. BigInt lanes: slow, but it hashes a few keys per read.
 
@@ -5,6 +6,7 @@ const MASK = (1n << 64n) - 1n;
 // Rotation offset of each lane, indexed x + 5y.
 const ROT = [0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14];
 // Round constants, from the standard's linear feedback shift register.
+/** @type {bigint[]} */
 const RC = [];
 for (let round = 0, R = 1; round < 24; round++) {
   let rc = 0n;
@@ -15,10 +17,13 @@ for (let round = 0, R = 1; round < 24; round++) {
   RC.push(rc);
 }
 
-const rotl = (v, n) => (n === 0 ? v : ((v << BigInt(n)) | (v >> BigInt(64 - n))) & MASK);
+const rotl = (/** @type {bigint} */ v, /** @type {number} */ n) => (n === 0 ? v : ((v << BigInt(n)) | (v >> BigInt(64 - n))) & MASK);
 
+/** @param {bigint[]} s */
 function permute(s) {
+  /** @type {bigint[]} */
   const C = new Array(5);
+  /** @type {bigint[]} */
   const B = new Array(25);
   for (let round = 0; round < 24; round++) {
     for (let x = 0; x < 5; x++) C[x] = s[x] ^ s[x + 5] ^ s[x + 10] ^ s[x + 15] ^ s[x + 20];
@@ -37,6 +42,7 @@ function permute(s) {
 }
 
 // The Keccak-256 hash of hex-encoded bytes, as 0x-prefixed hex.
+/** @param {string} hex @returns {string} */
 export function keccak256(hex) {
   const clean = String(hex).replace(/^0x/, '');
   const RATE = 136;
