@@ -1,10 +1,13 @@
+// @ts-check
 // Uniswap v3 and v4 liquidity positions, read straight from each chain's node. Read-only: only public addresses are used,
 // never keys. Token prices come from DefiLlama's public price endpoint.
 import { keccak256 } from './keccak.js';
+/** @import { Chain, Position, PoolState, Swap, ListedToken, RpcLog, Receipt, TxSource, BigIntish, V4Deployment } from '../types/uniswap' */
+/** @import { UniswapSettings, PositionEvent, PositionHistory, V4Scan, Store } from '../types/data' */
 
 // Chain logos from Trust Wallet's asset repository. Unichain and Robinhood Chain are not in it; both pay gas in ETH,
 // so they use ETH's logo.
-const trustLogo = (folder) => `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${folder}/info/logo.png`;
+const trustLogo = (/** @type {string} */ folder) => `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${folder}/info/logo.png`;
 const ETH_LOGO = trustLogo('ethereum');
 
 // The chains the LP tab reads. Each address is Uniswap's own deployment on that chain, checked on-chain.
@@ -13,6 +16,7 @@ const ETH_LOGO = trustLogo('ethereum');
 // v4.start is the first block worth searching for v4 positions (the deployment, or a day before it).
 // span is the widest block range the default node accepts in one log search.
 const ETH = { symbol: 'ETH', coingecko: 'ethereum', logo: ETH_LOGO };
+/** @type {Chain[]} */
 export const CHAINS = [
   { id: 1, name: 'Ethereum', rpc: 'https://ethereum.publicnode.com', span: 10000, prices: 'ethereum', app: 'ethereum', logo: ETH_LOGO, native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
     v4: { positions: '0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e', stateView: '0x7ffe42c4a5deea5b0fec41c94c136cf115597227', start: 21689089 } },
@@ -37,6 +41,7 @@ export const CHAINS = [
 
 // More public nodes per chain, each checked to answer browser calls. With no node saved in Settings, a chain is
 // read from its own node above plus these, which share the load and stand in when one stops answering.
+/** @type {Record<number, string[]>} */
 const MORE_NODES = {
   1: ['https://eth.drpc.org', 'https://1rpc.io/eth', 'https://rpc.mevblocker.io'],
   8453: ['https://mainnet.base.org', 'https://base.drpc.org', 'https://1rpc.io/base'],
@@ -53,33 +58,38 @@ for (const c of CHAINS) c.rpc = [c.rpc, ...(MORE_NODES[c.id] ?? [])].join(' ');
 
 // v4 pools hold the chain's native coin directly, as the zero address.
 export const NATIVE = '0x0000000000000000000000000000000000000000';
-export const isNative = (address) => String(address).toLowerCase() === NATIVE;
+export const isNative = (/** @type {unknown} */ address) => String(address).toLowerCase() === NATIVE;
 
 // Token logos from Uniswap's default token list, one file per chain on GitHub (which allows browser reads),
 // keyed "chainId:address" in lowercase. Fetched once; a token the list does not carry gets a monogram instead.
 const TOKEN_LIST_DIR = 'https://raw.githubusercontent.com/Uniswap/default-token-list/main/src/tokens';
+/** @type {Record<number, string>} */
 const TOKEN_LIST_FILE = { 1: 'mainnet', 8453: 'base', 42161: 'arbitrum', 10: 'optimism', 137: 'polygon', 56: 'bnb', 43114: 'avalanche', 130: 'unichain', 4663: 'robinhood', 324: 'zksync' };
+/** @type {Promise<ListedToken[]> | null} */
 let list = null;
+/** @type {Promise<Map<string, string>> | null} */
 let logos = null;
 // Every token on the lists: { chainId, address, symbol, decimals, logoURI }. A list that fails to load is left out.
+/** @returns {Promise<ListedToken[]>} */
 export function tokenList() {
   list ??= Promise.allSettled(Object.values(TOKEN_LIST_FILE).map(async (file) => {
     const res = await fetch(`${TOKEN_LIST_DIR}/${file}.json`);
     if (!res.ok) throw new Error(String(res.status));
-    return res.json();
+    return /** @type {Promise<ListedToken[]>} */ (res.json());
   })).then((results) => {
-    const ok = results.filter((r) => r.status === 'fulfilled' && Array.isArray(r.value));
+    const ok = /** @type {PromiseFulfilledResult<ListedToken[]>[]} */ (results.filter((r) => r.status === 'fulfilled' && Array.isArray(r.value)));
     // A list that failed to load is asked for again next time, so its tokens are not missing for the whole session.
     if (ok.length < results.length) list = null;
     return ok.flatMap((r) => r.value);
   });
   return list;
 }
+/** @returns {Promise<Map<string, string>>} */
 export function tokenLogos() {
   logos ??= tokenList().then((tokens) => new Map(tokens
     .filter((t) => t.logoURI)
-    .map((t) => [`${t.chainId}:${t.address.toLowerCase()}`, t.logoURI])
-    .concat(CHAINS.map((c) => [`${c.id}:${NATIVE}`, c.native.logo]))));
+    .map((t) => /** @type {[string, string]} */ ([`${t.chainId}:${t.address.toLowerCase()}`, t.logoURI]))
+    .concat(CHAINS.map((c) => /** @type {[string, string]} */ ([`${c.id}:${NATIVE}`, c.native.logo])))));
   return logos;
 }
 
@@ -109,21 +119,22 @@ const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523
 const MAX_POSITIONS = 40;
 const Q96 = 2 ** 96;
 
-const pad = (hex) => hex.replace(/^0x/, '').toLowerCase().padStart(64, '0');
-const padInt = (n) => pad((n < 0 ? 2n ** 256n + BigInt(n) : BigInt(n)).toString(16));
-const words = (hex) => {
+const pad = (/** @type {string} */ hex) => hex.replace(/^0x/, '').toLowerCase().padStart(64, '0');
+const padInt = (/** @type {number} */ n) => pad((n < 0 ? 2n ** 256n + BigInt(n) : BigInt(n)).toString(16));
+const words = (/** @type {unknown} */ hex) => {
   const s = String(hex ?? '').replace(/^0x/, '');
+  /** @type {string[]} */
   const out = [];
   for (let i = 0; i < s.length; i += 64) out.push(s.slice(i, i + 64));
   return out;
 };
-const big = (w) => BigInt('0x' + (w || '0'));
-const signed = (w) => {
+const big = (/** @type {string | undefined} */ w) => BigInt('0x' + (w || '0'));
+const signed = (/** @type {string | undefined} */ w) => {
   const v = big(w);
   return v >= 2n ** 255n ? v - 2n ** 256n : v;
 };
-const addressOf = (w) => `0x${w.slice(24)}`;
-const ascii = (hex) => {
+const addressOf = (/** @type {string} */ w) => `0x${w.slice(24)}`;
+const ascii = (/** @type {string} */ hex) => {
   let s = '';
   for (let i = 0; i < hex.length; i += 2) {
     const c = parseInt(hex.slice(i, i + 2), 16);
@@ -131,46 +142,52 @@ const ascii = (hex) => {
   }
   return s;
 };
-const shortAddress = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+const shortAddress = (/** @type {string} */ a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
-export const isAddress = (s) => /^0x[0-9a-fA-F]{40}$/.test(String(s ?? '').trim());
+export const isAddress = (/** @type {unknown} */ s) => /^0x[0-9a-fA-F]{40}$/.test(String(s ?? '').trim());
 
 // The node a chain is read from as saved in Settings, or '' when the default public node is used.
 // Ethereum's node was saved before the chains list existed, so it falls back to that field.
+/** @param {UniswapSettings | undefined} cfg @param {{ id: number }} chain @returns {string} */
 export function savedNode(cfg, chain) {
   return cfg?.chains?.[chain.id]?.node || (chain.id === 1 ? cfg?.node : '') || '';
 }
 
 // Whether a chain is read, and the node it is read from.
+/** @param {UniswapSettings | undefined} cfg @param {{ id: number, rpc: string }} chain */
 export function chainSettings(cfg, chain) {
   return { enabled: cfg?.chains?.[chain.id]?.enabled !== false, node: savedNode(cfg, chain) || chain.rpc };
 }
 
 // A chain's node field may list several addresses, separated by spaces or commas.
-export const nodeUrls = (node) => [...new Set(String(node ?? '').split(/[\s,]+/).filter(Boolean))];
+export const nodeUrls = (/** @type {unknown} */ node) => [...new Set(String(node ?? '').split(/[\s,]+/).filter(Boolean))];
 // What a saved search is keyed by: the first address, so adding more nodes does not start it over.
-export const nodeKey = (node) => nodeUrls(node)[0] ?? '';
+export const nodeKey = (/** @type {unknown} */ node) => nodeUrls(node)[0] ?? '';
 
 // How each node has done lately: calls in flight, a running average of its answer time, and until when it is
 // left aside after it failed. Shared by every read, so a node that stops answering is skipped everywhere.
+/** @type {Map<string, { busy: number, ms: number, downUntil: number }>} */
 const nodeHealth = new Map();
 const NODE_REST = 60000;
-const health = (url) => nodeHealth.get(url) ?? nodeHealth.set(url, { busy: 0, ms: 0, downUntil: 0 }).get(url);
+const health = (/** @type {string} */ url) => nodeHealth.get(url) ?? /** @type {{ busy: number, ms: number, downUntil: number }} */ (nodeHealth.set(url, { busy: 0, ms: 0, downUntil: 0 }).get(url));
 
 // The node expected to answer first: its average time, times the calls already waiting on it. Calls spread across
 // the nodes this way, and a node resting after a failure is used only once every other one has been tried.
+/** @param {string[]} urls @param {Set<string>} tried */
 function pickNode(urls, tried) {
   const left = urls.filter((u) => !tried.has(u));
   if (!left.length) return null;
   const now = Date.now();
   const up = left.filter((u) => health(u).downUntil <= now);
-  const wait = (u) => (health(u).busy + 1) * (health(u).ms || 400);
+  const wait = (/** @type {string} */ u) => (health(u).busy + 1) * (health(u).ms || 400);
   return (up.length ? up : left).reduce((a, b) => (wait(b) < wait(a) ? b : a));
 }
 
-const isLimit = (e) => e.code === -32005 || /usage limit|rate limit|request limit|daily limit|limit exceeded|limit reached|too many|over capacity|upgrade/i.test(String(e.message ?? ''));
+const isLimit = (/** @type {{ code?: number, message?: string }} */ e) => e.code === -32005 || /usage limit|rate limit|request limit|daily limit|limit exceeded|limit reached|too many|over capacity|upgrade/i.test(String(e.message ?? ''));
 
 // One request to one node. With other nodes to fall back on, a node that takes too long is given up on.
+/** @typedef {Error & { refused?: boolean }} RpcError a refusal is the node's answer; anything else is the node */
+/** @param {string} url @param {string} method @param {unknown[]} params @param {boolean} alone @returns {Promise<any>} */ // any: the answer's shape depends on the method
 async function rpcOne(url, method, params, alone, retry = true) {
   const h = health(url);
   const ctl = alone ? null : new AbortController();
@@ -195,6 +212,7 @@ async function rpcOne(url, method, params, alone, retry = true) {
     h.ms = h.ms ? h.ms * 0.7 + ms * 0.3 : ms;
     h.downUntil = 0;
     if (json.error) {
+      /** @type {RpcError} */
       const err = new Error(`The node refused the call: ${json.error.message ?? 'error'}.`);
       // A node over its rate or plan limit says so as an error too. That is the node, not the call, so another
       // node is asked; anything else (a revert, bad params) is the answer, and the node answered and said no.
@@ -203,9 +221,9 @@ async function rpcOne(url, method, params, alone, retry = true) {
     }
     return json.result;
   } catch (err) {
-    if (err.refused) throw err;
+    if (/** @type {RpcError} */ (err).refused) throw err;
     h.downUntil = Date.now() + NODE_REST;
-    throw err.name === 'AbortError' ? new Error('The node did not answer in time.') : err;
+    throw /** @type {Error} */ (err).name === 'AbortError' ? new Error('The node did not answer in time.') : err;
   } finally {
     clearTimeout(timer);
     h.busy--;
@@ -214,24 +232,28 @@ async function rpcOne(url, method, params, alone, retry = true) {
 
 // One JSON-RPC request to a chain's node, or to the first of its nodes that answers.
 // A refusal is the answer, except for log searches: nodes keep different history and accept different ranges.
+/** @param {string} node @param {string} method @param {unknown[]} params @returns {Promise<any>} */ // any: the answer's shape depends on the method
 export async function rpc(node, method, params) {
   const urls = nodeUrls(node);
   if (!urls.length) throw new Error('No node address is set.');
+  /** @type {Set<string>} */
   const tried = new Set();
+  /** @type {RpcError | null} */
   let failed = null;
   for (let url = pickNode(urls, tried); url; url = pickNode(urls, tried)) {
     tried.add(url);
     try {
       return await rpcOne(url, method, params, urls.length === 1);
     } catch (err) {
-      if (err.refused && method !== 'eth_getLogs') throw err;
-      if (!failed?.refused) failed = err; // a refusal says more than a node that was offline
+      if (/** @type {RpcError} */ (err).refused && method !== 'eth_getLogs') throw err;
+      if (!failed?.refused) failed = /** @type {RpcError} */ (err); // a refusal says more than a node that was offline
     }
   }
   throw failed;
 }
 
 // One read-only call to a contract. from: the caller, for a call that checks who sends it.
+/** @param {string} node @param {string} to @param {string} data @param {string} [from] @returns {Promise<string>} */
 export async function rpcCall(node, to, data, from) {
   return (await rpc(node, 'eth_call', [from ? { from, to, data } : { to, data }, 'latest'])) ?? '0x';
 }
@@ -240,6 +262,7 @@ export async function rpcCall(node, to, data, from) {
 // collect of everything is simulated as the owner, which credits the fees earned since. Falls back to the
 // stored amounts when the node refuses the call.
 const MAX_U128 = (2n ** 128n - 1n).toString(16);
+/** @param {Chain} chain @param {string} node @param {Position} p @returns {Promise<Position>} */
 async function withFees(chain, node, p) {
   try {
     const call = SEL.collect + pad(BigInt(p.tokenId).toString(16)) + pad(p.owner) + pad(MAX_U128) + pad(MAX_U128);
@@ -250,6 +273,7 @@ async function withFees(chain, node, p) {
 }
 
 // Decodes a string returned by a contract. Some tokens return the symbol as a bytes32 instead.
+/** @param {string} hex */
 function decodeString(hex) {
   const w = words(hex);
   if (w.length >= 2) {
@@ -260,6 +284,7 @@ function decodeString(hex) {
 }
 
 // Every position a public address owns on a chain (up to MAX_POSITIONS), closed ones included.
+/** @param {Chain} chain @param {string} node @param {string} owner @returns {Promise<Position[]>} */
 export async function readPositions(chain, node, owner) {
   const ownerWord = pad(owner);
   const count = Number(big(words(await rpcCall(node, chain.positions, SEL.balanceOf + ownerWord))[0]));
@@ -273,9 +298,10 @@ export async function readPositions(chain, node, owner) {
 }
 
 // No liquidity and nothing owed: the position was emptied but its token not burned.
-export const isClosed = (p) => BigInt(p.liquidity) === 0n && BigInt(p.owed0) === 0n && BigInt(p.owed1) === 0n;
+export const isClosed = (/** @type {{ liquidity: BigIntish, owed0: BigIntish, owed1: BigIntish }} */ p) => BigInt(p.liquidity) === 0n && BigInt(p.owed0) === 0n && BigInt(p.owed1) === 0n;
 
 // A v3 position as the position manager returns it.
+/** @param {Chain} chain @param {string} tokenId @param {string} owner @param {string} hex @returns {Position} */
 function decodeV3(chain, tokenId, owner, hex) {
   const w = words(hex);
   return {
@@ -295,6 +321,7 @@ function decodeV3(chain, tokenId, owner, hex) {
 }
 
 // One v3 position by its number, whoever owns it. null when the token was burned.
+/** @param {Chain} chain @param {string} node @param {BigIntish} tokenId @returns {Promise<Position | null>} */
 export async function readV3Position(chain, node, tokenId) {
   const id = pad(BigInt(tokenId).toString(16));
   try {
@@ -305,12 +332,13 @@ export async function readV3Position(chain, node, tokenId) {
     const p = decodeV3(chain, String(tokenId), addressOf(words(owner)[0]), hex);
     return isClosed(p) ? { ...p, feesFull: true } : withFees(chain, node, p);
   } catch (err) {
-    if (err.refused) return null; // both calls revert for a burned token
+    if (/** @type {RpcError} */ (err).refused) return null; // both calls revert for a burned token
     throw err;
   }
 }
 
 // The pool a position is in: its current price (sqrt, as a float) and tick. null when the pool does not exist.
+/** @param {Chain} chain @param {string} node @param {{ token0: string, token1: string, fee: number }} p @returns {Promise<PoolState | null>} */
 export async function poolState(chain, node, p) {
   const pool = addressOf(words(await rpcCall(node, chain.factory, SEL.getPool + pad(p.token0) + pad(p.token1) + pad(p.fee.toString(16))))[0]);
   if (/^0x0+$/.test(pool)) return null;
@@ -321,6 +349,7 @@ export async function poolState(chain, node, p) {
 // A token's symbol and decimals. Falls back to the short address when the token does not answer.
 // A node that is busy can drop the call, so it is tried twice, then the token list is asked. A symbol neither
 // gives is the short address, marked guessed so the caller asks again on the next read.
+/** @param {string} node @param {string} address @param {Chain} chain @returns {Promise<{ symbol: string, decimals: number, guessed?: boolean }>} */
 export async function tokenMeta(node, address, chain) {
   if (isNative(address)) return { symbol: chain.native.symbol, decimals: 18 };
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -337,24 +366,28 @@ export async function tokenMeta(node, address, chain) {
 }
 
 // A token as the token list has it, or null.
+/** @param {number} chainId @param {string} address */
 export async function listedToken(chainId, address) {
   const want = String(address).toLowerCase();
   return (await tokenList()).find((t) => t.chainId === chainId && t.address.toLowerCase() === want) ?? null;
 }
 
 // Whether a symbol is only a short address, written when the token's symbol could not be read.
-export const isAddressSymbol = (sym) => /^0x[0-9a-f]{4}…[0-9a-f]{4}$/i.test(String(sym ?? ''));
+export const isAddressSymbol = (/** @type {unknown} */ sym) => /^0x[0-9a-f]{4}…[0-9a-f]{4}$/i.test(String(sym ?? ''));
 
 // USD price of each token address on a chain, keyed by lowercase address, from DefiLlama: one request for all of
 // them, where CoinGecko's free tier now takes one address per request. Tokens it does not know are left out.
 // The native coin has no contract, so it is asked for by its CoinGecko id.
+/** @typedef {{ coins?: Record<string, { price?: number }> }} LlamaPrices DefiLlama's answer, as far as it is read */
+/** @param {Chain} chain @param {string[]} addresses @returns {Promise<Record<string, number>>} */
 export async function usdPrices(chain, addresses) {
   const list = [...new Set(addresses.map((a) => a.toLowerCase()))];
   if (!list.length) return {};
-  const keyOf = (a) => (isNative(a) ? `coingecko:${chain.native.coingecko}` : `${chain.prices}:${a}`);
+  const keyOf = (/** @type {string} */ a) => (isNative(a) ? `coingecko:${chain.native.coingecko}` : `${chain.prices}:${a}`);
   const res = await fetch(`https://coins.llama.fi/prices/current/${list.map(keyOf).join(',')}`);
   if (!res.ok) throw new Error(`The price service answered ${res.status}.`);
-  const coins = (await res.json()).coins ?? {};
+  const coins = /** @type {LlamaPrices} */ (await res.json()).coins ?? {};
+  /** @type {Record<string, number>} */
   const out = {};
   for (const a of list) {
     const usd = coins[keyOf(a)]?.price;
@@ -364,14 +397,15 @@ export async function usdPrices(chain, addresses) {
 }
 
 // The same, at a past time (unix seconds): the value of a collect when it was made.
+/** @param {Chain} chain @param {string[]} addresses @param {number} time @returns {Promise<Record<string, number>>} */
 export async function usdPricesAt(chain, addresses, time) {
   const list = [...new Set(addresses.map((a) => a.toLowerCase()))];
   if (!list.length) return {};
-  const keyOf = (a) => (isNative(a) ? `coingecko:${chain.native.coingecko}` : `${chain.prices}:${a}`);
+  const keyOf = (/** @type {string} */ a) => (isNative(a) ? `coingecko:${chain.native.coingecko}` : `${chain.prices}:${a}`);
   const res = await fetch(`https://coins.llama.fi/prices/historical/${Math.floor(time)}/${list.map(keyOf).join(',')}`);
   if (!res.ok) throw new Error(`The price service answered ${res.status}.`);
-  const coins = (await res.json()).coins ?? {};
-  return Object.fromEntries(list.filter((a) => coins[keyOf(a)]?.price).map((a) => [a, coins[keyOf(a)].price]));
+  const coins = /** @type {LlamaPrices} */ (await res.json()).coins ?? {};
+  return Object.fromEntries(list.filter((a) => coins[keyOf(a)]?.price).map((a) => [a, /** @type {number} */ (coins[keyOf(a)].price)]));
 }
 
 // Uniswap v4 positions are plain ERC-721 tokens with no way to list an owner's tokens, so they are found from the
@@ -382,19 +416,24 @@ export async function usdPricesAt(chain, addresses, time) {
 const MIN_SPAN = 1000;
 const SCAN_CALLS = 24; // log searches per wallet, chain and load
 
+/** @param {Chain} chain @param {string} node @param {string} owner @param {number} from @param {number} to @returns {Promise<string[]>} */
 async function transfersTo(chain, node, owner, from, to) {
   const logs = await rpc(node, 'eth_getLogs', [{
-    address: chain.v4.positions,
+    address: /** @type {V4Deployment} */ (chain.v4).positions, // v4 only
     fromBlock: `0x${from.toString(16)}`,
     toBlock: `0x${to.toString(16)}`,
     topics: [TRANSFER, null, `0x${pad(owner)}`],
   }]);
-  return (logs ?? []).map((l) => big(String(l.topics[3]).replace(/^0x/, '')).toString());
+  return /** @type {RpcLog[]} */ (logs ?? []).map((l) => big(String(l.topics[3]).replace(/^0x/, '')).toString());
 }
 
 // Searches one block range, narrowing it while the node refuses. Returns the ids found and the range searched.
 // When nothing works, refused says whether the node said no to every width (it will not search this far back)
 // or a request failed (busy or offline: worth trying again on the next load).
+/**
+ * @param {Chain} chain @param {string} node @param {string} owner @param {number} start @param {number} end @param {number} span @param {boolean} forward
+ * @returns {Promise<{ ids: string[], from: number, to: number, span: number } | { ids: null, refused: boolean }>}
+ */
 async function searchFrom(chain, node, owner, start, end, span, forward) {
   for (let width = span; width >= MIN_SPAN; width = Math.floor(width / 2)) {
     const from = forward ? start : Math.max(start, end - width + 1);
@@ -402,7 +441,7 @@ async function searchFrom(chain, node, owner, start, end, span, forward) {
     try {
       return { ids: await transfersTo(chain, node, owner, from, to), from, to, span: width };
     } catch (err) {
-      if (!err.refused) return { ids: null, refused: false };
+      if (!(/** @type {RpcError} */ (err).refused)) return { ids: null, refused: false };
     }
   }
   return { ids: null, refused: true };
@@ -410,9 +449,11 @@ async function searchFrom(chain, node, owner, start, end, span, forward) {
 
 // Extends a wallet's saved search on a chain. prev is what the last load saved: { node, from, to, span, ids, done }.
 // done means the search reached the deployment or the node refused to go further back.
+/** @param {Chain} chain @param {string} node @param {string} owner @param {V4Scan | null | undefined} prev @returns {Promise<V4Scan>} */
 export async function scanV4(chain, node, owner, prev) {
   const head = Number(await rpc(node, 'eth_blockNumber', []));
   const fresh = !prev || nodeKey(prev.node) !== nodeKey(node);
+  /** @type {V4Scan} */
   const s = fresh ? { node, from: head + 1, to: head, span: chain.span, ids: [], done: false } : { ...prev, ids: [...prev.ids] };
   const found = new Set(s.ids);
   let calls = SCAN_CALLS;
@@ -432,12 +473,12 @@ export async function scanV4(chain, node, owner, prev) {
 
   // Then older blocks, while the node keeps them.
   while (!s.done && calls > 0) {
-    if (s.from <= chain.v4.start) {
+    if (s.from <= /** @type {V4Deployment} */ (chain.v4).start) { // v4 only
       s.done = true;
       break;
     }
     calls--;
-    const r = await searchFrom(chain, node, owner, chain.v4.start, s.from - 1, s.span, false);
+    const r = await searchFrom(chain, node, owner, /** @type {V4Deployment} */ (chain.v4).start, s.from - 1, s.span, false);
     if (!r.ids) {
       s.done = r.refused;
       break;
@@ -460,10 +501,15 @@ const DECREASE_V3 = '0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9
 const COLLECT_V3 = '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01';
 const MODIFY_V4 = '0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec';
 const HISTORY_CALLS = 12; // log searches per position and load
+/** @type {Record<string, string>} */
 const KIND = { [INCREASE_V3]: 'add', [DECREASE_V3]: 'remove', [COLLECT_V3]: 'collect' };
-const idWord = (tokenId) => pad(BigInt(tokenId).toString(16));
+const idWord = (/** @type {BigIntish} */ tokenId) => pad(BigInt(tokenId).toString(16));
 
 // What a log search for a position asks for, and how each log reads. Amounts stay text, for JSON.
+/** @typedef {{ kind: string, liq: string, a0?: string, a1?: string }} LogEvent */
+/** @typedef {{ filter: { address: string, topics: (string | string[])[] }, read: (l: RpcLog) => LogEvent | null }} HistoryQuery */
+/** @typedef {{ version: string, tokenId: BigIntish, liquidity: BigIntish, pool?: string }} HistoryPosition */
+/** @param {Chain} chain @param {string} node @param {HistoryPosition} pos @returns {Promise<HistoryQuery>} */
 async function historyQuery(chain, node, pos) {
   if (pos.version === 'v3') {
     return {
@@ -477,7 +523,7 @@ async function historyQuery(chain, node, pos) {
     };
   }
   return {
-    filter: { address: await managerOf(chain, node), topics: [MODIFY_V4, `0x${pad(pos.pool)}`, `0x${pad(chain.v4.positions)}`] },
+    filter: { address: await managerOf(chain, node), topics: [MODIFY_V4, `0x${pad(/** @type {string} */ (pos.pool))}`, `0x${pad(/** @type {V4Deployment} */ (chain.v4).positions)}`] }, // v4: pos.pool is the pool id
     read: (l) => {
       const w = words(l.data);
       if (w[3] !== idWord(pos.tokenId)) return null; // another position in the same pool
@@ -488,19 +534,23 @@ async function historyQuery(chain, node, pos) {
 }
 
 // One block range of a position's events, narrowing it while the node refuses.
+/**
+ * @param {string} node @param {HistoryQuery} query @param {number} start @param {number} end @param {number} span @param {boolean} forward
+ * @returns {Promise<{ events: PositionEvent[], from: number, to: number, span: number } | { events: null, refused: boolean }>}
+ */
 async function historyIn(node, query, start, end, span, forward) {
   for (let width = span; width >= MIN_SPAN; width = Math.floor(width / 2)) {
     const from = forward ? start : Math.max(start, end - width + 1);
     const to = forward ? Math.min(end, start + width - 1) : end;
     try {
       const logs = await rpc(node, 'eth_getLogs', [{ ...query.filter, fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}` }]);
-      const events = (logs ?? []).map((l) => {
+      const events = /** @type {PositionEvent[]} */ (/** @type {RpcLog[]} */ (logs ?? []).map((l) => {
         const e = query.read(l);
         return e && { ...e, block: Number(l.blockNumber), index: Number(l.logIndex), tx: l.transactionHash };
-      }).filter(Boolean);
+      }).filter(Boolean));
       return { events, from, to, span: width };
     } catch (err) {
-      if (!err.refused) return { events: null, refused: false };
+      if (!(/** @type {RpcError} */ (err).refused)) return { events: null, refused: false };
     }
   }
   return { events: null, refused: true };
@@ -508,6 +558,7 @@ async function historyIn(node, query, start, end, span, forward) {
 
 // Whether the oldest event read is the position's opening: undoing every event read from today's liquidity
 // leaves none before it.
+/** @param {PositionEvent[]} events @param {BigIntish} liquidity */
 function reachedMint(events, liquidity) {
   if (!events.length) return false;
   const sorted = [...events].sort((a, b) => a.block - b.block || a.index - b.index);
@@ -525,16 +576,22 @@ function reachedMint(events, liquidity) {
 // lanes: how many block ranges are searched at once. Concurrent calls spread over a chain's nodes, so with several
 // nodes each load covers more blocks. The budget grows with the lanes: each node is asked about as often as one
 // node alone would be.
+/**
+ * @param {Chain} chain @param {string} node @param {HistoryPosition} pos @param {PositionHistory | null | undefined} prev
+ * @param {((range: { dir: string, from: number, to: number }) => void) | null} [onRange] @param {number} [lanes]
+ * @returns {Promise<PositionHistory>}
+ */
 export async function positionHistory(chain, node, pos, prev, onRange = null, lanes = 1) {
   const head = Number(await rpc(node, 'eth_blockNumber', []));
   const query = await historyQuery(chain, node, pos);
-  const floor = pos.version === 'v4' ? chain.v4.start : 0;
+  const floor = pos.version === 'v4' ? /** @type {V4Deployment} */ (chain.v4).start : 0;
   const fresh = !prev || nodeKey(prev.node) !== nodeKey(node);
-  const s = fresh
+  // reached and floor are set below, before it is returned.
+  const s = /** @type {PositionHistory} */ (fresh
     ? { node, from: head + 1, to: head, span: chain.span, done: false, events: [] }
-    : { ...prev, events: [...prev.events] };
+    : { ...prev, events: [...prev.events] });
   const have = new Set(s.events.map((e) => `${e.tx}:${e.index}`));
-  const add = (list) => list.forEach((e) => {
+  const add = (/** @type {PositionEvent[]} */ list) => list.forEach((e) => {
     if (!have.has(`${e.tx}:${e.index}`)) {
       have.add(`${e.tx}:${e.index}`);
       s.events.push(e);
@@ -546,6 +603,10 @@ export async function positionHistory(chain, node, pos, prev, onRange = null, la
   // Reads a batch of neighbouring ranges at once. Only the part next to what is already searched counts: it stops
   // at the first range that failed, or that the node narrowed (the rest of that range starts the next batch).
   // Ranges past it are dropped, so the saved search never has a hole. Returns the failed result, if any.
+  /**
+   * @param {string} dir @param {[number, number][]} windows
+   * @param {(r: { from: number, to: number }) => void} keep
+   */
   const batch = async (dir, windows, keep) => {
     calls -= windows.length;
     onRange?.({ dir, from: Math.min(...windows.map((w) => w[0])), to: Math.max(...windows.map((w) => w[1])) });
@@ -564,6 +625,7 @@ export async function positionHistory(chain, node, pos, prev, onRange = null, la
   // A gap too long for this load skips its oldest part rather than falling behind for good.
   let cursor = Math.max(s.to + 1, head - s.span * (budget / 2) + 1);
   while (cursor <= head && calls > 0) {
+    /** @type {[number, number][]} */
     const windows = [];
     for (let a = cursor; a <= head && windows.length < Math.min(lanes, calls); a += s.span) windows.push([a, Math.min(head, a + s.span - 1)]);
     const failed = await batch('new', windows, (r) => {
@@ -577,6 +639,7 @@ export async function positionHistory(chain, node, pos, prev, onRange = null, la
       s.done = true;
       break;
     }
+    /** @type {[number, number][]} */
     const windows = [];
     for (let b = s.from - 1; b >= floor && windows.length < Math.min(lanes, calls); b -= s.span) windows.push([Math.max(floor, b - s.span + 1), b]);
     const failed = await batch('back', windows, (r) => {
@@ -594,26 +657,28 @@ export async function positionHistory(chain, node, pos, prev, onRange = null, la
   s.floor = floor;
 
   const blocks = [...new Set(s.events.filter((e) => e.kind !== 'add' && !e.time).map((e) => e.block))];
-  const times = new Map(await Promise.all(blocks.map(async (b) => [b, await blockTime(nodeSource(node), b)])));
+  const times = new Map(await Promise.all(blocks.map(async (b) => /** @type {[number, number]} */ ([b, await blockTime(nodeSource(node), b)]))));
   s.events = s.events.map((e) => (times.get(e.block) ? { ...e, time: times.get(e.block) } : e));
   return s;
 }
 
 // The fees in each collect, in raw token units: what it paid out, less the liquidity removed and not yet paid.
+/** @param {PositionEvent[]} events v3 events, which carry their amounts */
 export function collectFees(events) {
   let owed0 = 0n;
   let owed1 = 0n;
+  /** @type {(PositionEvent & { f0: bigint, f1: bigint })[]} */
   const out = [];
   for (const e of [...events].sort((a, b) => a.block - b.block || a.index - b.index)) {
     if (e.kind === 'remove') {
-      owed0 += BigInt(e.a0);
-      owed1 += BigInt(e.a1);
+      owed0 += BigInt(/** @type {string} */ (e.a0));
+      owed1 += BigInt(/** @type {string} */ (e.a1));
     } else if (e.kind === 'collect') {
-      const p0 = BigInt(e.a0) < owed0 ? BigInt(e.a0) : owed0;
-      const p1 = BigInt(e.a1) < owed1 ? BigInt(e.a1) : owed1;
+      const p0 = BigInt(/** @type {string} */ (e.a0)) < owed0 ? BigInt(/** @type {string} */ (e.a0)) : owed0;
+      const p1 = BigInt(/** @type {string} */ (e.a1)) < owed1 ? BigInt(/** @type {string} */ (e.a1)) : owed1;
       owed0 -= p0;
       owed1 -= p1;
-      out.push({ ...e, f0: BigInt(e.a0) - p0, f1: BigInt(e.a1) - p1 });
+      out.push({ ...e, f0: BigInt(/** @type {string} */ (e.a0)) - p0, f1: BigInt(/** @type {string} */ (e.a1)) - p1 });
     }
   }
   return out;
@@ -621,24 +686,27 @@ export function collectFees(events) {
 
 // ---- Collect transactions: what each one paid, read from the node or from Etherscan ----
 
-const hexBlock = (n) => `0x${n.toString(16)}`;
-const lower = (a) => String(a ?? '').toLowerCase();
-const topicOf = (l, i) => lower(l.topics?.[i]).replace(/^0x/, '');
+const hexBlock = (/** @type {number} */ n) => `0x${n.toString(16)}`;
+const lower = (/** @type {unknown} */ a) => String(a ?? '').toLowerCase();
+const topicOf = (/** @type {{ topics?: string[] }} */ l, /** @type {number} */ i) => lower(l.topics?.[i]).replace(/^0x/, '');
 
 // Where a transaction is read from. Both answer the same JSON-RPC calls; Etherscan keeps every block, where most
 // public nodes keep only recent ones, and it also knows the native coin paid inside a transaction.
+/** @type {(node: string) => TxSource} */
 export const nodeSource = (node) => ({ kind: 'node', call: (method, params) => rpc(node, method, params) });
 
 const ETHERSCAN = 'https://api.etherscan.io/v2/api';
+/** @type {Promise<unknown>} */
 let etherscanQueue = Promise.resolve();
 // Etherscan's free plan takes about 5 calls a second, so calls go one at a time with a short pause.
+/** @param {string} key @param {number} chainId @param {Record<string, string>} params @returns {Promise<any>} */ // any: the result's shape depends on the module and action
 export function etherscan(key, chainId, params) {
   const run = async () => {
     const res = await fetch(`${ETHERSCAN}?${new URLSearchParams({ chainid: String(chainId), ...params, apikey: key })}`);
     await new Promise((resolve) => setTimeout(resolve, 250));
     if (!res.ok) throw new Error(`Etherscan answered ${res.status}.`);
     const json = await res.json();
-    const fail = (text) => Object.assign(new Error(`Etherscan: ${text}`), { refused: true });
+    const fail = (/** @type {string} */ text) => Object.assign(new Error(`Etherscan: ${text}`), { refused: true });
     if (json.error) throw fail(json.error.message ?? 'error');
     if (params.module === 'proxy') {
       if (typeof json.result === 'string' && json.status === '0') throw fail(json.result);
@@ -655,32 +723,36 @@ export function etherscan(key, chainId, params) {
   return p;
 }
 
+/** @param {string} key @param {number} chainId @returns {TxSource} */
 export function etherscanSource(key, chainId) {
-  const proxy = (action, params) => etherscan(key, chainId, { module: 'proxy', action, ...params });
+  const proxy = (/** @type {string} */ action, /** @type {Record<string, string>} */ params) => etherscan(key, chainId, { module: 'proxy', action, ...params });
   return {
     kind: 'etherscan',
     call: (method, params) => {
-      if (method === 'eth_getTransactionReceipt') return proxy(method, { txhash: params[0] });
-      if (method === 'eth_getBlockByNumber') return proxy(method, { tag: params[0], boolean: 'false' });
-      if (method === 'eth_call') return proxy(method, { to: params[0].to, data: params[0].data, tag: params[1] });
+      if (method === 'eth_getTransactionReceipt') return proxy(method, { txhash: /** @type {string} */ (params[0]) });
+      if (method === 'eth_getBlockByNumber') return proxy(method, { tag: /** @type {string} */ (params[0]), boolean: 'false' });
+      if (method === 'eth_call') return proxy(method, { to: /** @type {{ to: string, data: string }} */ (params[0]).to, data: /** @type {{ to: string, data: string }} */ (params[0]).data, tag: /** @type {string} */ (params[1]) });
       throw new Error(`Etherscan is not asked for ${method}.`);
     },
     // A v4 pool's swaps in a block range, for its price when no node will read past state.
     swaps: (manager, poolId, from, to) => etherscan(key, chainId, { module: 'logs', action: 'getLogs', address: manager, fromBlock: String(from), toBlock: String(to), topic0: SWAP_V4, topic1: `0x${pad(poolId)}`, topic0_1_opr: 'and', page: '1', offset: '1000' }),
     // The native coin paid to `to` inside a transaction, in wei. It leaves no log, but Etherscan traces it.
-    native: async (tx, to) => (await etherscan(key, chainId, { module: 'account', action: 'txlistinternal', txhash: tx }))
+    native: async (tx, to) => /** @type {{ to: string, isError: string, value: string }[]} */ (await etherscan(key, chainId, { module: 'account', action: 'txlistinternal', txhash: tx }))
       .filter((t) => lower(t.to) === lower(to) && t.isError !== '1')
       .reduce((s, t) => s + BigInt(t.value), 0n),
   };
 }
 
+/** @param {TxSource} src @param {number} block */
 export async function blockTime(src, block) {
   return Number((await src.call('eth_getBlockByNumber', [hexBlock(block), false]))?.timestamp ?? 0);
 }
 
 // A wallet's transactions to a chain's Uniswap position managers, oldest first, from a block on. Etherscan sends
 // up to 1000 transactions a call; last is the newest block it sent, and more says whether there are more after it.
+/** @param {string} key @param {Chain} chain @param {string} wallet @param {number} startblock */
 export async function walletPositionTxs(key, chain, wallet, startblock) {
+  /** @type {{ to: string, isError: string, hash: string, blockNumber: string, timeStamp: string }[]} */
   const list = await etherscan(key, chain.id, { module: 'account', action: 'txlist', address: wallet, startblock: String(startblock), endblock: '999999999', sort: 'asc', page: '1', offset: '1000' });
   const managers = new Set([chain.positions, chain.v4?.positions].filter(Boolean).map(lower));
   return {
@@ -692,7 +764,9 @@ export async function walletPositionTxs(key, chain, wallet, startblock) {
 
 // The positions a transaction collected from: v3 Collect events and v4 liquidity changes made through the
 // position manager that did not add liquidity.
+/** @param {Chain} chain @param {string} node @param {Receipt | null | undefined} receipt */
 export async function positionsInReceipt(chain, node, receipt) {
+  /** @type {{ version: string, tokenId: string }[]} */
   const out = [];
   const logs = receipt?.logs ?? [];
   for (const l of logs) {
@@ -710,8 +784,12 @@ export async function positionsInReceipt(chain, node, receipt) {
 
 // A v4 pool's price (sqrt, as a float) just before a transaction: its state one block back, from the source or
 // the node, else the last swap before it, from Etherscan's log search. null when none of them answers.
+/**
+ * @param {Chain} chain @param {TxSource} src @param {string} node @param {string} manager @param {string} poolId
+ * @param {number} block @param {number} txIndex
+ */
 async function priceBefore(chain, src, node, manager, poolId, block, txIndex) {
-  const call = { to: chain.v4.stateView, data: SEL.getSlot0 + pad(poolId) };
+  const call = { to: /** @type {V4Deployment} */ (chain.v4).stateView, data: SEL.getSlot0 + pad(poolId) }; // v4 only
   for (const s of [src, nodeSource(node)]) {
     try {
       const w = words(await s.call('eth_call', [call, hexBlock(block - 1)]));
@@ -740,7 +818,13 @@ async function priceBefore(chain, src, node, manager, poolId, block, txIndex) {
 // worked out from the pool's price just before; 1 the native coin part could not be read (left at 0).
 // A collect sends value only as fees and liquidity removed, so what the wallet gained in the native coin, plus the
 // gas it paid, is that part.
+/**
+ * @param {Chain} chain @param {TxSource} src @param {string} node @param {string} tx
+ * @param {{ version: string, tokenId: BigIntish, owner: string, token0: string, token1: string }} pos @param {Receipt | null} [given]
+ * @returns {Promise<{ block: number, f0: number, f1: number, level: number } | null>}
+ */
 export async function collectTx(chain, src, node, tx, pos, given = null) {
+  /** @type {Receipt | null} */
   const receipt = given ?? await src.call('eth_getTransactionReceipt', [tx]);
   if (!receipt || receipt.status !== '0x1') return null;
   const block = Number(receipt.blockNumber);
@@ -748,8 +832,8 @@ export async function collectTx(chain, src, node, tx, pos, given = null) {
   const logs = receipt.logs ?? [];
 
   if (pos.version === 'v3') {
-    const mine = (sig) => logs.filter((l) => lower(l.address) === lower(chain.positions) && lower(l.topics?.[0]) === sig && topicOf(l, 1) === id);
-    const sum = (list) => list.reduce(([x, y], l) => [x + big(words(l.data)[1]), y + big(words(l.data)[2])], [0n, 0n]);
+    const mine = (/** @type {string} */ sig) => logs.filter((l) => lower(l.address) === lower(chain.positions) && lower(l.topics?.[0]) === sig && topicOf(l, 1) === id);
+    const sum = (/** @type {RpcLog[]} */ list) => list.reduce(([x, y], l) => [x + big(words(l.data)[1]), y + big(words(l.data)[2])], [0n, 0n]);
     const collects = mine(COLLECT_V3);
     if (!collects.length) return null;
     const [c0, c1] = sum(collects);
@@ -759,7 +843,7 @@ export async function collectTx(chain, src, node, tx, pos, given = null) {
 
   const manager = lower(await managerOf(chain, node));
   const mods = logs.filter((l) => lower(l.address) === manager && lower(l.topics?.[0]) === MODIFY_V4
-    && topicOf(l, 2) === pad(chain.v4.positions) && words(l.data)[3] === id);
+    && topicOf(l, 2) === pad(/** @type {V4Deployment} */ (chain.v4).positions) && words(l.data)[3] === id);
   if (!mods.length) return null;
   const delta = mods.reduce((s, l) => s + signed(words(l.data)[2]), 0n);
   if (delta > 0n) return null; // liquidity added: the fees went back into the position
@@ -779,7 +863,7 @@ export async function collectTx(chain, src, node, tx, pos, given = null) {
   }
 
   const owner = pad(pos.owner);
-  const amountOf = async (token) => {
+  const amountOf = async (/** @type {string} */ token) => {
     if (!isNative(token)) {
       return Number(logs.filter((l) => lower(l.address) === lower(token) && lower(l.topics?.[0]) === TRANSFER && topicOf(l, 1) === pad(manager) && topicOf(l, 2) === owner)
         .reduce((s, l) => s + big(words(l.data)[0]), 0n));
@@ -806,10 +890,14 @@ export async function collectTx(chain, src, node, tx, pos, given = null) {
 // past state, but keep logs. Each pool's swaps stay in memory, so a longer window or the next load only reads
 // the blocks not yet read.
 const SWAP_CALLS = 40; // log searches per pool and load
+/** @typedef {{ node: string, from: number, to: number, swaps: Swap[] }} SwapRead */
+/** @type {Map<string, SwapRead>} */
 const swapCache = new Map(); // "chainId:version:pool" -> { node, from, to, swaps }
+/** @type {Map<number, string>} */
 const managers = new Map(); // chainId -> v4 pool manager address, which emits every v4 pool's swaps
 
 // The head block, its time (unix seconds), and the average seconds per block over the last 10,000 blocks.
+/** @param {string} node */
 export async function chainClock(node) {
   const head = Number(await rpc(node, 'eth_blockNumber', []));
   const back = Math.max(0, head - 10000);
@@ -818,14 +906,16 @@ export async function chainClock(node) {
   return { head, time: Number(a.timestamp), perBlock: perBlock > 0 ? perBlock : 1 };
 }
 
+/** @param {Chain} chain @param {string} node v4 only @returns {Promise<string>} */
 async function managerOf(chain, node) {
-  if (!managers.has(chain.id)) managers.set(chain.id, addressOf(words(await rpcCall(node, chain.v4.positions, SEL.poolManager))[0]));
-  return managers.get(chain.id);
+  if (!managers.has(chain.id)) managers.set(chain.id, addressOf(words(await rpcCall(node, /** @type {V4Deployment} */ (chain.v4).positions, SEL.poolManager))[0]));
+  return /** @type {string} */ (managers.get(chain.id));
 }
 
 // One swap, kept small: the block, the tick and active liquidity after it, the amount paid in of each token and,
 // on v4, the fee charged (v4 fees can change per swap). v3 amounts are the pool's side, so paid in is positive;
 // v4 amounts are the swapper's, so paid in is negative.
+/** @param {RpcLog} log @param {string} version @returns {Swap} */
 function parseSwap(log, version) {
   const w = words(log.data);
   const side = version === 'v3' ? 1n : -1n;
@@ -835,15 +925,19 @@ function parseSwap(log, version) {
 }
 
 // Swaps in one block range, narrowing it while the node refuses (too wide, or too many results). null on failure.
+/**
+ * @param {string} node @param {{ address: string, topics: string[] }} filter @param {string} version
+ * @param {number} start @param {number} end @param {number} span @param {boolean} forward
+ */
 async function swapsIn(node, filter, version, start, end, span, forward) {
   for (let width = span; width >= MIN_SPAN; width = Math.floor(width / 2)) {
     const from = forward ? start : Math.max(start, end - width + 1);
     const to = forward ? Math.min(end, start + width - 1) : end;
     try {
       const logs = await rpc(node, 'eth_getLogs', [{ ...filter, fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}` }]);
-      return { swaps: (logs ?? []).map((l) => parseSwap(l, version)), from, to, span: width };
+      return { swaps: /** @type {RpcLog[]} */ (logs ?? []).map((l) => parseSwap(l, version)), from, to, span: width };
     } catch (err) {
-      if (!err.refused) return null;
+      if (!(/** @type {RpcError} */ (err).refused)) return null;
     }
   }
   return null;
@@ -852,6 +946,7 @@ async function swapsIn(node, filter, version, start, end, span, forward) {
 // A pool's swaps from block `from` to `head`, adding to what was already read: new blocks first, then older ones
 // back to `from`. Stops at the call budget, so on a fast chain a long window may be covered only in part; the
 // returned `from` is the oldest block read. pool is the v3 pool address or the v4 pool id.
+/** @param {Chain} chain @param {string} node @param {string} version @param {string} pool @param {number} from @param {number} head @returns {Promise<SwapRead>} */
 export async function poolSwaps(chain, node, version, pool, from, head) {
   const key = `${chain.id}:${version}:${pool}`;
   let c = swapCache.get(key);
@@ -884,6 +979,7 @@ export async function poolSwaps(chain, node, version, pool, from, head) {
 // The fees a position earned from swaps since a block (and before toBlock), in raw token units: each swap that ended inside its range
 // pays it the fee times its share of the active liquidity. An estimate: a swap that crosses ticks is counted at
 // where it ended, and a hook can change what is paid.
+/** @param {Swap[]} swaps @param {number} fromBlock @param {EarningPosition} p @param {number} [toBlock] */
 export function swapFees(swaps, fromBlock, p, toBlock = Infinity) {
   let e0 = 0n;
   let e1 = 0n;
@@ -897,6 +993,8 @@ export function swapFees(swaps, fromBlock, p, toBlock = Infinity) {
 }
 
 // What one swap paid a position, in raw units of each token. p.liquidity may be text.
+/** @typedef {{ tickLower: number, tickUpper: number, liquidity: BigIntish, fee: number }} EarningPosition */
+/** @param {Swap} s @param {EarningPosition} p @returns {[bigint, bigint]} */
 export function swapEarn(s, p) {
   if (s.tick < p.tickLower || s.tick >= p.tickUpper || s.liq === 0n) return [0n, 0n];
   const L = BigInt(p.liquidity);
@@ -906,30 +1004,31 @@ export function swapEarn(s, p) {
 }
 
 // The id Uniswap v4 gives a pool: the hash of its key.
-const poolIdOf = (key) => keccak256(pad(key.currency0) + pad(key.currency1) + pad(key.fee.toString(16)) + padInt(key.tickSpacing) + pad(key.hooks));
+const poolIdOf = (/** @type {{ currency0: string, currency1: string, fee: number, tickSpacing: number, hooks: string }} */ key) => keccak256(pad(key.currency0) + pad(key.currency1) + pad(key.fee.toString(16)) + padInt(key.tickSpacing) + pad(key.hooks));
 const DYNAMIC_FEE = 0x800000;
 const Q128 = 2n ** 128n;
 const U256 = 2n ** 256n;
 
 // One v4 position: its owner, pool, range, liquidity and unclaimed fees, and the pool's current price.
 // null when the token was burned. The fees are what the pool owes the position; a hook can change what is paid.
+/** @param {Chain} chain @param {string} node @param {BigIntish} tokenId @returns {Promise<{ position: Position, pool: PoolState } | null>} */
 export async function readV4Position(chain, node, tokenId) {
   const id = pad(BigInt(tokenId).toString(16));
   let ownerHex;
   try {
-    ownerHex = await rpcCall(node, chain.v4.positions, SEL.ownerOf + id);
+    ownerHex = await rpcCall(node, /** @type {V4Deployment} */ (chain.v4).positions, SEL.ownerOf + id);
   } catch (err) {
-    if (err.refused) return null; // ownerOf reverts for a burned token
+    if (/** @type {RpcError} */ (err).refused) return null; // ownerOf reverts for a burned token
     throw err;
   }
   const [info, liq] = await Promise.all([
-    rpcCall(node, chain.v4.positions, SEL.getPoolAndPositionInfo + id),
-    rpcCall(node, chain.v4.positions, SEL.getPositionLiquidity + id),
+    rpcCall(node, /** @type {V4Deployment} */ (chain.v4).positions, SEL.getPoolAndPositionInfo + id),
+    rpcCall(node, /** @type {V4Deployment} */ (chain.v4).positions, SEL.getPositionLiquidity + id),
   ]);
   const w = words(info);
   const key = { currency0: addressOf(w[0]), currency1: addressOf(w[1]), fee: Number(big(w[2])), tickSpacing: Number(signed(w[3])), hooks: addressOf(w[4]) };
   const packed = big(w[5]);
-  const int24 = (v) => (v >= 2n ** 23n ? Number(v - 2n ** 24n) : Number(v));
+  const int24 = (/** @type {bigint} */ v) => (v >= 2n ** 23n ? Number(v - 2n ** 24n) : Number(v));
   const tickLower = int24((packed >> 8n) & 0xffffffn);
   const tickUpper = int24((packed >> 32n) & 0xffffffn);
   const liquidity = big(words(liq)[0]);
@@ -938,14 +1037,14 @@ export async function readV4Position(chain, node, tokenId) {
   const pid = pad(poolId);
   const range = padInt(tickLower) + padInt(tickUpper);
   const [slot0, inside, last] = await Promise.all([
-    rpcCall(node, chain.v4.stateView, SEL.getSlot0 + pid),
-    rpcCall(node, chain.v4.stateView, SEL.getFeeGrowthInside + pid + range),
-    rpcCall(node, chain.v4.stateView, SEL.getPositionInfo + pid + pad(chain.v4.positions) + range + id),
+    rpcCall(node, /** @type {V4Deployment} */ (chain.v4).stateView, SEL.getSlot0 + pid),
+    rpcCall(node, /** @type {V4Deployment} */ (chain.v4).stateView, SEL.getFeeGrowthInside + pid + range),
+    rpcCall(node, /** @type {V4Deployment} */ (chain.v4).stateView, SEL.getPositionInfo + pid + pad(/** @type {V4Deployment} */ (chain.v4).positions) + range + id),
   ]);
   const s0 = words(slot0);
   const g = words(inside);
   const l = words(last);
-  const owed = (now, then) => (((big(now) - big(then) + U256) % U256) * liquidity) / Q128;
+  const owed = (/** @type {string | undefined} */ now, /** @type {string | undefined} */ then) => (((big(now) - big(then) + U256) % U256) * liquidity) / Q128;
   return {
     position: {
       version: 'v4',
@@ -969,17 +1068,18 @@ export async function readV4Position(chain, node, tokenId) {
 
 // Positions added by hand, for those the board does not find: a v3 position held by an address that is not in the
 // wallet list, or a v4 position older than the node's history. v4ids came first, so each version has its own list.
-export const addedPositions = (cfg) => [
+export const addedPositions = (/** @type {Partial<UniswapSettings> | undefined} */ cfg) => [
   ...(cfg?.v3ids ?? []).map((x) => ({ ...x, version: 'v3' })),
   ...(cfg?.v4ids ?? []).map((x) => ({ ...x, version: 'v4' })),
 ];
-export const addedListOf = (version) => (version === 'v3' ? 'v3ids' : 'v4ids');
+export const addedListOf = (/** @type {string} */ version) => (version === 'v3' ? 'v3ids' : 'v4ids');
 
 // Whether the board reads positions of this Uniswap version on the chain.
-export const hasVersion = (chain, version) => version === 'v3' || (version === 'v4' && Boolean(chain.v4));
+export const hasVersion = (/** @type {Chain} */ chain, /** @type {string} */ version) => version === 'v3' || (version === 'v4' && Boolean(chain.v4));
 
 // Reads a Uniswap app link (…/positions/<v3|v4>/<chain>/<id>), which names its chain, version and number.
 // Returns null for text that is not such a link, and { slug } alone when the link names a chain the board does not read.
+/** @param {unknown} text @returns {{ chainId?: number, version: string, tokenId?: string, slug: string } | null} */
 export function readLink(text) {
   const m = String(text ?? '').trim().match(/positions\/(v3|v4)\/([a-z0-9_-]+)\/(\d+)/i);
   if (!m) return null;
@@ -991,15 +1091,17 @@ export function readLink(text) {
 
 // Reads what was typed to add a position: a Uniswap app link, or a plain number, which takes the chain and version
 // picked beside it.
+/** @param {unknown} text @param {number} chainId @param {string} version @returns {{ chainId: number, version: string, tokenId: string } | null} */
 export function parsePosition(text, chainId, version) {
   const link = readLink(text);
-  if (link) return link.chainId ? { chainId: link.chainId, version: link.version, tokenId: link.tokenId } : null;
+  if (link) return link.chainId ? { chainId: link.chainId, version: link.version, tokenId: /** @type {string} */ (link.tokenId) } : null;
   const s = String(text ?? '').trim();
   const chain = CHAINS.find((c) => c.id === chainId);
   return /^\d+$/.test(s) && chain && hasVersion(chain, version) ? { chainId, version, tokenId: s } : null;
 }
 
 // Adds a parsed position to the settings. Returns an error message, or '' when it was added.
+/** @param {Store} store @param {{ chainId: number, version: string, tokenId: string }} entry */
 export function addPosition(store, entry) {
   const cfg = store.get('settings').uniswap ?? {};
   if (addedPositions(cfg).some((x) => x.version === entry.version && x.chainId === entry.chainId && String(x.tokenId) === entry.tokenId)) {
@@ -1007,12 +1109,13 @@ export function addPosition(store, entry) {
   }
   const list = addedListOf(entry.version);
   store.update('settings', (d) => {
-    d.uniswap = { wallets: [], chains: {}, ...d.uniswap, [list]: [...(d.uniswap?.[list] ?? []), { chainId: entry.chainId, tokenId: entry.tokenId }] };
+    d.uniswap = { wallets: [], chains: {}, .../** @type {Partial<UniswapSettings> | undefined} */ (d.uniswap), [list]: [...(d.uniswap?.[list] ?? []), { chainId: entry.chainId, tokenId: entry.tokenId }] };
   });
   return '';
 }
 
 // The amounts of both tokens a position holds at the pool's current price (raw units, floats).
+/** @param {{ liquidity: BigIntish, tickLower: number, tickUpper: number }} p @param {number} sqrtPrice */
 export function positionAmounts(p, sqrtPrice) {
   const L = Number(p.liquidity);
   const sa = Math.pow(1.0001, p.tickLower / 2);
@@ -1023,4 +1126,4 @@ export function positionAmounts(p, sqrtPrice) {
 }
 
 // The price of token1 in token0 at a tick, in human units.
-export const priceAtTick = (tick, dec0, dec1) => Math.pow(1.0001, tick) * Math.pow(10, dec0 - dec1);
+export const priceAtTick = (/** @type {number} */ tick, /** @type {number} */ dec0, /** @type {number} */ dec1) => Math.pow(1.0001, tick) * Math.pow(10, dec0 - dec1);
