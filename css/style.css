@@ -2396,9 +2396,12 @@ button.sum-line:hover { background: var(--surface-2); }
 }
 
 /* Dev: files and terminals on this machine, Cursor style */
-.ide { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: 12px; align-items: start; }
-.ide-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.ide-explorer { padding: 8px; display: flex; flex-direction: column; gap: 6px; position: sticky; top: 12px; max-height: calc(100vh - 140px); min-height: 0; }
+/* The page fills the window below where it starts (--dev-top, measured by dev.js; the top bar and the view's
+   padding until then): the side panel runs its full height, and the editor and the terminal share it. */
+.dev { height: calc(100dvh - var(--dev-top, 95px)); min-height: 460px; }
+.ide { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 12px; }
+.ide-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; }
+.ide-explorer { padding: 8px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
 .ide-explorer-head { display: flex; gap: 6px; align-items: center; flex: none; }
 .ide-workspace { flex: 1; min-width: 0; }
 .chip-pick.field-pick.ide-workspace { min-height: 0; padding: 4px 8px; font-size: 0.85rem; justify-content: flex-start; }
@@ -2422,7 +2425,7 @@ button.sum-line:hover { background: var(--surface-2); }
 .tree-note { padding: 3px 6px 3px calc(24px + var(--depth, 0) * 14px); }
 .tree-error { color: var(--danger); overflow-wrap: anywhere; }
 
-.ide-editor { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+.ide-editor { flex: 3 1 0; min-height: 160px; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
 .file-tabs { display: flex; overflow-x: auto; border-bottom: 1px solid var(--border); scrollbar-width: thin; }
 .file-tab { display: inline-flex; align-items: center; flex: none; border-right: 1px solid var(--border); color: var(--muted); }
 .file-tab.active { background: var(--surface-2); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
@@ -2434,7 +2437,7 @@ button.sum-line:hover { background: var(--surface-2); }
 .file-meta { flex: none; white-space: nowrap; }
 .file-bar .icon-btn { flex: none; }
 .ide-msg { padding: 16px; margin: 0; }
-.code-view { height: min(52vh, 620px); overflow: auto; background: var(--surface-2); font: 0.8rem/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; outline: none; }
+.code-view { flex: 1; min-height: 0; overflow: auto; background: var(--surface-2); font: 0.8rem/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; outline: none; }
 .code { display: table; min-width: 100%; padding: 8px 0; }
 .code-line { display: table-row; }
 .code-line:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
@@ -2452,7 +2455,8 @@ button.sum-line:hover { background: var(--surface-2); }
 .tok-meta { color: var(--syn-meta); }
 .tok-variable { color: var(--syn-variable); }
 
-.term { display: flex; flex-direction: column; gap: 8px; }
+.term { flex: 2 1 0; min-height: 220px; display: flex; flex-direction: column; gap: 8px; }
+.term > * { flex: none; }
 .term-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .term-tabs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; min-width: 0; }
 .term-tab { display: inline-flex; align-items: center; border-radius: 6px; color: var(--muted); }
@@ -2468,8 +2472,8 @@ button.sum-line:hover { background: var(--surface-2); }
 .term-new .icon { width: 14px; height: 14px; }
 .term-cwd { flex: 1; min-width: 8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 0.78rem ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); text-align: right; }
 .term-actions { flex: none; gap: 2px; }
-.term-out { position: relative; height: min(62vh, 600px); overflow: auto; padding: 10px 12px; border-radius: 8px; background: var(--surface-2); color: var(--text); font: 0.8rem/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; outline: none; }
-.ide-main.has-file .term-out { height: min(34vh, 380px); }
+.term > .term-out { flex: 1; min-height: 0; }
+.term-out { position: relative; overflow: auto; padding: 10px 12px; border-radius: 8px; background: var(--surface-2); color: var(--text); font: 0.8rem/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; outline: none; }
 .term-out:focus { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
 .term-out.dropping { box-shadow: inset 0 0 0 2px var(--accent); }
 .term-line { min-height: 1.35em; overflow: hidden; }
@@ -2592,10 +2596,13 @@ button.sum-line:hover { background: var(--surface-2); }
 .diff-commit-message { white-space: pre-wrap; font-weight: 600; margin-bottom: 4px !important; }
 
 @media (max-width: 760px) {
-  .ide { grid-template-columns: minmax(0, 1fr); }
-  .ide-explorer { position: static; max-height: 260px; }
-  .term-out, .ide-main.has-file .term-out { height: 50vh; }
-  .code-view { height: 50vh; }
+  /* Stacked on a phone: the page scrolls, and each part keeps a fixed height. */
+  .dev { height: auto; min-height: 0; }
+  .ide { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  .ide-explorer { max-height: 260px; }
+  .ide-editor, .term { flex: none; }
+  .term > .term-out { flex: none; height: 60dvh; }
+  .code-view { flex: none; height: 50dvh; }
   .term-cwd { text-align: left; }
   .term-recent { justify-content: flex-start; }
 }
