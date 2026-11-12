@@ -1,4 +1,4 @@
-// Cron: recurring flows that gather board data, ask an AI model, and turn the answer into a task or a notification.
+// Cron: recurring flows that gather board data, ask an AI model, and turn the answer into a task, a notification or work for claude in Dev.
 // The editor draws a flow as a chain of nodes, like a workflow canvas; the inspector below edits the selected node.
 import { h, icon, empty, notice, now, uid } from '../ui.js';
 import { projectTree } from './projects.js';
@@ -6,7 +6,7 @@ import { modelChip } from '../model-picker.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import {
-  COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, REPEATS, STOP_WHEN, TEMPLATES, daysOf,
+  COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, REPEATS, STOP_WHEN, DEV_MODES, TEMPLATES, daysOf,
   makeFlow, makeStep, flowFromTemplate, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
 } from '../cron.js';
 import { modelForTask } from './settings.js';
@@ -15,7 +15,7 @@ import { modelForTask } from './settings.js';
 const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all' };
 const TABS = [['flows', 'Flows'], ['runs', 'Runs'], ['templates', 'Templates']];
 const SUBTITLES = {
-  flows: 'Recurring flows that gather data from the board, ask an AI model, and turn the answer into a task or a notification.',
+  flows: 'Recurring flows that gather data from the board, ask an AI model, and turn the answer into a task, a notification or work for claude in Dev.',
   runs: 'What every flow did, step by step.',
   templates: 'Starting points. A template becomes a paused flow you can adjust before switching it on.',
 };
@@ -212,6 +212,10 @@ function stepSummary(store, step) {
   if (step.type === 'ai') return step.model || modelForTask(store, AI_TASK) || 'No model set';
   if (step.type === 'task') return step.title || '{{input}}';
   if (step.type === 'stop') return stopLabel(step);
+  if (step.type === 'dev') {
+    const where = step.projectId ? projectsOf(store).find((p) => p.id === step.projectId)?.name ?? 'Choose a project' : 'Task’s project or board';
+    return `${step.mode === 'command' ? step.command || 'Enter a command' : 'claude'} · ${where}`;
+  }
   return step.text || 'Notification';
 }
 
@@ -379,6 +383,26 @@ function stepForm(store, flow, step) {
         needsText ? field('Words', h('input', { value: step.text ?? '', autocomplete: 'off', onchange: (e) => set({ text: e.target.value }) }), 'Not case-sensitive.') : null),
       h('p', { class: 'muted small' }, 'The run ends here without counting as a failure, and the steps after this one are skipped. Put it after a data step to stay quiet when there is nothing to report.'));
   }
+  if (step.type === 'dev') {
+    const claude = step.mode !== 'command';
+    const folders = [['', 'The task’s project, else this board'], ...projectsOf(store).filter((p) => p.localPath || p.id === step.projectId).map((p) => [p.id, p.localPath ? p.name : `${p.name} (no local folder)`])];
+    const hasTask = flow.steps.slice(0, flow.steps.indexOf(step)).some((s) => s.type === 'task');
+    return h('div', { class: 'stack' },
+      h('div', { class: 'row cron-fields' },
+        field('Run', select(step.mode, DEV_MODES, (mode) => set({ mode }))),
+        field('Folder', select(step.projectId, folders, (projectId) => set({ projectId })), 'Projects show here once they have a local folder.')),
+      claude
+        ? field('Prompt for claude', h('textarea', { rows: 6, class: 'mono-text', onchange: (e) => set({ prompt: e.target.value }) }, step.prompt ?? ''))
+        : field('Command', h('input', { value: step.command ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, placeholder: 'npm run build', onchange: (e) => set({ command: e.target.value }) }),
+            'Each {{…}} goes in as one quoted word, so text from a model never runs as a command.'),
+      h('p', { class: 'muted small' }, 'Use {{input}} for the previous step’s output, {{task}} for the task made above (its title and description), {{date}} and {{flow}}.'),
+      h('p', { class: 'muted small' },
+        claude ? 'claude starts with the project’s Dev command, in a worktree of its own. ' : '',
+        hasTask
+          ? 'The task made above goes with it, as from its Dev button: it moves to In progress, and the issues and PRs the terminal prints are added to it. '
+          : 'Put a “Create task” step before this one to follow the work from a task. ',
+        'The run does not wait for the terminal: it shows in Dev, and needs the runner that bun start starts.'));
+  }
   return h('div', { class: 'stack' },
     field('Message', h('textarea', { rows: 4, onchange: (e) => set({ text: e.target.value }) }, step.text)),
     vars,
@@ -493,7 +517,7 @@ function editor(store, flow) {
             type: 'button',
             class: 'btn-small',
             disabled: busy || !flow.steps.length,
-            title: 'Runs every step but creates no task and sends no notification. AI steps still call the model.',
+            title: 'Runs every step but creates no task, sends no notification and starts no terminal. AI steps still call the model.',
             onclick: () => startRun(store, flow, { dry: true }),
           }, icon('filter'), 'Test run'),
           h('button', { type: 'button', class: 'btn-small primary', disabled: busy || !flow.steps.length, onclick: () => startRun(store, flow) }, icon('play'), busy ? 'Running…' : 'Run now'),

@@ -8,6 +8,7 @@ import { calendarEvents, calendarAccounts, eventDate } from './gcal.js';
 import { sitesOf, siteData } from './automations.js';
 import { readPageText } from './sitecheck.js';
 import { openPositions } from './modules/positions.js';
+import { startDevSession } from './modules/dev.js';
 
 export const COLLECTION = 'cron';
 export const DEFAULTS = { flows: [], runs: [] };
@@ -22,6 +23,13 @@ export const STEP_TYPES = [
   ['stop', 'Stop if', 'filter', 'Ends the run early, for example when there is nothing to report.'],
   ['task', 'Create task', 'check-square', 'Adds a task with the output as its description.'],
   ['notify', 'Notify', 'bell', 'Posts the output under the bell (and Telegram if enabled).'],
+  ['dev', 'Run in Dev', 'terminal', 'Hands the output to claude, or runs a command, in a new Dev terminal.'],
+];
+
+// What a "Run in Dev" step starts.
+export const DEV_MODES = [
+  ['claude', 'claude, with a prompt'],
+  ['command', 'A shell command'],
 ];
 
 export const STOP_WHEN = [
@@ -71,6 +79,7 @@ export function makeStep(type) {
   if (type === 'ai') return { ...base, prompt: 'Summarize this in five bullet points:\n\n{{input}}', system: '', model: '' };
   if (type === 'task') return { ...base, title: '{{flow}} · {{date}}', projectId: '', priority: 'none', due: '' };
   if (type === 'stop') return { ...base, when: 'nothing', text: '' };
+  if (type === 'dev') return { ...base, mode: 'claude', projectId: '', prompt: '{{input}}', command: '' };
   return { ...base, text: '{{flow}}: {{input}}' };
 }
 
@@ -204,6 +213,32 @@ export const TEMPLATES = [
           + 'Do not invent facts, quotes, customers or numbers; where the post needs one, leave a [placeholder].',
       },
       { type: 'task', title: 'Blog draft: {{input}}' },
+    ],
+  },
+  {
+    name: 'Blog post as a PR',
+    about: 'Drafts a post from a project’s website and blog, adds it as a task, then has claude add it to the project’s repository and open a PR. Choose the project in the data steps and the task step; it needs a local folder.',
+    schedule: { every: 'weekly', time: '09:00', weekday: 2 },
+    steps: [
+      { type: 'gather', source: 'page' },
+      { type: 'gather', source: 'page', url: '/blog', append: true },
+      { type: 'gather', source: 'history', count: 6, append: true },
+      {
+        type: 'ai',
+        prompt: 'Below is a website, then its blog index with the posts already published, then the posts written for it before.\n\n{{input}}\n\n'
+          + 'Write one new blog post for this site, on a topic neither the blog nor the earlier posts cover, that its readers would search for. '
+          + 'Reply in Markdown: the post title alone on the first line (no # sign), then a one-sentence summary, then the post, 800 to 1,200 words with ## subheadings, '
+          + 'ending with a short call to action that fits the site. Match the tone of the existing posts. '
+          + 'Do not invent facts, quotes, customers or numbers; where the post needs one, leave a [placeholder].',
+      },
+      { type: 'task', title: 'Blog post: {{input}}' },
+      {
+        type: 'dev',
+        mode: 'claude',
+        prompt: 'Add this blog post to the site in this repository as a new post page, the way the existing posts are made '
+          + '(same folder, file format, front matter, and any list or index that names them). Leave [placeholders] as they are. '
+          + 'Check that the site still builds, then commit on a new branch, push it and open a pull request.\n\n{{task}}',
+      },
     ],
   },
   {
@@ -496,6 +531,51 @@ export function stopLabel(step) {
   return step.when === 'contains' || step.when === 'lacks' ? `${label} “${step.text || '…'}”` : label;
 }
 
+// A shell word: single quotes keep newlines, quotes and $ as they are.
+const shellQuote = (text) => `'${String(text).replace(/'/g, `'\\''`)}'`;
+
+// The task a "Create task" step made in this run, as claude gets a task from its Dev button: a checklist line,
+// then its description indented. In a test run no task is made, so it is the title the step would give it.
+function taskText(task, fallback) {
+  if (!task) return fallback;
+  const desc = (task.description ?? '').trim();
+  return `- [ ] ${task.text}${desc ? `\n${desc.split(/\r?\n/).map((l) => `  ${l}`).join('\n')}` : ''}`;
+}
+
+// Starts claude (or a command) in a new Dev terminal and moves on: the run does not wait for it to finish.
+// The task made earlier in the run goes with it, as when it is handed over from Tasks: it moves to In progress,
+// keeps the terminal and its worktree, and gets the issues and PRs claude prints.
+async function runDev(store, flow, step, input, vars, ctx) {
+  const claude = step.mode !== 'command';
+  const task = ctx.task ?? null;
+  const projectId = step.projectId || task?.projectId || '';
+  const project = projectId ? store.get('projects').projects.find((p) => p.id === projectId) : null;
+  if (projectId && !project) throw new Error('The project of this step was removed. Choose another.');
+  if (project && !project.localPath) throw new Error(`${project.name} has no local folder. Add one in Projects.`);
+  const v = { ...vars, task: taskText(task, input) };
+  const prompt = claude ? fill(step.prompt || '{{input}}', v).trim() : '';
+  // Values go into a command as one quoted word each, so text from a model cannot run as shell.
+  const command = claude ? '' : String(step.command ?? '').replace(/\{\{\s*(\w+)\s*\}\}/g, (m, k) => (k in v ? shellQuote(v[k]) : m)).trim();
+  if (claude ? !prompt : !command) throw new Error(claude ? 'Write the prompt for claude.' : 'Enter the command to run.');
+  const where = project ? `${project.name}’s folder` : 'the board’s folder';
+  if (ctx.dry) {
+    ctx.note = `Test run: would ${claude ? 'hand this prompt to claude' : 'run this command'} in a new Dev terminal, in ${where}.`;
+    return claude ? prompt : command;
+  }
+  const { id, n, worktree } = await startDevSession({ store, claude, prompt, command, projectId, taskIds: task ? [task.id] : [], title: task?.text || flow.name });
+  if (task) {
+    store.update('todos', (d) => {
+      const t = d.items.find((x) => x.id === task.id);
+      if (!t) return;
+      t.devSession = id;
+      if (statusOf(t) !== 'done') t.status = 'doing';
+      if (worktree && statusOf(t) !== 'done') t.worktrees = [...(t.worktrees ?? []), { ...worktree, session: id }];
+    });
+  }
+  ctx.note = `Started in Dev terminal ${n}, in ${where}${task ? `, on the task “${task.text}”` : ''}.`;
+  return input;
+}
+
 // ctx carries what passes between steps besides the text: whether the last data step found nothing, whether this is
 // a test run, and a note a step leaves for the run log (what it would have done, or why the run stopped).
 async function runStep(store, flow, step, input, ctx) {
@@ -527,7 +607,7 @@ async function runStep(store, flow, step, input, ctx) {
       ctx.note = `Test run: would create the task “${title}”${due ? ` due ${due}` : ''}.`;
       return input;
     }
-    store.update('todos', (d) => d.items.push(makeTask({
+    const task = makeTask({
       text: title,
       description: input,
       projectId: step.projectId || null,
@@ -535,9 +615,13 @@ async function runStep(store, flow, step, input, ctx) {
       due,
       auto: 'cron',
       autoRef: flow.id,
-    })));
+    });
+    store.update('todos', (d) => d.items.push(task));
+    // A "Run in Dev" step later in the run works on this task.
+    ctx.task = task;
     return input;
   }
+  if (step.type === 'dev') return runDev(store, flow, step, input, vars, ctx);
   if (step.type === 'notify') {
     const text = fill(step.text, vars).slice(0, 1200);
     if (ctx.dry) {
