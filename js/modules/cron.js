@@ -11,7 +11,7 @@ import {
   COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, PROFILE_EDITED, profileEditedMode, TEMPLATES, devRunOptions, devRunValue, devCommandPreview, daysOf,
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, templateFromFlow, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
-  testStep, testsOf, isTesting, clearTests, useDevStarter, varsTree, fillParts, pathTo, parseData, INPUT_NONE, reorderSteps, projectVars, runState, devWaits, DEV_WAIT_MINUTES,
+  testStep, testsOf, isTesting, clearTests, useDevStarter, varsTree, fillParts, pathTo, parseData, INPUT_NONE, reorderSteps, projectVars, runState, devWaits, DEV_WAIT_MINUTES, devJsonOffered, devJson, DEV_JSON_PROMPT,
 } from '../cron.js';
 import { modelForTask } from '../models.js';
 import { openSession, runnerOf, liveSession, onSessionPaint, exitText, terminalView, terminalBackground, startDevSession } from './dev.js';
@@ -605,6 +605,7 @@ function varNames(flow, index, extra = [], projectId = withFlowProject(flow, flo
     ...flow.steps.slice(0, index).flatMap((s, i) => [
       [`step${i + 1}`, `Output of step ${i + 1}, ${typeOf(s.type)[1]}`],
       ...(s.type === 'dev' && devWaits(flow, s) ? DEV_PARTS.map(([k, about]) => [`step${i + 1}.${k}`, `${about} (step ${i + 1})`]) : []),
+      ...(s.type === 'dev' && devWaits(flow, s) && devJson(flow, s) ? [[`step${i + 1}.json`, `The JSON of its final output (step ${i + 1})`]] : []),
     ]),
   ];
 }
@@ -1015,6 +1016,19 @@ function stepForm(store, flow, step) {
               onchange: (e) => set({ waitMinutes: Math.min(720, Math.max(1, Math.round(Number(e.target.value) || DEV_WAIT_MINUTES))) }),
             }))
           : null),
+      claude && devJsonOffered(flow, step)
+        ? h('div', { class: 'stack' },
+            h('label', { class: 'check' },
+              h('input', { type: 'checkbox', checked: Boolean(step.json), onchange: (e) => set({ json: e.target.checked || undefined }) }),
+              ' Ask for its final output as JSON, for the Run in Dev after it'),
+            step.json
+              ? h('p', { class: 'muted small' },
+                  `Adds “${DEV_JSON_PROMPT}” to the end of the prompt. `,
+                  waits
+                    ? `The JSON it ends with is read back as {{step${flow.steps.indexOf(step) + 1}.json}}, and its keys with a path such as {{step${flow.steps.indexOf(step) + 1}.json.title}}.`
+                    : 'Turn on waiting for the terminal to read it back.')
+              : null)
+        : null,
       h('p', { class: 'muted small' },
         waits
           ? 'The run waits until the terminal ends, or until claude is done and waits for you. The steps after it then get its branch, last commit, changed files, PR and the end of its output: {{input}} as text, or parts such as {{step' + String(flow.steps.indexOf(step) + 1) + '.pr.url}}, {{step' + String(flow.steps.indexOf(step) + 1) + '.branch}} and {{step' + String(flow.steps.indexOf(step) + 1) + '.files}}. '
