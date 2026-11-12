@@ -151,6 +151,8 @@ export function makeProject(existingCount, fields = {}) {
     labels: [],
     parentId: null,
     github: { org: '', repos: [] },
+    // What the project is, saved for the board's AI features (js/profile.js). A missing profile reads as empty.
+    profile: { text: '', sources: [], updated: '', edited: false, usageId: '' },
     created: now(),
     ...fields,
   };

@@ -10,6 +10,30 @@ function day(offset) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+// One filled profile, so the Projects page shows what a built profile looks like.
+const SAMPLE_PROFILE = {
+  text: [
+    '## What it is',
+    'Atlas Site is the marketing site of a sample product. It is for visitors comparing plans before they sign up.',
+    '## Stack and layout',
+    '- Static pages with a small amount of JavaScript',
+    '- pages/ for content, assets/ for images and styles',
+    '## How to work on it',
+    '- Run a local static server and open the home page',
+    '- Check every page at phone width before publishing',
+    '## Recent focus',
+    '- A new pricing page and fixes to the footer links',
+    '## Website and blog',
+    '- https://example.com presents the product and its plans',
+    '## Unknowns',
+    '- No repository or local folder is set, so the test commands are not known',
+  ].join('\n'),
+  sources: [],
+  updated: new Date(Date.now() - 2 * 86400000).toISOString(),
+  edited: false,
+  usageId: '',
+};
+
 function memoryFolder(name, initial) {
   const files = new Map(Object.entries(initial)); // path -> text or Blob
   const missing = () => Object.assign(new Error('Not found'), { name: 'NotFoundError' });
@@ -79,7 +103,7 @@ function collections() {
     projects: {
       categories: [{ id: 'cat-web', name: 'Web', color: '#3b6ea8' }, { id: 'cat-personal', name: 'Personal', color: '#2f6f4e' }],
       projects: [
-        { id: 'p-atlas', name: 'Atlas Site', color: '#3b6ea8', description: 'Marketing site.', website: 'https://example.com', labels: ['cat-web'], parentId: null, github: { org: '', repos: [] }, created: at },
+        { id: 'p-atlas', name: 'Atlas Site', color: '#3b6ea8', description: 'Marketing site.', website: 'https://example.com', labels: ['cat-web'], parentId: null, github: { org: '', repos: [] }, profile: SAMPLE_PROFILE, created: at },
         { id: 'p-docs', name: 'Atlas Docs', color: '#2e8a8a', description: '', website: 'https://docs.example.com', labels: ['cat-web'], parentId: 'p-atlas', github: { org: '', repos: [] }, created: at },
         { id: 'p-reno', name: 'Home Reno', color: '#a3432b', description: '', website: '', labels: ['cat-personal'], parentId: null, github: { org: '', repos: [] }, created: at },
       ],
