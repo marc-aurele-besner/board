@@ -4,14 +4,15 @@
 // removes the git worktree a task's session made once the task is completed, and only a clean one.
 // The runner owns each terminal session: a command keeps running when the page reloads or closes, and the session's
 // output is kept (in memory and in TERMINAL_STATE, a folder in the system's temp folder by default) so the page
-// shows it again when it comes back, even after the runner restarted.
+// shows it again when it comes back, even after the runner restarted. The list of open terminals is kept there too,
+// so every browser on this machine opens the same terminals.
 // TERMINAL_PORT changes the port (8419 by default); TERMINAL_MAX the number of commands that may run at once (12).
 // It can run anything on this machine, so it listens on 127.0.0.1 only and answers only pages served from this
 // machine: the Origin check keeps other websites out, the Host check keeps out DNS rebinding.
 import { createServer } from 'node:http';
 import { execFile, spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { appendFile, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,6 +37,10 @@ const KEEP_MS = 30 * 24 * 3600 * 1000;
 const FLUSH_MS = 250;
 const STATE = resolve(process.env.TERMINAL_STATE || join(tmpdir(), 'board-terminal'));
 const SESSION_ID = /^[\w-]{1,64}$/;
+// The terminals the page lists, in order, with the one shown.
+const LIST_FILE = join(STATE, 'sessions.json');
+// A task's prompt can be long; the list may be this large.
+const LIST_MAX = 2 * 1024 * 1024;
 const WORKTREE_NAME = /^[\w.-]{1,64}$/;
 const log = logger('terminal');
 // Running commands by pid: the child, the folder it reports into, and its session.
@@ -196,12 +201,12 @@ async function attach(req, res, cors, id) {
   res.on('close', () => s.listeners.delete(res));
 }
 
-function readBody(req) {
+function readBody(req, max = 100_000) {
   return new Promise((done, fail) => {
     let text = '';
     req.on('data', (chunk) => {
       text += chunk;
-      if (text.length > 100_000) req.destroy(new Error('Request too large'));
+      if (text.length > max) req.destroy(new Error('Request too large'));
     });
     req.on('end', () => done(text));
     req.on('error', fail);
@@ -216,9 +221,9 @@ function stop(child, signal) {
   } catch {}
 }
 
-async function jsonBody(req, res, cors) {
+async function jsonBody(req, res, cors, max) {
   try {
-    return JSON.parse(await readBody(req));
+    return JSON.parse(await readBody(req, max));
   } catch {
     res.writeHead(400, cors).end('Send JSON.');
     return null;
@@ -319,6 +324,45 @@ async function control(req, res, cors, action) {
     for (const listener of s.listeners) listener.end();
     s.disk.then(() => rm(logFile(s.id), { force: true })).catch(() => {});
   }
+  res.writeHead(204, cors).end();
+}
+
+// The open terminals: { active, sessions: [{ id, n, cwd, tasks?, prompt? }] }, or { sessions: null } before the
+// page saved any. Writes go one after another, each replacing the file whole.
+let listWrite = Promise.resolve();
+async function readList() {
+  await listWrite;
+  try {
+    const list = JSON.parse(await readFile(LIST_FILE, 'utf8'));
+    return { active: String(list.active ?? ''), sessions: Array.isArray(list.sessions) ? list.sessions : [] };
+  } catch {
+    return { active: '', sessions: null };
+  }
+}
+function cleanList(body) {
+  if (!Array.isArray(body.sessions)) return null;
+  const seen = new Set();
+  const sessions = [];
+  for (const x of body.sessions.slice(0, 200)) {
+    const id = String(x?.id ?? '');
+    if (!SESSION_ID.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    const tasks = Array.isArray(x.tasks) ? x.tasks.filter((t) => typeof t === 'string').slice(0, 200) : [];
+    sessions.push({ id, n: Math.max(1, Math.round(Number(x.n)) || 1), cwd: String(x.cwd ?? ''), ...(tasks.length ? { tasks, prompt: String(x.prompt ?? '') } : {}) });
+  }
+  return { active: seen.has(String(body.active)) ? String(body.active) : '', sessions };
+}
+async function saveList(req, res, cors) {
+  const body = await jsonBody(req, res, cors, LIST_MAX);
+  if (!body) return;
+  const list = cleanList(body);
+  if (!list) return res.writeHead(400, cors).end('Send the terminals as { active, sessions }.');
+  const tmp = `${LIST_FILE}.${process.pid}.tmp`;
+  listWrite = listWrite
+    .then(() => writeFile(tmp, JSON.stringify(list), { mode: 0o600 }))
+    .then(() => rename(tmp, LIST_FILE))
+    .catch((err) => log.error(`Could not save the terminal list: ${err.message}`));
+  await listWrite;
   res.writeHead(204, cors).end();
 }
 
@@ -628,6 +672,10 @@ createServer(async (req, res) => {
     if (!SESSION_ID.test(id)) return res.writeHead(400, cors).end('No terminal session.');
     return attach(req, res, cors, id);
   }
+  if (req.method === 'GET' && path === '/sessions') {
+    res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(await readList()));
+    return;
+  }
   if (req.method === 'GET' && path === '/status') {
     const ids = (new URL(req.url, 'http://terminal').searchParams.get('sessions') ?? '').split(',').filter((id) => SESSION_ID.test(id)).slice(0, 200);
     const out = {};
@@ -674,6 +722,7 @@ createServer(async (req, res) => {
     return;
   }
   if (req.method === 'POST' && path === '/input' && json) return input(req, res, cors);
+  if (req.method === 'POST' && path === '/sessions' && json) return saveList(req, res, cors);
   if (req.method === 'POST' && ['/stop', '/clear', '/close'].includes(path) && json) return control(req, res, cors, path.slice(1));
   if (req.method === 'POST' && path === '/worktree/remove' && json) return removeWorktree(req, res, cors);
   res.writeHead(404, cors).end('Not a terminal request.');
