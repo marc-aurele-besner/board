@@ -49,14 +49,19 @@
       "dry": false,
       "status": "ok",
       "steps": [
-        { "stepId": "step-4", "type": "task", "ok": true, "output": "Example output", "note": "", "ms": 12, "taskId": "task-2" },
+        { "stepId": "step-4", "type": "task", "ok": true, "output": "Example output", "note": "", "ms": 12, "taskId": "task-2", "taskIds": ["task-1", "task-2"] },
         {
           "stepId": "step-6", "type": "dev", "ok": true, "output": "Example output", "note": "", "ms": 60000,
           "session": "example-session-1", "cwd": "~/example/project", "terminal": 1, "worktree": "example-worktree",
           "branch": "example-branch", "commit": "abc1234",
           "pr": { "repo": "example-org/example-repo", "number": 12, "url": "https://github.com/example-org/example-repo/pull/12" },
-          "files": 3,
-          "prs": [{ "repo": "example-org/example-repo", "number": 12, "url": "https://github.com/example-org/example-repo/pull/12" }]
+          "files": 3, "taskId": "task-2",
+          "terminals": [
+            { "session": "example-session-0", "cwd": "~/example/project", "terminal": 0, "taskId": "task-1" },
+            { "session": "example-session-1", "cwd": "~/example/project", "terminal": 1, "taskId": "task-2", "worktree": "example-worktree", "branch": "example-branch" }
+          ],
+          "prs": [{ "repo": "example-org/example-repo", "number": 12, "url": "https://github.com/example-org/example-repo/pull/12" }],
+          "issues": [{ "repo": "example-org/example-repo", "number": 11, "url": "https://github.com/example-org/example-repo/issues/11" }]
         }
       ],
       "error": "",

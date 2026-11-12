@@ -1941,7 +1941,7 @@ async function runDev(store, flow, step, input, vars, ctx) {
   const workPath = worktree ? `${String(worktree.cwd).replace(/\/+$/, '')}/.claude/worktrees/${worktree.name}` : cwd;
   const on = `Dev terminal ${n}, in ${where}${task ? `, on the task “${task.text}”` : ''}`;
   // session and cwd let the editor show the terminal's output, which the runner keeps, and open it in Dev.
-  ctx.data = { terminal: n, session: id, cwd, folder: where, worktree: worktree ? workPath : '', ...(claude ? { prompt } : { command }) };
+  ctx.data = { terminal: n, session: id, cwd, folder: where, worktree: worktree ? workPath : '', ...(task ? { taskId: task.id } : {}), ...(claude ? { prompt } : { command }) };
   ctx.started?.({ session: id, cwd, terminal: n, ...(worktree ? { worktree: worktree.name } : {}), ...(task ? { taskId: task.id } : {}), work: workPath || cwd, where });
   if (!waits) {
     ctx.note = `${ctx.dry ? 'Test: started' : 'Started'} in ${on}.`;
@@ -2356,8 +2356,8 @@ async function resumeTest(store, flow, step, info, at) {
   if (current()) saveTest(store, flow.id, step.id, result);
 }
 
-// What a run keeps of a step besides its output, so the Runs tab can link to what it made: the task, the terminal,
-// and a Dev step's branch, commit and PR.
+// What a run keeps of a step besides its output, so the Runs tab can link to what it made: the tasks, the terminals,
+// and a Dev step's branch, commit, PRs and issues.
 /**
  * What a step's data holds, as far as it is kept: a task step's task, a Dev step's terminal and outcome.
  * @typedef {object} StepMade
@@ -2369,7 +2369,10 @@ async function resumeTest(store, flow, step, info, at) {
  * @property {string} [branch]
  * @property {string} [commit]
  * @property {string} [commitShort]
+ * @property {string} [taskId]
  * @property {CronPr | null} [pr]
+ * @property {CronPr[]} [prs]
+ * @property {CronPr[]} [issues]
  * @property {unknown[]} [files]
  * @property {number} [moreFiles]
  */
@@ -2378,20 +2381,43 @@ async function resumeTest(store, flow, step, info, at) {
  * @param {StepResult} result
  */
 function stepRecord(step, result) {
-  // A step in a loop made one per item: the last one is kept.
-  const made = Array.isArray(result.data) && step.type !== 'loop' ? result.data.at(-1) : result.data;
-  const d = result.ok && made && typeof made === 'object' ? /** @type {StepMade} */ (made) : null;
+  // A step in a loop made one per item: the last one fills the single fields, and every one is kept in the lists.
+  const all = /** @type {unknown[]} */ (Array.isArray(result.data) && step.type !== 'loop' ? result.data : [result.data]);
+  const made = result.ok ? all.filter((x) => x && typeof x === 'object').map((x) => /** @type {StepMade} */ (x)) : [];
+  const d = made.at(-1) ?? null;
   /** @type {CronRunStep} */
   const out = { stepId: step.id, type: step.type, ok: result.ok, output: result.output.slice(0, 4000), note: result.note, ms: result.ms };
-  if (step.type === 'task' && d?.id) out.taskId = d.id;
+  if (step.type === 'task' && d?.id) {
+    out.taskId = d.id;
+    const ids = [...new Set(made.map((x) => x.id).filter((id) => typeof id === 'string'))];
+    if (ids.length > 1) out.taskIds = ids;
+  }
   if (step.type === 'dev' && d?.session) {
     Object.assign(out, { session: d.session, cwd: d.cwd, terminal: d.terminal });
     // By name: Dev lists worktrees by their real path, which a project folder saved with ~ does not match.
     if (d.worktree) out.worktree = d.worktree.split('/').pop();
+    if (d.taskId) out.taskId = d.taskId;
     if (d.branch) out.branch = d.branch;
     if (d.commit) out.commit = d.commitShort || d.commit.slice(0, 7);
     if (d.pr) out.pr = d.pr;
     if (d.files) out.files = d.files.length + (d.moreFiles ?? 0);
+    const terms = made.filter((x) => x.session);
+    if (terms.length > 1) {
+      out.terminals = terms.map((x) => ({
+        session: /** @type {string} */ (x.session),
+        cwd: x.cwd ?? '',
+        terminal: x.terminal ?? 0,
+        ...(x.taskId ? { taskId: x.taskId } : {}),
+        ...(x.worktree ? { worktree: x.worktree.split('/').pop() } : {}),
+        ...(x.branch ? { branch: x.branch } : {}),
+      }));
+    }
+    /** @param {CronPr[]} list */
+    const unique = (list) => [...new Map(list.map((p) => [p.url.toLowerCase(), { repo: p.repo, number: p.number, url: p.url }])).values()];
+    const prs = unique(terms.flatMap((x) => x.prs ?? (x.pr ? [x.pr] : [])));
+    const issues = unique(terms.flatMap((x) => x.issues ?? []));
+    if (prs.length) out.prs = prs;
+    if (issues.length) out.issues = issues;
   }
   return out;
 }
