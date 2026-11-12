@@ -82,6 +82,8 @@ function parse(text, billing) {
   let overageUntil = 0;
   // By model: the weight of every reply, and of those billed as extra.
   const weights = {};
+  // Whether claude is in the middle of a turn, rather than waiting for the user (see turnOpen).
+  let open = false;
   for (const line of text.split('\n')) {
     if (!line) continue;
     let o;
@@ -90,6 +92,7 @@ function parse(text, billing) {
     } catch {
       continue;
     }
+    open = turnOpen(o, open);
     const quota = o.quotaLimits ?? o.apiErrorParams?.rate_limit_info;
     if (quota && typeof quota.isUsingOverage === 'boolean') overageUntil = quota.isUsingOverage ? (Number(quota.resetsAt) * 1000 || Infinity) : 0;
     if (o.type === 'worktree-state' && o.worktreeSession?.worktreeName) worktrees.add(o.worktreeSession.worktreeName);
@@ -136,7 +139,25 @@ function parse(text, billing) {
   }
   if (!counted.length) for (const m of replies.values()) addModel(models, m.model, tokensOf(m.usage), null);
   const extraCost = cost === null ? null : Object.values(models).reduce((s, m) => s + (m.extraCost ?? 0), 0);
-  return { worktrees: [...worktrees], models, cost, extraCost, billing, duration, apiDuration, linesAdded, linesRemoved, efforts, replies: replies.size, start, end };
+  return { worktrees: [...worktrees], models, cost, extraCost, billing, duration, apiDuration, linesAdded, linesRemoved, efforts, replies: replies.size, start, end, open };
+}
+
+// Whether a turn is still going after transcript line `o`. A reply that stopped for anything but a tool call ends
+// the turn (Claude's own error replies too); the user's message, a tool's result or a finished background task's
+// notification starts one again. Lines only shown to the user (a summary after compacting, a skill's text, a local
+// command and its output) and an interruption leave claude waiting.
+function turnOpen(o, open) {
+  if (o.type === 'assistant') {
+    if (o.message?.model === '<synthetic>') return false;
+    const stop = o.message?.stop_reason;
+    return !stop || stop === 'tool_use';
+  }
+  if (o.type !== 'user' || o.isMeta || o.isCompactSummary || o.isVisibleInTranscriptOnly) return open;
+  const c = o.message?.content;
+  const text = typeof c === 'string' ? c : Array.isArray(c) && c[0]?.type === 'text' ? c[0].text : '';
+  if (/^\[Request interrupted/.test(text)) return false;
+  if (/^<(command-name|local-command-)/.test(text)) return open;
+  return true;
 }
 
 // The part of a model's cost billed beyond the plan: all of it off the plan or off Anthropic, else its extra replies'.
@@ -202,6 +223,50 @@ export async function worktreeUsage(list) {
     if (!WORKTREE_NAME.test(w?.name ?? '') || typeof w.cwd !== 'string' || !w.cwd) continue;
     const usage = await usageOf(w);
     if (usage) out[w.name] = usage;
+  }
+  return out;
+}
+
+// A subagent whose transcript has not changed for this long died with its session rather than still working.
+const STALE_MS = 30 * 60 * 1000;
+
+// Whether the claude session in worktree `name` of the repo at `cwd` is working: { busy, agents }. Busy while its
+// latest transcript is in the middle of a turn, or while one of its subagents is (a background agent works on
+// while claude waits for the user). Null when no transcript of that worktree is found.
+async function activityOf({ name, cwd }) {
+  const repo = resolve(expand(cwd));
+  const files = new Set([
+    ...(await transcriptsIn(folderKey(join(repo, '.claude', 'worktrees', name)))),
+    ...(await transcriptsIn(folderKey(repo))),
+  ]);
+  const billing = await loginBilling();
+  let latest = null;
+  for (const file of files) {
+    const info = await stat(file).catch(() => null);
+    if (!info || (latest && info.mtimeMs <= latest.mtime)) continue;
+    const t = await readTranscript(file, billing);
+    if (t?.worktrees.includes(name)) latest = { file, t, mtime: info.mtimeMs };
+  }
+  if (!latest) return null;
+  // Claude keeps a session's subagents beside it, in <session>/subagents.
+  const folder = join(latest.file.slice(0, -'.jsonl'.length), 'subagents');
+  let agents = 0;
+  for (const n of await readdir(folder).catch(() => [])) {
+    if (!n.endsWith('.jsonl')) continue;
+    const info = await stat(join(folder, n)).catch(() => null);
+    if (!info || Date.now() - info.mtimeMs > STALE_MS) continue;
+    if ((await readTranscript(join(folder, n), billing))?.open) agents++;
+  }
+  return { busy: latest.t.open || agents > 0, agents };
+}
+
+// [{ name, cwd }] → { [name]: { busy, agents } }; worktrees with no transcript are left out.
+export async function worktreeActivity(list) {
+  const out = {};
+  for (const w of Array.isArray(list) ? list.slice(0, 50) : []) {
+    if (!WORKTREE_NAME.test(w?.name ?? '') || typeof w.cwd !== 'string' || !w.cwd) continue;
+    const activity = await activityOf(w);
+    if (activity) out[w.name] = activity;
   }
   return out;
 }
