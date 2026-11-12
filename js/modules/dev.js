@@ -190,7 +190,7 @@ function onSessionEvent(store, s, e) {
     // The runner has the whole terminal: it is drawn again from the start. A runner that lost it (its state folder
     // was removed) has nothing, so what is shown stays.
     if (e.known) {
-      // Replayed at the size it is shown, so lines wrap as they did.
+      // Output kept before the runner noted sizes is replayed at the size it is shown; newer output says its own.
       fit(s);
       s.term.reset();
       s.term.clear();
@@ -198,9 +198,15 @@ function onSessionEvent(store, s, e) {
     }
   } else if (e.t === 'live') {
     s.replaying = false;
+    // Replayed at the program's last size; now the terminal fits the page again, and a running program is told.
+    fit(s);
     store.refresh();
+  } else if (e.t === 'size') {
+    // The program drew what follows at this size; replayed at another one, its cursor moves land in the wrong place.
+    if (s.replaying) s.term.resize(e.cols, e.rows);
   } else if (e.t === 'start') {
     Object.assign(s, { running: true, pid: e.pid, cwd: e.cwd, command: e.command, exit: null });
+    if (s.replaying && e.cols) s.term.resize(e.cols, e.rows);
     s.term.note(`${e.cwd || 'board'} $ ${oneLine(e.command)}`, 't-cmd');
     if (!s.replaying) {
       saveSessions();
