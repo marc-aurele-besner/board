@@ -57,6 +57,10 @@ export const stopCommand = (base, session) => call(base, '/stop', post({ session
 export const clearSession = (base, session) => call(base, '/clear', post({ session }));
 export const closeSession = (base, session) => call(base, '/close', post({ session }));
 
+// Stops the session and removes the worktree `name` that claude made in the repo at `cwd`: { removed } or { missing }.
+// Fails when git refuses (changes or untracked files in it) or claude still runs there.
+export const removeWorktree = async (base, { cwd, name, session }) => (await call(base, '/worktree/remove', post({ cwd, name, session }))).json();
+
 // Keys for a running command, or its terminal's new size. Calls for one command are sent one after another,
 // so fast typing arrives in order.
 const queues = new Map();
