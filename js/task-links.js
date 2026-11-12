@@ -1,7 +1,10 @@
 // A task's GitHub issues and pull requests, and the links Dev finds in a terminal's output: when a task is handed
 // to claude and it opens a PR or an issue, the link printed in the terminal is added to the task.
+// A PR means claude is done: the task moves on to review.
 import { getIssue } from './github.js';
 import { toast } from './toast.js';
+import { statusOf } from './ui.js';
+import { statusName } from './task-labels.js';
 
 const COLLECTION = 'todos';
 
@@ -56,6 +59,8 @@ export function addTaskLinks(store, taskIds, links) {
       }
     }
   });
+  const prs = added.filter((a) => a.link.kind === 'pr');
+  if (prs.length) moveToReview(store, prs.map((a) => a.task.id));
   for (const { task, link } of added) {
     toast(`${link.kind === 'pr' ? 'PR' : 'Issue'} #${link.number} added to “${task.text}”`);
     getIssue(link.repo, link.number).then(({ title }) => title && store.update(COLLECTION, (d) => {
@@ -64,6 +69,21 @@ export function addTaskLinks(store, taskIds, links) {
       if (l) l.title = title;
     })).catch(() => {});
   }
+}
+
+// Claude is done with the tasks: those still in progress wait for review. A task moved elsewhere meanwhile is
+// left where it was put.
+export function moveToReview(store, taskIds) {
+  const moved = [];
+  store.update(COLLECTION, (d) => {
+    for (const task of d.items) {
+      if (!taskIds.includes(task.id) || statusOf(task) !== 'doing') continue;
+      task.status = 'review';
+      delete task.done;
+      moved.push(task.text);
+    }
+  });
+  if (moved.length) toast(moved.length === 1 ? `“${moved[0]}” moved to ${statusName(store, 'review')}` : `${moved.length} tasks moved to ${statusName(store, 'review')}`);
 }
 
 // Reads a terminal's output as it streams for links, and adds the new ones to the session's tasks.
