@@ -242,8 +242,8 @@ function projectTiles(store, projects, open) {
   return h('div', { class: 'tiles' },
     [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => {
       const n = open.filter((i) => i.projectId === p.id).length;
-      /** @type {ProjectLabel[]} */
-      const names = labelsOf(p).map(label).filter(Boolean);
+      // filter(Boolean) drops the labels that are gone.
+      const names = /** @type {ProjectLabel[]} */ (labelsOf(p).map(label).filter(Boolean));
       return h('a', { href: `#/projects?project=${p.id}`, class: 'tile' },
         h('div', { class: 'tile-head' }, projectIcon(p), h('strong', null, p.name)),
         h('div', { class: 'tile-meta' },
