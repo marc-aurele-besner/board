@@ -7,10 +7,11 @@ import { sitesOf } from '../automations.js';
 import { hostOf } from '../sitecheck.js';
 import { barChart, legend } from '../chart.js';
 import { stat } from './monitoring.js';
+import { projectLabel } from './monitoring-ai.js';
 /** @import { Project, Store } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @import { MonitoringView, PeriodWindow, SortColumn } from '../../types/monitoring' */
-/** @import { SearchReport, SearchRow } from '../webstats.js' */
+/** @import { SearchReport } from '../webstats.js' */
 
 /** @typedef {Awaited<ReturnType<typeof analyticsReport>>} AnalyticsData */
 /** @template T @typedef {{ status: 'loading' } | { status: 'ok', data: T } | { status: 'error', error: string }} Loaded */
@@ -56,17 +57,18 @@ function dayBuckets(w) {
 }
 
 // "All" comes first and is the default: an empty `view.site` adds every site together.
+// A site's chip carries its project's icon; "All" has none.
 /** @param {Store} store @param {MonitoringView} view @param {Project[]} sites @param {Project | null} current */
 function siteChips(store, view, sites, current) {
-  return h('div', { class: 'chips' }, [{ id: '', name: 'All' }, ...sites].map((p) =>
+  return h('div', { class: 'chips' }, [null, ...sites].map((p) =>
     h('button', {
       type: 'button',
-      class: p.id === (current?.id ?? '') ? 'chip active' : 'chip',
+      class: (p?.id ?? '') === (current?.id ?? '') ? 'chip active' : 'chip',
       onclick: () => {
-        view.site = p.id;
+        view.site = p?.id ?? '';
         store.refresh();
       },
-    }, p.name)));
+    }, p ? projectLabel(p) : 'All')));
 }
 
 const pickedSite = (/** @type {MonitoringView} */ view, /** @type {Project[]} */ sites) => sites.find((x) => x.id === view.site) ?? null;
@@ -157,6 +159,17 @@ function table(head, rows, format) {
   return sortTable(head.join('|'), head.map((label, i) => ({
     label, num: i > 0, clip: i === 0, value: (r) => r[i], format: format?.[i] ? (/** @type {never} */ v) => /** @type {(value: never) => Child} */ (format[i])(v) : null,
   })), rows);
+}
+
+/** A site's row in an All view: its project, then its numbers. @typedef {[Project, ...number[]]} SiteRow */
+
+// The "By site" table: a site is named with its project's icon, and still sorts by its name.
+/** @param {string[]} head @param {SiteRow[]} rows @param {((value: number) => Child)[]} format One per number column. */
+function siteTable(head, rows, format) {
+  if (!rows.length) return empty('Nothing in this period.');
+  return sortTable(head.join('|'), head.map((label, i) => (i
+    ? { label, num: true, value: (/** @type {SiteRow} */ r) => r[i], format: format[i - 1] }
+    : { label, clip: true, value: (/** @type {SiteRow} */ r) => r[0].name, format: (/** @type {string} */ _name, /** @type {SiteRow} */ r) => projectLabel(r[0]) })), rows);
 }
 
 /** @param {Store} store @param {string | string[]} keys */
@@ -354,7 +367,7 @@ function analyticsAll(store, view, sites, props, b) {
     { name: 'Users', color: 'var(--accent)', values: b.days.map((day) => sum((d) => d.days[day]?.users ?? 0)) },
     { name: 'Page views', color: 'var(--info)', values: b.days.map((day) => sum((d) => d.days[day]?.views ?? 0)) },
   ];
-  const bySite = all.ok.map(({ p, d }) => [p.name, d.totals.users, d.totals.sessions, d.totals.views]).sort((a, c) => c[3] - a[3]);
+  const bySite = all.ok.map(({ p, d }) => /** @type {SiteRow} */ ([p, d.totals.users, d.totals.sessions, d.totals.views])).sort((a, c) => c[3] - a[3]);
   const pages = mergeRows(all.ok.map(({ p, d }) => d.pages.map(([path, ...n]) => [`${hostOf(p.website)}${path}`, ...n])));
   return h('div', { class: 'stack-lg' }, head, failed,
     h('p', { class: 'muted small' }, `${all.ok.length} site${all.ok.length === 1 ? '' : 's'} added together. Users are counted per site, so someone who visits two sites counts twice.`),
@@ -366,7 +379,7 @@ function analyticsAll(store, view, sites, props, b) {
       stat('Engagement rate', pct(perSession((d) => d.totals.engagement)))),
     h('div', { class: 'split-2' }, series.map((s) =>
       h('section', { class: 'card stack' }, h('h3', null, s.name), views ? barChart(b.labels, [s]) : empty('No visits recorded in this period.'), legend([s])))),
-    h('section', { class: 'card stack' }, h('h3', null, 'By site'), table(['Site', 'Users', 'Sessions', 'Page views'], bySite, [null, fmt, fmt, fmt])),
+    h('section', { class: 'card stack' }, h('h3', null, 'By site'), siteTable(['Site', 'Users', 'Sessions', 'Page views'], bySite, [fmt, fmt, fmt])),
     h('div', { class: 'split-3' },
       h('section', { class: 'card stack' }, h('h3', null, 'Top pages'), table(['Page', 'Views', 'Users'], pages, [null, fmt, fmt])),
       h('section', { class: 'card stack' }, h('h3', null, 'Where visitors come from'), table(['Source', 'Sessions'], mergeRows(all.ok.map((x) => x.d.sources)), [null, fmt])),
@@ -400,7 +413,7 @@ function searchAll(store, view, sites, engines, b, all, note) {
   const format = [null, fmt, fmt, pct, (/** @type {number} */ n) => (n ? n.toFixed(1) : '—')];
   const bySite = all.ok.map((x) => {
     const t = searchTotals(x.parts.flatMap((r) => daysIn(b, r)));
-    return /** @type {SearchRow} */ ([x.p.name, t.clicks, t.imps, t.ctr, t.position]);
+    return /** @type {SiteRow} */ ([x.p, t.clicks, t.imps, t.ctr, t.position]);
   }).sort((a, c) => c[1] - a[1] || c[2] - a[2]);
   const clickSeries = [{ name: 'Clicks', color: 'var(--accent)', values: daySum('clicks') }];
   const impSeries = [{ name: 'Impressions', color: 'var(--info)', values: daySum('impressions') }];
@@ -414,7 +427,7 @@ function searchAll(store, view, sites, engines, b, all, note) {
     h('div', { class: 'split-2' },
       h('section', { class: 'card stack' }, h('h3', null, 'Clicks'), total.clicks ? barChart(b.labels, clickSeries) : empty('No clicks in this period.'), legend(clickSeries)),
       h('section', { class: 'card stack' }, h('h3', null, 'Impressions'), total.imps ? barChart(b.labels, impSeries) : empty('No impressions in this period.'), legend(impSeries))),
-    h('section', { class: 'card stack' }, h('h3', null, 'By site'), table(['Site', ...cols.slice(1)], bySite, format)),
+    h('section', { class: 'card stack' }, h('h3', null, 'By site'), siteTable(['Site', ...cols.slice(1)], bySite, [fmt, fmt, pct, (n) => (n ? n.toFixed(1) : '—')])),
     h('div', { class: 'split-2' },
       h('section', { class: 'card stack' }, h('h3', null, 'Top queries'), table(['Query', ...cols.slice(1)], mergeSearchRows(parts.map((r) => r.queries)), format)),
       h('section', { class: 'card stack' }, h('h3', null, 'Top pages'), table(['Page', ...cols.slice(1)], mergeSearchRows(parts.map((r) => r.pages)), format))));
