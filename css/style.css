@@ -2221,6 +2221,18 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .cron-run-actions { flex: none; gap: 6px; }
 .cron-run-error { margin: 0; overflow-wrap: anywhere; }
 .cron-run-links { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 28px; }
+/* A run's task with subtasks: its chip and a fold, the subtasks one per line under it on a guide line. */
+.cron-run-tasks { display: flex; flex-direction: column; gap: 6px; padding-left: 28px; }
+.cron-run-task { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cron-run-task-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.cron-run-subtoggle { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 28px; padding: 3px 8px; border: 0; border-radius: 999px; background: none; color: var(--muted); font: inherit; font-size: 0.85rem; cursor: pointer; }
+.cron-run-subtoggle:hover { background: var(--surface-2); color: var(--text); }
+.cron-run-subtoggle .chevron { display: inline-flex; }
+.cron-run-subtoggle .chevron .icon { width: 14px; height: 14px; }
+.cron-run-subtoggle .pill { font-size: 0.72rem; }
+.cron-run-subtasks { display: flex; flex-direction: column; gap: 4px; margin: 0 0 0 13px; padding: 0 0 0 14px; border-left: 2px solid var(--border); list-style: none; }
+.cron-run-subtasks > li { display: flex; min-width: 0; }
+.cron-run-subtasks .run-chip-text { max-width: 60ch; }
 .run-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 28px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); color: var(--text); font-size: 0.85rem; font-weight: 500; text-decoration: none; }
 a.run-chip:hover, button.run-chip:hover { border-color: var(--accent); }
 .run-chip .icon { width: 14px; height: 14px; flex: none; color: var(--accent); }

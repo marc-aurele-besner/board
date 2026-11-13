@@ -40,12 +40,13 @@ import { hasProfileSources } from '../profile.js';
 // terms: the terminals unfolded under runs (seenTerms: those drawn once, so one folded by hand stays folded).
 // sort: the order of the flow list, a key of FLOW_SORTS.
 // openRuns: the runs unfolded; focusRun: the run a link opened (#/cron?tab=runs&run=…), scrolled to once.
+// openSubtasks: the tasks of a run whose subtasks are unfolded, as `runId/taskId`.
 /**
  * @type {{ tab: string, flow: string, node: string, runs: string, project: string, sort: string, field: string,
  *   cursor: { key: string, start: number, end: number } | null, preview: Set<string>, terms: Set<string>,
- *   seenTerms: Set<string>, openRuns: Set<string>, focusRun: string, scrollTo: string }}
+ *   seenTerms: Set<string>, openRuns: Set<string>, openSubtasks: Set<string>, focusRun: string, scrollTo: string }}
  */
-const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', project: '', sort: 'next', field: '', cursor: null, preview: new Set(), terms: new Set(), seenTerms: new Set(), openRuns: new Set(), focusRun: '', scrollTo: '' };
+const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', project: '', sort: 'next', field: '', cursor: null, preview: new Set(), terms: new Set(), seenTerms: new Set(), openRuns: new Set(), openSubtasks: new Set(), focusRun: '', scrollTo: '' };
 const NO_PROJECT = 'none';
 const TABS = [['flows', 'Flows'], ['runs', 'Runs'], ['templates', 'Templates']];
 /** @type {Record<string, string>} */
@@ -2154,6 +2155,75 @@ function taskChip(store, id) {
     status ? pill(status.name, statusLook(status)) : null);
 }
 
+// A run's tasks as a tree, by parentId: a task under another task of the run shows under it (under its nearest
+// ancestor in the run, when the task between is not part of it). Returns the top tasks and each task's children.
+/**
+ * @param {Store} store
+ * @param {string[]} ids
+ */
+function taskTree(store, ids) {
+  const byId = new Map(store.get('todos').items.map((t) => [t.id, t]));
+  const inRun = new Set(ids);
+  /** @type {Map<string, string[]>} */
+  const children = new Map();
+  /** @type {string[]} */
+  const tops = [];
+  for (const id of ids) {
+    let at = byId.get(id)?.parentId ?? '';
+    for (let n = 0; at && !inRun.has(at) && n <= byId.size; n++) at = byId.get(at)?.parentId ?? '';
+    if (at && at !== id) children.set(at, [...(children.get(at) ?? []), id]);
+    else tops.push(id);
+  }
+  return { tops, children };
+}
+
+// A task that has subtasks in the run: its chip, then a button that folds them, with how many there are in each
+// status; unfolded, the subtasks one per line under it (and theirs under them).
+/**
+ * @param {Store} store
+ * @param {CronRun} r
+ * @param {string} id
+ * @param {Map<string, string[]>} children
+ * @returns {Child}
+ */
+function taskGroup(store, r, id, children) {
+  const kids = children.get(id);
+  if (!kids?.length) return taskChip(store, id);
+  const key = `${r.id}/${id}`;
+  const open = view.openSubtasks.has(key);
+  const items = store.get('todos').items;
+  const statuses = taskStatuses(store);
+  /** @type {Map<string, number>} */
+  const counts = new Map();
+  for (const k of kids) {
+    const t = items.find((x) => x.id === k);
+    const s = t ? statusOf(t) : '';
+    counts.set(s, (counts.get(s) ?? 0) + 1);
+  }
+  const summary = [...counts].map(([s, n]) => {
+    const status = statuses.find((x) => x.key === s);
+    return status ? pill(`${n} ${status.name}`, statusLook(status)) : h('span', { class: 'pill tone-plain' }, `${n} deleted`);
+  });
+  return h('div', { class: 'cron-run-task' },
+    h('div', { class: 'cron-run-task-head' },
+      taskChip(store, id),
+      h('button', {
+        type: 'button',
+        class: 'cron-run-subtoggle',
+        'aria-expanded': String(open),
+        title: open ? 'Hide the subtasks' : 'Show the subtasks',
+        onclick: () => {
+          if (open) view.openSubtasks.delete(key);
+          else view.openSubtasks.add(key);
+          store.refresh();
+        },
+      },
+        h('span', { class: `icon-wrap chevron${open ? ' open' : ''}` }, icon('chevron-down')),
+        `${kids.length} subtask${kids.length === 1 ? '' : 's'}`,
+        summary)),
+    open ? h('ul', { class: 'cron-run-subtasks' }, kids.map((k) => h('li', null, taskGroup(store, r, k, children)))) : null);
+}
+
 /**
  * @param {Store} store
  * @param {{ session: string, cwd: string, terminal?: number, taskId: string }} term
@@ -2262,7 +2332,10 @@ function runCard(store, flow, r, { showFlow = false } = {}) {
   const end = r.ended ? Date.parse(r.ended) : state === 'running' ? Date.now() : NaN;
   const took = end - Date.parse(r.at);
   const { tasks, terms, prs, issues, branches } = runOutcomes(r);
-  const links = [...tasks.map((id) => taskChip(store, id)), ...terms.map((t) => terminalChip(store, t)), ...prs.map(prChip), ...issues.map(issueChip), ...previewChips(store, prs, 'run-chip'), ...branches.map(branchChip)];
+  const { tops, children } = taskTree(store, tasks);
+  // Tasks with subtasks get a line each; the other tasks go with the rest of what the run made.
+  const groups = tops.filter((id) => children.has(id)).map((id) => taskGroup(store, r, id, children));
+  const links = [...tops.filter((id) => !children.has(id)).map((id) => taskChip(store, id)), ...terms.map((t) => terminalChip(store, t)), ...prs.map(prChip), ...issues.map(issueChip), ...previewChips(store, prs, 'run-chip'), ...branches.map(branchChip)];
   return h('li', { class: `cron-run${view.focusRun === r.id ? ' focus' : ''}`, 'data-run': r.id },
     h('div', { class: 'cron-run-head' },
       h('button', { type: 'button', class: 'cron-run-toggle', 'aria-expanded': String(open), onclick: toggle },
@@ -2289,6 +2362,7 @@ function runCard(store, flow, r, { showFlow = false } = {}) {
               },
             }, icon('arrow-right'))
           : null)),
+    groups.length ? h('div', { class: 'cron-run-tasks' }, groups) : null,
     links.length ? h('div', { class: 'cron-run-links' }, links) : null,
     r.error ? h('p', { class: `small cron-run-error ${state === 'error' ? 'error' : 'muted'}` }, r.error) : null,
     state === 'lost' ? h('p', { class: 'muted small' }, 'The board was closed or reloaded while this run was going, so it never finished. A terminal it started may still be running in Dev.') : null,
