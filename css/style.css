@@ -373,6 +373,10 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .sub-tabs-bar .sub-tab { flex: none; margin-bottom: 0; padding-inline: 12px; white-space: nowrap; }
 .sub-tabs-bar > .sub-tabs-tools { flex: none; flex-wrap: nowrap; gap: 6px; margin-left: auto; align-self: center; padding-block: 4px; }
 .sub-tabs-tools select { field-sizing: content; width: auto; min-width: 0; min-height: 30px; padding-block: 2px; font-size: 0.85rem; }
+/* Buttons and a segmented switch among the controls share one height. */
+.sub-tabs-tools > :is(button, .btn-small) { height: 30px; min-height: 0; padding-block: 0; }
+.sub-tabs-tools > .segmented { height: 30px; margin: 0; padding: 2px; }
+.sub-tabs-tools > .segmented .seg { min-height: 0; padding-block: 0; font-size: 0.82rem; }
 .period-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 /* Compact density (Settings > Appearance) */
@@ -2835,6 +2839,8 @@ button.sum-line:hover { background: var(--surface-2); }
    runs from the top bar to the bottom of the window and meets the grid with one border; the grid fills the rest. */
 .cal-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 0; align-items: start; }
 .view[data-section="calendar"] > .stack-lg > .cal-layout:first-child { padding-top: 0; }
+/* DeFi's tabs sit right under the top bar. */
+.view[data-section="positions"] > .stack-lg > .sub-tabs-bar:first-child { padding-top: 0; }
 .cal-side { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 54px; height: calc(100dvh - 54px); overflow-y: auto; padding: 12px; background: var(--surface); border-right: 1px solid var(--border); }
 .cal-filters { display: flex; flex-direction: column; gap: 8px; }
 .cal-filters .pick-multi, .cal-filters .cal-project-pick { width: 100%; justify-content: space-between; }
