@@ -61,6 +61,8 @@ export interface JobParams {
   chainId?: number;
   // socials: the accounts to read now (just added).
   ids?: string[];
+  // linkedin-metrics: the posts (linkedin.json ids) to read now.
+  posts?: string[];
   // github, npm, previews, webstats: what to read when the board lacks it.
   repos?: string[];
   orgs?: string[];
