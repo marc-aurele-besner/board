@@ -337,8 +337,8 @@ function collections() {
 function liPost(id, text, daysAgo, reads) {
   const postedAt = Date.now() - daysAgo * 86400000;
   return {
-    id, projectId: 'p-atlas', text, status: 'posted', postedAt, createdAt: postedAt - 3600000, urn: `urn:li:share:${id}`, url: 'https://www.linkedin.com/feed/',
-    metrics: reads.filter(([h]) => postedAt + h * 3600000 < Date.now()).map(([h, reactions]) => ({ at: postedAt + h * 3600000, reactions, comments: Math.round(reactions / 6), reposts: Math.round(reactions / 12) })),
+    id, projectId: 'p-atlas', text, status: 'posted', postedAt, createdAt: postedAt - 3600000, urn: `urn:li:share:${id}`, url: `https://www.linkedin.com/feed/update/urn:li:share:${id}/`,
+    metrics: reads.filter(([h]) => postedAt + h * 3600000 < Date.now()).map(([h, reactions]) => ({ at: postedAt + h * 3600000, reactions, comments: Math.round(reactions / 6), reposts: Math.round(reactions / 12), impressions: reactions * 40 })),
   };
 }
 
