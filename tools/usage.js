@@ -19,7 +19,7 @@ const cache = new Map();
 // The parts of a transcript line that are read. Lines are Claude's JSON, so every field may be missing.
 /** @typedef {{ input_tokens?: number, output_tokens?: number, cache_read_input_tokens?: number, cache_creation_input_tokens?: number, output_tokens_details?: { thinking_tokens?: number } }} ReplyUsage */
 /** @typedef {ReplyUsage & { inputTokens?: number, outputTokens?: number, thinkingTokens?: number, cacheReadInputTokens?: number, cacheCreationInputTokens?: number, costUSD?: number }} ModelTokens */
-/** @typedef {{ file_path?: unknown, notebook_path?: unknown, action?: unknown, asset?: unknown, title?: unknown, type_url?: unknown, from_url?: unknown, questions?: { question?: unknown }[], command?: unknown, plan?: unknown }} ToolInput */
+/** @typedef {{ skill?: unknown, file_path?: unknown, notebook_path?: unknown, action?: unknown, asset?: unknown, title?: unknown, type_url?: unknown, from_url?: unknown, questions?: { question?: unknown }[], command?: unknown, plan?: unknown }} ToolInput */
 /** @typedef {{ type?: string, text: string, id?: string, name?: string, input?: ToolInput, tool_use_id?: string, is_error?: boolean, content?: unknown }} ContentBlock */
 /** @typedef {{ id?: string, model?: string, usage?: ReplyUsage, stop_reason?: string | null, content?: string | ContentBlock[] }} ReplyMessage */
 /** @typedef {{ isUsingOverage?: boolean, resetsAt?: number }} Quota */
@@ -145,6 +145,13 @@ function parse(text, billing) {
   // The user's prompts, each a turn: when it was sent, when claude last answered it, and whether it was interrupted.
   /** @type {SessionTurn[]} */
   const turns = [];
+  // The skills claude ran and the MCP tools it called, with how many times; and a slash command the user typed,
+  // waiting for the skill text that says it was a skill rather than a built-in command such as /clear.
+  /** @type {Record<string, number>} */
+  const skills = {};
+  /** @type {Record<string, number>} */
+  const mcp = {};
+  let command = '';
   for (const line of text.split('\n')) {
     if (!line) continue;
     /** @type {TranscriptLine} */
@@ -157,6 +164,7 @@ function parse(text, billing) {
     open = turnOpen(o, open);
     if (!open) pending.clear();
     readArtifacts(o, publishing, artifacts);
+    command = readTools(o, command, skills, mcp);
     if (!o.isSidechain) {
       const c = o.message?.content;
       const at = Date.parse(/** @type {string} */ (o.timestamp)) || 0;
@@ -256,7 +264,35 @@ function parse(text, billing) {
     ask: last ? askOf(last) : null,
     since: last?.at || 0,
     artifacts: [...artifacts].map(([url, title]) => ({ url, title })),
+    skills, mcp,
   };
+}
+
+// Counts a line's skills and MCP calls. A skill runs through the Skill tool, or as a slash command the user typed,
+// which claude follows with the skill's text ("Base directory for this skill: …"); a built-in command has none.
+// Answers the slash command still waiting for that text.
+const SKILL_TEXT = /^Base directory for this skill:/;
+/** @param {TranscriptLine} o @param {string} command @param {Record<string, number>} skills @param {Record<string, number>} mcp */
+function readTools(o, command, skills, mcp) {
+  const c = o.message?.content;
+  if (o.type === 'assistant') {
+    for (const b of Array.isArray(c) ? c : []) {
+      if (b.type !== 'tool_use' || !b.name) continue;
+      const skill = b.name === 'Skill' && typeof b.input?.skill === 'string' ? b.input.skill.replace(/^\//, '') : '';
+      if (skill) skills[skill] = (skills[skill] ?? 0) + 1;
+      else if (b.name.startsWith('mcp__')) mcp[b.name] = (mcp[b.name] ?? 0) + 1;
+    }
+    return '';
+  }
+  if (o.type !== 'user') return command;
+  const text = typeof c === 'string' ? c : Array.isArray(c) ? c.find((b) => b.type === 'text')?.text ?? '' : '';
+  const typed = /<command-name>\/?([^<\s]+)<\/command-name>/.exec(text)?.[1];
+  if (typed) return typed;
+  if (command && SKILL_TEXT.test(text)) {
+    skills[command] = (skills[command] ?? 0) + 1;
+    return '';
+  }
+  return command;
 }
 
 // The Artifacts a session published: a publish call (no action, or 'publish'; not an asset upload) and the claude.ai
@@ -382,7 +418,7 @@ async function usageOf({ name, cwd }) {
   ]);
   const billing = await loginBilling();
   /** @type {Required<WorktreeUsage>} */
-  const sum = { sessions: 0, billing, models: {}, cost: null, extraCost: null, duration: 0, apiDuration: 0, linesAdded: 0, linesRemoved: 0, efforts: {}, replies: 0, start: null, end: null };
+  const sum = { sessions: 0, billing, models: {}, cost: null, extraCost: null, duration: 0, apiDuration: 0, linesAdded: 0, linesRemoved: 0, efforts: {}, replies: 0, start: null, end: null, skills: {}, mcp: {} };
   const seen = new Set();
   for (const file of files) {
     // The same session may sit in both folders while Claude moves it.
@@ -397,6 +433,8 @@ async function usageOf({ name, cwd }) {
     if (t.extraCost !== null) sum.extraCost = (sum.extraCost ?? 0) + t.extraCost;
     for (const k of /** @type {const} */ (['duration', 'apiDuration', 'linesAdded', 'linesRemoved', 'replies'])) sum[k] += t[k];
     for (const [e, n] of Object.entries(t.efforts)) sum.efforts[e] = (sum.efforts[e] ?? 0) + n;
+    for (const [k, n] of Object.entries(t.skills)) sum.skills[k] = (sum.skills[k] ?? 0) + n;
+    for (const [k, n] of Object.entries(t.mcp)) sum.mcp[k] = (sum.mcp[k] ?? 0) + n;
     if (t.start !== null) sum.start = sum.start === null ? t.start : Math.min(sum.start, t.start);
     if (t.end !== null) sum.end = sum.end === null ? t.end : Math.max(sum.end, t.end);
   }
@@ -499,5 +537,5 @@ export async function sessionTranscript({ cwd, at, prompt = '', worktree = '', k
   const t = file ? await readTranscript(file, billing) : null;
   if (!t) return null;
   const agents = await agentsOf(file, billing);
-  return { file, busy: t.open || agents > 0, agents, reply: t.reply, written: t.written, ask: t.ask, since: t.since, artifacts: t.artifacts, turns: t.turns };
+  return { file, busy: t.open || agents > 0, agents, reply: t.reply, written: t.written, ask: t.ask, since: t.since, artifacts: t.artifacts, turns: t.turns, skills: t.skills, mcp: t.mcp };
 }

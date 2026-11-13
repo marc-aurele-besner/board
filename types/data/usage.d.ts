@@ -95,6 +95,9 @@ export interface DevUsage {
   // Replies per effort level ('low', 'medium', 'high' ...).
   efforts?: Record<string, number>;
   replies?: number;
+  // Uses per skill name ('fix-issue', 'plugin:skill'), and calls per MCP tool ('mcp__<server>__<tool>').
+  skills?: Record<string, number>;
+  mcp?: Record<string, number>;
   // Times (ms) of the first and last reply.
   start?: number | null;
   end?: number | null;

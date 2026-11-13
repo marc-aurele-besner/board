@@ -13,7 +13,7 @@ const DAY = 86400000;
 // caches each transcript until it changes.
 const BATCH = 200;
 /** @type {(keyof WorktreeUsage)[]} */
-const FIELDS = ['sessions', 'billing', 'models', 'cost', 'extraCost', 'duration', 'apiDuration', 'linesAdded', 'linesRemoved', 'efforts', 'replies', 'start', 'end'];
+const FIELDS = ['sessions', 'billing', 'models', 'cost', 'extraCost', 'duration', 'apiDuration', 'linesAdded', 'linesRemoved', 'efforts', 'replies', 'start', 'end', 'skills', 'mcp'];
 
 const runnerOf = (/** @type {DataStore} */ store) => store.get('dev')?.runner || TERMINAL_RUNNER;
 export const devUsage = (/** @type {DataStore} */ store) => store.get(COLLECTION).dev ?? {};
@@ -73,8 +73,10 @@ let busy = false;
 export async function refreshDevUsage(store, read = (list) => worktreeUsage(runnerOf(store), list)) {
   if (busy) return;
   rememberWorktrees(store, heldWorktrees(store));
-  // Records saved before the cost was split into included and extra are read once more for the split.
-  const records = Object.values(devUsage(store)).filter((r) => r.cwd && (live(store, r) || r.billing === undefined));
+  // Records saved before the cost was split into included and extra, or before skills and MCP calls were counted,
+  // are read once more.
+  const stale = (/** @type {DevUsage} */ r) => r.billing === undefined || (!!r.sessions && !r.skills);
+  const records = Object.values(devUsage(store)).filter((r) => r.cwd && (live(store, r) || stale(r)));
   if (!records.length) return;
   // A record not read yet has no `end`: its `added` stands in, so a new session is read first rather than never.
   const recent = (/** @type {DevUsage} */ r) => Math.max(r.end ?? 0, Date.parse(r.added ?? '') || 0);
@@ -84,15 +86,20 @@ export async function refreshDevUsage(store, read = (list) => worktreeUsage(runn
     const asked = records.slice(0, BATCH);
     const found = await read(asked.map(({ name, cwd }) => ({ name, cwd })));
     const changed = Object.entries(found).filter(([name, u]) => FIELDS.some((k) => JSON.stringify(u[k]) !== JSON.stringify(devUsage(store)[name]?.[k])));
-    // Transcripts Claude has since deleted can't be split: marked, so they are not asked for again.
-    const gone = asked.filter((r) => r.billing === undefined && !found[r.name] && !live(store, r)).map((r) => r.name);
+    // Transcripts Claude has since deleted can't be read again: marked, so they are not asked for again.
+    const gone = asked.filter((r) => stale(r) && !found[r.name] && !live(store, r)).map((r) => r.name);
     if (!changed.length && !gone.length) return;
     store.update(COLLECTION, (d) => {
       for (const [name, u] of changed) {
         if (!d.dev?.[name]) continue;
         for (const k of FIELDS) /** @type {Partial<Record<keyof WorktreeUsage, unknown>>} */ (d.dev[name])[k] = u[k];
       }
-      for (const name of gone) if (d.dev?.[name]) d.dev[name].billing = null;
+      for (const name of gone) {
+        const r = d.dev?.[name];
+        if (!r) continue;
+        if (r.billing === undefined) r.billing = null;
+        if (r.sessions && !r.skills) Object.assign(r, { skills: {}, mcp: {} });
+      }
     });
   } finally {
     busy = false;
@@ -158,6 +165,17 @@ export function sumUsage(records) {
 export const recordsOfTask = (/** @type {DataStore} */ store, /** @type {string} */ taskId) => Object.values(devUsage(store)).filter((r) => r.taskIds?.includes(taskId) && hasUsage(r));
 export const recordOfSession = (/** @type {DataStore} */ store, /** @type {string} */ sessionId) => Object.values(devUsage(store)).find((r) => r.session === sessionId && hasUsage(r)) ?? null;
 export const usageRecords = (/** @type {DataStore} */ store) => Object.values(devUsage(store)).filter(hasUsage);
+
+// An MCP tool's server and tool from its name, `mcp__<server>__<tool>`; claude.ai's connectors drop their prefix.
+/** @param {string} name */
+export function mcpTool(name) {
+  const rest = name.replace(/^mcp__/, '');
+  const at = rest.indexOf('__');
+  const server = at < 0 ? rest : rest.slice(0, at);
+  return { server: server.replace(/^claude_ai_/, '').replace(/_/g, ' '), tool: at < 0 ? '' : rest.slice(at + 2) };
+}
+// Counts by name, the most used first.
+export const byUse = (/** @type {Record<string, number> | undefined} */ counts) => Object.entries(counts ?? {}).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 
 // The models by name, the one with the most output first: "claude-opus-5-5" reads "Opus 5.5".
 /** @param {string} id */

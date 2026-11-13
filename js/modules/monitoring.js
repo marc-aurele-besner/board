@@ -11,6 +11,7 @@ import { socialsTab } from './monitoring-socials.js';
 import { contractsActivityTab, contractsActivitySerialize, contractsActivityRestore } from './monitoring-contracts.js';
 import { usageRecords, sumUsage, modelName, modelsByUse, fmtDuration } from '../dev-usage.js';
 import { devBreakdown } from './monitoring-dev.js';
+import { toolUsage } from './monitoring-tools.js';
 import { aiOverview, aiView, devProjectOf, projectShown, sourceShown, SOURCES, BREAKDOWNS, MEASURES } from './monitoring-ai.js';
 import { sessionStatus } from '../terminal.js';
 import { runnerOf } from '../dev-core.js';
@@ -229,6 +230,7 @@ function aiTab(store, w) {
       : null,
     aiOverview(store, w),
     sourceShown('dev') ? devSessions(store, w) : null,
+    sourceShown('dev') ? toolUsage(store, w, devRecords(store, w)) : null,
     sourceShown('board') ? h('section', { class: 'card stack' },
       h('h3', null, 'Recent calls'),
       recent.length
@@ -280,12 +282,19 @@ function pollLive(store, ids) {
   live.timer = setTimeout(poll, 0);
 }
 
+// The Dev records whose last reply falls in the period, for the projects shown.
+/** @param {Store} store @param {PeriodWindow} w */
+const devRecords = (store, w) => {
+  const tasks = store.get('todos').items;
+  return usageRecords(store).filter((r) => inWindow(r.end ?? null, w) && projectShown(devProjectOf(tasks, r)));
+};
+
 // A session counts in the period its last reply falls in.
 /** @param {Store} store @param {PeriodWindow} w */
 function devSessions(store, w) {
   const tasks = store.get('todos').items;
   const projectName = new Map(store.get('projects').projects.map((p) => [p.id, p.name]));
-  const records = usageRecords(store).filter((r) => inWindow(r.end ?? null, w) && projectShown(devProjectOf(tasks, r)));
+  const records = devRecords(store, w);
   const sum = sumUsage(records);
   // The terminal session of a record: its own, or one of its tasks' (records saved before they named it).
   const sessionOf = (/** @type {DevUsage} */ r) => r.session || tasks.find((t) => r.taskIds?.includes(t.id) && t.devSession)?.devSession || '';

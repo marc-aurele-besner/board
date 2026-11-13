@@ -3044,9 +3044,10 @@ button.cal-agenda-name:hover { color: var(--accent); }
 .term-name .icon { width: 13px; height: 13px; flex: none; }
 .term-name .term-dot { flex: none; }
 /* The turns of the shown claude: a count and a dot for where the last one stands. */
-.term-turns { flex: none; min-height: 0; display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border: none; border-radius: 6px; background: none; color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
-.term-turns:hover { background: var(--surface-2); color: var(--text); }
-.term-turns .icon { width: 14px; height: 14px; flex: none; }
+.term-turns, .term-tool { flex: none; min-height: 0; display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border: none; border-radius: 6px; background: none; color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.term-turns:hover, .term-tool:hover { background: var(--surface-2); color: var(--text); }
+.term-turns .icon, .term-tool .icon { width: 14px; height: 14px; flex: none; }
+.term-tool.none { opacity: 0.55; }
 .term-turns-state { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .term-turns.working .term-turns-state { background: var(--income); animation: pulse 1.4s ease-in-out infinite; }
 .term-turns.waiting .term-turns-state { background: var(--accent); }
