@@ -2704,6 +2704,7 @@ button.json-key:hover { background: color-mix(in srgb, var(--accent) 15%, transp
 .cal-group.open .icon { transform: rotate(90deg); }
 .cal-group-count { flex: none; margin-left: auto; padding: 0 6px; border-radius: 999px; font-size: 0.72rem; font-weight: 600; background: var(--surface-2); color: var(--muted); }
 .cal-sub { margin-left: 12px !important; width: auto; }
+.cal-event-title .cal-group-count { margin-left: 4px; }
 
 .cal-weekday { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
 

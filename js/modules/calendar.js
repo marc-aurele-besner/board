@@ -196,6 +196,33 @@ function connectAccount(store, clientId, email) {
 
 // --- Pieces ---
 
+// The other copies of an event, by the one that stands for them.
+/** @type {WeakMap<CalendarEvent, CalendarEvent[]>} */
+const copiesOf = new WeakMap();
+
+// One event per title and time: a holiday calendar added on every account, or a meeting on two of them, came back
+// once per calendar and filled the day with the same chip. The first copy stands for the others.
+/** @param {CalendarEvent[]} events */
+function regroup(events) {
+  /** @type {Map<string, CalendarEvent>} */
+  const first = new Map();
+  /** @type {CalendarEvent[]} */
+  const out = [];
+  for (const e of events) {
+    const id = [e.title.trim().toLowerCase(), e.start, e.end, e.allDay].join('|');
+    const head = first.get(id);
+    if (!head) { first.set(id, e); copiesOf.delete(e); out.push(e); continue; }
+    copiesOf.set(head, [...(copiesOf.get(head) ?? []), e]);
+  }
+  return out;
+}
+
+/** @param {CalendarEvent} e */
+const copyCount = (e) => {
+  const n = copiesOf.get(e)?.length ?? 0;
+  return n ? h('span', { class: 'cal-group-count', title: `On ${n + 1} calendars` }, String(n + 1)) : null;
+};
+
 /**
  * @param {Store} store
  * @param {CalendarEvent} e
@@ -213,6 +240,9 @@ function openEvent(store, e) {
         h('span', { class: 'gcal-swatch', style: { '--c': e.color || 'var(--accent)' } }),
         `${e.calendar} · ${e.account}`,
         project ? h('span', { class: 'row' }, projectIcon(project), project.name) : null),
+      (copiesOf.get(e) ?? []).map((c) => h('p', { class: 'row muted small' },
+        h('span', { class: 'gcal-swatch', style: { '--c': c.color || 'var(--accent)' } }),
+        `${c.calendar} · ${c.account}`)),
       text ? h('p', { class: 'cal-notes' }, text) : null,
       h('div', { class: 'row' },
         h('button', { type: 'button', class: 'primary', onclick: () => { eventAsTask(store, e); dialog.close(); } }, icon('check-square'), 'Make a task'),
@@ -236,7 +266,8 @@ const eventChip = (store, e, { time = true } = {}) =>
   },
     h('span', { class: 'gcal-swatch' }),
     time && !e.allDay ? h('span', { class: 'cal-time' }, timeLabel(e)) : null,
-    h('span', { class: 'cal-chip-text' }, e.title));
+    h('span', { class: 'cal-chip-text' }, e.title),
+    copyCount(e));
 
 /** @param {Task} t */
 const taskChip = (t) =>
@@ -389,7 +420,7 @@ function timedBlock(store, s) {
     title: `${e.title} · ${whenOf(e)}`,
     onclick: () => openEvent(store, e),
   },
-    h('span', { class: 'cal-event-title' }, e.title),
+    h('span', { class: 'cal-event-title' }, e.title, copyCount(e)),
     h('span', { class: 'cal-event-time' }, `${shortClock(eventDate(e.start))} – ${shortClock(eventDate(e.end || e.start))}`),
     e.location && !short ? h('span', { class: 'cal-event-place' }, e.location) : null);
 }
@@ -419,7 +450,7 @@ function gridView(store, from, days, events, tasks) {
       style: { '--c': e.color || 'var(--accent)', gridColumn: `${first + 1} / ${last + 1}` },
       title: `${e.title} · ${whenOf(e)}`,
       onclick: () => openEvent(store, e),
-    }, h('span', { class: 'cal-chip-text' }, e.title));
+    }, h('span', { class: 'cal-chip-text' }, e.title), copyCount(e));
   });
   const due = dates.flatMap((d, i) => taskChips(store, tasks.filter((t) => t.due === isoOf(d)), isoOf(d)).map((chip) => {
     chip.style.gridColumn = String(i + 1);
@@ -595,7 +626,7 @@ function miniMonth(store, d, from, to) {
 function agenda(store, byProject) {
   const today = midnight(new Date());
   const end = addDays(today, AGENDA_DAYS);
-  const events = cachedCalendarEvents(store, today, end).events.filter(byProject);
+  const events = regroup(cachedCalendarEvents(store, today, end).events.filter(byProject));
   const tasks = view.tasks
     ? store.get('todos').items.filter((t) => t.due && statusOf(t) !== 'done' && t.due < isoOf(end)).filter(byProject)
     : [];
@@ -661,7 +692,7 @@ function draw(root, store) {
   /** @param {{ projectId: string | null, labelId?: string | null }} x */
   const byProject = (x) => view.project === 'all' ||
     (labelFilter ? underLabel(projects, x.projectId, x.labelId ?? null, labelFilter) : x.projectId === view.project);
-  const events = cached.events.filter(byProject);
+  const events = regroup(cached.events.filter(byProject));
   const tasks = view.tasks
     ? store.get('todos').items.filter((t) => t.due && statusOf(t) !== 'done' && t.due >= isoOf(from) && t.due < isoOf(to)).filter(byProject)
     : [];
