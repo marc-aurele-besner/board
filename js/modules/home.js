@@ -451,4 +451,6 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
   readsRunners: true,
   defaults: {},
   render: draw,
+  // The calendar, GitHub and site checks refresh it often: patched, it keeps its scroll and hover.
+  patch: true,
 });
