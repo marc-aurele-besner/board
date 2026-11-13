@@ -2157,19 +2157,31 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .cron-layout > .card:not(.cron-list), .cron-editor > .card { border-radius: 0; border-top: none; border-left: none; border-right: none; }
 .cron-layout > .cron-editor { gap: 0; }
 .cron-flows { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
-.cron-flow-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.cron-flow-toggle { flex: none; margin-right: 6px; }
-.cron-flow-copy { flex: none; margin-right: 4px; }
+.cron-flow-row { position: relative; display: flex; align-items: center; gap: 4px; min-width: 0; }
+/* The on-schedule switch: a small track and knob drawn on the checkbox itself. */
+.cron-flow-toggle { appearance: none; flex: none; position: relative; width: 28px; height: 16px; margin: 0 8px 0 2px; border-radius: 999px; background: var(--border); cursor: pointer; transition: background-color 0.15s ease; }
+.cron-flow-toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 25%, transparent); transition: transform 0.15s ease; }
+.cron-flow-toggle:checked { background: var(--income); }
+.cron-flow-toggle:checked::after { transform: translateX(12px); }
+.cron-flow-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cron-flow-actions { display: flex; flex: none; gap: 2px; }
+.cron-flow-copy { flex: none; min-width: 28px; min-height: 28px; padding: 0; }
 .icon-btn.cron-flow-copy:hover { color: var(--accent); }
-/* Shown on hover or focus where a pointer can hover; always shown on touch. */
+/* Shown over the row's end on hover or focus where a pointer can hover; always in line on touch. */
 @media (hover: hover) {
-  .cron-flow-row:not(:hover):not(:focus-within) .cron-flow-copy { opacity: 0; }
+  .cron-flow-actions { position: absolute; right: 44px; top: 50%; transform: translateY(-50%); padding-left: 16px; background: linear-gradient(to right, transparent, var(--surface-2) 14px); border-radius: 0 8px 8px 0; }
+  .cron-flow-row:has(.cron-flow.active) .cron-flow-actions { background: linear-gradient(to right, transparent, color-mix(in srgb, var(--accent) 13%, var(--surface)) 14px); }
+  .cron-flow-row:not(:hover):not(:focus-within) .cron-flow-actions { visibility: hidden; }
 }
-.cron-list-tools { flex-wrap: nowrap; gap: 8px; }
-.cron-list .cron-project-filter { flex: 1 1 auto; min-width: 0; }
-.cron-sort { flex: none; margin-left: auto; }
+.cron-list-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cron-list-head h3 { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; margin: 0; }
+.cron-list-head > :not(h3) { flex: none; }
+.cron-list-count { padding: 0 7px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; color: var(--muted); background: var(--surface-2); }
+.cron-list .cron-project-filter { width: 100%; min-width: 0; }
+.cron-sort { display: inline-flex; align-items: center; gap: 3px; min-height: 28px; padding: 2px 6px 2px 9px; font-size: 0.8rem; color: var(--muted); }
+.cron-sort .icon { width: 13px; height: 13px; }
 .cron-flow { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; padding: 8px 10px; border: none; border-radius: 8px; background: none; text-align: left; color: var(--text); font-weight: 400; }
-.cron-flow:hover { background: var(--surface-2); }
+.cron-flow:hover, .cron-flow-row:hover .cron-flow:not(.active) { background: var(--surface-2); }
 .cron-flow.active { background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
 .cron-flow .grow { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
 .cron-flow strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

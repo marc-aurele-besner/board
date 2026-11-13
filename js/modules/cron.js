@@ -1,6 +1,7 @@
 // Cron: recurring flows that gather board data, ask an AI model, and turn the answer into a task, a notification or work for claude in Dev.
 // The editor draws a flow as a chain of nodes, like a workflow canvas; the inspector below edits the selected node.
 import { h, icon, empty, notice, now, uid, todayISO, statusOf } from '../ui.js';
+import { openMenu } from '../menu.js';
 import { projectTree, projectIcon } from './projects.js';
 import { pickChip, pickButton, pill } from '../inline.js';
 import { taskStatuses, statusLook, statusOptions, taskCategoryNames } from '../task-labels.js';
@@ -301,15 +302,26 @@ function sortFlows(store, flows) {
 }
 
 /** @param {Store} store */
+// A small button naming the order, opening a menu of the others: a select took a row of its own.
 function flowSort(store) {
-  return h('label', { class: 'inline cron-sort' }, 'Sort',
-    h('select', {
-      'aria-label': 'Sort flows',
-      onchange: (/** @type {Event} */ e) => {
-        view.sort = /** @type {HTMLSelectElement} */ (e.target).value;
-        store.refresh();
-      },
-    }, Object.entries(FLOW_SORTS).map(([key, label]) => h('option', { value: key, selected: key === view.sort }, label))));
+  return h('button', {
+    type: 'button',
+    class: 'btn-small cron-sort',
+    title: 'Sort flows',
+    'aria-label': `Sort flows: ${FLOW_SORTS[view.sort] ?? FLOW_SORTS.next}`,
+    'aria-haspopup': 'menu',
+    onclick: (/** @type {MouseEvent} */ e) => {
+      e.stopPropagation();
+      openMenu(Object.entries(FLOW_SORTS).map(([key, label]) => ({
+        label,
+        checked: key === view.sort,
+        onSelect: () => {
+          view.sort = key;
+          store.refresh();
+        },
+      })), /** @type {HTMLElement} */ (e.currentTarget));
+    },
+  }, FLOW_SORTS[view.sort] ?? FLOW_SORTS.next, icon('chevron-down'));
 }
 
 // A row's timing: when the flow runs next, or when it last ran once paused or when the list is sorted by that.
@@ -333,11 +345,16 @@ const inFilter = (f) => !view.project || (flowProjectId(f) || NO_PROJECT) === vi
  * @param {CronFlow[]} flows
  */
 function flowList(store, all, flows) {
+  // The title, the order, templates and New flow on one row; the project filter below once flows differ in project.
   return h('aside', { class: 'card cron-list' },
-    h('div', { class: 'row between' },
-      h('h3', null, 'Flows'),
+    h('div', { class: 'cron-list-head' },
+      h('h3', null, 'Flows', all.length ? h('span', { class: 'cron-list-count' }, String(flows.length)) : null),
+      flows.length > 1 ? flowSort(store) : null,
+      all.length
+        ? h('button', { type: 'button', class: 'icon-btn', title: 'Start from a template', 'aria-label': 'Start from a template', onclick: () => openTemplates(store) }, icon('bookmark'))
+        : null,
       h('button', { type: 'button', class: 'btn-small primary', onclick: () => openNewFlow(store) }, icon('plus'), 'New flow')),
-    h('div', { class: 'row cron-list-tools' }, projectFilter(store, all), flows.length > 1 ? flowSort(store) : null),
+    projectFilter(store, all),
     flows.length
       ? h('ul', { class: 'cron-flows' }, sortFlows(store, flows).map((f) => {
           const last = lastRunOf(store, f.id);
@@ -357,25 +374,29 @@ function flowList(store, all, flows) {
                 h('strong', null, f.name),
                 h('span', { class: 'muted small cron-flow-meta' }, h('span', { class: 'cron-flow-project' }, `${f.enabled ? scheduleLabel(f.schedule) : 'Paused'} · ${flowWhen(f, last)}`)),
                 project ? h('span', { class: 'muted small cron-flow-meta' }, projectIcon(project), h('span', { class: 'cron-flow-project' }, project.name)) : null)),
+            // Shown over the row's end on hover, so they take no room from the name.
+            h('span', { class: 'cron-flow-actions' },
+              latestRunButton(store, f, 'icon-btn cron-flow-copy'),
+              h('button', {
+                type: 'button',
+                class: 'icon-btn cron-flow-copy',
+                title: 'Duplicate flow',
+                'aria-label': `Duplicate “${f.name}”`,
+                onclick: () => duplicateFlow(store, f),
+              }, icon('copy'))),
             h('input', {
               type: 'checkbox',
+              role: 'switch',
               class: 'cron-flow-toggle',
               checked: f.enabled,
-              title: f.enabled ? 'On schedule. Uncheck to pause.' : 'Paused. Check to run on schedule.',
+              title: f.enabled ? 'On schedule. Switch off to pause.' : 'Paused. Switch on to run on schedule.',
               'aria-label': `Run “${f.name}” on schedule`,
               onchange: (/** @type {FieldEvent} */ e) => setEnabled(store, f, e.target.checked),
-            }),
-            latestRunButton(store, f, 'icon-btn cron-flow-copy'),
-            h('button', {
-              type: 'button',
-              class: 'icon-btn cron-flow-copy',
-              title: 'Duplicate flow',
-              'aria-label': `Duplicate “${f.name}”`,
-              onclick: () => duplicateFlow(store, f),
-            }, icon('copy')));
+            }));
         }))
-      : empty('No flow yet. Build one from scratch, or start from a template.'),
-    h('button', { type: 'button', class: 'btn-link small', onclick: () => openTemplates(store) }, icon('bookmark'), 'Start from a template'));
+      : h('div', { class: 'stack' },
+          empty('No flow yet. Build one from scratch, or start from a template.'),
+          h('button', { type: 'button', class: 'btn-link small', onclick: () => openTemplates(store) }, icon('bookmark'), 'Start from a template')));
 }
 
 // A new flow starts empty, on its schedule node, with every node there is in the palette above its canvas.
