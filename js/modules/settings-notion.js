@@ -146,7 +146,7 @@ export function notionCard(store) {
   const signedIn = ways(cfg).length > 0;
 
   const tokenForm = h('form', {
-    class: 'svc-section',
+    class: 'notion-way',
     /** @param {FormSubmit} e */
     onsubmit: (e) => {
       e.preventDefault();
@@ -156,11 +156,13 @@ export function notionCard(store) {
     },
   },
     h('h3', null, 'Integration secret'),
+    h('p', { class: 'muted small' }, 'For a workspace where you may create an integration.'),
     h('ol', { class: 'steps' }, [
       ['Open ', link('https://www.notion.so/profile/integrations', 'Notion → Integrations'), ' and create an internal integration with Read content.'],
       'Copy its Internal Integration Secret, paste it here and save.',
       'In Notion, open each database, then ⋯ → Connections, and add the integration.',
     ].map((s) => h('li', null, h('span', { class: 'step-text' }, s)))),
+    h('div', { class: 'notion-way-fields' },
     h('input', { name: 'token', type: 'password', value: cfg.token, placeholder: 'ntn_…', autocomplete: 'off', spellcheck: false, 'aria-label': 'Integration secret' }),
     h('div', { class: 'svc-actions' },
       h('button', { class: 'primary', type: 'submit' }, 'Save'),
@@ -173,7 +175,7 @@ export function notionCard(store) {
         },
       }, 'Test connection'),
       cfg.token ? h('button', { type: 'button', class: 'danger', onclick: () => { save(store, (c) => ({ ...c, token: '' })); say(store, 'token', ''); } }, icon('x'), 'Clear') : null),
-    result('token'));
+    result('token')));
 
   const addForm = h('form', {
     class: 'resend-edit',
@@ -209,7 +211,7 @@ export function notionCard(store) {
 
   const oauth = { clientId: '', clientSecret: '', ...cfg.oauth };
   const oauthForm = h('form', {
-    class: 'svc-section',
+    class: 'notion-way',
     /** @param {FormSubmit} e */
     onsubmit: (e) => {
       e.preventDefault();
@@ -224,10 +226,11 @@ export function notionCard(store) {
     h('p', { class: 'muted small' }, 'For a workspace where you cannot create an integration, but may add one made elsewhere.'),
     h('ol', { class: 'steps' }, [
       ['In a workspace of your own (a personal one is fine), open ', link('https://www.notion.so/profile/integrations', 'Notion → Integrations'), ' and create a public integration with Read content.'],
-      ['Under Redirect URIs, add ', copyable(redirectUri()), '.'],
+      ['Under Redirect URIs, add ', copyable(redirectUri())],
       'Copy its OAuth client ID and client secret, paste them here and save.',
       'Sign in with Notion, pick the other workspace, and choose the databases it may read.',
     ].map((s) => h('li', null, h('span', { class: 'step-text' }, s)))),
+    h('div', { class: 'notion-way-fields' },
     h('input', { name: 'clientId', value: oauth.clientId, placeholder: 'OAuth client ID', autocomplete: 'off', spellcheck: false, 'aria-label': 'OAuth client ID' }),
     h('input', { name: 'clientSecret', type: 'password', value: oauth.clientSecret, placeholder: 'OAuth client secret', autocomplete: 'off', spellcheck: false, 'aria-label': 'OAuth client secret' }),
     oauth.accessToken ? h('p', { class: 'muted small' }, `Signed in${oauth.workspace ? ` to ${oauth.workspace}` : ''}.`) : null,
@@ -259,11 +262,11 @@ export function notionCard(store) {
           say(store, 'oauth', '');
         },
       }, icon('x'), 'Sign out') : null),
-    result('oauth'));
+    result('oauth')));
 
   const session = { tokenV2: '', userId: '', ...cfg.session };
   const sessionForm = h('form', {
-    class: 'svc-section',
+    class: 'notion-way',
     /** @param {FormSubmit} e */
     onsubmit: (e) => {
       e.preventDefault();
@@ -281,6 +284,8 @@ export function notionCard(store) {
       'Open the developer tools → Application (Storage in Firefox) → Cookies → https://www.notion.so.',
       'Copy the value of token_v2 and paste it here. Signed in to several accounts? Copy notion_user_id too, for the one to read as.',
     ].map((s) => h('li', null, h('span', { class: 'step-text' }, s)))),
+    h('p', { class: 'muted small' }, 'This uses the API of Notion’s own web app, which is not documented and may change. The cookie is a full sign-in to your account: it is kept in settings.json, so keep the data folder private, and sent only to www.notion.so. It stops working when you sign out of Notion in this browser.'),
+    h('div', { class: 'notion-way-fields' },
     h('input', { name: 'tokenV2', type: 'password', value: session.tokenV2, placeholder: 'token_v2', autocomplete: 'off', spellcheck: false, 'aria-label': 'token_v2 cookie' }),
     h('input', { name: 'userId', value: session.userId, placeholder: 'notion_user_id (optional)', autocomplete: 'off', spellcheck: false, 'aria-label': 'notion_user_id cookie' }),
     h('div', { class: 'svc-actions' },
@@ -294,8 +299,7 @@ export function notionCard(store) {
         },
       }, 'Test session'),
       session.tokenV2 ? h('button', { type: 'button', class: 'danger', onclick: () => { save(store, (c) => ({ ...c, session: { tokenV2: '', userId: '' } })); say(store, 'session', ''); } }, icon('x'), 'Clear') : null),
-    result('session'),
-    h('p', { class: 'muted small' }, 'This uses the API of Notion’s own web app, which is not documented and may change. The cookie is a full sign-in to your account: it is kept in settings.json, so keep the data folder private, and sent only to www.notion.so. It stops working when you sign out of Notion in this browser.'));
+    result('session')));
 
   return h('div', { class: 'stack-lg' },
     h('section', { class: 'card panel' },
@@ -303,15 +307,12 @@ export function notionCard(store) {
         h('div', null, h('h2', null, 'Notion'),
           h('p', { class: 'muted' }, 'The pages of a Notion database become tasks in the project you pick. When a page changes in Notion, its task follows; what you change on the board is kept, and nothing is written back to Notion.')),
         h('div', { class: 'row' }, badge(signedIn && linked ? `${linked} database${linked === 1 ? '' : 's'}` : 'Not set', signedIn && linked ? 'done' : 'plain'))),
-      h('div', { class: 'cred-body' },
-        h('div', { class: 'svc-section' },
-          h('h3', null, 'Setup'),
+      h('div', { class: 'notion-intro' },
+        h('div', { class: 'notion-intro-text' },
           h('p', { class: 'muted small' }, 'Set up one of the three ways to sign in below: an integration secret if you can create an integration in the workspace, otherwise Sign in with Notion or the browser session. Then copy each database’s link (⋯ → Copy link), add it under Databases and pick its project; it is read with the first way that can open it.'),
           h('p', { class: 'muted small' }, 'The title becomes the task. A Status (or a Done checkbox) sets its status, the first date (Due or Deadline first) its deadline, and a Priority select its priority. The first read skips pages already done.')),
-        notice({ tone: 'info', text: 'Notion’s API does not answer web pages, so the runners read it: start the board with bun start. They read every database every few minutes (Settings → Runners).' }),
-        tokenForm,
-        oauthForm,
-        sessionForm)),
+        notice({ tone: 'info', text: 'Notion’s API does not answer web pages, so the runners read it: start the board with bun start. They read every database every few minutes (Settings → Runners).' })),
+      h('div', { class: 'notion-ways' }, tokenForm, oauthForm, sessionForm)),
     h('section', { class: 'card panel' },
       h('header', { class: 'panel-head' },
         h('div', null, h('h2', null, 'Databases'), h('p', { class: 'muted' }, 'Each database feeds one project. Removing one keeps the tasks it made.'))),
