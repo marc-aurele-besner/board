@@ -1,7 +1,7 @@
 // The command runner's answers (tools/terminal.js), as js/terminal.js returns them. API responses: only what the
 // board reads, or what js/terminal.js documents, is typed.
 
-import type { DevSession, DevUsage } from './data';
+import type { DevSession, DevToolUse, DevUsage } from './data';
 
 // GET /info.
 export interface RunnerInfo {
@@ -57,6 +57,10 @@ export interface SessionTurn {
   interrupted: boolean;
   waits: SessionWait[];
   done?: boolean;
+  // What it called and ran, and its replies' output tokens (as in DevTurn).
+  tools: Record<string, DevToolUse>;
+  skills: Record<string, number>;
+  tokens: number;
 }
 
 // GET /turns: the prompts of a terminal's claude session, oldest first, and where its last turn stands: working,

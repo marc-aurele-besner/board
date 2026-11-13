@@ -153,6 +153,9 @@ function parse(text, billing) {
   /** @type {Record<string, number>} */
   const mcp = {};
   let command = '';
+  // Output tokens already counted, by reply: a reply's lines repeat its id with a growing count.
+  /** @type {Map<string | undefined, number>} */
+  const counted = new Map();
   // Its last tool call and how many it made, and the text of its last reply, in any line: what a subagent is doing.
   /** @type {{ name: string, detail: string, at: number } | null} */
   let lastTool = null;
@@ -171,7 +174,7 @@ function parse(text, billing) {
     open = turnOpen(o, open);
     if (!open) pending.clear();
     readArtifacts(o, publishing, artifacts);
-    command = readTools(o, command, skills, mcp);
+    command = readTools(o, command, skills, mcp, o.isSidechain ? undefined : turns.at(-1));
     if (o.type === 'assistant' && Array.isArray(o.message?.content)) {
       for (const b of o.message.content) {
         if (b.type === 'tool_use' && b.name) {
@@ -189,7 +192,7 @@ function parse(text, billing) {
         if (said === INTERRUPTED) {
           if (last) last.interrupted = true;
         } else if (said) {
-          turns.push({ text: said.slice(0, PROMPT_KEPT), at, end: at, interrupted: false, waits: [] });
+          turns.push({ text: said.slice(0, PROMPT_KEPT), at, end: at, interrupted: false, waits: [], tools: {}, skills: {}, tokens: 0 });
           if (turns.length > TURNS_KEPT) turns.shift();
         }
       } else if (o.type === 'assistant' && at && turns.length) turns[turns.length - 1].end = at;
@@ -208,8 +211,15 @@ function parse(text, billing) {
         const turn = turns.at(-1);
         const working = c.some((b) => b.type === 'tool_use');
         if (turn && (text || working)) turn.done = !working && saysDone(reply);
+        const out = Number(o.message?.usage?.output_tokens) || 0;
+        const id = o.message?.id ?? o.uuid;
+        if (turn && out > (counted.get(id) ?? 0)) {
+          turn.tokens += out - (counted.get(id) ?? 0);
+          counted.set(id, out);
+        }
         for (const b of c) {
           if (b.type === 'tool_use' && b.id) pending.set(b.id, { name: b.name ?? '', input: b.input ?? {}, at });
+          if (b.type === 'tool_use' && b.name && turn) (turn.tools[b.name] ??= { calls: 0 }).calls++;
           const path = b.type === 'tool_use' && WRITES.includes(b.name ?? '') ? b.input?.file_path ?? b.input?.notebook_path : null;
           if (typeof path === 'string' && path) {
             written.delete(path);
@@ -224,6 +234,11 @@ function parse(text, billing) {
           const kind = call ? ASKS[call.name] : undefined;
           const turn = turns.at(-1);
           if (kind && turn && call?.at && at > call.at && call.at >= turn.at) turn.waits.push({ kind, at: call.at, end: at });
+          const use = call && turn && call.at >= turn.at ? turn.tools[call.name] : undefined;
+          if (use && call) {
+            if (b.is_error) use.errors = (use.errors ?? 0) + 1;
+            if (!kind && at > call.at) use.ms = (use.ms ?? 0) + at - call.at;
+          }
           pending.delete(b.tool_use_id);
         }
       }
@@ -262,8 +277,8 @@ function parse(text, billing) {
   let linesAdded = 0;
   let linesRemoved = 0;
   // A total that carried the previous one on replaces it rather than adding to it.
-  const counted = totals.filter((t, i) => !(totals[i + 1] && carries(totals[i + 1], t)));
-  for (const t of counted) {
+  const kept = totals.filter((t, i) => !(totals[i + 1] && carries(totals[i + 1], t)));
+  for (const t of kept) {
     cost = (cost ?? 0) + (Number(t.totalCostUSD) || 0);
     duration += Number(t.totalDuration) || 0;
     apiDuration += Number(t.totalAPIDuration) || 0;
@@ -274,7 +289,7 @@ function parse(text, billing) {
       addModel(models, id, tokensOf(u), c, c === null ? null : c * extraShare(id, weights[id], billing));
     }
   }
-  if (!counted.length) for (const m of replies.values()) addModel(models, m.model, tokensOf(m.usage), null);
+  if (!kept.length) for (const m of replies.values()) addModel(models, m.model, tokensOf(m.usage), null);
   const extraCost = cost === null ? null : Object.values(models).reduce((s, m) => s + (m.extraCost ?? 0), 0);
   const last = open ? [...pending.values()].at(-1) : undefined;
   return {
@@ -300,16 +315,20 @@ function toolDetail(input) {
 
 // Counts a line's skills and MCP calls. A skill runs through the Skill tool, or as a slash command the user typed,
 // which claude follows with the skill's text ("Base directory for this skill: …"); a built-in command has none.
-// Answers the slash command still waiting for that text.
+// Answers the slash command still waiting for that text. A skill also counts in `turn`, the turn it ran in.
 const SKILL_TEXT = /^Base directory for this skill:/;
-/** @param {TranscriptLine} o @param {string} command @param {Record<string, number>} skills @param {Record<string, number>} mcp */
-function readTools(o, command, skills, mcp) {
+/** @param {TranscriptLine} o @param {string} command @param {Record<string, number>} skills @param {Record<string, number>} mcp @param {SessionTurn} [turn] */
+function readTools(o, command, skills, mcp, turn) {
+  const ran = (/** @type {string} */ skill) => {
+    skills[skill] = (skills[skill] ?? 0) + 1;
+    if (turn) turn.skills[skill] = (turn.skills[skill] ?? 0) + 1;
+  };
   const c = o.message?.content;
   if (o.type === 'assistant') {
     for (const b of Array.isArray(c) ? c : []) {
       if (b.type !== 'tool_use' || !b.name) continue;
       const skill = b.name === 'Skill' && typeof b.input?.skill === 'string' ? b.input.skill.replace(/^\//, '') : '';
-      if (skill) skills[skill] = (skills[skill] ?? 0) + 1;
+      if (skill) ran(skill);
       else if (b.name.startsWith('mcp__')) mcp[b.name] = (mcp[b.name] ?? 0) + 1;
     }
     return '';
@@ -319,7 +338,7 @@ function readTools(o, command, skills, mcp) {
   const typed = /<command-name>\/?([^<\s]+)<\/command-name>/.exec(text)?.[1];
   if (typed) return typed;
   if (command && SKILL_TEXT.test(text)) {
-    skills[command] = (skills[command] ?? 0) + 1;
+    ran(command);
     return '';
   }
   return command;
@@ -484,6 +503,10 @@ function turnLog(turns) {
     /** @type {DevTurn} */
     const out = { text: t.text.replace(/\s+/g, ' ').trim().slice(0, TURN_TEXT), at: t.at, end, wait, review: prev ? Math.max(0, t.at - prev.end) : 0 };
     if (t.interrupted) out.interrupted = true;
+    if (t.done) out.done = true;
+    out.tools = t.tools;
+    if (Object.keys(t.skills).length) out.skills = t.skills;
+    if (t.tokens) out.tokens = t.tokens;
     return out;
   });
 }

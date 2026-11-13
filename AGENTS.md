@@ -69,7 +69,9 @@ js/modules/inbox-linkedin.js  Inbox → LinkedIn: comments on the member's posts
 js/modules/monitoring-ai.js  Monitoring → AI usage overview: board calls and Dev sessions by source and project, a chart and table broken down by project, source, model or feature, against the period before
 js/modules/monitoring-dev.js  Monitoring → AI usage → Dev sessions: a chart and table by project, model, effort or billing, in cost, tokens, time or sessions
 js/modules/monitoring-tools.js  Monitoring → AI usage → Skills and MCP: the skills Dev sessions ran and the MCP tools they called, each counted on its own
-js/modules/monitoring-development.js  Monitoring → Development: the Dev sessions' claude turns (usage.json `dev` turns): time per turn, review and waiting time, task time, interruptions, a log of recent turns
+js/modules/monitoring-development.js  Monitoring → Development: the Dev sessions' claude turns (usage.json `dev` turns) in four views under one project filter; Overview (summary against the period before, insights, time, projects, hours) and Turns (lengths, tasks, a log of recent turns)
+js/modules/monitoring-development-tools.js  Monitoring → Development → Skills & MCP and Tools: each skill, MCP tool or server, and every tool, with its calls, turns, failures and time per call
+js/dev-turns.js       Development's numbers without the DOM: a turn's working and review time, its tools grouped and added up, and the findings of the Insights card
 js/chains.js          every chain the board reads: the built-in ones and those added in Settings → Blockchains
 js/abi.js             Solidity ABI encoding and decoding: calls, answers and event logs
 js/contracts.js       saved smart contracts: reads through the node, writes through the browser wallet, activity
@@ -152,7 +154,7 @@ tools/check-imports.js  loads every worker module under plain Node, to catch a m
 tools/check-merge.js  the worker and a tab change two fields of one file; both must survive
 tools/linkedin-session.js  the LinkedIn session's queue (runners only): 20–40 s gap, daily limit, cache in linkedin.json, stop on sign-out; POST /linkedin/voyager runs it for a tab
 tools/check-linkedin.js  the LinkedIn queue against a stubbed fetch: gap, limit, cache, sign-out
-tools/usage.js        reads Claude Code's transcripts for the runner: a task worktree's models, tokens, cost and effort
+tools/usage.js        reads Claude Code's transcripts for the runner: a task worktree's models, tokens, cost and effort, and each turn's tools (calls, failures, time), skills and output tokens
 ```
 
 ## Conventions

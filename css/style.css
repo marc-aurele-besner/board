@@ -541,6 +541,16 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .pill.dev-waiting { --c: var(--warn); }
 .mon-recent { display: flex; flex-direction: column; }
 .mon-recent li { display: flex; align-items: center; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.dev-filters { justify-content: space-between; }
+.dev-change { white-space: nowrap; }
+.dev-bad { color: var(--danger); font-weight: 600; }
+.dev-insights { display: flex; flex-direction: column; }
+.dev-insight { display: flex; align-items: baseline; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.dev-insight:last-child { border-bottom: none; }
+.dev-insight-mark { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--info); transform: translateY(-1px); }
+.dev-insight.good .dev-insight-mark { background: var(--income); }
+.dev-insight.warn .dev-insight-mark { background: var(--warn); }
+.dev-insight .btn-link-inline { flex: none; white-space: nowrap; }
 .dev-turn-log li { flex-wrap: nowrap; }
 .dev-turn-log .grow { flex: 1; min-width: 0; max-width: none; }
 .dev-turn-log .time, .dev-turn-log .num, .dev-turn-log .pill { flex: none; }
