@@ -72,6 +72,8 @@ js/modules/settings-runners.js  Settings → Runners: the worker's status and fo
 js/task-links.js      a task's GitHub issues and PRs; finds the links a Dev session prints and adds them to its tasks
 js/link-states.js     whether a task's issues and PRs are open, merged or closed: read by the runners into github.json, coloured on tasks
 js/previews.js        the Vercel and Netlify preview links in PR comments: read by the runners into github.json, shown on tasks and Cron runs
+js/deployments.js     a PR's deployments from the Vercel and Netlify APIs (with Settings' tokens), and their build logs (no DOM)
+js/deploy-panel.js    a preview's panel: state, commit, timings, error, links and its build log, reloaded while it builds
 js/images.js          which pasted or dropped files are images claude reads
 js/task-images.js     a task's images: kept in the data folder, shown on the task, saved through the runner for claude
 js/task-worktrees.js  the worktrees Dev sessions made for tasks; removed through the runner once their tasks are done
