@@ -638,7 +638,7 @@ async function runTriage(store, p) {
           content: systemPrompt(store, 'triage'),
         },
         { role: 'user', content: JSON.stringify({ items: all, profiles: profilesFor([p], [p.id]) }) },
-      ])).trim();
+      ], { projectId: p.id })).trim();
       triage.status = 'ok';
     }
   } catch (err) {
@@ -898,7 +898,7 @@ async function explainRepo(store, repo, entry) {
           readme: d.readme,
         }),
       },
-    ]);
+    ], { projectId: store.get('projects').projects.find((p) => p.github.repos.includes(repo))?.id ?? '' });
     entry.summary = { status: 'ok', text: text.trim() };
   } catch (err) {
     entry.summary = { status: 'error', text: /** @type {Error} */ (err).message };

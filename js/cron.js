@@ -2193,7 +2193,7 @@ async function runStep(store, flow, step, input, ctx) {
     const messages = [];
     if (step.system?.trim()) messages.push({ role: 'system', content: fill(step.system, vars) });
     messages.push({ role: 'user', content: fill(step.prompt, vars) });
-    return (await ask(store, AI_TASK, messages, { model: step.model || '' })).trim();
+    return (await ask(store, AI_TASK, messages, { model: step.model || '', projectId: withFlowProject(flow, step).projectId || '' })).trim();
   }
   if (step.type === 'task') {
     const title = fill(step.title || '{{input}}', vars).split('\n')[0].slice(0, 200).trim() || flow.name;
