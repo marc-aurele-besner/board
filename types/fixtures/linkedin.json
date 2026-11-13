@@ -1,0 +1,27 @@
+{
+  "auth": { "token": "token", "expires": 1767000000000, "sub": "abc123", "name": "Example", "picture": "https://example.com/me.png", "at": 1761800000000 },
+  "posts": [
+    {
+      "id": "lip-1",
+      "taskId": "task-1",
+      "projectId": "proj-1",
+      "text": "A post about the example project.",
+      "link": "https://example.com",
+      "status": "posted",
+      "scheduledAt": null,
+      "postedAt": 1762000000000,
+      "urn": "urn:li:share:1",
+      "url": "https://www.linkedin.com/feed/update/urn:li:share:1/",
+      "error": null,
+      "createdAt": 1761900000000,
+      "updatedAt": 1762000000000,
+      "metrics": [{ "at": 1762003600000, "reactions": 12, "comments": 2, "reposts": 1, "impressions": 800 }]
+    },
+    { "id": "lip-2", "projectId": null, "text": "A scheduled post.", "status": "scheduled", "scheduledAt": 1763000000000, "createdAt": 1762100000000 }
+  ],
+  "comments": [
+    { "id": "urn:li:comment:1", "postId": "lip-1", "postUrn": "urn:li:share:1", "author": "Someone", "authorHeadline": "Engineer", "authorUrl": "https://www.linkedin.com/in/someone/", "text": "Nice.", "at": 1762010000000, "read": false, "taskId": null }
+  ],
+  "cache": { "company:example": { "at": 1762000000000, "value": { "name": "Example" } } },
+  "session": { "calls": { "2026-11-13": 4 }, "expiredAt": null, "error": null, "lastCallAt": 1762000000000 }
+}

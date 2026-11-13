@@ -21,6 +21,16 @@ export interface CalendarEvent {
   // The event's page in Google Calendar, and its Meet link.
   link: string;
   meet: string;
+  // The guests, as Google lists them; `self` is the calendar's own account.
+  attendees?: CalendarAttendee[];
+}
+
+export interface CalendarAttendee {
+  email: string;
+  name?: string;
+  self?: boolean;
+  // 'accepted', 'declined', 'tentative' or 'needsAction'.
+  response?: string;
 }
 
 // One read of a calendar over [from, to) (ms).

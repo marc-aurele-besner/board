@@ -21,7 +21,8 @@
             "location": "Room 1",
             "description": "Sample event.",
             "link": "https://example.com/event/evt001",
-            "meet": "https://example.com/meet/abc"
+            "meet": "https://example.com/meet/abc",
+            "attendees": [{ "email": "jane@example.com", "name": "Jane Example", "response": "accepted" }, { "email": "me@example.com", "self": true }]
           },
           {
             "key": "someone@example.com|someone@example.com|evt002",

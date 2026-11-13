@@ -99,7 +99,7 @@
   "netlify": { "token": "" },
   "analytics": { "properties": { "project-1": "123456789" } },
   "bing": { "key": "", "relay": "" },
-  "linkedin": { "liAt": "", "jsessionid": "" },
+  "linkedin": { "liAt": "", "jsessionid": "", "clientId": "", "clientSecret": "", "dailyLimit": 60 },
   "resend": { "relay": "", "keys": { "project-1": "" } },
   "gmail": {
     "accounts": [
