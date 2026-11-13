@@ -2732,8 +2732,16 @@ button.sum-line:hover { background: var(--surface-2); }
 .opt-plain .account-avatar { width: 16px; height: 16px; font-size: 0.6rem; }
 
 /* Inbox: folders and project directories in a side column, like a mail client. On a phone they sit above the list. */
-.inbox-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 16px; align-items: start; }
-.inbox-side { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+/* The side column runs from the top bar to the bottom of the window, and meets the mail list with one border. */
+.inbox-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 0; align-items: start; }
+.inbox-side { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 54px; height: calc(100dvh - 54px); overflow-y: auto; padding: 10px 8px 10px 0; background: var(--surface); border-right: 1px solid var(--border); }
+.view[data-section="inbox"] > .stack-lg > .inbox-layout:first-child { padding-top: 0; }
+.inbox-main { gap: 8px; min-width: 0; }
+.inbox-main > :not(.inbox-card) { margin-inline: 12px; }
+.inbox-main > :first-child { margin-top: 10px; }
+.inbox-main > .inbox-search { width: auto; }
+.inbox-main > .inbox-card { border-radius: 0; border-left: none; border-right: none; }
+.inbox-pickers .icon-btn { flex: none; }
 .inbox-layout .inbox-folders { display: flex; flex-direction: column; gap: 2px; }
 .inbox-layout .inbox-folders .lp-chip { border-color: transparent; background: transparent; border-radius: 0 999px 999px 0; padding: 6px 12px; justify-content: flex-start; }
 .inbox-layout .inbox-folders .lp-chip:hover { background: var(--surface-2); }
@@ -2753,7 +2761,7 @@ button.sum-line:hover { background: var(--surface-2); }
 .inbox-dir-btn .chip-count { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 @media (max-width: 760px) {
   .inbox-layout { grid-template-columns: minmax(0, 1fr); }
-  .inbox-side { position: static; max-height: none; overflow: visible; }
+  .inbox-side { position: static; height: auto; overflow: visible; padding: 10px 0 0; border-right: none; background: none; }
   .inbox-layout .inbox-folders { flex-direction: row; overflow-x: auto; scrollbar-width: none; }
   .inbox-layout .inbox-folders .lp-chip { flex: none; border-color: var(--border); border-radius: 999px; }
   .inbox-layout .inbox-folders .lp-chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
