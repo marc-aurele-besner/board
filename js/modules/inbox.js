@@ -561,7 +561,7 @@ function rowEl(store, e, projects, threadSize, select) {
   const [, tone] = STATUS[e.status] ?? ['', 'plain'];
   // Outside the Sent folder, a sent email says who it went to, as a mail client does.
   const who = e.dir === 'sent' && view.folder !== 'sent' ? `To: ${counterparty(e)}` : counterparty(e);
-  return h('li', { class: ['mail-row', e.unread ? 'unread' : '', view.selected.has(e.id) ? 'selected' : ''].filter(Boolean).join(' ') },
+  return h('li', { 'data-id': e.id, class: ['mail-row', e.unread ? 'unread' : '', view.selected.has(e.id) ? 'selected' : ''].filter(Boolean).join(' ') },
     select,
     starButton(store, e),
     h('button', { type: 'button', class: 'mail-open', onclick: () => openReader(store, e), 'aria-label': `${e.unread ? 'Unread. ' : ''}${who}: ${e.subject || '(no subject)'}` },
@@ -930,6 +930,8 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
   // Redrawn when the runners' heartbeat changes: it holds the last read's time and errors.
   readsRunners: true,
   render: draw,
+  // New mail arrives every few minutes: the list is patched, so it keeps its scroll and hover.
+  patch: true,
   serialize: () => ({
     folder: view.folder === 'inbox' ? '' : view.folder,
     project: view.project === 'all' ? '' : view.project,
