@@ -3,10 +3,12 @@
 // gets it at its prompt, and an idle terminal gets a claude command that starts with it.
 import { h, icon } from '../ui.js';
 import { listSkills } from '../terminal.js';
+import { onContextMenu, copyItem } from '../menu.js';
 import { baseName, panelHead, panelAction, openFile } from './dev-files.js';
 /** @import { DevContext } from '../../types/dev' */
 /** @import { RunnerSkills, RunnerSkill } from '../../types/terminal' */
 /** @import { Child } from '../../types/ui' */
+/** @import { MenuEntry } from '../menu.js' */
 
 // The list is read again when the panel is drawn after this long: a skill added on disk shows on the next visit.
 const STALE_MS = 30000;
@@ -53,9 +55,18 @@ const matches = (/** @type {RunnerSkill} */ s) => {
   return !q || s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q);
 };
 
+/** @param {DevContext} ctx @param {RunnerSkill} s @returns {MenuEntry[]} */
+const skillMenu = (ctx, s) => [
+  { label: `Type /${s.name} in the terminal`, icon: () => icon('terminal'), onSelect: () => ctx.typeInTerminal(`/${s.name} `) },
+  { label: 'Open its SKILL.md', icon: () => icon('file'), onSelect: () => openFile(ctx, s.path) },
+  '-',
+  copyItem('Copy command', `/${s.name}`),
+  copyItem('Copy path', s.path),
+];
+
 /** @param {DevContext} ctx @param {RunnerSkill} s */
 function row(ctx, s) {
-  return h('div', { class: 'tree-row scm-row term-list-row skill-row', role: 'listitem' },
+  return onContextMenu(h('div', { class: 'tree-row scm-row term-list-row skill-row', role: 'listitem' },
     h('button', {
       type: 'button',
       class: 'tree-item',
@@ -71,7 +82,7 @@ function row(ctx, s) {
       title: 'Open its SKILL.md',
       'aria-label': `Open the SKILL.md of ${s.name}`,
       onclick: () => openFile(ctx, s.path),
-    }, icon('file')));
+    }, icon('file'))), () => skillMenu(ctx, s));
 }
 
 /** @param {DevContext} ctx @param {string} key @param {string} title @param {RunnerSkill[]} all @param {string} empty */
