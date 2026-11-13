@@ -1,17 +1,18 @@
 // What waits on the user in sections they may not have open, as a number on the nav tab: Slack mentions (a DM with
-// unread messages counts once), claude terminals in Dev whose turn ended (a question, a plan, or done), and unread
-// comments on the member's LinkedIn posts on the Inbox tab.
+// unread messages counts once), claude terminals in Dev that wait on the user (a question, a plan, a permission, or a
+// turn that ended without the done signal), and unread comments on the member's LinkedIn posts on the Inbox tab.
 // Read every 20 s while the page is visible. The Slack tab reads counts itself while open and reports them here,
 // so they are not read twice.
 import { runnersOnline } from './runners.js';
 import { runnerOf } from './dev-core.js';
-import { listSessions, sessionStatus } from './terminal.js';
+import { listSessions, sessionStatus, sessionTurns } from './terminal.js';
 import { SLACK, SLACK_DEFAULTS, readCounts } from './slack.js';
 import { LINKEDIN } from './linkedin-core.js';
 /** @import { Store, SlackData } from '../types/data' */
 /** @import { Count } from './slack.js' */
 
 const EVERY_MS = 20000;
+const TURNS_TIMEOUT_MS = 8000;
 
 /** @type {Record<string, number>} by section id */
 const counts = { slack: 0, dev: 0, inbox: 0 };
@@ -81,7 +82,17 @@ async function readDev(store) {
     const ids = ((await listSessions(base)).sessions ?? []).map((s) => s.id);
     const states = await sessionStatus(base, ids);
     // Only claude reports its transcript (agents); a quiet dev server is not waiting on anyone.
-    setAttention('dev', Object.values(states).filter((s) => s.state === 'waiting' && (s.ask || s.agents !== undefined)).length);
+    const waiting = Object.entries(states).filter(([, s]) => s.state === 'waiting' && (s.ask || s.agents !== undefined));
+    // A claude that asks nothing may have finished its task: its turns tell (state done once it gave the done signal).
+    const open = await Promise.all(waiting.map(async ([id, s]) => {
+      if (s.ask) return true;
+      try {
+        return (await sessionTurns(base, id, AbortSignal.timeout(TURNS_TIMEOUT_MS))).state !== 'done';
+      } catch {
+        return true;
+      }
+    }));
+    setAttention('dev', open.filter(Boolean).length);
   } catch {
     setAttention('dev', 0);
   }
