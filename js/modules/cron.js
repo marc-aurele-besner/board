@@ -945,7 +945,7 @@ function varNames(flow, index, extra = [], projectId = withFlowProject(flow, flo
   ];
 }
 
-// A field that takes variables, with its variables under it as chips. A text area given `vars` (a function, so
+// A field that takes variables, with its variables under it as chips. A field given `vars` (a function, so
 // the values are only worked out when asked) gets Edit and Preview tabs: Preview shows the text with each {{…}}
 // filled from the test data or the last run.
 /**
@@ -967,7 +967,7 @@ function varField(label, control, key, names, hint, vars) {
     names.map(([name, title]) => h('button', {
       type: 'button', class: 'cron-var', title, onmousedown: keepFocus, onclick: () => insertVar(key, name),
     }, `{{${name}}}`)));
-  if (!vars || control.tagName !== 'TEXTAREA') return h('div', { class: 'cron-col' }, field(label, control, hint), chips);
+  if (!vars) return h('div', { class: 'cron-col' }, field(label, control, hint), chips);
 
   control.setAttribute('aria-label', label);
   const box = h('div', { class: 'cron-preview-wrap stack' });
@@ -983,7 +983,7 @@ function varField(label, control, key, names, hint, vars) {
       b.classList.toggle('active', active);
       b.setAttribute('aria-selected', String(active));
     });
-    // Only text areas with vars get here.
+    // Only fields with vars get here.
     if (on) box.replaceChildren(...previewOf(control.value, /** @type {() => Vars} */ (vars)()));
   };
   /** @param {boolean} on */
@@ -1347,7 +1347,8 @@ function sourceCard(store, flow, own, { setSource, remove }) {
       ? varField(src.projectId ? 'Path or link (optional)' : 'Link',
           h('input', { value: src.url ?? '', autocomplete: 'off', placeholder: src.projectId ? '/blog or https://docs.example.com' : 'example.com/blog', onchange: (/** @type {FieldEvent} */ e) => set({ url: e.target.value.trim() }) }),
           `${own.id}:url`, src.projectId ? PROJECT_NAMES.slice(1, 3).concat([['project.repoUrl', 'The project’s first GitHub repo, as a link']]) : [],
-          src.projectId ? 'Empty reads the project’s website. A path such as /blog reads that page of it; a full link reads any page, such as {{project.repoUrl}}.' : null)
+          src.projectId ? 'Empty reads the project’s website. A path such as /blog reads that page of it; a full link reads any page, such as {{project.repoUrl}}.' : null,
+          src.projectId ? () => previewVars(store, flow, flow.steps.find((s) => sourcesOf(s).some((x) => x.id === own.id)), src.projectId) : undefined)
       : null,
     src.source === 'page'
       ? field('Linked pages to read too',
@@ -1427,7 +1428,7 @@ function stepForm(store, flow, step) {
   if (step.type === 'task') {
     return h('div', { class: 'stack' },
       varField('Task title', h('input', { value: step.title, autocomplete: 'off', onchange: (/** @type {FieldEvent} */ e) => set({ title: e.target.value }) }), key('title'), names,
-        'The first line is used.'),
+        'The first line is used.', vars),
       varField('Description', h('textarea', { rows: 6, class: 'mono-text', onchange: (/** @type {FieldEvent} */ e) => set({ description: e.target.value }) }, step.description ?? '{{input}}'), key('description'), names,
         'Markdown is fine. {{input}} is the output of the step before.', vars),
       h('div', { class: 'row cron-fields' },
@@ -1438,7 +1439,7 @@ function stepForm(store, flow, step) {
         field('Status', select(step.status || 'todo', statusOptions(store, step.status || 'todo').map((o) => [o.value, o.label]), (status) => set({ status }))),
         field('Category', select(step.category ?? '', taskCategoryOptions(store, step.category), (category) => set({ category })))),
       varField('Parent task (optional)', h('input', { value: step.parent ?? '', autocomplete: 'off', placeholder: '{{step2}}', onchange: (/** @type {FieldEvent} */ e) => set({ parent: e.target.value.trim() }) }), key('parent'), names,
-        'Puts the new task under another one: the id an earlier Create task step gives as its output, such as {{step2}}. This step’s own output is the new task’s id.'));
+        'Puts the new task under another one: the id an earlier Create task step gives as its output, such as {{step2}}. This step’s own output is the new task’s id.', vars));
   }
   if (step.type === 'stop') {
     const needsText = step.when === 'contains' || step.when === 'lacks';
@@ -1449,8 +1450,8 @@ function stepForm(store, flow, step) {
       h('p', { class: 'muted small' }, 'The run ends here without counting as a failure, and the steps after this one are skipped. Put it after a data step to stay quiet when there is nothing to report.'));
   }
   if (step.type === 'format') return formatForm(store, flow, step, set);
-  if (step.type === 'parse') return parseForm(flow, step, set);
-  if (step.type === 'loop') return loopForm(flow, step, set);
+  if (step.type === 'parse') return parseForm(store, flow, step, set);
+  if (step.type === 'loop') return loopForm(store, flow, step, set);
   if (step.type === 'profile') {
     const own = withFlowProject(flow, step).projectId;
     const readable = projectsOf(store).filter((p) => hasProfileSources(p) || p.id === own);
@@ -1507,7 +1508,7 @@ function stepForm(store, flow, step) {
       claude
         ? varField('Dev prompt', h('textarea', { rows: 13, class: 'mono-text', onchange: (/** @type {FieldEvent} */ e) => set({ prompt: e.target.value }) }, step.prompt ?? ''), key('prompt'), devNames, null, vars)
         : varField('Command', h('input', { value: step.command ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, placeholder: 'npm run build', onchange: (/** @type {FieldEvent} */ e) => set({ command: e.target.value }) }), key('command'), devNames,
-            'Each {{…}} goes in as one quoted word, so text from a model never runs as a command.'),
+            'Each {{…}} goes in as one quoted word, so text from a model never runs as a command.', vars),
       h('div', { class: 'row cron-fields' },
         h('label', { class: 'check' },
           h('input', { type: 'checkbox', checked: waits, onchange: (/** @type {FieldEvent} */ e) => set({ wait: e.target.checked === !last ? undefined : e.target.checked }) }),
@@ -1594,7 +1595,7 @@ function formatForm(store, flow, step, set) {
       : null,
     mode === 'list'
       ? [
-          varField('List', h('input', { value: step.items ?? '{{input}}', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (/** @type {FieldEvent} */ e) => set({ items: e.target.value.trim() }) }), key('items'), names, ITEMS_HINT),
+          varField('List', h('input', { value: step.items ?? '{{input}}', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (/** @type {FieldEvent} */ e) => set({ items: e.target.value.trim() }) }), key('items'), names, ITEMS_HINT, vars),
           varField('Each item as', h('textarea', { rows: 2, class: 'mono-text', onchange: (/** @type {FieldEvent} */ e) => set({ itemText: e.target.value }) }, step.itemText ?? '{{item}}'), key('itemText'),
             [...LOOP_NAMES, ...names.filter(([name]) => !LOOP_NAMES.some(([l]) => l === name))],
             '{{item}} is the item, and {{item.title}} a part of it when it is JSON; {{index}} counts from 1. Preview shows the first item.',
@@ -1610,7 +1611,7 @@ function formatForm(store, flow, step, set) {
               fields.length > 1
                 ? h('button', { type: 'button', class: 'icon-btn', title: 'Remove field', 'aria-label': 'Remove field', onclick: () => editFields((list) => list.filter((x) => x.id !== f.id)) }, icon('trash'))
                 : null),
-            varField('Value', h('input', { value: f.value, autocomplete: 'off', onchange: (/** @type {FieldEvent} */ e) => setField(f.id, { value: e.target.value }) }), key(`field:${f.id}`), names))),
+            varField('Value', h('input', { value: f.value, autocomplete: 'off', onchange: (/** @type {FieldEvent} */ e) => setField(f.id, { value: e.target.value }) }), key(`field:${f.id}`), names, null, vars))),
           h('div', null, h('button', { type: 'button', class: 'btn-small', onclick: () => editFields((list) => [...list, makeField()]) }, icon('plus'), ' Add a field')),
           h('p', { class: 'muted small' },
             `The output is one JSON object with these names as keys, so later steps read {{step${n}.title}}. `,
@@ -1620,16 +1621,17 @@ function formatForm(store, flow, step, set) {
 }
 
 /**
+ * @param {Store} store
  * @param {CronFlow} flow
  * @param {CronStep} step
  * @param {(patch: Partial<CronStep>) => void} set
  */
-function parseForm(flow, step, set) {
+function parseForm(store, flow, step, set) {
   const index = flow.steps.indexOf(step);
   const n = String(index + 1);
   return h('div', { class: 'stack' },
     varField('Text', h('input', { value: step.text ?? '{{input}}', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (/** @type {FieldEvent} */ e) => set({ text: e.target.value.trim() }) }),
-      `${step.id}:text`, varNames(flow, index), 'The text to read, such as {{input}} or {{step2.answer}}.'),
+      `${step.id}:text`, varNames(flow, index), 'The text to read, such as {{input}} or {{step2.answer}}.', () => previewVars(store, flow, step)),
     h('div', { class: 'row cron-fields' },
       field('When it holds several', select(step.mode || 'largest', PARSE_MODES, (mode) => set({ mode })))),
     h('p', { class: 'muted small' },
@@ -1638,11 +1640,12 @@ function parseForm(flow, step, set) {
 }
 
 /**
+ * @param {Store} store
  * @param {CronFlow} flow
  * @param {CronStep} step
  * @param {(patch: Partial<CronStep>) => void} set
  */
-function loopForm(flow, step, set) {
+function loopForm(store, flow, step, set) {
   const index = flow.steps.indexOf(step);
   const span = loopSpan(flow, index);
   const after = flow.steps.length - index - 1;
@@ -1650,7 +1653,7 @@ function loopForm(flow, step, set) {
   const range = span > 1 ? `Steps ${index + 2} to ${index + 1 + span} run` : `Step ${index + 2} runs`;
   return h('div', { class: 'stack' },
     varField('Items', h('input', { value: step.items ?? '{{input}}', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (/** @type {FieldEvent} */ e) => set({ items: e.target.value.trim() }) }),
-      `${step.id}:items`, varNames(flow, index), ITEMS_HINT),
+      `${step.id}:items`, varNames(flow, index), ITEMS_HINT, () => previewVars(store, flow, step)),
     h('div', { class: 'row cron-fields' },
       field('Steps to repeat', h('input', {
         type: 'number', min: 1, max: Math.max(1, after), value: String(want),
