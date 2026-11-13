@@ -35,6 +35,8 @@ export async function refreshWorktrees(ctx, path, { force = false } = {}) {
   if (path !== state.path) Object.assign(state, { path, data: null, loadError: '', at: 0, errors: new Map() });
   if (!ctx.ready() || state.loading || (!force && Date.now() - state.at < STALE_MS)) return;
   state.loading = true;
+  // Redrawn only when the answer changed, as a page rebuilt every few seconds flashed.
+  const before = JSON.stringify([state.data, state.loadError]);
   try {
     const data = await listWorktrees(ctx.base(), path);
     if (path === state.path) Object.assign(state, { data, loadError: '' });
@@ -43,7 +45,7 @@ export async function refreshWorktrees(ctx, path, { force = false } = {}) {
   } finally {
     state.loading = false;
     state.at = Date.now();
-    ctx.refresh();
+    if (force || path !== state.path || JSON.stringify([state.data, state.loadError]) !== before) ctx.refresh();
   }
 }
 
