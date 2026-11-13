@@ -21,7 +21,7 @@ import { previewChips } from '../previews.js';
 import { attachSession, sessionStatus, listSkills } from '../terminal.js';
 import { createTerminal } from '../vt.js';
 import { hasProfileSources } from '../profile.js';
-/** @import { Store, CronFlow, CronStep, CronSource, CronFormatField, CronSchedule, CronTemplate, CronRun, CronRunStep, CronRunTerminal, CronPr, Project, Task, IconName } from '../../types/data' */
+/** @import { Store, CronFlow, CronStep, CronSource, CronFormatField, CronSchedule, CronRun, CronRunStep, CronRunTerminal, CronPr, Project, Task, IconName } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @import { Vars } from '../cron.js' */
 /** @import { Exit } from './dev.js' */
@@ -54,7 +54,7 @@ const TABS = [['flows', 'Flows'], ['runs', 'Runs'], ['templates', 'Templates']];
 const SUBTITLES = {
   flows: 'Recurring flows that gather data from the board, ask an AI model, and turn the answer into a task, a notification or work for claude in Dev.',
   runs: 'What every flow did, step by step.',
-  templates: 'Starting points, and the flows you saved as templates. A template becomes a paused flow you can adjust before switching it on.',
+  templates: 'Ready-made flows, and those you saved with the bookmark in a flow’s editor. A template becomes a paused flow you adjust, then switch on.',
 };
 
 /**
@@ -425,66 +425,106 @@ function saveAsTemplate(store, flow) {
   });
 }
 
+// A template's steps in words, for its card. A prompt's ask is usually its last line, after the data it quotes.
 /**
  * @param {Store} store
- * @param {CronTemplate} t
+ * @param {CronFlow} flow
+ * @param {CronStep} step
  */
-function removeTemplate(store, t) {
-  const before = structuredClone(store.get(COLLECTION).templates ?? []);
-  store.update(COLLECTION, (d) => {
-    d.templates = (d.templates ?? []).filter((x) => x.id !== t.id);
-  });
-  toast(`Removed the template “${t.name}”`, { undo: () => store.update(COLLECTION, (d) => { d.templates = before; }) });
+function templateStepText(store, flow, step) {
+  const lines = (/** @type {string | undefined} */ text) => String(text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+  if (step.type === 'ai') return lines(step.prompt).filter((l) => !/^\{\{[^}]+\}\}$/.test(l)).at(-1) || 'Your prompt';
+  if (step.type === 'notify') return lines(step.text).join(' ') || 'The input';
+  return stepSummary(store, flow, step);
 }
 
-// A built-in template has no id or project; the blank one starts a flow with one AI step.
+// Hides a built-in template, or removes a saved one; both can be undone.
 /**
  * @param {Store} store
- * @param {{ name: string, about: string, schedule: CronSchedule, steps: Array<Omit<CronStep, 'id'>>, projectId?: string, blank?: boolean }} template
- * @param {{ remove?: (() => void) | null }} [options]
+ * @param {{ id?: string, name: string }} t
  */
-function templateCard(store, { name, about, schedule, steps, projectId = '', blank = false }, { remove = null } = {}) {
-  const project = projectId ? store.get('projects').projects.find((p) => p.id === projectId) : null;
-  return h('article', { class: 'card stack cron-template-card' },
-    h('div', { class: 'row between' },
-      h('h3', null, name),
-      remove ? h('button', { type: 'button', class: 'icon-btn', title: 'Remove template', 'aria-label': `Remove the template “${name}”`, onclick: remove }, icon('trash')) : null),
-    h('p', { class: 'muted small grow' }, about || 'Saved from a flow.'),
-    project ? h('span', { class: 'muted small cron-flow-meta' }, projectIcon(project), h('span', { class: 'cron-flow-project' }, project.name)) : null,
-    h('div', { class: 'cron-template-steps', 'aria-label': 'Steps' },
-      h('span', { class: 'flow-node-icon kind-trigger', title: scheduleLabel(schedule) }, icon('clock')),
-      steps.map((s) => {
-        const [, label, iconName] = typeOf(s.type);
-        return h('span', { class: `flow-node-icon kind-${s.type}`, title: label }, icon(iconName));
+function dropTemplate(store, t) {
+  const before = structuredClone(store.get(COLLECTION));
+  store.update(COLLECTION, (d) => {
+    if (t.id) d.templates = (d.templates ?? []).filter((x) => x.id !== t.id);
+    else d.hiddenTemplates = [...new Set([...(d.hiddenTemplates ?? []), t.name])];
+  });
+  toast(`Removed the template “${t.name}”`, {
+    undo: () => store.update(COLLECTION, (d) => {
+      d.templates = before.templates;
+      d.hiddenTemplates = before.hiddenTemplates;
+    }),
+  });
+}
+
+// Brings back the built-in templates that were removed.
+/** @param {Store} store */
+function restoreTemplates(store) {
+  store.update(COLLECTION, (d) => {
+    delete d.hiddenTemplates;
+  });
+}
+
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ */
+function useTemplate(store, flow) {
+  view.tab = 'flows';
+  // A flow made while the list shows one project starts in it.
+  if (view.project && view.project !== NO_PROJECT) flow.projectId = view.project;
+  addFlow(store, flow);
+}
+
+// A template's card: its name and purpose, when it runs, each step in words, and the button that makes a flow of it.
+/**
+ * @param {Store} store
+ * @param {{ id?: string, name: string, about: string, schedule: CronSchedule, steps: Array<Omit<CronStep, 'id'>>, projectId?: string }} t
+ */
+function templateCard(store, t) {
+  const project = t.projectId ? store.get('projects').projects.find((p) => p.id === t.projectId) : null;
+  // A template's project that was removed since is dropped.
+  const make = () => flowFromTemplate({ name: t.name, schedule: t.schedule, steps: t.steps, projectId: project ? t.projectId : '' });
+  const preview = make();
+  return h('article', { class: 'card cron-template-card' },
+    h('div', { class: 'cron-template-head' },
+      h('h3', null, t.name),
+      h('button', { type: 'button', class: 'icon-btn cron-template-remove', title: 'Remove template', 'aria-label': `Remove the template “${t.name}”`, onclick: () => dropTemplate(store, t) }, icon('trash'))),
+    t.about ? h('p', { class: 'muted small cron-template-about' }, t.about) : null,
+    h('ol', { class: 'cron-template-steps', 'aria-label': 'What it does' },
+      h('li', null,
+        h('span', { class: 'flow-node-icon kind-trigger' }, icon('clock')),
+        h('span', { class: 'cron-template-step' }, h('strong', null, 'Runs'), h('span', { class: 'muted' }, scheduleLabel(t.schedule)))),
+      preview.steps.map((step) => {
+        const [, label, iconName] = typeOf(step.type);
+        const text = templateStepText(store, preview, step);
+        return h('li', null,
+          h('span', { class: `flow-node-icon kind-${step.type}` }, icon(iconName)),
+          h('span', { class: 'cron-template-step' }, h('strong', null, label), h('span', { class: 'muted', title: text }, text)));
       })),
-    h('p', { class: 'muted small' }, scheduleLabel(schedule)),
-    h('div', null, h('button', {
-      type: 'button',
-      class: 'btn-small primary',
-      onclick: () => {
-        view.tab = 'flows';
-        // A template's project that was removed since is dropped.
-        const flow = blank ? makeFlow({ steps: [makeStep('ai')] }) : flowFromTemplate({ name, schedule, steps, projectId: project ? projectId : '' });
-        // A flow made while the list shows one project starts in it.
-        if (view.project && view.project !== NO_PROJECT) flow.projectId = view.project;
-        addFlow(store, flow);
-      },
-    }, icon('plus'), blank ? 'Start blank' : 'Use template')));
+    h('div', { class: 'cron-template-foot' },
+      project ? h('span', { class: 'muted small cron-flow-meta' }, projectIcon(project), h('span', { class: 'cron-flow-project' }, project.name)) : h('span'),
+      h('button', { type: 'button', class: 'btn-small primary', title: 'Makes a paused flow from it, to adjust before switching it on', onclick: () => useTemplate(store, make()) }, icon('plus'), 'Use template')));
 }
 
 /** @param {Store} store */
 function templatesTab(store) {
-  const blank = { name: 'Blank flow', about: 'One AI step to start with. Add data, conditions and outputs around it.', schedule: makeFlow().schedule, steps: [{ type: 'ai' }], blank: true };
-  const builtIn = h('div', { class: 'cron-template-grid' }, [...TEMPLATES, blank].map((t) => templateCard(store, t)));
-  const saved = store.get(COLLECTION).templates ?? [];
-  if (!saved.length) return builtIn;
-  return h('div', { class: 'stack-lg' },
-    h('section', { class: 'stack' },
-      h('h3', null, 'Your templates'),
-      h('div', { class: 'cron-template-grid' }, saved.map((t) => templateCard(store, t, { remove: () => removeTemplate(store, t) })))),
-    h('section', { class: 'stack' },
-      h('h3', null, 'Starting points'),
-      builtIn));
+  const { templates: saved = [], hiddenTemplates: hidden = [] } = store.get(COLLECTION);
+  const builtIn = TEMPLATES.filter((t) => !hidden.includes(t.name));
+  const blank = h('button', {
+    type: 'button',
+    class: 'card cron-template-blank',
+    onclick: () => useTemplate(store, makeFlow({ steps: [makeStep('ai')] })),
+  },
+    h('span', { class: 'flow-node-icon kind-ai' }, icon('plus')),
+    h('strong', null, 'Blank flow'),
+    h('span', { class: 'muted small' }, 'One AI step to start with. Add data, conditions and outputs around it.'));
+  return h('div', { class: 'stack' },
+    h('div', { class: 'cron-template-grid' }, blank, [...saved, ...builtIn].map((t) => templateCard(store, t))),
+    hidden.length
+      ? h('p', { class: 'muted small' }, `${hidden.length} template${hidden.length === 1 ? '' : 's'} removed. `,
+          h('button', { type: 'button', class: 'btn-link small', onclick: () => restoreTemplates(store) }, 'Bring them back'))
+      : null);
 }
 
 // --- Runs tab ---

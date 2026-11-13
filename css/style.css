@@ -2137,12 +2137,24 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .cron-name { flex: 1 1 220px; min-width: 0; font-size: 1.1rem; font-weight: 600; }
 .cron-templates { display: grid; gap: 8px; }
 .cron-template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: var(--gap); }
-.cron-template-card { display: flex; flex-direction: column; }
-.cron-template-card h3 { margin: 0; }
-.cron-template-card .grow { flex: 1; margin: 0; }
-.cron-template-steps { display: flex; flex-wrap: wrap; gap: 6px; }
-.cron-template-steps .flow-node-icon { width: 28px; height: 28px; border-radius: 8px; }
-.cron-template-steps .flow-node-icon .icon { width: 15px; height: 15px; }
+.cron-template-card { display: flex; flex-direction: column; gap: 12px; }
+.cron-template-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.cron-template-head h3 { margin: 0; }
+.cron-template-remove { flex: none; margin: -6px -6px 0 0; }
+@media (hover: hover) {
+  .cron-template-card:not(:hover):not(:focus-within) .cron-template-remove { opacity: 0; }
+}
+.cron-template-about { margin: 0; }
+.cron-template-steps { flex: 1; margin: 0; padding: 0; list-style: none; display: grid; align-content: start; gap: 8px; }
+.cron-template-steps > li { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; }
+.cron-template-steps > li:not(:last-child)::before { content: ''; position: absolute; left: 12px; top: 28px; bottom: -8px; width: 2px; background: var(--border); }
+.cron-template-steps .flow-node-icon { width: 26px; height: 26px; border-radius: 8px; }
+.cron-template-steps .flow-node-icon .icon { width: 14px; height: 14px; }
+.cron-template-step { display: flex; flex-direction: column; min-width: 0; font-size: 0.85rem; line-height: 1.3; }
+.cron-template-step .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cron-template-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+.cron-template-blank { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 180px; border-style: dashed; background: none; color: var(--text); text-align: center; font-weight: 400; cursor: pointer; }
+.cron-template-blank:hover { border-color: var(--accent); background: var(--surface-2); }
 .cron .segmented { margin-bottom: 0; }
 .cron-template { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; text-align: left; font-weight: 400; }
 .cron-template.row { flex-direction: row; align-items: center; gap: 12px; }

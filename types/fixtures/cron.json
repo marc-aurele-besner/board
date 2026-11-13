@@ -82,6 +82,7 @@
       "current": { "stepId": "step-6", "session": "example-session-2", "cwd": "~/example/project", "terminal": 2, "worktree": "example-worktree-2", "taskId": "task-2", "work": "~/example/project/.claude/worktrees/example-worktree-2", "where": "Example’s folder" }
     }
   ],
+  "hiddenTemplates": ["Example built-in template"],
   "templates": [
     {
       "id": "template-1",

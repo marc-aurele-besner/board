@@ -232,6 +232,8 @@ export interface CronData {
   // Newest first.
   runs: CronRun[];
   templates: CronTemplate[];
+  // The names of the built-in templates removed from the Templates tab.
+  hiddenTemplates?: string[];
   // By flow id, then step id.
   tests: Record<string, Record<string, CronTest>>;
   schemaVersion?: number;
