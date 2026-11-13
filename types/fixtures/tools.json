@@ -117,5 +117,20 @@
     },
     "pr-002": { "error": "The status page took too long.", "at": "2026-01-10T10:00:00.000Z" }
   },
+  "requests": [
+    {
+      "id": "rq-sample",
+      "name": "List items",
+      "projectId": "p-sample",
+      "method": "POST",
+      "url": "https://api.example.com/items",
+      "params": [{ "key": "limit", "value": "10", "on": true }],
+      "headers": [{ "key": "Accept", "value": "application/json", "on": false }],
+      "bodyType": "json",
+      "body": "{ \"name\": \"Sample\" }",
+      "form": [],
+      "auth": { "type": "bearer", "token": "placeholder-token" }
+    }
+  ],
   "schemaVersion": 1
 }

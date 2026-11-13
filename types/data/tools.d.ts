@@ -213,6 +213,37 @@ export interface ProviderStatus {
   at: string;
 }
 
+// A key and value of a request's params, headers or form body. `on: false` keeps the row without sending it.
+export interface RequestPair {
+  key: string;
+  value: string;
+  on?: boolean;
+}
+
+export interface RequestAuth {
+  // 'none' | 'bearer' | 'basic'
+  type: string;
+  token?: string;
+  user?: string;
+  pass?: string;
+}
+
+// A saved request of Tools → Requests (js/http-request.js).
+export interface ApiRequest {
+  id: string;
+  name: string;
+  projectId: string | null;
+  method: string;
+  url: string;
+  params: RequestPair[];
+  headers: RequestPair[];
+  // 'none' | 'json' | 'text' | 'form'
+  bodyType: string;
+  body: string;
+  form: RequestPair[];
+  auth: RequestAuth;
+}
+
 export interface ToolsData {
   // Project id -> what the checks found for its website.
   sites: Record<string, Site>;
@@ -221,6 +252,8 @@ export interface ToolsData {
   providers: Provider[];
   // Provider id -> its last status.
   status: Record<string, ProviderStatus>;
+  // Tools → Requests: the saved requests. Missing in files saved before it.
+  requests?: ApiRequest[];
   // Written by the store on save.
   schemaVersion?: number;
 }
