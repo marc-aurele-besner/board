@@ -29,23 +29,26 @@ export function editText({ value = '', placeholder = 'Empty', multiline = false,
     role: 'button',
     tabindex: '0',
     title: 'Click to edit',
-    /** @param {MouseEvent} e */
+    // A patched redraw keeps the element on screen and hands it these handlers, so they edit the element they
+    // fire on (currentTarget), not the one drawn here.
+    /** @param {MouseEvent & { currentTarget: HTMLElement }} e */
     onclick: (e) => {
       // Links and buttons inside a rich description work as usual; only the text opens the editor.
       if (/** @type {Element} */ (e.target).closest('a, button, input')) return;
       e.stopPropagation();
-      start();
+      start(e.currentTarget);
     },
-    /** @param {KeyboardEvent} e */
+    /** @param {KeyboardEvent & { currentTarget: HTMLElement }} e */
     onkeydown: (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        start();
+        start(e.currentTarget);
       }
     },
   }, display && current ? display(current) : rich && current ? richText(current) : current || placeholder);
 
-  function start() {
+  /** @param {HTMLElement} shown the element on screen */
+  function start(shown) {
     let done = false;
     const field = multiline
       ? h('textarea', { class: 'editable-field', rows: Math.min(10, Math.max(2, current.split('\n').length + 1)), placeholder, value: current })
@@ -58,7 +61,7 @@ export function editText({ value = '', placeholder = 'Empty', multiline = false,
       const next = multiline ? field.value.trim() : field.value.trim();
       const changed = next !== current.trim();
       if (save && changed && (next || allowEmpty)) onSave(next);
-      else field.replaceWith(view);
+      else field.replaceWith(shown);
     };
 
     /** @type {HTMLElement} */ (field).addEventListener('keydown', (e) => {
@@ -73,7 +76,7 @@ export function editText({ value = '', placeholder = 'Empty', multiline = false,
     field.addEventListener('blur', () => finish(true));
     field.addEventListener('click', (e) => e.stopPropagation());
 
-    view.replaceWith(field);
+    shown.replaceWith(field);
     field.focus();
     if (!multiline) field.select();
   }
