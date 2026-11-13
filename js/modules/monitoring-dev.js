@@ -5,8 +5,7 @@ import { barChart, legend } from '../chart.js';
 import { sumUsage, modelName, tokensOf, fmtDuration } from '../dev-usage.js';
 import { usdPrecise, fmtTokens } from './monitoring.js';
 import { sortTable } from './monitoring-web.js';
-import { projectIcon } from './projects.js';
-import { aiView, devProjectOf, segmented, PALETTE, OTHER, NO_PROJECT, TOP } from './monitoring-ai.js';
+import { aiView, projectMark, devProjectOf, segmented, PALETTE, OTHER, NO_PROJECT, TOP } from './monitoring-ai.js';
 /** @import { DevUsage, Store } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 /** @import { ChartTip } from '../chart.js' */
@@ -78,11 +77,7 @@ export function devBreakdown(store, w, records) {
     store.refresh();
   };
   const projects = new Map(store.get('projects').projects.map((p) => [p.id, p]));
-  // A project's own icon (image or site icon) beside its swatch; none for a project without one, or in other breakdowns.
-  const iconOf = (/** @type {string} */ key) => {
-    const p = devView.by === 'project' ? projects.get(key) : undefined;
-    return p && (p.iconUrl || p.website) ? projectIcon(p, 'project-icon dev-by-icon') : null;
-  };
+  const iconOf = (/** @type {string} */ key) => (devView.by === 'project' ? projectMark(projects.get(key)) : null);
   const parts = partsOf(store, records);
 
   /** @typedef {{ key: string, label: string, title: string, color: string, value: number, cost: number, extra: number, tokens: number, time: number, lines: number, sessions: number, worktrees: Set<string> }} Row */

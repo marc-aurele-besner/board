@@ -8,7 +8,7 @@ import { stat, costOf, usdPrecise, fmtTokens } from './monitoring.js';
 import { sortTable } from './monitoring-web.js';
 import { projectIcon } from './projects.js';
 import { pickChip } from '../inline.js';
-/** @import { DevUsage, Store, Task, UsageEntry } from '../../types/data' */
+/** @import { DevUsage, Project, Store, Task, UsageEntry } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 /** @import { ChartTip } from '../chart.js' */
 
@@ -38,6 +38,14 @@ export const aiView = { source: 'all', project: '', by: 'project', measure: 'cos
 export function devProjectOf(tasks, r) {
   return tasks.find((t) => r.taskIds?.includes(t.id) && t.projectId)?.projectId ?? '';
 }
+
+// A project's own icon (image or site icon) beside its colour swatch; none for a project without one.
+/** @param {Project | undefined} p */
+export const projectMark = (p) => (p && (p.iconUrl || p.website) ? projectIcon(p, 'project-icon dev-by-icon') : null);
+
+// A project named with its icon, for cells and cards with no swatch: a plain dot of its colour when it has no image.
+/** @param {Project | undefined} p @param {string} [missing] */
+export const projectLabel = (p, missing = 'Removed project') => h('span', { class: 'ai-project-name' }, p ? projectIcon(p) : null, p?.name ?? missing);
 
 /** @param {string} projectId */
 export const projectShown = (projectId) => !aiView.project || (aiView.project === NO_PROJECT ? !projectId : projectId === aiView.project);
@@ -234,7 +242,7 @@ export function aiOverview(store, w) {
         w.hourly ? (costBuckets[peak] ? usdPrecise(costBuckets[peak]) : 'nothing spent') : `average over ${days} days`),
       stat('Calls', String(boardCalls), `board AI calls · ${sessions} Dev session${sessions === 1 ? '' : 's'}`),
       stat('Tokens', fmtTokens(sum(cur, (s) => s.tokens)), 'input, cache and output'),
-      stat('Top project', topId ? projectOf.get(topId)?.name ?? 'Removed project' : '—', topId ? `${usdPrecise(topCost)} · ${Math.round((topCost / (cost || 1)) * 100)}% of the cost` : 'no spend filed under a project')),
+      stat('Top project', topId ? projectLabel(projectOf.get(topId)) : '—', topId ? `${usdPrecise(topCost)} · ${Math.round((topCost / (cost || 1)) * 100)}% of the cost` : 'no spend filed under a project')),
     h('section', { class: 'card stack' },
       h('div', { class: 'row between ai-chart-head' },
         h('h3', null, 'Over time'),
@@ -254,12 +262,13 @@ export function aiOverview(store, w) {
               format: (v, r) => {
                 const swatch = h('span', { class: 'legend-swatch', style: { background: shownKeys.has(r.key) ? r.color : OTHER.color } });
                 // A project or a source can be opened: it becomes the filter, and the breakdown moves a level down.
+                const mark = aiView.by === 'project' ? projectMark(projectOf.get(r.key)) : null;
                 const drill = aiView.by === 'project' ? () => set({ project: r.key, by: 'feature' })
                   : aiView.by === 'source' ? () => set({ source: r.key, by: 'project' })
                     : null;
                 return drill
-                  ? h('button', { type: 'button', class: 'link-btn ai-drill', title: 'Show only this', onclick: drill }, swatch, ` ${v}`)
-                  : h('span', null, swatch, ` ${v}`);
+                  ? h('button', { type: 'button', class: 'link-btn ai-drill', title: 'Show only this', onclick: drill }, swatch, mark, ` ${v}`)
+                  : h('span', null, swatch, mark, ` ${v}`);
               },
             },
             { label: 'Cost', num: true, value: (r) => (r.priced ? r.cost : null), format: (v, r) => (v === null ? '—' : `${r.estimated ? '≈ ' : ''}${usdPrecise(v)}`) },
