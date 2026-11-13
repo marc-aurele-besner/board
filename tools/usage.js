@@ -5,7 +5,7 @@
 // is removed, so both places are read.
 // CLAUDE_CONFIG_DIR moves Claude's folder, as it does for Claude itself.
 /** @import { DevModelUsage, DevTurn } from '../types/data' */
-/** @import { SessionArtifact, SessionAsk, SessionTurn, WorktreeUsage } from '../types/terminal' */
+/** @import { SessionAgent, SessionArtifact, SessionAsk, SessionTurn, WorktreeUsage } from '../types/terminal' */
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -19,7 +19,7 @@ const cache = new Map();
 // The parts of a transcript line that are read. Lines are Claude's JSON, so every field may be missing.
 /** @typedef {{ input_tokens?: number, output_tokens?: number, cache_read_input_tokens?: number, cache_creation_input_tokens?: number, output_tokens_details?: { thinking_tokens?: number } }} ReplyUsage */
 /** @typedef {ReplyUsage & { inputTokens?: number, outputTokens?: number, thinkingTokens?: number, cacheReadInputTokens?: number, cacheCreationInputTokens?: number, costUSD?: number }} ModelTokens */
-/** @typedef {{ skill?: unknown, file_path?: unknown, notebook_path?: unknown, action?: unknown, asset?: unknown, title?: unknown, type_url?: unknown, from_url?: unknown, questions?: { question?: unknown }[], command?: unknown, plan?: unknown }} ToolInput */
+/** @typedef {{ skill?: unknown, file_path?: unknown, notebook_path?: unknown, action?: unknown, asset?: unknown, title?: unknown, type_url?: unknown, from_url?: unknown, questions?: { question?: unknown }[], command?: unknown, plan?: unknown, description?: unknown, pattern?: unknown, path?: unknown, url?: unknown, query?: unknown, prompt?: unknown }} ToolInput */
 /** @typedef {{ type?: string, text: string, id?: string, name?: string, input?: ToolInput, tool_use_id?: string, is_error?: boolean, content?: unknown }} ContentBlock */
 /** @typedef {{ id?: string, model?: string, usage?: ReplyUsage, stop_reason?: string | null, content?: string | ContentBlock[] }} ReplyMessage */
 /** @typedef {{ isUsingOverage?: boolean, resetsAt?: number }} Quota */
@@ -152,6 +152,12 @@ function parse(text, billing) {
   /** @type {Record<string, number>} */
   const mcp = {};
   let command = '';
+  // Its last tool call and how many it made, and the text of its last reply, in any line: what a subagent is doing.
+  /** @type {{ name: string, detail: string, at: number } | null} */
+  let lastTool = null;
+  let toolCalls = 0;
+  let said = '';
+  let task = '';
   for (const line of text.split('\n')) {
     if (!line) continue;
     /** @type {TranscriptLine} */
@@ -165,6 +171,14 @@ function parse(text, billing) {
     if (!open) pending.clear();
     readArtifacts(o, publishing, artifacts);
     command = readTools(o, command, skills, mcp);
+    if (o.type === 'assistant' && Array.isArray(o.message?.content)) {
+      for (const b of o.message.content) {
+        if (b.type === 'tool_use' && b.name) {
+          toolCalls++;
+          lastTool = { name: b.name, detail: toolDetail(b.input ?? {}), at: Date.parse(/** @type {string} */ (o.timestamp)) || 0 };
+        } else if (b.type === 'text' && b.text?.trim()) said = b.text.trim().slice(0, PROMPT_KEPT);
+      }
+    } else if (o.type === 'user' && !task && !o.isMeta) task = turnText(o.message?.content).slice(0, PROMPT_KEPT);
     if (!o.isSidechain) {
       const c = o.message?.content;
       const at = Date.parse(/** @type {string} */ (o.timestamp)) || 0;
@@ -265,7 +279,18 @@ function parse(text, billing) {
     since: last?.at || 0,
     artifacts: [...artifacts].map(([url, title]) => ({ url, title })),
     skills, mcp,
+    lastTool, toolCalls, said, task,
   };
+}
+
+// What a tool call works on, in a few words: the command, file, pattern, address or task it was given.
+/** @param {ToolInput} input */
+function toolDetail(input) {
+  for (const k of /** @type {const} */ (['description', 'command', 'file_path', 'notebook_path', 'pattern', 'url', 'query', 'skill', 'path', 'prompt'])) {
+    const v = input[k];
+    if (typeof v === 'string' && v.trim()) return v.replace(/\s+/g, ' ').trim().slice(0, 200);
+  }
+  return '';
 }
 
 // Counts a line's skills and MCP calls. A skill runs through the Skill tool, or as a slash command the user typed,
@@ -496,22 +521,61 @@ async function activityOf({ name, cwd }) {
     if (t?.worktrees.includes(name)) latest = { file, t, mtime: info.mtimeMs };
   }
   if (!latest) return null;
-  const agents = await agentsOf(latest.file, billing);
+  const agents = (await agentsOf(latest.file, billing)).running;
   return { busy: latest.t.open || agents > 0, agents, ask: latest.t.ask, artifacts: latest.t.artifacts };
 }
 
-// How many of a session's subagents are still working. Claude keeps them beside it, in <session>/subagents.
-/** @param {string} file @param {string} billing */
+// A session's subagents, newest first, and how many are still working. Claude keeps them beside it, in
+// <session>/subagents: a transcript each, and a .meta.json with its type and the task it was given.
+const AGENTS_KEPT = 30;
+/** @param {string} file @param {string} billing @returns {Promise<{ running: number, list: SessionAgent[] }>} */
 async function agentsOf(file, billing) {
   const folder = join(file.slice(0, -'.jsonl'.length), 'subagents');
-  let agents = 0;
+  /** @type {SessionAgent[]} */
+  const list = [];
   for (const n of await readdir(folder).catch(() => [])) {
     if (!n.endsWith('.jsonl')) continue;
-    const info = await stat(join(folder, n)).catch(() => null);
-    if (!info || Date.now() - info.mtimeMs > STALE_MS) continue;
-    if ((await readTranscript(join(folder, n), billing))?.open) agents++;
+    const path = join(folder, n);
+    const info = await stat(path).catch(() => null);
+    const t = info ? await readTranscript(path, billing) : null;
+    if (!info || !t) continue;
+    const meta = await readMeta(join(folder, `${n.slice(0, -'.jsonl'.length)}.meta.json`));
+    const running = t.open && !meta.finished && Date.now() - info.mtimeMs <= STALE_MS;
+    list.push({
+      id: n.slice(0, -'.jsonl'.length).replace(/^agent-/, ''),
+      type: typeof meta.agentType === 'string' ? meta.agentType : '',
+      description: typeof meta.description === 'string' ? meta.description : '',
+      background: meta.requestShape === 'background',
+      state: running ? 'working' : t.open && !meta.finished ? 'stopped' : 'done',
+      start: t.start ?? Math.round(info.birthtimeMs),
+      end: Math.round(Math.max(t.end ?? 0, info.mtimeMs)),
+      tool: t.lastTool,
+      tools: t.toolCalls,
+      said: t.said,
+      task: t.task,
+    });
   }
-  return agents;
+  list.sort((a, b) => b.start - a.start);
+  return { running: list.filter((a) => a.state === 'working').length, list: list.slice(0, AGENTS_KEPT) };
+}
+
+// A subagent's .meta.json, cached by its time; {} when there is none (an older claude).
+/** @type {Map<string, { mtime: number, data: Record<string, unknown> }>} */
+const metas = new Map();
+/** @param {string} path @returns {Promise<Record<string, unknown>>} */
+async function readMeta(path) {
+  const info = await stat(path).catch(() => null);
+  if (!info) return {};
+  const hit = metas.get(path);
+  if (hit?.mtime === info.mtimeMs) return hit.data;
+  /** @type {Record<string, unknown>} */
+  let data = {};
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8'));
+    if (parsed && typeof parsed === 'object') data = parsed;
+  } catch {}
+  metas.set(path, { mtime: info.mtimeMs, data });
+  return data;
 }
 
 // [{ name, cwd }] → { [name]: { busy, agents } }; worktrees with no transcript are left out.
@@ -555,6 +619,6 @@ export async function sessionTranscript({ cwd, at, prompt = '', worktree = '', k
   }
   const t = file ? await readTranscript(file, billing) : null;
   if (!t) return null;
-  const agents = await agentsOf(file, billing);
-  return { file, busy: t.open || agents > 0, agents, reply: t.reply, written: t.written, ask: t.ask, since: t.since, artifacts: t.artifacts, turns: t.turns, skills: t.skills, mcp: t.mcp };
+  const { running: agents, list: subagents } = await agentsOf(file, billing);
+  return { file, busy: t.open || agents > 0, agents, subagents, reply: t.reply, written: t.written, ask: t.ask, since: t.since, artifacts: t.artifacts, turns: t.turns, skills: t.skills, mcp: t.mcp };
 }
