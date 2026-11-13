@@ -54,3 +54,40 @@ export function checkLinkedinExpiry(store) {
     key: `linkedin-expiry:${auth.expires}`,
   });
 }
+
+// --- Weekly summary and rules: reads of posts and follower history, no DOM ---
+/** @import { LinkedinPost, LinkedinPostMetrics } from '../types/data' */
+
+// A post's last read of its results, or null before the first.
+/** @param {LinkedinPost} post @returns {LinkedinPostMetrics | null} */
+export const latestMetrics = (post) => (post.metrics?.length ? post.metrics[post.metrics.length - 1] : null);
+
+// Reactions, comments and reposts together: what "did well" means when posts are compared.
+/** @param {LinkedinPostMetrics | null | undefined} m */
+export const engagement = (m) => (m ? (m.reactions ?? 0) + (m.comments ?? 0) + (m.reposts ?? 0) : 0);
+
+// The posts published from `from` up to `to` (ms), oldest first.
+/** @param {LinkedinPost[]} posts @param {number} from @param {number} [to] */
+export const postsBetween = (posts, from, to = Date.now()) => posts
+  .filter((p) => p.status === 'posted' && typeof p.postedAt === 'number' && p.postedAt >= from && p.postedAt < to)
+  .sort((a, b) => Number(a.postedAt) - Number(b.postedAt));
+
+// An account's followers now and `days` days ago, from its day-by-day history (socials.json). Without a point that
+// old, the change counts from the oldest one (`since`). Null when the history is empty.
+/**
+ * @param {Record<string, number> | undefined} history
+ * @param {number} days
+ * @param {number} [at]
+ * @returns {{ now: number, before: number, change: number, since: string } | null}
+ */
+export function followerChange(history, days, at = Date.now()) {
+  const keys = Object.keys(history ?? {}).sort();
+  if (!history || !keys.length) return null;
+  const d = new Date(at);
+  d.setDate(d.getDate() - days);
+  const start = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const since = [...keys].reverse().find((k) => k <= start) ?? keys[0];
+  const now = history[keys[keys.length - 1]];
+  const before = history[since];
+  return { now, before, change: now - before, since };
+}
