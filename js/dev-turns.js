@@ -96,6 +96,26 @@ export function callsOf(t, keep = () => true) {
   }
   return out;
 }
+// Every tool some turns called, added up by tool (as toolGroup names it), the most called first: what the tools
+// button on Dev's bar lists for the shown claude.
+/** @typedef {{ key: string, label: string, calls: number, errors: number, ms: number, names: string[] }} ToolRow */
+/** @param {{ tools?: Record<string, DevToolUse> | null }[]} turns @returns {ToolRow[]} */
+export function toolRows(turns) {
+  /** @type {Map<string, ToolRow>} */
+  const out = new Map();
+  for (const t of turns) {
+    for (const [name, u] of Object.entries(t.tools ?? {})) {
+      const { key, label } = toolGroup(name);
+      let row = out.get(key);
+      if (!row) out.set(key, (row = { key, label, calls: 0, errors: 0, ms: 0, names: [] }));
+      row.calls += u.calls;
+      row.errors += u.errors ?? 0;
+      row.ms += u.ms ?? 0;
+      if (!row.names.includes(name)) row.names.push(name);
+    }
+  }
+  return [...out.values()].sort((a, b) => b.calls - a.calls || a.label.localeCompare(b.label));
+}
 export const isMcp = (/** @type {string} */ name) => name.startsWith('mcp__');
 export const skillUses = (/** @type {DevTurn} */ t) => sum(Object.values(t.skills ?? {}));
 

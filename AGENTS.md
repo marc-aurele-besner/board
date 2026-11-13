@@ -71,7 +71,7 @@ js/modules/monitoring-dev.js  Monitoring → AI usage → Dev sessions: a chart 
 js/modules/monitoring-tools.js  Monitoring → AI usage → Skills and MCP: the skills Dev sessions ran and the MCP tools they called, each counted on its own
 js/modules/monitoring-development.js  Monitoring → Development: the Dev sessions' claude turns (usage.json `dev` turns) in four views under one project filter; Overview (summary against the period before, insights, time, projects, hours) and Turns (lengths, tasks, a log of recent turns)
 js/modules/monitoring-development-tools.js  Monitoring → Development → Skills & MCP and Tools: each skill, MCP tool or server, and every tool, with its calls, turns, failures and time per call
-js/dev-turns.js       Development's numbers without the DOM: a turn's working and review time, its tools grouped and added up, and the findings of the Insights card
+js/dev-turns.js       Development's numbers without the DOM: a turn's working and review time, its tools grouped and added up, and the findings of the Insights card; toolRows() also feeds the tools button on Dev's bar
 js/chains.js          every chain the board reads: the built-in ones and those added in Settings → Blockchains
 js/abi.js             Solidity ABI encoding and decoding: calls, answers and event logs
 js/contracts.js       saved smart contracts: reads through the node, writes through the browser wallet, activity
