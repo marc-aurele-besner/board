@@ -194,3 +194,59 @@ export async function bingReport(store, website, from, to) {
   };
   return { site: website, days, queries: table(queries, 'Query'), pages: table(pages, 'Query') };
 }
+
+// Search rows from several reports as one list, matched by name, keeping the top `n` by clicks. Clicks and
+// impressions add up; the rate is worked out again and the position is weighed by impressions. A row with
+// no position (0) stays out of that average.
+/** @param {SearchRow[][]} lists @param {number} [n] @returns {SearchRow[]} */
+export function mergeSearchRows(lists, n = 10) {
+  /** @type {Map<string, { clicks: number, imps: number, pos: number, weight: number }>} */
+  const sum = new Map();
+  for (const rows of lists) {
+    for (const [name, clicks, imps, , pos] of rows) {
+      const cur = sum.get(name) ?? { clicks: 0, imps: 0, pos: 0, weight: 0 };
+      cur.clicks += clicks;
+      cur.imps += imps;
+      if (pos) {
+        cur.pos += pos * imps;
+        cur.weight += imps;
+      }
+      sum.set(name, cur);
+    }
+  }
+  return [...sum.entries()].sort((a, b) => b[1].clicks - a[1].clicks || b[1].imps - a[1].imps).slice(0, n)
+    .map(([name, v]) => /** @type {SearchRow} */ ([name, v.clicks, v.imps, v.imps ? v.clicks / v.imps : 0, v.weight ? v.pos / v.weight : 0]));
+}
+
+// One site's reports from several engines (Google's and Bing's) as one report: days and rows add up as in
+// mergeSearchRows(). The property name and the sitemaps come from the first report that has them (Google's).
+/** @param {SearchReport[]} reports @returns {SearchReport} */
+export function mergeSearchReports(reports) {
+  if (reports.length === 1) return reports[0];
+  /** @type {Map<string, { clicks: number, imps: number, pos: number, weight: number }>} */
+  const sum = new Map();
+  for (const r of reports) {
+    for (const [day, v] of Object.entries(r.days)) {
+      const cur = sum.get(day) ?? { clicks: 0, imps: 0, pos: 0, weight: 0 };
+      cur.clicks += v.clicks;
+      cur.imps += v.impressions;
+      // Bing gives no position per day (0): its impressions must not pull Google's position down.
+      if (v.position) {
+        cur.pos += v.position * v.impressions;
+        cur.weight += v.impressions;
+      }
+      sum.set(day, cur);
+    }
+  }
+  /** @type {Record<string, SearchDay>} */
+  const days = {};
+  for (const [day, v] of sum) days[day] = { clicks: v.clicks, impressions: v.imps, position: v.weight ? v.pos / v.weight : 0 };
+  const maps = reports.find((r) => r.sitemaps !== undefined);
+  return {
+    site: reports.find((r) => r.site)?.site ?? '',
+    days,
+    queries: mergeSearchRows(reports.map((r) => r.queries)),
+    pages: mergeSearchRows(reports.map((r) => r.pages)),
+    ...(maps ? { sitemaps: maps.sitemaps } : {}),
+  };
+}

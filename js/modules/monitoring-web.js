@@ -2,7 +2,7 @@
 import { h, empty, notice, progress, icon, refreshIcon } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { isConnected } from '../google.js';
-import { analyticsReport, searchReport, bingReport } from '../webstats.js';
+import { analyticsReport, searchReport, bingReport, mergeSearchRows } from '../webstats.js';
 import { sitesOf } from '../automations.js';
 import { hostOf } from '../sitecheck.js';
 import { barChart, legend } from '../chart.js';
@@ -95,25 +95,6 @@ function mergeRows(lists, n = 8) {
     }
   }
   return [...sum.entries()].sort((a, b) => b[1][0] - a[1][0]).slice(0, n).map(([name, nums]) => [name, ...nums]);
-}
-
-// Search rows are [name, clicks, impressions, ctr, position]. Clicks and impressions add up; the rate
-// is worked out again and the position is weighed by impressions.
-/** @param {SearchRow[][]} lists @param {number} [n] @returns {SearchRow[]} */
-function mergeSearchRows(lists, n = 10) {
-  /** @type {Map<string, { clicks: number, imps: number, pos: number }>} */
-  const sum = new Map();
-  for (const rows of lists) {
-    for (const [name, clicks, imps, , pos] of rows) {
-      const cur = sum.get(name) ?? { clicks: 0, imps: 0, pos: 0 };
-      cur.clicks += clicks;
-      cur.imps += imps;
-      cur.pos += (pos || 0) * imps;
-      sum.set(name, cur);
-    }
-  }
-  return [...sum.entries()].sort((a, b) => b[1].clicks - a[1].clicks || b[1].imps - a[1].imps).slice(0, n)
-    .map(([name, v]) => /** @type {SearchRow} */ ([name, v.clicks, v.imps, v.imps ? v.clicks / v.imps : 0, v.imps ? v.pos / v.imps : 0]));
 }
 
 // Sort choice per table, kept across re-renders. No entry means the order the rows came in.
