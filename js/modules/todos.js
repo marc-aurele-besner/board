@@ -26,7 +26,7 @@ import { systemPrompt } from '../prompts.js';
 import { profilesFor } from '../profile.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { taskMatcher, QUERY_HINT } from '../task-query.js';
-import { taskStatuses, statusName, statusOptions, statusLook, categoryColor, taskCategoryNames, categoryLabelIds } from '../task-labels.js';
+import { taskStatuses, statusName, statusOptions, statusLook, categoryColor, taskCategoryNames, categoryLabelIds, isReady } from '../task-labels.js';
 
 const COLLECTION = 'todos';
 const PRIORITIES = [
@@ -35,9 +35,10 @@ const PRIORITIES = [
   ['medium', 'Medium'],
   ['high', 'High'],
 ];
-// The "Show" filter: "Open" (anything not done) and each status by the name it has in Settings → Labels.
+// The "Show" filter: "Open" (anything not done), "Ready" (open, but neither parked nor blocked) and each status by
+// the name it has in Settings → Labels.
 /** @param {Store} store */
-const statusFilters = (store) => [{ value: 'open', label: 'Open' }, ...taskStatuses(store).map((s) => ({ value: s.key, label: s.name, ...statusLook(s) }))];
+const statusFilters = (store) => [{ value: 'open', label: 'Open' }, { value: 'ready', label: 'Ready' }, ...taskStatuses(store).map((s) => ({ value: s.key, label: s.name, ...statusLook(s) }))];
 /** @type {Record<string, number>} */
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2, none: 3 };
 const NO_CATEGORY = '__none';
@@ -47,7 +48,7 @@ const SMART_LISTS = ['all', 'personal', 'today', 'organize', 'auto'];
 /** @type {[string, string, IconName][]} */
 const LAYOUTS = [['table', 'Table', 'list'], ['board', 'Board', 'columns'], ['project', 'By project', 'folder'], ['status', 'By status', 'check-square']];
 // In "By status", what is being worked on comes first and what is done comes last.
-const STATUS_GROUP_ORDER = ['doing', 'review', 'ondeck', 'todo', 'blocked', 'paused', 'done'];
+const STATUS_GROUP_ORDER = ['doing', 'review', 'ondeck', 'todo', 'blocked', 'paused', 'parking', 'done'];
 
 // Tasks open sorted by status, so what is being worked on is on top. An empty key means the manual (dragged) order.
 const DEFAULT_SORT = { key: 'status', dir: 'asc' };
@@ -108,7 +109,7 @@ const matchesFilter = (item) => {
 const matchesStatus = (item) => {
   const s = statusOf(item);
   if (!view.status.length) return true;
-  return view.status.includes(s) || (s !== 'done' && view.status.includes('open'));
+  return view.status.includes(s) || (s !== 'done' && view.status.includes('open')) || (isReady(s) && view.status.includes('ready'));
 };
 /** @param {Task} item */
 const matchesCategory = (item) => !view.category.length || view.category.includes(item.category || NO_CATEGORY);
@@ -1820,7 +1821,7 @@ function draw(root, store) {
   let listBody;
   if (!visible.length) {
     listBody = h('p', { class: 'empty' }, matchesQuery.active
-      ? `No task matches “${view.query.trim()}”${view.status.includes('open') && !view.status.includes('done') && !matchesQuery.hasStatus ? ' among open tasks. Add is:done to look in completed ones.' : '.'}`
+      ? `No task matches “${view.query.trim()}”${(view.status.includes('open') || view.status.includes('ready')) && !view.status.includes('done') && !matchesQuery.hasStatus ? ' among open tasks. Add is:done to look in completed ones.' : '.'}`
       : columnsActive ? 'No todo matches these filters.' : 'Nothing matches these filters.');
   } else if (view.layout === 'board') {
     listBody = boardView(store, visible, projects, order);

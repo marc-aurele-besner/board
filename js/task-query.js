@@ -2,10 +2,11 @@
 // project name. Tokens narrow further: #project (or #personal), !high, is:doing (or is:open), cat:design, due:today.
 /** @import { Task } from '../types/data' */
 import { statusOf, todayISO } from './ui.js';
+import { STATUSES, isReady } from './task-labels.js';
 
-const STATUS_KEYS = ['todo', 'blocked', 'paused', 'ondeck', 'doing', 'review', 'done'];
+const STATUS_KEYS = STATUSES.map(([key]) => key);
 /** @type {Record<string, string>} */
-const STATUS_ALIASES = { open: 'open', progress: 'doing', inprogress: 'doing', deck: 'ondeck', completed: 'done', closed: 'done' };
+const STATUS_ALIASES = { open: 'open', ready: 'ready', parked: 'parking', progress: 'doing', inprogress: 'doing', deck: 'ondeck', completed: 'done', closed: 'done' };
 const PRIORITY_KEYS = ['high', 'medium', 'low', 'none'];
 export const QUERY_HINT = 'words, #project, !high, is:doing, cat:name, due:today';
 
@@ -53,12 +54,12 @@ export function taskMatcher(query, projects) {
       tests.push((i) => (i.priority ?? 'none') === raw.slice(1));
     } else if (key === 'is' || key === 'status') {
       const s = STATUS_ALIASES[value] ?? value;
-      if (s !== 'open' && !STATUS_KEYS.includes(s)) {
+      if (s !== 'open' && s !== 'ready' && !STATUS_KEYS.includes(s)) {
         words.push(raw);
         continue;
       }
       hasStatus = true;
-      tests.push((i) => (s === 'open' ? statusOf(i) !== 'done' : statusOf(i) === s));
+      tests.push((i) => (s === 'open' ? statusOf(i) !== 'done' : s === 'ready' ? isReady(statusOf(i)) : statusOf(i) === s));
     } else if (key === 'cat' || key === 'category') {
       tests.push((i) => (i.category ?? '').toLowerCase().includes(value));
     } else if (key === 'due') {
