@@ -6,6 +6,8 @@ import { h, empty } from '../ui.js';
 import { barChart, legend } from '../chart.js';
 import { usageRecords, fmtDuration } from '../dev-usage.js';
 import { stat } from './monitoring.js';
+import { pickChip } from '../inline.js';
+import { projectIcon } from './projects.js';
 import { sortTable } from './monitoring-web.js';
 import { devProjectOf, segmented, NO_PROJECT } from './monitoring-ai.js';
 /** @import { DevTurn, DevUsage, Store } from '../../types/data' */
@@ -72,10 +74,18 @@ export function developmentTab(store, w) {
   const filters = h('div', { class: 'row ai-filters' },
     h('label', { class: 'row ai-project' },
       h('span', { class: 'muted small' }, 'Project'),
-      h('select', { onchange: (/** @type {Event} */ e) => set({ project: /** @type {HTMLSelectElement} */ (e.target).value }) },
-        h('option', { value: '', selected: !developmentView.project }, 'All projects'),
-        h('option', { value: NO_PROJECT, selected: developmentView.project === NO_PROJECT }, 'No project'),
-        projectChoices.map((p) => h('option', { value: p.id, selected: developmentView.project === p.id }, p.name)))));
+      // Searchable, with each project's icon: a board with many projects makes a plain dropdown long.
+      pickChip({
+        value: developmentView.project || null,
+        options: [
+          { value: NO_PROJECT, label: 'No project' },
+          ...projectChoices.map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
+        ],
+        nullable: true,
+        nullLabel: 'All projects',
+        className: 'field-pick project-field-pick',
+        onPick: (v) => set({ project: v ?? '' }),
+      })));
   if (!turns.length) {
     return h('div', { class: 'stack-lg' }, filters, h('section', { class: 'card' },
       empty(all.length ? 'No claude turns in this period.' : 'No claude turns yet. Start claude on a task with its Dev button: each prompt and how long claude took on it shows here.')));
