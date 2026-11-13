@@ -2,7 +2,7 @@
 // It has the few methods of a real folder handle that storage.js and store.js call, so the rest of the app cannot tell.
 // Nothing is written to disk, and it is gone when the page reloads.
 
-/** @import { Collections, Task, FinanceEntry, DevUsage, InboxMessage, Site, UsageEntry } from '../types/data' */
+/** @import { Collections, Task, FinanceEntry, DevTurn, DevUsage, InboxMessage, Site, UsageEntry } from '../types/data' */
 
 /** @param {number} n */
 const pad = (n) => String(n).padStart(2, '0');
@@ -110,10 +110,15 @@ function collections() {
     const list = Object.entries(models);
     // Three prompts, as Monitoring → Development shows them: the task, a question answered mid-turn, then two follow-ups.
     const min = 60000;
+    // The first turn ran the record's skills and MCP tools, a call in ten failing, beside the usual tools.
+    const called = Object.fromEntries(Object.entries(mcp).map(([tool, calls]) => [tool, { calls, errors: Math.floor(calls / 10), ms: calls * 2400 }]));
+    /** @type {DevTurn[]} */
     const turns = [
-      { text: 'Work on this task', at: end - 40 * min, end: end - 22 * min, wait: 3 * min, review: 0 },
-      { text: 'The spacing looks off on phones, can you check?', at: end - 14 * min, end: end - 6 * min, wait: 0, review: 8 * min, ...(offset === -3 ? { interrupted: true } : {}) },
-      { text: 'Looks good, open the PR and merge it', at: end - 4 * min, end, wait: 0, review: 2 * min },
+      { text: 'Work on this task', at: end - 40 * min, end: end - 22 * min, wait: 3 * min, review: 0, tokens: 9800, skills,
+        tools: { Bash: { calls: 24, errors: 2, ms: 5 * min }, Edit: { calls: 11, ms: 1800 }, Read: { calls: 9, ms: 900 }, AskUserQuestion: { calls: 1 }, ...called } },
+      { text: 'The spacing looks off on phones, can you check?', at: end - 14 * min, end: end - 6 * min, wait: 0, review: 8 * min, tokens: 3100,
+        tools: { Bash: { calls: 7, errors: 1, ms: 70000 }, Edit: { calls: 3, ms: 500 }, Agent: { calls: 1, ms: 2 * min } }, ...(offset === -3 ? { interrupted: true } : {}) },
+      { text: 'Looks good, open the PR and merge it', at: end - 4 * min, end, wait: 0, review: 2 * min, tokens: 900, done: true, tools: { Bash: { calls: 5, ms: 40000 } } },
     ];
     return {
       name, cwd: '', added: at, taskIds, sessions: 1, start: end - 40 * 60000, end, duration: 38 * 60000, apiDuration: 21 * 60000, turns,
