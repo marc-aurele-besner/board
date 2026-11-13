@@ -1,4 +1,4 @@
-/** @import { Store, Task, TaskLink, Project, ProjectLabel, IconName } from '../../types/data' */
+/** @import { Store, Task, TaskArtifact, TaskLink, Project, ProjectLabel, IconName } from '../../types/data' */
 /** @import { RunnerStatus } from '../../types/terminal' */
 /** @import { PickOption } from '../inline.js' */
 /** @typedef {{ text: string, status: string[], priority: string[], project: string[], category: string[] }} ColFilter */
@@ -13,7 +13,7 @@ import { createProject, projectIcon, labelsOf, projectTree, moveProject, labelCo
 import { editText, pickChip, pickButton, pickMulti, pill } from '../inline.js';
 import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
 import { openDialog } from '../modal.js';
-import { issuesOf, prsOf, moveToReview } from '../task-links.js';
+import { issuesOf, prsOf, artifactsOf, addTaskArtifacts, moveToReview } from '../task-links.js';
 import { previewChips } from '../previews.js';
 import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
@@ -723,7 +723,8 @@ function openIssueDialog(store, item, repos) {
 function linkChips(store, item) {
   const issues = issuesOf(item);
   const prs = prsOf(item);
-  if (!issues.length && !prs.length) return null;
+  const artifacts = artifactsOf(item);
+  if (!issues.length && !prs.length && !artifacts.length) return null;
   /** @param {TaskLink} l @param {boolean} pr */
   const chip = (l, pr) => {
     const state = linkState(store, l);
@@ -736,8 +737,19 @@ function linkChips(store, item) {
     'aria-label': `Open ${pr ? 'pull request' : 'issue'} ${l.repo} #${l.number}`,
   }, icon(pr ? 'pull-request' : 'repo'), `#${l.number}`);
   };
-  return h('span', { class: 'task-link-chips' }, issues.map((l) => chip(l, false)), prs.map((l) => chip(l, true)), previewChips(store, prs, 'issue-link'));
+  return h('span', { class: 'task-link-chips' }, issues.map((l) => chip(l, false)), prs.map((l) => chip(l, true)), previewChips(store, prs, 'issue-link'), artifacts.map(artifactChip));
 }
+
+// A claude.ai Artifact a Dev session published, by its title (or "Artifact"), opening in a new tab.
+/** @param {TaskArtifact} a */
+const artifactChip = (a) => h('a', {
+  href: a.url,
+  target: '_blank',
+  rel: 'noopener',
+  class: 'issue-link artifact-link',
+  title: `Artifact${a.title ? ` “${a.title}”` : ''} · ${a.url}`,
+  'aria-label': `Open the artifact ${a.title || a.url}`,
+}, icon('sparkle'), h('span', { class: 'artifact-link-title' }, a.title || 'Artifact'));
 
 /** @type {Record<string, string>} */
 const STATE_NAMES = { open: 'open', merged: 'merged', closed: 'closed', completed: 'closed as completed', not_planned: 'closed as not planned' };
@@ -840,8 +852,12 @@ async function devTasks(store, items) {
 // A task waits for review once claude quits, or once it has a PR and claude waits for its user: the runner says
 // waiting only when claude's turn ended and no subagent still works, so a PR opened mid-turn does not count yet.
 const DEV_POLL_MS = 4000;
-/** @type {{ status: Record<string, RunnerStatus>, withPr: Set<string>, timer: number }} */
-const devWatch = { status: {}, withPr: new Set(), timer: 0 };
+/** @type {{ status: Record<string, RunnerStatus>, withPr: Set<string>, timer: number, polled: boolean }} */
+const devWatch = { status: {}, withPr: new Set(), timer: 0, polled: false };
+// What claude waits on, when it stopped at a tool call (tools/usage.js askOf).
+/** @type {Record<string, string>} */
+const ASK_LABELS = { question: 'claude asks you', plan: 'claude waits for its plan to be approved', permission: 'claude waits for your permission' };
+
 /** @type {Record<string, string>} */
 const DEV_STATES = {
   working: 'claude is working',
@@ -866,20 +882,30 @@ export function watchDevSessions(store) {
     devWatch.timer ||= setTimeout(poll, DEV_POLL_MS);
     // An unreachable runner says nothing about the sessions, so nothing moves.
     if (!status) return;
+    const polled = devWatch.polled;
+    devWatch.polled = true;
+    addTaskArtifacts(store, Object.fromEntries(Object.entries(status).map(([id, s]) => [id, s.artifacts ?? []])));
     const withPr = new Set(items.filter((t) => prsOf(t).length).map((t) => t.id));
     const { status: was, withPr: hadPr } = devWatch;
     devWatch.withPr = withPr;
     if (JSON.stringify(status) === JSON.stringify(was) && [...withPr].every((id) => hadPr.has(id))) return;
     devWatch.status = status;
     // Only on a change (claude quit, started waiting, or a PR came while it waits), so a task put back in progress
-    // while claude waits stays there.
+    // while claude waits stays there. claude waiting on a question or a permission is not done.
     const ready = items.filter((t) => {
       // A task with no session reads no entry.
       const now = status[/** @type {string} */ (t.devSession)]?.state;
       const before = was[/** @type {string} */ (t.devSession)]?.state;
       if (now === 'done') return before !== 'done';
-      return now === 'waiting' && withPr.has(t.id) && (before !== 'waiting' || !hadPr.has(t.id));
+      const s = status[/** @type {string} */ (t.devSession)];
+      return now === 'waiting' && !s?.ask && withPr.has(t.id) && (before !== 'waiting' || !hadPr.has(t.id));
     });
+    // A new question or permission is said once, wherever the board is open; not those already asked at load.
+    if (polled) for (const [id, s] of Object.entries(status)) {
+      if (!s.ask || s.state !== 'waiting' || JSON.stringify(was[id]?.ask) === JSON.stringify(s.ask)) continue;
+      const task = items.find((t) => t.devSession === id);
+      if (task) toast(`${ASK_LABELS[s.ask.kind] ?? ASK_LABELS.permission}: “${task.text}”`);
+    }
     if (ready.length) moveToReview(store, ready.map((t) => t.id));
     if (location.hash.startsWith('#/todos')) store.refresh();
   };
@@ -901,7 +927,9 @@ function devButton(store, item) {
     }, icon('terminal'));
   }
   const state = DEV_STATES[status.state] ? status.state : 'idle';
-  const label = state === 'failed' && status.code != null ? `${DEV_STATES.failed} (exit ${status.code})` : DEV_STATES[state];
+  const label = state === 'failed' && status.code != null ? `${DEV_STATES.failed} (exit ${status.code})`
+    : state === 'waiting' && status.ask ? `${ASK_LABELS[status.ask.kind] ?? ASK_LABELS.permission}${status.ask.text ? `: ${status.ask.text}` : ''}`
+    : DEV_STATES[state];
   return h('button', {
     type: 'button',
     class: `icon-btn dev-btn dev-${state}`,
@@ -914,6 +942,27 @@ function devButton(store, item) {
       openSession({ id: /** @type {string} */ (item.devSession), cwd: status.cwd, taskIds });
     },
   }, icon('terminal'));
+}
+
+// Beside the title while claude waits for its user, so it shows from across the list: what it asks, and a click
+// opens its terminal to answer. A question or permission stands out more than a turn that simply ended.
+/** @param {Store} store @param {Task} item */
+function waitingBadge(store, item) {
+  const status = item.devSession ? devWatch.status[item.devSession] : null;
+  if (status?.state !== 'waiting') return null;
+  const ask = status.ask;
+  const label = ask ? (ask.kind === 'question' ? 'Question' : ask.kind === 'plan' ? 'Approve plan' : 'Permission') : 'Your turn';
+  const what = ask ? `${ASK_LABELS[ask.kind] ?? ASK_LABELS.permission}${ask.text ? `: ${ask.text}` : ''}` : 'claude finished its turn and waits for you';
+  return h('button', {
+    type: 'button',
+    class: `dev-wait-badge${ask ? ' asks' : ''}`,
+    title: `${what}. Click to open its terminal.`,
+    'aria-label': `${what}. Open the Dev terminal of "${item.text}"`,
+    onclick: () => {
+      const taskIds = store.get(COLLECTION).items.filter((t) => t.devSession === item.devSession).map((t) => t.id);
+      openSession({ id: /** @type {string} */ (item.devSession), cwd: status.cwd, taskIds });
+    },
+  }, icon(ask ? 'message' : 'terminal'), label);
 }
 
 // On a task a Cron flow made: opens the run that made it, or the flow when the run is gone (or the task predates
@@ -1191,6 +1240,7 @@ function todoRow(store, item, ctx, place) {
         dueChip(item),
         autoBadge(item),
         linkChips(store, item),
+        waitingBadge(store, item),
         item.inbox ? h('span', { class: 'muted small' }, `needs ${missingFor(item)}`) : null,
         item.inbox
           ? h('button', {

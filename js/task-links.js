@@ -2,7 +2,7 @@
 // to claude and it opens a PR or an issue, the link printed in the terminal is added to the task.
 // A PR alone does not mean claude is done (it may still check CI, merge, or wait on a subagent): Tasks moves the task
 // on to review once claude also waits for its user. A caller that knows the session ended passes `review`.
-/** @import { DataStore, Task, TaskLink } from '../types/data' */
+/** @import { DataStore, Task, TaskArtifact, TaskLink } from '../types/data' */
 import { getIssue } from './github.js';
 import { toast } from './toast.js';
 import { statusOf } from './ui.js';
@@ -15,6 +15,36 @@ const COLLECTION = 'todos';
 export const issuesOf = (task) => task.issues ?? (task.issue ? [task.issue] : []);
 /** @param {Task} task @returns {TaskLink[]} */
 export const prsOf = (task) => task.prs ?? [];
+/** @param {Task} task @returns {TaskArtifact[]} */
+export const artifactsOf = (task) => task.artifacts ?? [];
+
+// Adds the claude.ai Artifacts each Dev session published to the tasks it works on, by session id. A title that comes
+// later (a type's artifact is named before its first write) fills in an empty one. Saves only on a change.
+/** @param {DataStore} store @param {Record<string, TaskArtifact[]>} bySession */
+export function addTaskArtifacts(store, bySession) {
+  /** @param {Task} task */
+  const missing = (task) => (bySession[task.devSession ?? ''] ?? []).filter((a) => {
+    const had = artifactsOf(task).find((x) => x.url === a.url);
+    return !had || (!had.title && a.title);
+  });
+  if (!store.get(COLLECTION).items.some((t) => missing(t).length)) return;
+  /** @type {{ task: string, artifact: TaskArtifact }[]} */
+  const added = [];
+  store.update(COLLECTION, (d) => {
+    for (const task of d.items) {
+      for (const a of missing(task)) {
+        const list = artifactsOf(task);
+        const had = list.find((x) => x.url === a.url);
+        if (had) had.title = a.title;
+        else {
+          task.artifacts = [...list, { url: a.url, title: a.title }];
+          added.push({ task: task.text, artifact: a });
+        }
+      }
+    }
+  });
+  for (const { task, artifact } of added) toast(`Artifact${artifact.title ? ` “${artifact.title}”` : ''} added to “${task}”`);
+}
 
 /** @param {string} a @param {string} b */
 const sameRepo = (a, b) => a.toLowerCase() === b.toLowerCase();
