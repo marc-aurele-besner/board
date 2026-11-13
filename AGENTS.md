@@ -49,7 +49,10 @@ js/prompts.js         the system prompt of every AI feature; Settings → Prompt
 js/profile.js         a project's saved profile: reads its folder, commits, repos and pages, asks the model once, saves it on the project
 js/brand.js           a project's brand (images, colours, fonts, links): reads its folder and site's head tags, asks the model, adds what is new
 js/modules/project-brand.js  the Brand block of a project's page: swatches, images, fonts, links, editing and Find with AI
-js/chart.js           SVG bar charts with a hover tooltip
+js/chart.js           SVG bar and line charts with a hover tooltip
+js/socials.js         the X and LinkedIn accounts and their follower history in socials.json; parsing a handle or profile link (no DOM)
+js/modules/settings-socials.js  Settings → X / Twitter and LinkedIn: accounts, their projects, LinkedIn’s session for company pages
+js/modules/monitoring-socials.js  Monitoring → Socials: followers now, growth over the period, a line per account
 js/chains.js          every chain the board reads: the built-in ones and those added in Settings → Blockchains
 js/abi.js             Solidity ABI encoding and decoding: calls, answers and event logs
 js/contracts.js       saved smart contracts: reads through the node, writes through the browser wallet, activity
@@ -116,6 +119,7 @@ tools/jobs/calendar.js  reads every shown calendar's window into calendar.json, 
 tools/jobs/monitoring.js  deadlines, budgets, site checks, status pages and the rules that make tasks, every 5 minutes
 tools/jobs/telegram.js  long-polls the bot and turns messages into tasks (a `loop` job: it starts again at once)
 tools/jobs/github.js, npm.js, webstats.js, fx.js  GitHub counts (github.json), npm packages (npm.json), Bing data (webstats.json), exchange rates (fx.json)
+tools/jobs/socials.js  reads X and LinkedIn follower counts from the profile pages (LinkedIn company pages with the saved session)
 tools/jobs/dev-usage.js, worktrees.js  what claude sessions used; removing done tasks' worktrees through the command runner
 tools/jobs/defi.js    the DeFi jobs (positions, fee history, wallets, lending, hourly snapshots), run one at a time
 tools/jobs/cron.js    starts due Cron flows every minute, and one flow on Run now

@@ -3392,3 +3392,20 @@ button.sum-line:hover { background: var(--surface-2); }
   .slack-resize { display: none; }
   .slack-topic { max-width: 30ch; }
 }
+
+/* Settings → X and LinkedIn: an account not read yet shows its network's mark */
+.social-avatar { width: 28px; height: 28px; border-radius: 6px; flex: none; display: grid; place-items: center; background: var(--surface-2); color: var(--muted); }
+/* Monitoring → Socials */
+.social-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: var(--gap); }
+.social-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.social-pic { width: 36px; height: 36px; border-radius: 50%; flex: none; object-fit: cover; }
+.social-head .social-avatar { width: 36px; height: 36px; border-radius: 50%; }
+.social-name { display: flex; flex-direction: column; min-width: 0; }
+.social-name strong, .social-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.social-name svg { width: 12px; height: 12px; vertical-align: -1px; }
+.social-now { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.social-now strong { font-size: 1.6rem; font-variant-numeric: tabular-nums; }
+.social-change { font-size: 0.85rem; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted); }
+.social-change.up { color: var(--income); }
+.social-change.down { color: var(--danger); }
+.social-error { color: var(--danger); margin: 0; }

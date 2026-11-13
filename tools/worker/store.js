@@ -29,6 +29,7 @@ export const DEFAULTS = {
   github: { repos: {} },
   npm: { orgs: {}, packages: {} },
   webstats: { bing: {} },
+  socials: { accounts: [], history: {} },
   fx: { days: {} },
   cron: { flows: [], runs: [], templates: [], tests: {} },
   dev: { history: [], runner: '', presets: [] },

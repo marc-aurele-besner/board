@@ -20,6 +20,7 @@ import type { SlackData } from './data/slack';
 import type { GithubData } from './data/github';
 import type { NpmData } from './data/npm';
 import type { WebstatsData } from './data/webstats';
+import type { SocialsData } from './data/socials';
 import type { FxData } from './data/fx';
 import type { RunnersData } from './data/runners';
 import type { DefiSnapshotsData } from './data/defi-snapshots';
@@ -42,6 +43,7 @@ export type * from './data/slack';
 export type * from './data/github';
 export type * from './data/npm';
 export type * from './data/webstats';
+export type * from './data/socials';
 export type * from './data/fx';
 export type * from './data/runners';
 export type * from './data/defi-snapshots';
@@ -66,6 +68,7 @@ export interface Collections {
   github: GithubData;
   npm: NpmData;
   webstats: WebstatsData;
+  socials: SocialsData;
   fx: FxData;
 }
 

@@ -59,6 +59,8 @@ export interface JobParams {
   aprOnly?: boolean;
   // defi-history: the one chain to read.
   chainId?: number;
+  // socials: the accounts to read now (just added).
+  ids?: string[];
   // github, npm, previews, webstats: what to read when the board lacks it.
   repos?: string[];
   orgs?: string[];
