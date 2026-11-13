@@ -156,15 +156,15 @@ function categoriesFor(store, projectId) {
 }
 // "buy milk #home" files the item under project "home" (created if missing).
 // Extra lines from a multi-line paste arrive as the description.
-// Images pasted or dropped on the add field go to the task it adds. Returns whether a task was added.
-/** @param {Store} store @param {string} raw @param {string} [description] @returns {boolean} */
+// Images pasted or dropped on the add field go to the task it adds. Returns the task added, or null.
+/** @param {Store} store @param {string} raw @param {string} [description] @returns {Task | null} */
 function addItem(store, raw, description = '') {
   let text = raw.trim();
   const tag = text.match(/(?:^|\s)#([\w-]+)/);
   if (tag) text = text.replace(tag[0], ' ').replace(/\s+/g, ' ').trim();
   if (!text) {
     if (pending.length) toast('Give the task a title, then add it with its images');
-    return false;
+    return null;
   }
 
   let projectId = isProjectFilter(view.filter) ? view.filter : null;
@@ -179,7 +179,7 @@ function addItem(store, raw, description = '') {
     addImages(store, task.id, pending.map((p) => p.file));
     clearPending();
   }
-  return true;
+  return task;
 }
 
 // --- Images waiting on the add field, shown under it until the task is added ---
@@ -2247,6 +2247,20 @@ function draw(root, store) {
             },
           }),
           h('button', { class: 'primary', type: 'submit' }, 'Add'),
+          // Adds the task and starts a Dev session on it, when the listed project has a folder for Dev to open.
+          projects.find((p) => p.id === view.filter)?.localPath
+            ? h('button', {
+                type: 'button',
+                title: 'Add the task and start a Dev session on it',
+                onclick: (/** @type {MouseEvent & { currentTarget: HTMLButtonElement }} */ e) => {
+                  const input = /** @type {HTMLInputElement} */ (e.currentTarget.form?.querySelector('input[name="todo"]'));
+                  const task = addItem(store, input.value);
+                  if (!task) return;
+                  input.value = '';
+                  devTasks(store, [task]);
+                },
+              }, icon('terminal'), 'Dev')
+            : null,
           pendingImagesStrip()),
 
         h('div', { class: ['todo-table', view.layout === 'table' ? '' : 'no-columns', showDue ? '' : 'no-due'].filter(Boolean).join(' ') },
