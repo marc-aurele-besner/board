@@ -1,4 +1,4 @@
-// The X, LinkedIn and GitHub accounts added in Settings, and their follower counts (and a GitHub account's stars) over time: the runners read them
+// The X, LinkedIn, GitHub and Instagram accounts added in Settings, and their follower counts (and a GitHub account's stars) over time: the runners read them
 // (tools/jobs/socials.js) into socials.json, and Monitoring → Socials draws them. No DOM: the runners import this file.
 /** @import { DataStore, SocialAccount, SocialsData, IconName } from '../types/data' */
 
@@ -7,10 +7,10 @@ export const SOCIALS = 'socials';
 export const SOCIALS_DEFAULTS = { accounts: [], history: {}, stars: {} };
 
 /** @type {Record<string, string>} */
-export const NETWORKS = { x: 'X', linkedin: 'LinkedIn', github: 'GitHub' };
+export const NETWORKS = { x: 'X', linkedin: 'LinkedIn', github: 'GitHub', instagram: 'Instagram' };
 
 /** @param {string} network @returns {IconName} */
-export const networkIcon = (network) => (network === 'x' ? 'x-mark' : network === 'github' ? 'github' : 'linkedin');
+export const networkIcon = (network) => (network === 'x' ? 'x-mark' : network === 'github' ? 'github' : network === 'instagram' ? 'instagram' : 'linkedin');
 
 // A local day as YYYY-MM-DD, the key of an account's history.
 /** @param {number | Date} [t] */
@@ -33,6 +33,10 @@ export function parseHandle(network, text) {
     const name = raw.replace(/^https?:\/\//i, '').replace(/^(www\.)?github\.com\//i, '').replace(/^@/, '').split('/')[0];
     return /^[a-z\d][a-z\d-]{0,38}$/i.test(name) ? name : '';
   }
+  if (network === 'instagram') {
+    const name = raw.replace(/^https?:\/\//i, '').replace(/^(www\.)?instagram\.com\//i, '').replace(/^@/, '').split('/')[0];
+    return /^[\w.]{1,30}$/.test(name) ? name.toLowerCase() : '';
+  }
   const path = raw.replace(/^https?:\/\//i, '').replace(/^([a-z]{2,3}\.)?(www\.)?linkedin\.com\//i, '');
   const m = path.match(/^(in|company|school|showcase)\/([^/]+)/i);
   if (m) return `${m[1].toLowerCase()}/${decodeURIComponent(m[2])}`;
@@ -43,10 +47,11 @@ export function parseHandle(network, text) {
 /** @param {SocialAccount} a */
 export const profileUrl = (a) => (a.network === 'x' ? `https://x.com/${a.handle}`
   : a.network === 'github' ? `https://github.com/${a.handle}`
-    : `https://www.linkedin.com/${a.handle}/`);
+    : a.network === 'instagram' ? `https://www.instagram.com/${a.handle}/`
+      : `https://www.linkedin.com/${a.handle}/`);
 
 /** @param {SocialAccount} a */
-export const handleLabel = (a) => (a.network === 'x' ? `@${a.handle}` : a.network === 'github' ? a.handle : a.handle.replace(/^[a-z]+\//, ''));
+export const handleLabel = (a) => (a.network === 'x' || a.network === 'instagram' ? `@${a.handle}` : a.network === 'github' ? a.handle : a.handle.replace(/^[a-z]+\//, ''));
 
 // A LinkedIn page that is not a person's: LinkedIn shows those only to a signed-in session.
 /** @param {SocialAccount} a */

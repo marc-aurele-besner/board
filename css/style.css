@@ -3545,7 +3545,7 @@ button.cal-agenda-name:hover { color: var(--accent); }
   .slack-topic { max-width: 30ch; }
 }
 
-/* Settings → X and LinkedIn: an account not read yet shows its network's mark */
+/* Settings → X, LinkedIn, GitHub and Instagram: an account not read yet shows its network's mark */
 .social-avatar { width: 28px; height: 28px; border-radius: 6px; flex: none; display: grid; place-items: center; background: var(--surface-2); color: var(--muted); }
 /* Monitoring → Socials */
 .social-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: var(--gap); }

@@ -217,17 +217,19 @@ function collections() {
         mail('m7', 'received', 200, 'Newsletter <news@example.org>', 'This month in web design', { archived: true }),
       ],
     },
-    // Three accounts with three months of follower counts (and stars for GitHub), so Monitoring → Socials has lines to draw.
+    // Four accounts with three months of follower counts (and stars for GitHub), so Monitoring → Socials has lines to draw.
     socials: {
       accounts: [
         { id: 's-x', network: 'x', handle: 'atlas_example', name: 'Atlas', projectId: 'p-atlas', followers: 1789, following: 180, at: Date.now() - 2 * 3600000, error: null },
         { id: 's-li', network: 'linkedin', handle: 'company/atlas-example', name: 'Atlas', projectId: 'p-atlas', followers: 784, at: Date.now() - 2 * 3600000, error: null },
         { id: 's-gh', network: 'github', handle: 'atlas-example', name: 'Atlas', projectId: 'p-atlas', followers: 321, following: 4, stars: 2845, at: Date.now() - 2 * 3600000, error: null },
+        { id: 's-ig', network: 'instagram', handle: 'atlas.example', name: 'Atlas', projectId: 'p-atlas', followers: 1312, following: 210, at: Date.now() - 2 * 3600000, error: null },
       ],
       history: {
         's-x': Object.fromEntries(Array.from({ length: 90 }, (_, i) => [day(i - 89), 1240 + i * 6 + (i % 7) * 3])),
         's-li': Object.fromEntries(Array.from({ length: 90 }, (_, i) => [day(i - 89), 610 + i * 2 - (i % 5)])),
         's-gh': Object.fromEntries(Array.from({ length: 90 }, (_, i) => [day(i - 89), 232 + i])),
+        's-ig': Object.fromEntries(Array.from({ length: 90 }, (_, i) => [day(i - 89), 980 + i * 4 - (i % 6)])),
       },
       stars: {
         's-gh': Object.fromEntries(Array.from({ length: 90 }, (_, i) => [day(i - 89), 2400 + i * 5 + (i % 4)])),

@@ -31,6 +31,17 @@
       "stars": 3400,
       "at": 1762896400000,
       "error": null
+    },
+    {
+      "id": "soc-4",
+      "network": "instagram",
+      "handle": "example",
+      "projectId": "proj-1",
+      "name": "Example",
+      "followers": 12300,
+      "following": 95,
+      "at": 1762896400000,
+      "error": null
     }
   ],
   "history": {

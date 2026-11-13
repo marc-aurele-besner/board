@@ -1,4 +1,4 @@
-// Settings → X / Twitter, LinkedIn and GitHub accounts: the accounts whose follower counts (and GitHub stars)
+// Settings → X / Twitter, LinkedIn, GitHub and Instagram accounts: the accounts whose follower counts (and GitHub stars)
 // Monitoring → Socials follows, each tied to a project if wanted, and LinkedIn's signed-in session for company pages.
 import { h, icon, uid, refreshIcon } from '../ui.js';
 import { pickChip } from '../inline.js';
@@ -101,8 +101,10 @@ function addForm(store, network) {
     spellcheck: false,
     placeholder: network === 'x' ? '@name or https://x.com/name'
       : network === 'github' ? 'name or https://github.com/name'
-        : 'https://www.linkedin.com/in/name or /company/name',
-    'aria-label': network === 'x' ? 'X handle or profile link' : network === 'github' ? 'GitHub user or organization' : 'LinkedIn profile or page link',
+        : network === 'instagram' ? '@name or https://www.instagram.com/name'
+          : 'https://www.linkedin.com/in/name or /company/name',
+    'aria-label': network === 'x' ? 'X handle or profile link' : network === 'github' ? 'GitHub user or organization'
+      : network === 'instagram' ? 'Instagram username or profile link' : 'LinkedIn profile or page link',
   });
   const status = h('p', { class: 'small muted', role: 'status' });
   return h('form', {
@@ -113,7 +115,8 @@ function addForm(store, network) {
       if (!handle) {
         status.textContent = network === 'x' ? 'That is not an X handle: up to 15 letters, digits or _.'
           : network === 'github' ? 'That is not a GitHub login: up to 39 letters, digits or -.'
-            : 'Paste a linkedin.com/in/… or linkedin.com/company/… link.';
+            : network === 'instagram' ? 'That is not an Instagram username: up to 30 letters, digits, _ or .'
+              : 'Paste a linkedin.com/in/… or linkedin.com/company/… link.';
         return;
       }
       const have = store.get(SOCIALS).accounts.find((a) => a.network === network && a.handle.toLowerCase() === handle.toLowerCase());
@@ -189,16 +192,18 @@ function linkedinSession(store) {
           set ? h('button', { type: 'button', class: 'danger', onclick: () => save({}) }, icon('x'), 'Clear') : null))));
 }
 
-/** @param {Store} store @param {'x' | 'linkedin' | 'github'} network */
+/** @param {Store} store @param {'x' | 'linkedin' | 'github' | 'instagram'} network */
 export function socialsCard(store, network) {
   const projects = projectTree(store.get('projects').projects).map(({ project }) => project);
   const accounts = store.get(SOCIALS).accounts.filter((a) => a.network === network);
-  const name = network === 'x' ? 'X / Twitter' : network === 'github' ? 'GitHub accounts' : NETWORKS[network];
+  const name = network === 'x' ? 'X / Twitter' : network === 'github' ? 'GitHub accounts' : network === 'instagram' ? 'Instagram' : NETWORKS[network];
   const intro = network === 'x'
     ? 'Monitoring → Socials follows the followers of each account here over time. X shows the counts of a public profile to anyone, so no key or sign-in is needed: the runners read each profile’s page every few hours.'
     : network === 'github'
       ? 'Monitoring → Socials follows the followers of each GitHub user or organization here over time, and the stars of its public repos (forks left out). The runners read them from GitHub’s API every few hours, with the token of Settings → GitHub when one is set.'
-      : 'Monitoring → Socials follows the followers of each profile and company page here over time. The runners read them every few hours.';
+      : network === 'instagram'
+        ? 'Monitoring → Socials follows the followers of each Instagram account here over time. No key or sign-in is needed: the runners read the counts Instagram gives a public profile’s link preview every few hours, rounded above 10,000 as Instagram writes them (12.3K).'
+        : 'Monitoring → Socials follows the followers of each profile and company page here over time. The runners read them every few hours.';
   return h('div', { class: 'stack-lg' },
     h('section', { class: 'card panel' },
       h('header', { class: 'panel-head' },

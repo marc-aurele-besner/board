@@ -16,6 +16,7 @@ const SECTIONS = {
   x: ['x', 'X / Twitter'],
   linkedin: ['linkedin', 'LinkedIn'],
   githubAccounts: ['github-accounts', 'GitHub accounts'],
+  instagram: ['instagram', 'Instagram'],
 };
 
 /** @import { DataStore } from '../types/data' */
