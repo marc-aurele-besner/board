@@ -330,6 +330,8 @@ export function infoButton({ title, text }) {
       positionPopover(el, button);
       document.addEventListener('pointerdown', onOutside, true);
       document.addEventListener('keydown', onKey, true);
+      // A shortcut can change the page with no click; an open popover would hold its re-renders.
+      window.addEventListener('hashchange', closePicker, { once: true });
     },
   }, icon('info'));
   return button;
