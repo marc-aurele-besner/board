@@ -6,6 +6,7 @@ import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
 import { gitStatus, gitDiff, gitAction } from '../terminal.js';
 import { openDiff, openFile, baseName, panelHead, panelAction } from './dev-files.js';
+import { openPullRequest } from './dev-pr.js';
 /** @import { DevContext, FileDecor } from '../../types/dev' */
 /** @import { GitStatus, GitRepoStatus, GitFile, GitCommit } from '../../types/terminal' */
 /** @import { Child } from '../../types/ui' */
@@ -351,7 +352,9 @@ export function sourceControl(ctx, picker, switcher, path) {
   } else body = repoBody(ctx);
   return h('aside', { class: 'card ide-explorer scm', 'aria-label': 'Source control' },
     switcher,
-    panelHead('Source control', panelAction('refresh', 'Read the repository again', () => refreshGit(ctx, path, { force: true }), !ctx.ready() || state.loading)),
+    panelHead('Source control',
+      st?.repo ? panelAction('git-pull-request', 'Review the branch as a pull request', () => openPullRequest(ctx, path), !ctx.ready()) : null,
+      panelAction('refresh', 'Read the repository again', () => refreshGit(ctx, path, { force: true }), !ctx.ready() || state.loading)),
     h('div', { class: 'ide-explorer-head' }, picker),
     st?.repo ? h('div', { class: 'tree-root muted small', title: st.root }, baseName(st.root).toUpperCase()) : null,
     body);
