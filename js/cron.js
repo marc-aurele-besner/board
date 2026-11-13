@@ -1286,7 +1286,7 @@ async function gather(store, step, flow, vars = {}) {
     return last?.steps.at(-1)?.output ?? '';
   }
   if (step.source === 'inbox') {
-    const unread = (store.get('inbox')?.emails ?? []).filter((e) => e.dir === 'received' && !e.archived && e.unread).slice(0, 50);
+    const unread = (store.get('inbox')?.emails ?? []).filter((e) => e.dir === 'received' && !e.archived && !e.deleted && e.unread).slice(0, 50);
     return unread.map((e) => `- ${e.from || 'Unknown sender'}: ${e.subject || '(no subject)'}`).join('\n');
   }
   if (step.source === 'sites') {

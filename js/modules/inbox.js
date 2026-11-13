@@ -118,15 +118,41 @@ function patch(store, ids, fields) {
     for (const e of d.emails) if (set.has(e.id)) Object.assign(e, fields);
   });
 }
+// Sets fields on several emails with a toast whose Undo gives each email back the values it had.
 /**
  * @param {Store} store
- * @param {InboxMessage} e
+ * @param {string[]} ids
+ * @param {Partial<InboxMessage>} fields
+ * @param {string} message
+ */
+function change(store, ids, fields, message) {
+  const set = new Set(ids);
+  const keys = /** @type {(keyof InboxMessage)[]} */ (Object.keys(fields));
+  const before = new Map(store.get(COLLECTION).emails.filter((e) => set.has(e.id)).map((e) => [e.id, Object.fromEntries(keys.map((k) => [k, e[k]]))]));
+  patch(store, ids, fields);
+  toast(message, {
+    undo: () => store.update(COLLECTION, (d) => {
+      for (const e of d.emails) if (before.has(e.id)) Object.assign(e, before.get(e.id));
+    }),
+  });
+}
+/** @param {number} n */
+const emailsWord = (n) => (n === 1 ? 'Email' : `${n} emails`);
+/**
+ * @param {Store} store
+ * @param {string[]} ids
  * @param {boolean} archived
  */
-function archive(store, e, archived) {
-  patch(store, [e.id], { archived });
-  toast(archived ? 'Archived' : 'Moved to the Inbox', { undo: () => patch(store, [e.id], { archived: !archived }) });
-}
+const archive = (store, ids, archived) => change(store, ids, { archived }, archived ? `${emailsWord(ids.length)} archived` : `${emailsWord(ids.length)} moved to the Inbox`);
+// Deleting only hides the email on the board: Gmail is read-only here, and Resend keeps its own copy.
+/**
+ * @param {Store} store
+ * @param {string[]} ids
+ */
+const remove = (store, ids) => change(store, ids, { deleted: true }, `${emailsWord(ids.length)} deleted`);
+// The emails the board shows: every saved one but those deleted.
+/** @param {Store} store */
+const liveEmails = (store) => store.get(COLLECTION).emails.filter((e) => !e.deleted);
 /**
  * @param {Store} store
  * @param {InboxMessage} e
@@ -342,10 +368,19 @@ function openReader(store, e) {
               class: 'btn-small',
               onclick: () => {
                 dialog.close();
-                archive(store, now, !now.archived);
+                archive(store, [now.id], !now.archived);
               },
             }, icon(now.archived ? 'inbox' : 'archive'), now.archived ? 'Move to Inbox' : 'Archive')
           : null,
+        h('button', {
+          type: 'button',
+          class: 'btn-small danger',
+          title: 'Delete this email from the board',
+          onclick: () => {
+            dialog.close();
+            remove(store, [now.id]);
+          },
+        }, icon('trash'), 'Delete'),
         now.dir === 'received'
           ? h('button', {
               type: 'button',
@@ -363,7 +398,7 @@ function openReader(store, e) {
   };
 
   // The other emails of the conversation, sent and received, oldest first.
-  const thread = store.get(COLLECTION).emails
+  const thread = liveEmails(store)
     .filter((x) => x.id !== e.id && threadKey(x) === threadKey(e))
     .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
 
@@ -455,7 +490,7 @@ function rowEl(store, e, projects, threadSize) {
           class: 'icon-btn mail-archive',
           title: e.archived ? 'Move to Inbox' : 'Archive',
           'aria-label': e.archived ? `Move “${e.subject}” to the Inbox` : `Archive “${e.subject}”`,
-          onclick: () => archive(store, e, !e.archived),
+          onclick: () => archive(store, [e.id], !e.archived),
         }, icon(e.archived ? 'inbox' : 'archive'))
       : null,
     taskControl(store, e));
@@ -578,7 +613,8 @@ function draw(root, store) {
   const keyed = store.get('projects').projects.filter((p) => withMail.has(p.id));
   /** @type {Map<string | null, Project>} */
   const projects = new Map(store.get('projects').projects.map((p) => [p.id, p]));
-  const { emails, syncedAt } = store.get(COLLECTION);
+  const { syncedAt } = store.get(COLLECTION);
+  const emails = liveEmails(store);
   // A Gmail account needs no project, so it counts on its own.
   const hasMail = keyed.length > 0 || accounts.length > 0;
   const last = lastReads();
@@ -766,7 +802,7 @@ function draw(root, store) {
 
 // Received emails in the Inbox not opened yet, for the Home page.
 /** @param {Store} store */
-export const unreadCount = (store) => store.get(COLLECTION).emails.filter((e) => FOLDERS[0][3](e) && e.unread).length;
+export const unreadCount = (store) => liveEmails(store).filter((e) => FOLDERS[0][3](e) && e.unread).length;
 
 export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'inbox',

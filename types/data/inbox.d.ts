@@ -23,6 +23,8 @@ export interface InboxMessage {
   unread?: boolean;
   archived?: boolean;
   starred?: boolean;
+  // Deleted on the board. The row stays, hidden, so the next read does not bring the email back.
+  deleted?: boolean;
   // The task made from this email.
   taskId: string | null;
 }
