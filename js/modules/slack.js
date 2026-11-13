@@ -12,6 +12,7 @@ import { runnersOnline, runnersKnown } from '../runners.js';
 import { markup } from '../slack-markup.js';
 import { emojiChar } from '../emoji.js';
 import { pickEmoji, frequentEmoji, rememberEmoji } from '../emoji-picker.js';
+import { makeTask } from '../capture.js';
 import { setAttention, slackMentions, mentionsOf } from '../attention.js';
 import {
   SLACK, SLACK_DEFAULTS, keyOf, splitKey, addWorkspaces, listChannels, ensureUsers, readCounts, readHistory, readThread,
@@ -1167,6 +1168,57 @@ function deleteDialog(store, key, m) {
   });
 }
 
+// A message's text as read: mentions as @names, links as their labels, Slack's escapes undone.
+/** @param {Store} store @param {string} team @param {string} text */
+function plainText(store, team, text) {
+  return text
+    .replace(/<@([A-Z0-9]+)(?:\|[^>]*)?>/g, (_, id) => `@${userName(store, team, id)}`)
+    .replace(/<!(here|channel|everyone)[^>]*>/g, '@$1')
+    .replace(/<#[A-Z0-9]+\|([^>]*)>/g, '#$1')
+    .replace(/<([^|>]+)\|([^>]+)>/g, '$2')
+    .replace(/<([^>]+)>/g, '$1')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
+// A task from a message: its first line as the title, the whole text and its link below, in the conversation's project.
+/** @param {Store} store @param {string} key @param {Message} m */
+function messageTask(store, key, m) {
+  const [team, channel] = splitKey(key);
+  const w = workspaceOf(store, team);
+  const text = plainText(store, team, m.text).trim();
+  const first = text.split('\n').find((l) => l.trim())?.trim() ?? '';
+  const title = first.length > 120 ? `${first.slice(0, 119)}…` : first || 'Slack message';
+  const description = [text, w ? slackLink(w, channel, m.ts) : ''].filter(Boolean).join('\n\n');
+  store.update('todos', (d) => d.items.push(makeTask({ text: title, description, projectId: projectOf(data(store), key) })));
+  toast(`Task added: ${title}`);
+}
+
+// A message's menu on a right click, as Slack's: react, reply, a task, copy and open, then edit and delete.
+/** @param {Store} store @param {string} key @param {Message} m @param {boolean} inThread @returns {MenuEntry[]} */
+function messageMenu(store, key, m, inThread) {
+  const [team, channel] = splitKey(key);
+  const w = /** @type {SlackWorkspace} */ (workspaceOf(store, team));
+  const mine = m.user === w.userId;
+  const link = slackLink(w, channel, m.ts);
+  const reacted = (/** @type {string} */ n) => Boolean(m.reactions.find((r) => r.name === n)?.users.includes(w.userId));
+  return [
+    { label: 'Add reaction', icon: () => icon('smile'), items: [
+      ...frequentEmoji(5).map((n) => ({ label: `:${n}:`, icon: () => emojiNode(team, n), hint: reacted(n) ? 'added' : undefined, onSelect: () => toggleReaction(store, key, m, !reacted(n), n) })),
+      '-',
+      { label: 'More reactions…', icon: () => icon('smile'), onSelect: () => pickReaction(store, key, m, w) },
+    ] },
+    inThread ? null : { label: m.replyCount ? 'View thread' : 'Reply in thread', icon: () => icon('message'), onSelect: () => openThread(store, m.ts) },
+    { label: 'Add to tasks', icon: () => icon('check-square'), onSelect: () => messageTask(store, key, m) },
+    '-',
+    m.text ? { label: 'Copy text', icon: () => icon('copy'), onSelect: () => copyText(plainText(store, team, m.text), 'text') } : null,
+    { label: 'Copy link', icon: () => icon('copy'), onSelect: () => copyText(link, 'link') },
+    { label: 'Open in Slack', icon: () => icon('link'), onSelect: () => window.open(link, '_blank', 'noopener') },
+    mine ? '-' : null,
+    mine ? { label: 'Edit message', icon: () => icon('pencil'), onSelect: () => editDialog(store, key, m) } : null,
+    mine ? { label: 'Delete message…', icon: () => icon('trash'), danger: true, onSelect: () => deleteDialog(store, key, m) } : null,
+  ];
+}
+
 const SYSTEM = /^(channel_join|channel_leave|group_join|group_leave|channel_topic|channel_purpose|channel_name|pinned_item|bot_add|bot_remove)$/;
 
 /** @param {Store} store @param {string} key @param {Message} m @param {{ compact: boolean, inThread: boolean }} options */
@@ -1221,7 +1273,7 @@ function messageRow(store, key, m, { compact, inThread }) {
     mine ? h('button', { type: 'button', class: 'icon-btn', title: 'Edit', 'aria-label': 'Edit', onclick: () => editDialog(store, key, m) }, icon('pencil')) : null,
     mine ? h('button', { type: 'button', class: 'icon-btn', title: 'Delete', 'aria-label': 'Delete', onclick: () => deleteDialog(store, key, m) }, icon('trash')) : null,
     h('a', { class: 'icon-btn', href: slackLink(w, channel, m.ts), target: '_blank', rel: 'noopener noreferrer', title: 'Open in Slack', 'aria-label': 'Open in Slack' }, icon('link')));
-  return h('div', { class: compact ? 'slack-msg compact' : 'slack-msg', 'data-ts': m.ts },
+  const row = h('div', { class: compact ? 'slack-msg compact' : 'slack-msg', 'data-ts': m.ts },
     compact
       ? h('span', { class: 'slack-time slack-gutter', title: dateOf(m.ts).toLocaleString() }, timeOf(m.ts))
       : avatar(name, person?.avatar || m.avatar),
@@ -1237,6 +1289,14 @@ function messageRow(store, key, m, { compact, inThread }) {
       reactions,
       thread),
     actions);
+  // The browser's own menu stays on a link, an image or selected text, to open or copy them.
+  row.addEventListener('contextmenu', (e) => {
+    const target = /** @type {Element} */ (e.target);
+    if (target.closest('a, img, .slack-msg-actions') || String(getSelection() ?? '').trim()) return;
+    e.preventDefault();
+    openMenu(messageMenu(store, key, m, inThread), { x: e.clientX, y: e.clientY });
+  });
+  return row;
 }
 
 // Messages with a day line between days and one header per run of the same person.
