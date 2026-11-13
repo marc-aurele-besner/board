@@ -4,7 +4,7 @@
 // keeps a session's transcript under the worktree's folder name, and moves it under the repo's once the worktree
 // is removed, so both places are read.
 // CLAUDE_CONFIG_DIR moves Claude's folder, as it does for Claude itself.
-/** @import { DevModelUsage, DevTurn } from '../types/data' */
+/** @import { DevModelUsage, DevToolUse, DevTurn } from '../types/data' */
 /** @import { SessionAgent, SessionArtifact, SessionAsk, SessionTurn, WorktreeUsage } from '../types/terminal' */
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -162,6 +162,12 @@ function parse(text, billing) {
   let toolCalls = 0;
   let said = '';
   let task = '';
+  // Every tool call of the transcript by tool, with its failures and time: what a subagent called, which no turn
+  // of the session holds. The calls still waiting for their result, by id.
+  /** @type {Record<string, DevToolUse>} */
+  const tools = {};
+  /** @type {Map<string, { name: string, at: number }>} */
+  const called = new Map();
   for (const line of text.split('\n')) {
     if (!line) continue;
     /** @type {TranscriptLine} */
@@ -180,9 +186,22 @@ function parse(text, billing) {
         if (b.type === 'tool_use' && b.name) {
           toolCalls++;
           lastTool = { name: b.name, detail: toolDetail(b.input ?? {}), at: Date.parse(/** @type {string} */ (o.timestamp)) || 0 };
+          (tools[b.name] ??= { calls: 0 }).calls++;
+          if (b.id) called.set(b.id, lastTool);
         } else if (b.type === 'text' && b.text?.trim()) said = b.text.trim().slice(0, PROMPT_KEPT);
       }
     } else if (o.type === 'user' && !task && !o.isMeta) task = turnText(o.message?.content).slice(0, PROMPT_KEPT);
+    if (o.type === 'user' && Array.isArray(o.message?.content)) {
+      const at = Date.parse(/** @type {string} */ (o.timestamp)) || 0;
+      for (const b of o.message.content) {
+        const call = b.type === 'tool_result' && b.tool_use_id ? called.get(b.tool_use_id) : undefined;
+        if (!call || !b.tool_use_id) continue;
+        const use = tools[call.name];
+        if (b.is_error) use.errors = (use.errors ?? 0) + 1;
+        if (!ASKS[call.name] && at > call.at) use.ms = (use.ms ?? 0) + at - call.at;
+        called.delete(b.tool_use_id);
+      }
+    }
     if (!o.isSidechain) {
       const c = o.message?.content;
       const at = Date.parse(/** @type {string} */ (o.timestamp)) || 0;
@@ -299,7 +318,7 @@ function parse(text, billing) {
     since: last?.at || 0,
     artifacts: [...artifacts].map(([url, title]) => ({ url, title })),
     skills, mcp,
-    lastTool, toolCalls, said, task,
+    lastTool, toolCalls, tools, said, task,
   };
 }
 
@@ -554,13 +573,17 @@ async function activityOf({ name, cwd }) {
 }
 
 // A session's subagents, newest first, and how many are still working. Claude keeps them beside it, in
-// <session>/subagents: a transcript each, and a .meta.json with its type and the task it was given.
+// <session>/subagents: a transcript each, and a .meta.json with its type and the task it was given. `tools` is
+// what they all called.
 const AGENTS_KEPT = 30;
-/** @param {string} file @param {string} billing @returns {Promise<{ running: number, list: SessionAgent[] }>} */
+/** @param {string} file @param {string} billing @returns {Promise<{ running: number, list: SessionAgent[], tools: Record<string, DevToolUse> }>} */
 async function agentsOf(file, billing) {
   const folder = join(file.slice(0, -'.jsonl'.length), 'subagents');
   /** @type {SessionAgent[]} */
   const list = [];
+  // What all of them called, by tool: those past the ones kept count too.
+  /** @type {Record<string, DevToolUse>} */
+  const tools = {};
   for (const n of await readdir(folder).catch(() => [])) {
     if (!n.endsWith('.jsonl')) continue;
     const path = join(folder, n);
@@ -569,6 +592,12 @@ async function agentsOf(file, billing) {
     if (!info || !t) continue;
     const meta = await readMeta(join(folder, `${n.slice(0, -'.jsonl'.length)}.meta.json`));
     const running = t.open && !meta.finished && Date.now() - info.mtimeMs <= STALE_MS;
+    for (const [name, u] of Object.entries(t.tools)) {
+      const use = (tools[name] ??= { calls: 0 });
+      use.calls += u.calls;
+      if (u.errors) use.errors = (use.errors ?? 0) + u.errors;
+      if (u.ms) use.ms = (use.ms ?? 0) + u.ms;
+    }
     list.push({
       id: n.slice(0, -'.jsonl'.length).replace(/^agent-/, ''),
       type: typeof meta.agentType === 'string' ? meta.agentType : '',
@@ -584,7 +613,7 @@ async function agentsOf(file, billing) {
     });
   }
   list.sort((a, b) => b.start - a.start);
-  return { running: list.filter((a) => a.state === 'working').length, list: list.slice(0, AGENTS_KEPT) };
+  return { running: list.filter((a) => a.state === 'working').length, list: list.slice(0, AGENTS_KEPT), tools };
 }
 
 // A subagent's .meta.json, cached by its time; {} when there is none (an older claude).
@@ -647,6 +676,6 @@ export async function sessionTranscript({ cwd, at, prompt = '', worktree = '', k
   }
   const t = file ? await readTranscript(file, billing) : null;
   if (!t) return null;
-  const { running: agents, list: subagents } = await agentsOf(file, billing);
-  return { file, busy: t.open || agents > 0, agents, subagents, reply: t.reply, written: t.written, ask: t.ask, since: t.since, artifacts: t.artifacts, turns: t.turns, skills: t.skills, mcp: t.mcp };
+  const { running: agents, list: subagents, tools: agentTools } = await agentsOf(file, billing);
+  return { file, busy: t.open || agents > 0, agents, subagents, reply: t.reply, written: t.written, ask: t.ask, since: t.since, artifacts: t.artifacts, turns: t.turns, skills: t.skills, mcp: t.mcp, agentTools };
 }
