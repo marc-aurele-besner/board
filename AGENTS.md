@@ -55,8 +55,9 @@ js/contacts-core.js   contacts.json without the DOM: addContacts() (merged by Li
 js/modules/project-contacts.js  a project's Contacts block, Projects → Contacts, the contact dialog, Inbox's contact chip, Calendar's guests
 js/chart.js           SVG bar and line charts with a hover tooltip
 js/socials.js         the X, LinkedIn, GitHub and Instagram accounts, their follower (and GitHub star) history in socials.json; parsing a handle or profile link (no DOM)
-js/linkedin-core.js   linkedin.json without the DOM: the official sign-in's code trade and its expiry notice
-js/linkedin.js        LinkedIn's official sign-in popup (Settings → LinkedIn → Publish as you)
+js/linkedin-core.js   linkedin.json without the DOM: the official sign-in's code trade and expiry notice, a task's draft, posting through the API
+js/linkedin.js        LinkedIn's official sign-in popup (Settings → LinkedIn → Publish as you), and Post now through the runners
+js/linkedin-composer.js  the LinkedIn post composer: text, link, a feed preview, Save draft and Post now
 js/linkedin-session.js  linkedinCall(store, req): the one entry point for any LinkedIn read through the saved session (contract at its top); the runners run the queue, a tab asks them (no DOM)
 js/modules/settings-socials.js  Settings → X / Twitter, LinkedIn, GitHub and Instagram accounts: accounts, their projects, LinkedIn’s session, its state, calls today and daily limit; Read now
 js/modules/monitoring-socials.js  Monitoring → Socials (X, LinkedIn, GitHub, Instagram): followers (and GitHub stars) now, growth over the period, a line per account, Read now
