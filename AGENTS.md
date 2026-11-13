@@ -98,6 +98,7 @@ js/task-worktrees.js  the worktrees Dev sessions made for tasks; removed through
 js/modules/dev-worktrees.js  Dev's Worktrees panel: the repo's worktrees, whether each is in use, and removing them
 js/modules/dev-pr.js   Dev's pull request view: the branch against the default branch, file list, diffs as cards that fold, Viewed marks
 js/dev-usage.js       what a task's claude session used (model, effort, tokens, cost), kept in usage.json `dev`
+js/dev-done.js        claude's done signal: the line a task prompt asks for, and whether a reply ends with it (Dev's turns)
 js/dev-core.js        Dev without the DOM: runner address, presets, a project's Dev command, starting a terminal on the runner
 js/models.js          the model an AI task uses (Settings → Models & tasks)
 js/defi/positions-read.js  Liquidity Pools reads without the DOM: positions, fee APR, collects; all saved in pools.json; openPositions() for Cron and Home
