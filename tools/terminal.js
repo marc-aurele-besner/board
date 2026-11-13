@@ -1112,6 +1112,19 @@ async function searchFiles(params) {
   });
 }
 
+// The default branch as the remote names it, else a local main or master, and where HEAD left it ('' when
+// neither is found or they share no history).
+/** @param {string} root */
+async function defaultBase(root) {
+  let base = (await git(root, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], { ok: [0, 1, 128] }).catch(() => '')).trim();
+  for (const name of ['main', 'master']) {
+    if (base) break;
+    if ((await git(root, ['rev-parse', '--verify', '--quiet', name], { ok: [0, 1, 128] }).catch(() => '')).trim()) base = name;
+  }
+  const mergeBase = base ? (await git(root, ['merge-base', 'HEAD', base], { ok: [0, 1, 128] }).catch(() => '')).trim() : '';
+  return { base, mergeBase };
+}
+
 // What a terminal left behind, for a Cron step that runs after a Run in Dev step: the end of its output (escape
 // sequences and all; the page reads links from it), the same output as the screen showed it, claude's last answer
 // and the files it wrote (from its transcript), and, in the folder it worked in, the branch, the last commit, and the
@@ -1162,14 +1175,7 @@ async function sessionOutcome(params) {
   if (!root) return { output, screen, ...claude, repo: false };
   const status = parseStatus(await git(root, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', ...NOT_WORKTREES]));
   const head = (await git(root, ['log', '-1', '--format=%H%x1f%h%x1f%s'], { ok: [0, 128] }).catch(() => '')).trim().split('\x1f');
-  // The default branch as the remote names it, else a local main or master.
-  const remoteHead = (await git(root, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], { ok: [0, 1, 128] }).catch(() => '')).trim();
-  let base = remoteHead;
-  for (const name of ['main', 'master']) {
-    if (base) break;
-    if ((await git(root, ['rev-parse', '--verify', '--quiet', name], { ok: [0, 1, 128] }).catch(() => '')).trim()) base = name;
-  }
-  const mergeBase = base ? (await git(root, ['merge-base', 'HEAD', base], { ok: [0, 1, 128] }).catch(() => '')).trim() : '';
+  const { base, mergeBase } = await defaultBase(root);
   /** @type {{ status: string, path: string, from?: string }[]} */
   let files = [];
   /** @type {{ hash: string, short: string, subject: string }[]} */
@@ -1238,6 +1244,47 @@ async function gitDiff(params) {
   if (params.get('untracked')) return { diff: await git(root, ['diff', '--no-index', '--no-ext-diff', '--', '/dev/null', file], { ok: [0, 1] }) };
   const staged = params.get('staged') ? ['--cached'] : [];
   return { diff: await git(root, ['diff', ...staged, '-M', '--no-ext-diff', ...paths]) };
+}
+
+// Dev's pull request view: what the branch changes against the default branch, as a GitHub pull request shows
+// it, from where they part. Uncommitted and new files are included unless `committed` is set, so the view shows
+// what the pull request will hold once they are committed.
+const PR_UNTRACKED = 200;
+/** @param {URLSearchParams} params */
+async function gitPullRequest(params) {
+  const root = await repoOf(params.get('path') ?? '');
+  if (!root) throw new Error('Not a git repository.');
+  const committed = !!params.get('committed');
+  const status = parseStatus(await git(root, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', ...NOT_WORKTREES]));
+  const { base, mergeBase } = await defaultBase(root);
+  if (!mergeBase) throw new Error(base ? `${status.branch || 'HEAD'} shares no history with ${base}.` : 'No default branch found (origin/HEAD, main or master).');
+  const [log, diff] = await Promise.all([
+    git(root, ['log', `-n${LOG_SHOWN}`, '--format=%H%x1f%h%x1f%an%x1f%at%x1f%s%x1e', `${mergeBase}..HEAD`]).catch(() => ''),
+    git(root, ['diff', '-M', '--no-ext-diff', mergeBase, ...(committed ? ['HEAD'] : []), ...NOT_WORKTREES], { timeout: 30000 }),
+  ]);
+  const commits = log.split('\x1e').map((l) => l.trim()).filter(Boolean).map((l) => {
+    const [hash, short, author, at, subject] = l.split('\x1f');
+    return { hash, short, author, at: Number(at) * 1000, subject };
+  });
+  const count = Number((await git(root, ['rev-list', '--count', `${mergeBase}..HEAD`]).catch(() => '0')).trim()) || 0;
+  // New files are not in git's diff; each is diffed against nothing, as git shows an added file.
+  const untracked = committed ? [] : status.files.filter((f) => f.untracked && !f.path.endsWith('/')).map((f) => f.path);
+  const added = [];
+  for (const file of untracked.slice(0, PR_UNTRACKED)) {
+    added.push(await git(root, ['diff', '--no-index', '--no-ext-diff', '--', '/dev/null', file], { ok: [0, 1] }).catch(() => ''));
+  }
+  return {
+    root,
+    branch: status.branch,
+    base: base.replace(/^origin\//, ''),
+    mergeBase,
+    committed,
+    uncommitted: status.files.length,
+    commits,
+    count,
+    diff: diff + added.join(''),
+    more: Math.max(0, untracked.length - PR_UNTRACKED),
+  };
 }
 
 /** @param {unknown} files */
@@ -1376,10 +1423,10 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (req.method === 'GET' && (path === '/git' || path === '/git/diff')) {
+  if (req.method === 'GET' && (path === '/git' || path === '/git/diff' || path === '/git/pr')) {
     const params = new URL(/** @type {string} */ (req.url), 'http://terminal').searchParams;
     try {
-      const body = path === '/git' ? await gitStatus(params.get('path') ?? '') : await gitDiff(params);
+      const body = path === '/git' ? await gitStatus(params.get('path') ?? '') : path === '/git/pr' ? await gitPullRequest(params) : await gitDiff(params);
       res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(body));
     } catch (err) {
       res.writeHead(400, cors).end(/** @type {Error} */ (err).message);

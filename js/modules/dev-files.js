@@ -12,9 +12,10 @@ import { highlight, languageOf, languageLabel } from '../highlight.js';
 
 /**
  * @typedef {{ loading?: boolean, full?: string, entries?: RunnerFolder['entries'], error?: string }} Folder
- * @typedef {{ path: string, name: string, title?: string, file?: string, load?: () => Promise<GitDiff> }} TabInfo
+ * @typedef {{ path: string, name: string, title?: string, file?: string, load?: () => Promise<GitDiff>, icon?: IconName,
+ *   read?: () => Promise<unknown>, draw?: (tab: FileTab) => HTMLElement, meta?: (tab: FileTab) => string }} TabInfo
  * @typedef {TabInfo & { loading: boolean, scroll: number, goto: number, error?: string, el?: HTMLElement | null, size?: number, text?: string, binary?: boolean,
- *   tooLarge?: boolean, diff?: string, commit?: GitDiff['commit'], lines?: number, files?: number }} FileTab
+ *   tooLarge?: boolean, diff?: string, commit?: GitDiff['commit'], lines?: number, files?: number, data?: unknown }} FileTab
  */
 
 // Folders nobody reads in an explorer, and that can hold many thousands of files.
@@ -85,6 +86,12 @@ export const openFile = (ctx, path, { reload = false, line = 0 } = {}) => openTa
 /** @type {(ctx: DevContext, tab: { key: string, name: string, title: string, file?: string, load: () => Promise<GitDiff> }) => Promise<void>} */
 export const openDiff = (ctx, { key, name, title, file = '', load }) => openTab(ctx, { path: key, name, title, file, load }, { reload: true });
 
+// A view of its own in a tab (the pull request): `read` answers its data, kept as the tab's `data`; `draw` builds
+// the view from the tab once per read, and sets the tab's `scroll` from its scrolling part (a .code-view) to keep it.
+// `meta` is the text by the title. Opening it again reads it again.
+/** @type {(ctx: DevContext, tab: { key: string, name: string, title: string, icon: IconName, read: () => Promise<unknown>, draw: (tab: FileTab) => HTMLElement, meta?: (tab: FileTab) => string }) => Promise<void>} */
+export const openView = (ctx, { key, ...tab }) => openTab(ctx, { path: key, ...tab }, { reload: true });
+
 /** @param {DevContext} ctx @param {TabInfo} tab @param {{ reload: boolean, line?: number }} options */
 async function openTab(ctx, tab, { reload, line = 0 }) {
   let file = state.tabs.find((f) => f.path === tab.path);
@@ -101,7 +108,8 @@ async function openTab(ctx, tab, { reload, line = 0 }) {
   file.loading = true;
   ctx.refresh();
   try {
-    if (file.load) Object.assign(file, await file.load(), { error: '', el: null });
+    if (file.read) Object.assign(file, { data: await file.read(), error: '', el: null });
+    else if (file.load) Object.assign(file, await file.load(), { error: '', el: null });
     else {
       const read = await readFile(ctx.base(), file.path);
       Object.assign(file, { size: read.size, text: read.text, binary: read.binary, tooLarge: read.tooLarge, error: '', el: null });
@@ -192,9 +200,73 @@ function codeView(file) {
   return file.el;
 }
 
+/**
+ * One file of a unified diff: its path (and the old one on a rename), git's letter (A, D, R or M), whether it is
+ * binary, its lines from the first hunk on, and how many lines it adds and removes.
+ * @typedef {{ name: string, from?: string, status: string, binary: boolean, lines: string[], adds: number, dels: number }} DiffFile
+ */
+
+// A unified diff split by file. The lines before a file's first hunk only say what happened to it.
+/** @param {string} text @returns {DiffFile[]} */
+export function splitDiff(text) {
+  /** @type {DiffFile[]} */
+  const files = [];
+  /** @type {DiffFile | null} */
+  let file = null;
+  const lines = text.split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  for (const line of lines) {
+    if (line.startsWith('diff --')) {
+      file = { name: / b\/(.*)$/.exec(line)?.[1] ?? line, status: 'M', binary: false, lines: [], adds: 0, dels: 0 };
+      files.push(file);
+    } else if (!file) {
+      continue;
+    } else if (!file.lines.length && !line.startsWith('@@')) {
+      if (line.startsWith('new file mode')) file.status = 'A';
+      else if (line.startsWith('deleted file mode')) file.status = 'D';
+      else if (line.startsWith('rename from ')) [file.status, file.from] = ['R', line.slice(12)];
+      else if (line.startsWith('rename to ')) file.name = line.slice(10);
+      else if (line.startsWith('+++ b/')) file.name = line.slice(6);
+      else if (line.startsWith('Binary files ')) file.binary = true;
+    } else {
+      file.lines.push(line);
+      if (line[0] === '+') file.adds++;
+      else if (line[0] === '-') file.dels++;
+    }
+  }
+  return files;
+}
+
+/** @type {(cls: string, a: number | string, b: number | string, sign: string, content: Child) => HTMLElement} */
+const diffRow = (cls, a, b, sign, content) => h('div', { class: `code-line ${cls}` },
+  h('span', { class: 'ln', 'aria-hidden': 'true' }, a),
+  h('span', { class: 'ln', 'aria-hidden': 'true' }, b),
+  h('span', { class: 'lc' }, h('span', { class: 'diff-sign', 'aria-hidden': 'true' }, sign), content));
+
+// A file's hunks as rows, each line with its old and new numbers; `last` is the largest number, for the gutter.
+/** @param {string[]} lines @param {string} lang */
+export function diffRows(lines, lang) {
+  /** @type {HTMLElement[]} */
+  const rows = [];
+  let oldN = 0;
+  let newN = 0;
+  // Each line is coloured on its own: a hunk starts anywhere, so a comment opened above it is not seen.
+  const coloured = (/** @type {string} */ text) => (highlight(text, lang)[0] ?? []).map(([cls, t]) => (cls ? h('span', { class: `tok-${cls}` }, t) : t));
+  for (const line of lines) {
+    if (line.startsWith('@@')) {
+      const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(line);
+      if (m) [oldN, newN] = [Number(m[1]), Number(m[2])];
+      rows.push(diffRow('diff-hunk', '', '', '', line));
+    } else if (line.startsWith('+')) rows.push(diffRow('diff-add', '', newN++, '+', coloured(line.slice(1))));
+    else if (line.startsWith('-')) rows.push(diffRow('diff-del', oldN++, '', '-', coloured(line.slice(1))));
+    else if (line.startsWith(' ')) rows.push(diffRow('diff-ctx', oldN++, newN++, ' ', coloured(line.slice(1))));
+    else if (line) rows.push(diffRow('diff-meta', '', '', '', line));
+  }
+  return { rows, last: Math.max(oldN, newN) };
+}
+
 // A unified diff as rows: each file's name (in a commit), its hunks, and lines with their old and new numbers.
 const DIFF_MAX_LINES = 20000;
-const DIFF_HEADER = /^(index |--- |\+\+\+ |old mode|new mode|similarity index|dissimilarity index|copy from|copy to)/;
 /** @param {FileTab & { diff: string }} file */
 function diffView(file) {
   if (file.el) return file.el;
@@ -202,44 +274,25 @@ function diffView(file) {
   const rows = [];
   const lines = file.diff.split('\n');
   if (lines.at(-1) === '') lines.pop();
-  let oldN = 0;
-  let newN = 0;
-  let lang = languageOf(file.name);
-  let files = 0;
-  /** @type {(cls: string, a: number | string, b: number | string, sign: string, content: Child) => HTMLElement} */
-  const row = (cls, a, b, sign, content) => h('div', { class: `code-line ${cls}` },
-    h('span', { class: 'ln', 'aria-hidden': 'true' }, a),
-    h('span', { class: 'ln', 'aria-hidden': 'true' }, b),
-    h('span', { class: 'lc' }, h('span', { class: 'diff-sign', 'aria-hidden': 'true' }, sign), content));
-  // Each line is coloured on its own: a hunk starts anywhere, so a comment opened above it is not seen.
-  const coloured = (/** @type {string} */ text) => (highlight(text, lang)[0] ?? []).map(([cls, t]) => (cls ? h('span', { class: `tok-${cls}` }, t) : t));
-  for (const line of lines.slice(0, DIFF_MAX_LINES)) {
-    if (line.startsWith('diff --')) {
-      files++;
-      const name = / b\/(.*)$/.exec(line)?.[1] ?? line;
-      lang = languageOf(baseName(name));
-      if (file.commit) rows.push(h('div', { class: 'code-line diff-file' }, h('span', { class: 'ln' }), h('span', { class: 'ln' }), h('span', { class: 'lc' }, name)));
-    } else if (line.startsWith('@@')) {
-      const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(line);
-      if (m) [oldN, newN] = [Number(m[1]), Number(m[2])];
-      rows.push(row('diff-hunk', '', '', '', line));
-    } else if (DIFF_HEADER.test(line)) {
-      continue;
-    } else if (line.startsWith('+')) rows.push(row('diff-add', '', newN++, '+', coloured(line.slice(1))));
-    else if (line.startsWith('-')) rows.push(row('diff-del', oldN++, '', '-', coloured(line.slice(1))));
-    else if (line.startsWith(' ')) rows.push(row('diff-ctx', oldN++, newN++, ' ', coloured(line.slice(1))));
-    else if (line) rows.push(row('diff-meta', '', '', '', line));
+  let last = 0;
+  const files = splitDiff(lines.slice(0, DIFF_MAX_LINES).join('\n'));
+  for (const f of files) {
+    if (file.commit) rows.push(h('div', { class: 'code-line diff-file' }, h('span', { class: 'ln' }), h('span', { class: 'ln' }), h('span', { class: 'lc' }, f.name)));
+    if (f.binary) rows.push(diffRow('diff-meta', '', '', '', 'Binary file changed.'));
+    const drawn = diffRows(f.lines, languageOf(baseName(f.name)));
+    rows.push(...drawn.rows);
+    last = Math.max(last, drawn.last);
   }
-  if (lines.length > DIFF_MAX_LINES) rows.push(row('diff-meta', '', '', '', `${lines.length - DIFF_MAX_LINES} more lines not shown.`));
+  if (lines.length > DIFF_MAX_LINES) rows.push(diffRow('diff-meta', '', '', '', `${lines.length - DIFF_MAX_LINES} more lines not shown.`));
   file.lines = lines.length;
-  file.files = files;
+  file.files = files.length;
   const head = file.commit
     ? h('div', { class: 'diff-commit' },
         h('p', { class: 'diff-commit-message' }, file.commit.message),
         h('p', { class: 'muted small' }, `${file.commit.author} · ${new Date(file.commit.at).toLocaleString()} · `, h('code', null, file.commit.hash.slice(0, 10))))
     : null;
   const body = rows.length
-    ? h('div', { class: 'code diff', style: { '--gutter': `${String(Math.max(oldN, newN)).length + 1}ch` } }, rows)
+    ? h('div', { class: 'code diff', style: { '--gutter': `${String(last).length + 1}ch` } }, rows)
     : h('p', { class: 'muted small ide-msg' }, 'No changes to show.');
   file.el = h('div', { class: 'code-view', tabindex: '0', onscroll: (/** @type {Event} */ e) => (file.scroll = /** @type {HTMLElement} */ (e.currentTarget).scrollTop) }, head, body);
   return file.el;
@@ -249,6 +302,12 @@ function diffView(file) {
 function fileBody(file) {
   if (file.loading && !file.el) return h('p', { class: 'muted small ide-msg' }, 'Reading…');
   if (file.error) return h('p', { class: 'small ide-msg tree-error' }, file.error);
+  if (file.draw) {
+    const el = file.el ??= file.draw(file);
+    const scroller = el.matches('.code-view') ? el : el.querySelector('.code-view');
+    if (scroller) requestAnimationFrame(() => (scroller.scrollTop = file.scroll));
+    return el;
+  }
   if (file.diff !== undefined) {
     const el = diffView(/** @type {FileTab & { diff: string }} */ (file));
     requestAnimationFrame(() => (el.scrollTop = file.scroll));
@@ -280,10 +339,10 @@ export function editor(ctx) {
   const root = state.folders.get(state.root)?.full ?? '';
   const shown = root && file.path.startsWith(root) ? file.path.slice(root.length).replace(/^[\\/]/, '') : file.path;
   const lang = languageOf(file.name);
-  const diffBar = file.load
+  const diffBar = file.load || file.read
     ? h('div', { class: 'file-bar' },
         h('code', { class: 'file-path', title: file.title }, file.title),
-        h('span', { class: 'muted small file-meta' }, file.commit ? `${file.files ?? 0} ${file.files === 1 ? 'file' : 'files'}` : ''),
+        h('span', { class: 'muted small file-meta' }, file.meta && !file.loading && !file.error ? file.meta(file) : file.commit ? `${file.files ?? 0} ${file.files === 1 ? 'file' : 'files'}` : ''),
         file.file ? h('button', { type: 'button', class: 'icon-btn', title: 'Open the file', 'aria-label': 'Open the file', onclick: () => openFile(ctx, /** @type {string} */ (file.file)) }, icon('file')) : null,
         h('button', { type: 'button', class: 'icon-btn', title: 'Read the changes again', 'aria-label': 'Reload the changes', onclick: () => openTab(ctx, file, { reload: true }) }, icon('refresh')))
     : null;
@@ -300,7 +359,7 @@ export function editor(ctx) {
               state.active = f.path;
               ctx.refresh();
             },
-          }, icon(f.load ? 'diff' : 'file'), f.name),
+          }, icon(f.icon ?? (f.load ? 'diff' : 'file')), f.name),
           h('button', { type: 'button', class: 'term-close', title: `Close ${f.name}`, 'aria-label': `Close ${f.name}`, onclick: () => closeFile(ctx, f) }, icon('x'))))),
     diffBar ?? h('div', { class: 'file-bar' },
       h('code', { class: 'file-path', title: file.path }, shown.split(/[\\/]/).join(' › ')),

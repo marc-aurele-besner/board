@@ -1,5 +1,5 @@
 // The Dev section's calls to the command runner on this machine (tools/terminal.js, started by `bun start`).
-/** @import { RunnerInfo, RunnerSessionList, RunnerStatus, RunnerFolder, RunnerFile, RunnerEvent, RunnerRun, RunnerRemoved, RunnerClaudeExit, RunnerWorktrees, RunnerSkills, RunnerOutcome, WorktreeUsage, GitStatus, GitDiff, RunnerSearch } from '../types/terminal' */
+/** @import { RunnerInfo, RunnerSessionList, RunnerStatus, RunnerFolder, RunnerFile, RunnerEvent, RunnerRun, RunnerRemoved, RunnerClaudeExit, RunnerWorktrees, RunnerSkills, RunnerOutcome, WorktreeUsage, GitStatus, GitDiff, GitPullRequest, RunnerSearch } from '../types/terminal' */
 /** @import { DevSession, DevSessionList } from '../types/data' */
 export const TERMINAL_RUNNER = 'http://127.0.0.1:8419';
 
@@ -219,6 +219,11 @@ export const gitStatus = async (base, path) => (await call(base, `/git?path=${en
 // Numbers in `params` (staged: 1) are sent as text.
 /** @type {(base: string, params: Record<string, string | number>) => Promise<GitDiff>} */
 export const gitDiff = async (base, params) => (await call(base, `/git/diff?${new URLSearchParams(/** @type {Record<string, string>} */ (params))}`)).json();
+
+// What the folder's branch changes against the default branch, as a pull request: its commits and one diff of
+// every file, uncommitted and new ones too unless `committed`.
+/** @type {(base: string, path: string, committed?: boolean) => Promise<GitPullRequest>} */
+export const gitPullRequest = async (base, path, committed = false) => (await call(base, `/git/pr?${new URLSearchParams({ path, ...(committed ? { committed: '1' } : {}) })}`)).json();
 
 // Changes the repository: stage, unstage, discard, commit, fetch, pull, push, checkout, branch or init.
 /** @type {(base: string, path: string, action: string, body?: object) => Promise<{ ok: boolean }>} */
