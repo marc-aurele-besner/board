@@ -73,6 +73,19 @@ export interface DevModelUsage {
   extraCost?: number | null;
 }
 
+// One prompt of a claude session and how it went. Times in ms: `at` when it was sent, `end` claude's last reply to it.
+export interface DevTurn {
+  // The prompt's start, cut short.
+  text: string;
+  at: number;
+  end: number;
+  // Of the turn, the time spent waiting on the user's answer to a question or a plan.
+  wait: number;
+  // Since the session's previous turn ended: the user reading, reviewing and writing the prompt. 0 for a first turn.
+  review: number;
+  interrupted?: boolean;
+}
+
 // A worktree's claude sessions. Records only remembered (no transcript read yet) have just name, cwd, added and taskIds.
 export interface DevUsage {
   name: string;
@@ -101,6 +114,8 @@ export interface DevUsage {
   // Times (ms) of the first and last reply.
   start?: number | null;
   end?: number | null;
+  // The prompts, oldest first, the latest ones kept. Lacking in records read before turns were kept.
+  turns?: DevTurn[];
 }
 
 export interface UsageData {

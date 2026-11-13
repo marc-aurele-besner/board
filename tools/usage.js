@@ -4,7 +4,7 @@
 // keeps a session's transcript under the worktree's folder name, and moves it under the repo's once the worktree
 // is removed, so both places are read.
 // CLAUDE_CONFIG_DIR moves Claude's folder, as it does for Claude itself.
-/** @import { DevModelUsage } from '../types/data' */
+/** @import { DevModelUsage, DevTurn } from '../types/data' */
 /** @import { SessionArtifact, SessionAsk, SessionTurn, WorktreeUsage } from '../types/terminal' */
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -418,7 +418,7 @@ async function usageOf({ name, cwd }) {
   ]);
   const billing = await loginBilling();
   /** @type {Required<WorktreeUsage>} */
-  const sum = { sessions: 0, billing, models: {}, cost: null, extraCost: null, duration: 0, apiDuration: 0, linesAdded: 0, linesRemoved: 0, efforts: {}, replies: 0, start: null, end: null, skills: {}, mcp: {} };
+  const sum = { sessions: 0, billing, models: {}, cost: null, extraCost: null, duration: 0, apiDuration: 0, linesAdded: 0, linesRemoved: 0, efforts: {}, replies: 0, start: null, end: null, skills: {}, mcp: {}, turns: [] };
   const seen = new Set();
   for (const file of files) {
     // The same session may sit in both folders while Claude moves it.
@@ -437,9 +437,28 @@ async function usageOf({ name, cwd }) {
     for (const [k, n] of Object.entries(t.mcp)) sum.mcp[k] = (sum.mcp[k] ?? 0) + n;
     if (t.start !== null) sum.start = sum.start === null ? t.start : Math.min(sum.start, t.start);
     if (t.end !== null) sum.end = sum.end === null ? t.end : Math.max(sum.end, t.end);
+    sum.turns.push(...turnLog(t.turns));
   }
+  sum.turns = sum.turns.sort((a, b) => a.at - b.at).slice(-TURNS_LOGGED);
   return sum.sessions ? sum : null;
 }
+
+// A session's turns as usage.json keeps them: the prompt cut short, the time waiting on the user within the turn, and
+// the time the user took since the previous turn ended (reading claude's answer, reviewing, writing the next prompt).
+/** @param {SessionTurn[]} turns @returns {DevTurn[]} */
+function turnLog(turns) {
+  return turns.map((t, i) => {
+    const end = Math.max(t.at, t.end);
+    const wait = t.waits.reduce((s, w) => s + Math.max(0, Math.min(w.end || end, end) - w.at), 0);
+    const prev = turns[i - 1];
+    /** @type {DevTurn} */
+    const out = { text: t.text.replace(/\s+/g, ' ').trim().slice(0, TURN_TEXT), at: t.at, end, wait, review: prev ? Math.max(0, t.at - prev.end) : 0 };
+    if (t.interrupted) out.interrupted = true;
+    return out;
+  });
+}
+const TURNS_LOGGED = 200;
+const TURN_TEXT = 120;
 
 // [{ name, cwd }] → { [name]: usage }; worktrees with no transcript are left out.
 /** @param {unknown} list [{ name, cwd }], checked here: it comes from a request @returns {Promise<Record<string, WorktreeUsage>>} */
