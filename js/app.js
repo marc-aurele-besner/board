@@ -15,6 +15,7 @@ import { CALENDAR, CALENDAR_DEFAULTS } from './gcal.js';
 import { GITHUB, GITHUB_DEFAULTS, useGithubStore } from './github.js';
 import { NPM, NPM_DEFAULTS, useNpmStore } from './npm.js';
 import { WEBSTATS, WEBSTATS_DEFAULTS } from './webstats.js';
+import { SOCIALS, SOCIALS_DEFAULTS } from './socials.js';
 import { FX, FX_DEFAULTS, useFxStore } from './fx.js';
 import { JUMPS, openShortcuts } from './shortcuts.js';
 import { sampleFolder } from './sample.js';
@@ -74,6 +75,8 @@ const collectionDefaults = () => ({
   [GITHUB]: GITHUB_DEFAULTS,
   [NPM]: NPM_DEFAULTS,
   [WEBSTATS]: WEBSTATS_DEFAULTS,
+  // The X and LinkedIn accounts and their follower counts (Settings, Monitoring → Socials).
+  [SOCIALS]: SOCIALS_DEFAULTS,
   [FX]: FX_DEFAULTS,
 });
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);

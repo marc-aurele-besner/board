@@ -87,6 +87,7 @@
   "netlify": { "token": "" },
   "analytics": { "properties": { "project-1": "123456789" } },
   "bing": { "key": "", "relay": "" },
+  "linkedin": { "liAt": "", "jsessionid": "" },
   "resend": { "relay": "", "keys": { "project-1": "" } },
   "gmail": {
     "accounts": [

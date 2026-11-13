@@ -126,6 +126,12 @@ export interface AnalyticsSettings {
   properties: Record<string, string>;
 }
 
+// The signed-in LinkedIn session that reads company pages (Settings → LinkedIn): the li_at and JSESSIONID cookies.
+export interface LinkedinSettings {
+  liAt?: string;
+  jsessionid?: string;
+}
+
 export interface BingSettings {
   key: string;
   // Old: no longer read; Settings drops it when the key is saved.
@@ -225,6 +231,7 @@ export interface Settings {
   netlify?: DeploySettings;
   analytics: AnalyticsSettings;
   bing: BingSettings;
+  linkedin?: LinkedinSettings;
   resend: ResendSettings;
   gmail: GmailSettings;
   gcal: GcalSettings;

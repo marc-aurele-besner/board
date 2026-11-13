@@ -1,0 +1,26 @@
+{
+  "accounts": [
+    {
+      "id": "soc-1",
+      "network": "x",
+      "handle": "example",
+      "projectId": "proj-1",
+      "name": "Example",
+      "image": "https://example.com/avatar.png",
+      "followers": 1240,
+      "following": 180,
+      "at": 1762896400000,
+      "error": null
+    },
+    {
+      "id": "soc-2",
+      "network": "linkedin",
+      "handle": "company/example",
+      "projectId": null,
+      "error": "LinkedIn shows company pages only to a signed-in session."
+    }
+  ],
+  "history": {
+    "soc-1": { "2026-11-11": 1221, "2026-11-12": 1232, "2026-11-13": 1240 }
+  }
+}
