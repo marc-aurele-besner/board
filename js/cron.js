@@ -8,7 +8,7 @@ import { calendarEvents, calendarAccounts, eventDate } from './gcal.js';
 import { sitesOf, siteData } from './automations.js';
 import { readPageText } from './sitecheck.js';
 import { openPositions } from './defi/positions-read.js';
-import { devPresets, devCommandOf, runnerOf, startRunnerSession } from './dev-core.js';
+import { devPresets, devCommandOf, runnerOf, startRunnerSession, withClaudeOptions } from './dev-core.js';
 import { sessionStatus, sessionOutcome, exitClaude } from './terminal.js';
 import { forgetWorktree } from './task-worktrees.js';
 import { findGithubLinks, plainOutput, addTaskLinks, prsOf } from './task-links.js';
@@ -97,6 +97,10 @@ function stepDevCommand(store, step) {
   return preset.command;
 }
 
+// The model and effort a Dev step picks for claude; unset ones keep the command's own.
+/** @param {CronStep} step */
+const stepClaudeOptions = (step) => ({ model: step.model ?? '', effort: step.effort ?? '' });
+
 // The command a Dev step runs before its prompt, to show it in the editor.
 /**
  * @param {DataStore} store
@@ -106,7 +110,8 @@ function stepDevCommand(store, step) {
 export function devCommandPreview(store, flow, step) {
   if (step.mode === 'command') return '';
   try {
-    return stepDevCommand(store, step) || devCommandOf(store, store.get('projects').projects.find((p) => p.id === withFlowProject(flow, step).projectId));
+    const command = stepDevCommand(store, step) || devCommandOf(store, store.get('projects').projects.find((p) => p.id === withFlowProject(flow, step).projectId));
+    return withClaudeOptions(command, stepClaudeOptions(step));
   } catch (err) {
     return /** @type {Error} */ (err).message;
   }
@@ -2064,11 +2069,11 @@ async function runDev(store, flow, step, input, vars, ctx) {
   if (ctx.dry && !ctx.live) {
     const how = devCommand ? `start “${devCommand.trim()}” with this prompt` : claude ? 'hand this prompt to the project’s Dev command' : 'run this command';
     ctx.note = `Test run: would ${how} in a new Dev terminal, in ${where}${waits ? ', then wait for it and pass on its branch, commit, files and PR' : ''}.`;
-    ctx.data = { ...(claude ? { devCommand: devCommand || null, prompt } : { command }), folder: where, ...(waits ? { ...OUTCOME_SHAPE, ...(json ? { json: {} } : {}) } : {}) };
+    ctx.data = { ...(claude ? { devCommand: devCommand || null, ...stepClaudeOptions(step), prompt } : { command }), folder: where, ...(waits ? { ...OUTCOME_SHAPE, ...(json ? { json: {} } : {}) } : {}) };
     return claude ? prompt : command;
   }
   // Cast until js/dev-core.js is checked: it infers taskIds as never[] from its default.
-  const { id, n, worktree } = await devStarter(/** @type {Parameters<typeof startRunnerSession>[0]} */ ({ store, claude, prompt, command, devCommand, projectId, taskIds: task ? [task.id] : [], title: task?.text || flow.name }));
+  const { id, n, worktree } = await devStarter(/** @type {Parameters<typeof startRunnerSession>[0]} */ ({ store, claude, prompt, command, devCommand, ...(claude ? stepClaudeOptions(step) : {}), projectId, taskIds: task ? [task.id] : [], title: task?.text || flow.name }));
   if (task) {
     store.update('todos', (d) => {
       const t = d.items.find((x) => x.id === task.id);

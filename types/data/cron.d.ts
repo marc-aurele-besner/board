@@ -108,6 +108,9 @@ export interface CronStep {
   max?: number;
   preset?: string;
   devCommand?: string;
+  // dev: claude's --model alias and --effort level; missing keeps the command's own.
+  model?: string;
+  effort?: string;
   command?: string;
   waitMinutes?: number;
   // Whether the run waits for the terminal; missing means wait unless it is the last step.
