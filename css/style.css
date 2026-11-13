@@ -3123,6 +3123,8 @@ button.cal-agenda-name:hover { color: var(--accent); }
 .term-name > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .term-name .icon { width: 13px; height: 13px; flex: none; }
 .term-name .term-dot { flex: none; }
+/* The claude buttons are drawn again in place as its counts change; their box takes no part in the bar's layout. */
+.term-claude { display: contents; }
 /* The turns of the shown claude: a count and a dot for where the last one stands. */
 .term-turns, .term-tool { flex: none; min-height: 0; display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border: none; border-radius: 6px; background: none; color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
 .term-turns:hover, .term-tool:hover { background: var(--surface-2); color: var(--text); }
