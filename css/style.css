@@ -598,6 +598,23 @@ body.project-dragging .project-list .root-drop { display: block; }
 .profile-text { font-size: 0.9rem; min-width: 0; overflow-wrap: anywhere; }
 .profile-text h4 { margin: 10px 0 2px; font-size: 0.9rem; }
 .profile-text h4:first-child { margin-top: 0; }
+
+/* Project brand: swatches, image cards, fonts and links */
+.brand-sub { margin: 4px 0 0; font-size: 0.85rem; }
+.brand-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+.brand-swatch { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.brand-chip { display: block; height: 44px; border-radius: var(--radius); border: 1px solid var(--border); }
+.brand-images { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.brand-image { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.brand-thumb { display: grid; place-items: center; height: 90px; padding: 8px; border-radius: var(--radius); border: 1px solid var(--border);
+  /* A checkerboard, so transparent and white logos both show. */
+  background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface) 0 50%) 0 0 / 16px 16px; }
+.brand-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.brand-thumb-none { color: var(--muted); font-size: 1.4rem; }
+.brand-addr { overflow-wrap: anywhere; }
+.brand-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.brand-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; }
+.brand-font { font-size: 1.05rem; }
 .profile-edit { width: 100%; min-height: 240px; font-family: var(--mono, ui-monospace, monospace); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .dropzone { border: 1.5px dashed var(--border); border-radius: var(--radius); padding: 18px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; cursor: pointer; background: var(--surface); }

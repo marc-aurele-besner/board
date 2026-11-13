@@ -24,6 +24,7 @@ import { pickFolder } from '../folder-picker.js';
 import { openDialog } from '../modal.js';
 import { buildProfile, profileOf, hasProfileSources, profilesFor } from '../profile.js';
 import { fmtCost } from '../dev-usage.js';
+import { brandBlock } from './project-brand.js';
 import { PALETTE, makeProject, createProject } from '../projects-core.js';
 
 export { makeProject, createProject };
@@ -1184,6 +1185,7 @@ function projectView(store, p, items, categories) {
     p.github.repos.length ? repoTable(store, p) : null,
     npmOf(p).org || npmOf(p).packages.length ? npmTable(store, p) : null,
     profileBlock(store, p),
+    brandBlock(store, p),
     overviewBlock(store, p),
     triageBlock(store, p));
 }
