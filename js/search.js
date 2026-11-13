@@ -10,7 +10,7 @@ export const SETTINGS = [['github', 'GitHub'], ['openrouter', 'OpenRouter'], ['g
 
 // [key, label, icon], in the order the page lists them.
 /** @type {[string, string, IconName][]} */
-export const GROUPS = [['tasks', 'Tasks', 'check-square'], ['projects', 'Projects', 'folder'], ['recipes', 'Recipes', 'chef-hat'], ['sections', 'Sections', 'home'], ['settings', 'Settings', 'settings']];
+export const GROUPS = [['tasks', 'Tasks', 'check-square'], ['projects', 'Projects', 'folder'], ['contacts', 'Contacts', 'users'], ['recipes', 'Recipes', 'chef-hat'], ['sections', 'Sections', 'home'], ['settings', 'Settings', 'settings']];
 
 // Every word has to appear somewhere in the text.
 /** @param {string} q @param {string} text */
@@ -47,6 +47,11 @@ export function searchAll(store, modules, query) {
   }
   for (const p of projects) {
     if (wordsIn(q, `${p.name} ${p.description ?? ''} ${p.profile?.text ?? ''}`)) out.projects.push({ label: p.name, hint: p.description ?? '', iconName: 'folder', href: `#/projects?project=${p.id}` });
+  }
+  // A contact opens the full list, searched for its name.
+  for (const c of store.get('contacts')?.contacts ?? []) {
+    const hint = [c.headline, c.company, ...(c.emails ?? [])].filter(Boolean).join(' · ');
+    if (wordsIn(q, `${c.name} ${hint} ${c.linkedin ?? ''}`)) out.contacts.push({ label: c.name, hint, iconName: 'users', href: `#/projects?${new URLSearchParams({ mode: 'people', who: c.name })}` });
   }
   for (const r of store.get('recipes').recipes) {
     if (wordsIn(q, `${r.title} ${(r.tags ?? []).join(' ')} ${(r.ingredients ?? []).join(' ')}`)) {

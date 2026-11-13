@@ -88,6 +88,9 @@ function itemsFor(store, modules, query) {
   add('Keyboard shortcuts', 'Help', 'info', openShortcuts);
   for (const [key, label] of SETTINGS) add(`Settings: ${label}`, 'Go to', 'settings', go(`#/settings?section=${key}`));
   for (const p of store.get('projects').projects) add(p.name, 'Project', 'folder', go(`#/projects?project=${p.id}`));
+  if (q) {
+    for (const c of store.get('contacts')?.contacts ?? []) add(c.name, 'Contact', 'users', go(`#/projects?${new URLSearchParams({ mode: 'people', who: c.name })}`));
+  }
   for (const r of store.get('recipes').recipes) add(r.title, 'Recipe', 'chef-hat', go(`#/kitchen?recipe=${r.id}`));
   if (q) {
     for (const t of store.get('todos').items) {
