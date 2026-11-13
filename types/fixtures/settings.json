@@ -83,6 +83,8 @@
     }
   ],
   "telegram": { "token": "", "chatId": "", "confirm": true, "offset": 0 },
+  "vercel": { "token": "" },
+  "netlify": { "token": "" },
   "analytics": { "properties": { "project-1": "123456789" } },
   "bing": { "key": "", "relay": "" },
   "resend": { "relay": "", "keys": { "project-1": "" } },

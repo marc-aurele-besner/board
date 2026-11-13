@@ -107,6 +107,11 @@ export interface Contract {
   abi: AbiItem[];
 }
 
+// A Vercel or Netlify token (js/deployments.js): the runners read the PRs' deployments with it.
+export interface DeploySettings {
+  token: string;
+}
+
 export interface TelegramSettings {
   token: string;
   chatId: string;
@@ -216,6 +221,8 @@ export interface Settings {
   blockchains: BlockchainsSettings;
   contracts: Contract[];
   telegram: TelegramSettings;
+  vercel?: DeploySettings;
+  netlify?: DeploySettings;
   analytics: AnalyticsSettings;
   bing: BingSettings;
   resend: ResendSettings;

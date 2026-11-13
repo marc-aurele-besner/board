@@ -28,8 +28,24 @@ export interface PreviewItem {
   // The provider's project or site; may be empty.
   name: string;
   url: string;
-  // 'ready', 'building', 'failed', 'canceled' or ''.
+  // 'ready', 'queued', 'building', 'failed', 'canceled' or ''.
   state: string;
+  // The fields below come only from the provider's API (js/deployments.js), read with a Vercel or Netlify token.
+  // The Vercel deployment ('dpl_…') or Netlify deploy; with it, the board can read the build log.
+  id?: string;
+  // The Vercel team of the project; missing for a personal project.
+  team?: string;
+  // The Netlify site.
+  site?: string;
+  // The deployment's page on Vercel or Netlify.
+  inspect?: string;
+  // Why the build failed or was canceled.
+  error?: string;
+  // The commit deployed.
+  sha?: string;
+  // Times (ms) the deployment was created and became ready.
+  created?: number;
+  ready?: number;
 }
 
 export interface PrPreviews {
@@ -38,6 +54,8 @@ export interface PrPreviews {
   at: number;
   // Time (ms) of the first read.
   first: number;
+  // The PR's head branch, read once a Vercel or Netlify token is set.
+  branch?: string;
 }
 
 // Whether an issue or PR linked to a task is open (js/link-states.js).
