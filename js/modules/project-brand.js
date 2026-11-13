@@ -75,6 +75,11 @@ function imageThumb(store, value) {
     src,
     alt: '',
     loading: 'lazy',
+    // Its real size shows in the corner, so a favicon and a share image read at a glance.
+    onload: (/** @type {Event & { target: HTMLImageElement }} */ e) => {
+      const size = e.target.parentElement?.querySelector('.brand-size');
+      if (size && e.target.naturalWidth) size.textContent = `${e.target.naturalWidth} × ${e.target.naturalHeight}`;
+    },
     onerror: (/** @type {Event & { target: HTMLImageElement }} */ e) => e.target.replaceWith(h('span', { class: 'brand-thumb-none' }, icon('image'))),
   });
   if (isUrl(value)) return img(value);
@@ -110,7 +115,7 @@ function brandDisplay(store, brand) {
       h('span', { class: 'small' }, c.label || ' '),
       copyable(c.value))))) : null,
     brand.images.length ? group('Images', h('div', { class: 'brand-images' }, brand.images.map((i) => h('div', { class: 'brand-image' },
-      h('div', { class: 'brand-thumb' }, imageThumb(store, i.value)),
+      h('div', { class: 'brand-thumb' }, imageThumb(store, i.value), h('span', { class: 'brand-size' })),
       h('strong', { class: 'small' }, i.label || nameOf(i.value)),
       target(i.value))))) : null,
     brand.fonts.length ? group('Fonts', h('ul', { class: 'brand-list' }, brand.fonts.map((f) => h('li', null,
