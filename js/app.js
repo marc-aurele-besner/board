@@ -75,7 +75,7 @@ const collectionDefaults = () => ({
   [GITHUB]: GITHUB_DEFAULTS,
   [NPM]: NPM_DEFAULTS,
   [WEBSTATS]: WEBSTATS_DEFAULTS,
-  // The X and LinkedIn accounts and their follower counts (Settings, Monitoring → Socials).
+  // The X, LinkedIn, GitHub and Instagram accounts and their follower counts (Settings, Monitoring → Socials).
   [SOCIALS]: SOCIALS_DEFAULTS,
   [FX]: FX_DEFAULTS,
 });

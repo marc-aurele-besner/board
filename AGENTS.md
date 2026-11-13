@@ -52,9 +52,9 @@ js/profile.js         a project's saved profile: reads its folder, commits, repo
 js/brand.js           a project's brand (images, colours, fonts, links): reads its folder and site's head tags, asks the model, adds what is new
 js/modules/project-brand.js  the Brand block of a project's page: swatches, images, fonts, links, editing and Find with AI
 js/chart.js           SVG bar and line charts with a hover tooltip
-js/socials.js         the X, LinkedIn and GitHub accounts, their follower (and GitHub star) history in socials.json; parsing a handle or profile link (no DOM)
-js/modules/settings-socials.js  Settings → X / Twitter, LinkedIn and GitHub accounts: accounts, their projects, LinkedIn’s session; Read now
-js/modules/monitoring-socials.js  Monitoring → Socials: followers (and GitHub stars) now, growth over the period, a line per account, Read now
+js/socials.js         the X, LinkedIn, GitHub and Instagram accounts, their follower (and GitHub star) history in socials.json; parsing a handle or profile link (no DOM)
+js/modules/settings-socials.js  Settings → X / Twitter, LinkedIn, GitHub and Instagram accounts: accounts, their projects, LinkedIn’s session; Read now
+js/modules/monitoring-socials.js  Monitoring → Socials (X, LinkedIn, GitHub, Instagram): followers (and GitHub stars) now, growth over the period, a line per account, Read now
 js/chains.js          every chain the board reads: the built-in ones and those added in Settings → Blockchains
 js/abi.js             Solidity ABI encoding and decoding: calls, answers and event logs
 js/contracts.js       saved smart contracts: reads through the node, writes through the browser wallet, activity
@@ -121,7 +121,7 @@ tools/jobs/calendar.js  reads every shown calendar's window into calendar.json, 
 tools/jobs/monitoring.js  deadlines, budgets, site checks, status pages and the rules that make tasks, every 5 minutes
 tools/jobs/telegram.js  long-polls the bot and turns messages into tasks (a `loop` job: it starts again at once)
 tools/jobs/github.js, npm.js, webstats.js, fx.js  GitHub counts (github.json), npm packages (npm.json), Bing data (webstats.json), exchange rates (fx.json)
-tools/jobs/socials.js  reads X and LinkedIn follower counts from the profile pages (LinkedIn company pages with the saved session), GitHub followers and stars from its API
+tools/jobs/socials.js  reads X and LinkedIn follower counts from the profile pages (LinkedIn company pages with the saved session), GitHub followers and stars from its API, Instagram's from the link-preview page
 tools/jobs/dev-usage.js, worktrees.js  what claude sessions used; removing done tasks' worktrees through the command runner
 tools/jobs/defi.js    the DeFi jobs (positions, fee history, wallets, lending, hourly snapshots), run one at a time
 tools/jobs/cron.js    starts due Cron flows every minute, and one flow on Run now

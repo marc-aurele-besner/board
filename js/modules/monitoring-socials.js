@@ -1,4 +1,4 @@
-// Monitoring → Socials: the followers of each X, LinkedIn and GitHub account added in Settings (and a GitHub account's
+// Monitoring → Socials: the followers of each X, LinkedIn, GitHub and Instagram account added in Settings (and a GitHub account's
 // stars), and how they grew over the period. The runners read the counts a few times a day (tools/jobs/socials.js);
 // each day keeps its last read.
 import { h, icon, empty, notice, refreshIcon } from '../ui.js';
@@ -98,11 +98,12 @@ export function socialsTab(store, w) {
   if (!accounts.length) {
     return notice({
       tone: 'info',
-      text: 'No account followed yet. Add your X, LinkedIn and GitHub accounts in Settings, and their followers show here over time.',
+      text: 'No account followed yet. Add your X, LinkedIn, GitHub and Instagram accounts in Settings, and their followers show here over time.',
       actions: [
         h('a', { href: settingsHref('x'), class: 'btn-small primary-link' }, 'Add X accounts'),
         h('a', { href: settingsHref('linkedin'), class: 'btn-small primary-link' }, 'Add LinkedIn accounts'),
         h('a', { href: settingsHref('githubAccounts'), class: 'btn-small primary-link' }, 'Add GitHub accounts'),
+        h('a', { href: settingsHref('instagram'), class: 'btn-small primary-link' }, 'Add Instagram accounts'),
       ],
     });
   }
