@@ -142,7 +142,7 @@ function collections() {
     todos: {
       categories: [],
       items: [
-        task('t1', 'Ship the pricing page', 'doing', 'high', 'p-atlas', { due: day(0) }),
+        task('t1', 'Ship the pricing page', 'doing', 'high', 'p-atlas', { due: day(0), prs: [{ repo: 'example-org/atlas-site', number: 42, url: 'https://github.com/example-org/atlas-site/pull/42', title: 'Pricing page' }] }),
         task('t2', 'Fix the footer links', 'todo', 'none', 'p-atlas', { due: day(1) }),
         task('t3', 'Pick the bathroom tile', 'todo', 'high', 'p-reno', { due: day(-1) }),
         task('t4', 'Renew the domain example.com', 'todo', 'high', 'p-atlas', { due: day(21), auto: 'domain', autoRef: 'example.com', description: 'Created automatically: the domain expires soon.' }),
@@ -151,6 +151,19 @@ function collections() {
         task('t7', 'Book the plumber', 'done', 'none', 'p-reno'),
         task('t8', 'Buy oat milk', 'todo', 'low', null),
       ],
+    },
+    // The pricing task's PR, with the previews a Vercel and a Netlify token would read (js/previews.js).
+    github: {
+      repos: {},
+      previews: {
+        'example-org/atlas-site#42': {
+          at: Date.now(), first: Date.now() - 3600000, branch: 'feat/pricing', error: null,
+          items: [
+            { provider: 'vercel', name: 'atlas-site', url: 'https://atlas-site-git-feat-pricing.example.com', state: 'ready', id: 'dpl_sample', inspect: 'https://example.com/atlas-site/deployments', sha: '3f9c2a1b7d4e5f60718293a4b5c6d7e8f9012345', created: Date.now() - 50 * 60000, ready: Date.now() - 48 * 60000 },
+            { provider: 'netlify', name: 'atlas-docs', url: 'https://deploy-preview-42--atlas-docs.example.com', state: 'failed', id: 'sample-deploy', site: 'sample-site', inspect: 'https://example.com/atlas-docs/deploys', error: 'Build script returned non-zero exit code: 2', sha: '3f9c2a1b7d4e5f60718293a4b5c6d7e8f9012345', created: Date.now() - 50 * 60000 },
+          ],
+        },
+      },
     },
     recipes: {
       recipes: [
