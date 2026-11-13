@@ -781,7 +781,8 @@ body.project-dragging .project-list .root-drop { display: block; }
 }
 .tab.active { background: var(--surface-2); color: var(--text); font-weight: 600; }
 .topbar-end { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-.status { font-size: 0.85rem; color: var(--muted); }
+.status { display: inline-flex; align-items: center; color: var(--warn); font-size: 1.1rem; }
+.status[hidden] { display: none; }
 .theme-toggle { font-size: 1.15rem; }
 .theme-toggle:hover { color: var(--text); }
 .status.error { color: var(--danger); }
@@ -1677,7 +1678,7 @@ a { color: var(--accent); }
   .tabs { order: 3; flex-basis: 100%; }
   .topbar-end { margin-left: auto; width: auto; }
   .search-btn { width: auto; }
-  .search-btn .grow, .search-btn kbd, .topbar .status { display: none; }
+  .search-btn .grow, .search-btn kbd { display: none; }
 }
 
 /* The whole width of the screen is used; grids add columns as it grows. */

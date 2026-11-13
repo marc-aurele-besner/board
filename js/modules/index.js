@@ -19,4 +19,4 @@ import search from './search.js';
 
 // Each section's default export is also checked against Module where it is defined (@satisfies).
 /** @type {Module[]} */
-export const modules = [home, todos, inbox, calendar, slack, projects, kitchen, money, positions, monitoring, tools, dev, cron, settings, search];
+export const modules = [home, todos, inbox, calendar, slack, projects, kitchen, money, positions, monitoring, tools, cron, dev, settings, search];
