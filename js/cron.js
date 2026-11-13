@@ -17,6 +17,7 @@ import { buildProfile, profileOf, hasProfileSources } from './profile.js';
 import { findJson } from './json-extract.js';
 import { LINKEDIN, latestMetrics, engagement, postsBetween, followerChange } from './linkedin-core.js';
 import { SOCIALS, handleLabel } from './socials.js';
+import { upcomingMeetings } from './meetings.js';
 /** @import { DataStore, Store, CronStep, CronSource, CronFlow, CronSchedule, CronTemplate, CronRun, CronRunStep, CronRunCurrent, CronTest, CronPr, CronFormatField, LinkedinPost, Project, Task, DevPreset, SiteLogEntry, TaskLink, IconName } from '../types/data' */
 // The variables a step's templates read; $data holds what a name reads into with a path.
 /** @typedef {{ [name: string]: unknown, $data?: Record<string, unknown> }} Vars */
@@ -161,6 +162,7 @@ const NOTHING = {
   notifications: 'No unread notifications.',
   flow: 'That flow has no successful run yet.',
   linkedin: 'No LinkedIn account or post yet.',
+  meetings: 'No meeting with guests coming up.',
 };
 
 // [key, label, icon]
@@ -177,6 +179,7 @@ export const SOURCES = [
   ['income', 'Income this month', 'coins'],
   ['calendar', 'Calendar events today', 'calendar'],
   ['calendar-week', 'Calendar events in the next 7 days', 'calendar'],
+  ['meetings', 'Upcoming meetings with guests (contacts, last emails)', 'users'],
   ['inbox', 'Unread emails in the Inbox', 'inbox'],
   ['notifications', 'Unread notifications', 'bell'],
   ['sites', 'Site check problems (last 24 hours)', 'activity'],
@@ -238,6 +241,7 @@ export function sourceLabel(store, src) {
   if (src.source === 'page') return project ? `${project.name} website${src.url ? ` ${src.url}` : ''}` : src.url || 'Web page';
   if (src.source === 'history') return `Last ${src.count ?? 5} outputs of this flow`;
   if (src.source === 'linkedin') return `LinkedIn, last ${linkedinDays(src)} days${project ? ` (${project.name})` : ''}`;
+  if (src.source === 'meetings') return `Meetings with guests in the next ${meetingHours(src)} hours`;
   if (src.source === 'flow') return `Latest output of “${store.get(COLLECTION).flows.find((f) => f.id === src.flowId)?.name ?? 'a removed flow'}”`;
   return base;
 }
@@ -560,6 +564,21 @@ export const TEMPLATES = [
       },
       { type: 'notify', text: 'LinkedIn this week:\n{{step2}}' },
       { type: 'task', title: 'Next LinkedIn post: {{step2}}', description: '{{step2}}' },
+    ],
+  },
+  {
+    name: 'Meeting prep',
+    about: 'Every half hour in the workday, finds the meetings with guests in the next two hours and adds one task per meeting, due today in its calendar’s project, with a brief: who the guests are (from Contacts), the last emails with them, open points and questions to ask. The brief’s instructions are in Settings → Prompts.',
+    schedule: { every: 'interval', minutes: 30, from: '08:00', to: '19:00' },
+    steps: [
+      { type: 'gather', source: 'meetings', count: 2 },
+      { type: 'stop', when: 'nothing' },
+      // One task per meeting: a meeting already prepared in an earlier run is dropped here, before any AI call.
+      { type: 'dedupe', items: '{{input}}', text: '{{item.label}}', match: 'title', scope: 'flow' },
+      { type: 'stop', when: 'nothing' },
+      { type: 'loop', items: '{{input}}', span: 2 },
+      { type: 'ai', prompt: 'Prepare me for this meeting:\n\n{{item.text}}', promptId: 'meeting-prep' },
+      { type: 'task', title: '{{item.label}}', description: '{{input}}', projectId: '{{item.projectId}}', due: 'today', priority: 'medium' },
     ],
   },
 ];
@@ -1342,8 +1361,17 @@ async function gather(store, step, flow, vars = {}) {
     return rows.map((/** @type {PoolRow} */ r) => `- ${r.pair} on ${r.chain} #${r.tokenId}: ${r.inRange ? 'in range' : 'out of range'}, value ${usd(r.value)}, unclaimed fees ${usd(r.fees)}`).join('\n');
   }
   if (step.source === 'linkedin') return gatherLinkedin(store, linkedinDays(step), step.projectId || '');
+  if (step.source === 'meetings') {
+    // Readable text for a prompt, and the meetings as a list a Loop or Filter duplicates step reads.
+    const meetings = await upcomingMeetings(store, meetingHours(step));
+    return { text: meetings.map((m) => m.text).join('\n\n'), data: meetings };
+  }
   return fill(step.text, vars);
 }
+
+// The meetings source reads `count` as hours ahead: picking the source sets 2.
+/** @param {{ count?: number }} src */
+export const meetingHours = (src) => Math.min(48, Math.max(1, Number(src.count) || 2));
 
 // The LinkedIn source reads `count` as days: picking the source sets 7.
 /** @param {{ count?: number }} src */
@@ -1967,6 +1995,21 @@ export const UPDATE_DUE = [
 /** @param {string | undefined} due */
 const dueDate = (due) => (due === 'today' ? todayISO() : due === 'tomorrow' ? new Date(Date.now() + 24 * 60 * MINUTE).toISOString().slice(0, 10) : '');
 
+// A Create task step's project: its own, a variable such as {{item.projectId}} (a meeting's project), else the flow's.
+// A variable that gives no known project falls back to the flow's.
+/**
+ * @param {DataStore} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {Vars} vars
+ */
+function taskProjectId(store, flow, step, vars) {
+  const own = String(step.projectId ?? '');
+  if (!own.includes('{{')) return withFlowProject(flow, step).projectId || null;
+  const id = fill(own, vars).trim();
+  return (id && store.get('projects').projects.some((p) => p.id === id) ? id : flowProjectId(flow)) || null;
+}
+
 // An "Update task" step: the task named by its id gets the note (added below its description, or in its place) and
 // the fields the step sets. A later "Run in Dev" step works on it, as on a task made in the run.
 /**
@@ -2425,32 +2468,42 @@ async function runStep(store, flow, step, input, ctx) {
     const parts = [];
     for (const own of sources) {
       const src = withFlowProject(flow, own);
-      const text = await gather(store, src, flow, varsFor(flow, ctx, src, store));
-      parts.push({ src, text, body: text || NOTHING[src.source] || '' });
+      // A source gives text, or text with the list it was made from.
+      const got = await gather(store, src, flow, varsFor(flow, ctx, src, store));
+      const text = typeof got === 'string' ? got : got.text;
+      parts.push({ src, text, body: text || NOTHING[src.source] || '', data: typeof got === 'string' ? undefined : got.data });
     }
     ctx.nothing = parts.every((p) => !p.text.trim());
     const appending = step.append && input.trim();
     // Several sources, or data added to earlier data, go under headings so a prompt can tell them apart.
-    if (parts.length > 1) ctx.data = Object.fromEntries(parts.map((p) => [sourceLabel(store, p.src), parseData(p.body) ?? p.body]));
-    if (parts.length === 1 && !appending) return parts[0].body;
+    if (parts.length > 1) ctx.data = Object.fromEntries(parts.map((p) => [sourceLabel(store, p.src), p.data ?? parseData(p.body) ?? p.body]));
+    if (parts.length === 1 && !appending) {
+      if (parts[0].data !== undefined) ctx.data = parts[0].data;
+      return parts[0].body;
+    }
     const sections = parts.map((p) => `## ${sourceLabel(store, p.src)}\n\n${p.body}`).join('\n\n');
     return appending ? `${input}\n\n${sections}` : sections;
   }
   if (step.type === 'stop') {
     ctx.stop = stopsOn(step, input, ctx.nothing);
     ctx.note = ctx.stop ? `Stopped: ${stopLabel(step).replace(/^./, (c) => c.toLowerCase())}.` : 'Went on: the condition was not met.';
+    // The input goes on as it came, its list too, so a Loop after a "Stop if" reads the data step's items.
+    const prev = pipedResult(ctx.results, ctx.from);
+    if (prev && prev.data !== undefined) ctx.data = prev.data;
     return input;
   }
   if (step.type === 'ai') {
     const messages = [];
+    // A step from a template may name a prompt of Settings → Prompts, used while its own instructions are empty.
     if (step.system?.trim()) messages.push({ role: 'system', content: fill(step.system, vars) });
+    else if (step.promptId) messages.push({ role: 'system', content: systemPrompt(store, step.promptId) });
     messages.push({ role: 'user', content: fill(step.prompt, vars) });
     return (await ask(store, AI_TASK, messages, { model: step.model || '', projectId: withFlowProject(flow, step).projectId || '' })).trim();
   }
   if (step.type === 'task') {
     const title = fill(step.title || '{{input}}', vars).split('\n')[0].slice(0, 200).trim() || flow.name;
     const due = dueDate(step.due);
-    const projectId = withFlowProject(flow, step).projectId || null;
+    const projectId = taskProjectId(store, flow, step, vars);
     const description = fill(step.description ?? '{{input}}', vars).trim();
     const status = step.status || 'todo';
     const category = step.category || '';

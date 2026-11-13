@@ -92,7 +92,7 @@
       "about": "Example about.",
       "schedule": { "every": "daily", "time": "08:00", "weekday": 1, "days": [1, 2, 3, 4, 5], "day": 1, "minutes": 60, "from": "", "to": "" },
       "projectId": "",
-      "steps": [{ "type": "ai", "prompt": "{{input}}", "system": "", "model": "" }],
+      "steps": [{ "type": "ai", "prompt": "{{input}}", "system": "", "promptId": "meeting-prep", "model": "" }],
       "created": "2026-01-05T09:00:00.000Z"
     }
   ],

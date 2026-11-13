@@ -13,9 +13,10 @@ import {
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, templateFromFlow, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
   testStep, testsOf, isTesting, clearTests, resumeDevTests, useDevStarter, varsTree, fillParts, pathTo, parseData, INPUT_NONE, reorderSteps, projectVars, runState, devWaits, DEV_WAIT_MINUTES, devJsonOffered, devJson, DEV_JSON_PROMPT,
-  FORMAT_MODES, PARSE_MODES, DEDUPE_MATCH, DEDUPE_SCOPE, AI_FILTER_MODES, AI_FILTER_BATCH, AI_FILTER_MAX, aiFilterTop, SEPARATOR_OPTIONS, LOOP_LIMIT, makeField, loopSpan, loopOf, loopMax, valueOf, listOf, withItem, linkedinDays,
+  FORMAT_MODES, PARSE_MODES, DEDUPE_MATCH, DEDUPE_SCOPE, AI_FILTER_MODES, AI_FILTER_BATCH, AI_FILTER_MAX, aiFilterTop, SEPARATOR_OPTIONS, LOOP_LIMIT, makeField, loopSpan, loopOf, loopMax, valueOf, listOf, withItem, linkedinDays, meetingHours,
 } from '../cron.js';
 import { modelForTask } from '../models.js';
+import { PROMPTS } from '../prompts.js';
 import { DEV_MODELS, DEV_MODEL_NAMES, DEV_EFFORTS } from '../dev-core.js';
 import { openSession, runnerOf, liveSession, onSessionPaint, exitText, terminalView, terminalBackground, startDevSession } from './dev.js';
 import { runJob } from '../runners.js';
@@ -1303,9 +1304,11 @@ function select(value, options, onchange, attrs = {}) {
  * @param {ProjectPickOptions} [options]
  */
 function projectPick(store, value, none, onPick, { list = projectsOf(store), name = (p) => p.name } = {}) {
+  // A template can set a variable, such as {{item.projectId}} for a meeting's project; it stays a choice until replaced.
+  const variable = value?.includes('{{') ? [{ value, label: `From ${value}`, plainIcon: () => icon('repeat') }] : [];
   return pickChip({
     value: value || null,
-    options: list.map((p) => ({ value: p.id, label: name(p), plainIcon: () => projectIcon(p) })),
+    options: [...variable, ...list.map((p) => ({ value: p.id, label: name(p), plainIcon: () => projectIcon(p) }))],
     nullable: true,
     nullLabel: none,
     className: 'field-pick project-field-pick',
@@ -1470,6 +1473,7 @@ const SOURCE_ABOUT = {
   history: 'The final output of this flow’s last successful runs (not test runs), so the AI can avoid repeating itself.',
   flow: 'The final output of that flow’s last successful run (not a test run).',
   linkedin: 'Each LinkedIn account’s followers and their change, the posts published in the period with their last read results (best and worst), the scheduled posts next, the drafts waiting and the new comments. A project keeps only its accounts and posts.',
+  meetings: 'Timed events starting within the hours set, on every shown calendar, that have a guest besides you (declined ones left out). Each meeting lists its guests with what Contacts knows of them and the subjects of their latest emails in the Inbox. Its list (label, title, when, projectId, guests, text) feeds a Loop or Filter duplicates step.',
   text: null,
 };
 
@@ -1500,7 +1504,11 @@ function sourceCard(store, flow, own, { setSource, remove }) {
   const otherFlows = store.get(COLLECTION).flows.filter((f) => f.id !== flow.id);
   return h('div', { class: 'cron-source stack' },
     h('div', { class: 'row cron-fields' },
-      field('Source', sourcePick(src.source, (source) => set(source === 'linkedin' && src.source !== 'linkedin' ? { source, count: 7 } : { source }))),
+      field('Source', sourcePick(src.source, (source) => set(source === src.source ? { source }
+        : source === 'linkedin' ? { source, count: 7 } : source === 'meetings' ? { source, count: 2 } : { source }))),
+      src.source === 'meetings'
+        ? field('Hours ahead', h('input', { type: 'number', min: 1, max: 48, value: String(meetingHours(src)), onchange: (/** @type {FieldEvent} */ e) => set({ count: meetingHours({ count: Number(e.target.value) }) }) }))
+        : null,
       src.source === 'linkedin' ? field('Project', stepProjectPick(store, flow, own.projectId, (projectId) => set({ projectId }), { none: 'All accounts and posts' })) : null,
       src.source === 'linkedin'
         ? field('Days', h('input', { type: 'number', min: 1, max: 90, value: String(linkedinDays(src)), onchange: (/** @type {FieldEvent} */ e) => set({ count: linkedinDays({ count: Number(e.target.value) }) }) }))
@@ -1596,7 +1604,8 @@ function stepForm(store, flow, step) {
     return h('div', { class: 'stack' },
       varField('Prompt', h('textarea', { rows: 6, class: 'mono-text', onchange: (/** @type {FieldEvent} */ e) => set({ prompt: e.target.value }) }, step.prompt), key('prompt'), names,
         'Ask for JSON to pick its parts in later steps, such as {{step2.title}}.', vars),
-      varField('System instructions (optional)', h('textarea', { rows: 2, onchange: (/** @type {FieldEvent} */ e) => set({ system: e.target.value }) }, step.system ?? ''), key('system'), names, null, vars),
+      varField('System instructions (optional)', h('textarea', { rows: 2, onchange: (/** @type {FieldEvent} */ e) => set({ system: e.target.value }) }, step.system ?? ''), key('system'), names,
+        step.promptId ? `While empty, the “${PROMPTS.find((p) => p.id === step.promptId)?.name ?? step.promptId}” prompt of Settings → Prompts is used.` : null, vars),
       h('div', { class: 'row' },
         h('span', { class: 'muted small' }, 'Model'),
         modelChip({ value: step.model, nullable: true, nullLabel: `Default (${modelForTask(store, AI_TASK) || 'not set'})`, onPick: (model) => set({ model: model ?? '' }) })),
