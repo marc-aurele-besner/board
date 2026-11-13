@@ -111,7 +111,7 @@ function render({ user = true } = {}) {
   const before = app.querySelector('main.view');
   // Unsubmitted fields are carried over within a section; a new section starts clean.
   const kept = before && mod.id === lastSection ? snapshot(before) : [];
-  const main = h('main', { class: 'view' });
+  const main = h('main', { class: 'view', 'data-section': mod.id });
   // What this render reads (and the section's own redraws until the next one) decides which disk changes redraw it.
   store.forget();
   // Only a change of section plays the entrance animation; edits within a section re-render silently.

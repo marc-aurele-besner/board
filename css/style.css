@@ -1339,6 +1339,21 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .connect { max-width: 480px; margin: 12vh auto 0; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 
+/* Todos, Inbox, Calendar, Projects, Money, DeFi, Monitoring, Tools and Cron use the whole page below the top bar: no
+   padding around their boxes, which run to the window's edges. Headings, sub-tabs and notes keep a gutter of their own,
+   and the side panels stick right under the top bar and run to the bottom of the window. */
+.view:is([data-section="todos"], [data-section="inbox"], [data-section="calendar"], [data-section="projects"], [data-section="money"], [data-section="positions"], [data-section="monitoring"], [data-section="tools"], [data-section="cron"]) {
+  padding: 0;
+  min-height: calc(100dvh - 54px);
+  & > .stack-lg > :is(header, .row.between, nav.sub-tabs, p, .notice, .period-row, .money-controls) { padding-inline: 16px; }
+  & > .stack-lg > :first-child { padding-top: 14px; }
+  & > .split > .card { border-radius: 0; border-top: none; }
+  & > .split > .card:first-child { border-left: none; }
+  & > .split > .card:last-child { border-right: none; }
+  & > .split > :is(.side, .side-pane) { top: 54px; height: calc(100dvh - 54px); }
+  & > .split > .main-pane { min-height: calc(100dvh - 54px); }
+}
+
 /* Phones */
 @media (max-width: 720px) {
   .view { padding: 16px; }
