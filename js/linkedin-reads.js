@@ -97,3 +97,76 @@ export function parsePostCounts(answer, at = Date.now()) {
   if (impressions !== undefined) m.impressions = impressions;
   return m;
 }
+
+// --- Comments: the comments on the member's recent posts ---
+
+// UNVERIFIED path: the newest comments of a post, `urn` being the post's own URN.
+/** @param {string} urn @param {number} [count] */
+export const postCommentsPath = (urn, count = 50) => `socialActions/${encodeURIComponent(urn)}/comments?count=${count}&start=0&sortOrder=REVERSE_CHRONOLOGICAL`;
+
+/** @typedef {{ id: string, author: string, authorHeadline?: string, authorUrl?: string, text: string, at: number }} ParsedComment */
+
+/** @param {unknown} v @returns {string} */
+const textOf = (v) => {
+  if (typeof v === 'string') return v;
+  if (!v || typeof v !== 'object') return '';
+  const o = /** @type {Record<string, any>} */ (v); // any: one of LinkedIn's text shapes
+  if (typeof o.text === 'string') return o.text;
+  if (o.text && typeof o.text === 'object') return textOf(o.text);
+  if (Array.isArray(o.values)) return o.values.map((/** @type {any} */ x) => textOf(x?.value ?? x)).join(''); // any: as above
+  return '';
+};
+
+// The comments in a comments answer, in any of the shapes LinkedIn has used: REST elements with `message` or
+// `commentV2`, the normalized form whose `included` list holds comments and the profiles they point at, or the
+// newer dash comments with `commentary` and `commenter`. Anything that looks like a comment (a comment URN and a text)
+// is kept; the rest is skipped. Throws a readable error only when the answer is not JSON at all.
+/** @param {unknown} answer @returns {ParsedComment[]} */
+export function parseComments(answer) {
+  if (!answer || typeof answer !== 'object') throw new Error('LinkedIn’s answer for the comments was empty.');
+  /** @type {Map<string, Record<string, any>>} */ // any: LinkedIn's objects, read field by field
+  const byUrn = new Map();
+  /** @type {Record<string, any>[]} */ // any: as above
+  const nodes = [];
+  /** @param {unknown} n */
+  const collect = (n) => {
+    if (!n || typeof n !== 'object') return;
+    if (Array.isArray(n)) {
+      n.forEach(collect);
+      return;
+    }
+    const o = /** @type {Record<string, any>} */ (n); // any: as above
+    nodes.push(o);
+    const urn = o.entityUrn ?? o.urn ?? o.$id;
+    if (typeof urn === 'string') byUrn.set(urn, o);
+    for (const v of Object.values(o)) collect(v);
+  };
+  collect(answer);
+  /** @param {unknown} ref @returns {Record<string, any> | undefined} */ // any: as above
+  const deref = (ref) => (typeof ref === 'string' ? byUrn.get(ref) : ref && typeof ref === 'object' ? /** @type {Record<string, any>} */ (ref) : undefined); // any: as above
+  /** @param {Record<string, any> | undefined} p */ // any: as above
+  const nameOfProfile = (p) => (p ? [p.firstName, p.lastName].filter((s) => typeof s === 'string' && s).join(' ') : '');
+
+  /** @type {Map<string, ParsedComment>} */
+  const out = new Map();
+  for (const o of nodes) {
+    const id = [o.entityUrn, o.urn, o.commentUrn].find((u) => typeof u === 'string' && /^urn:li:[\w]*comment/i.test(u));
+    if (!id || out.has(id)) continue;
+    const text = textOf(o.commentary) || textOf(o.commentV2) || textOf(o.message) || textOf(o.comment) || '';
+    if (!text.trim()) continue;
+    const commenter = deref(o.commenter) ?? deref(o.actor) ?? deref(o.author);
+    // The commenter can be a profile reference, or a block with a title and subtitle as the page draws it.
+    const profile = deref(commenter?.member ?? commenter?.profile ?? commenter?.['*profile'] ?? commenter?.miniProfile ?? o['*commenterProfile'] ?? o.commenterProfileId) ?? commenter;
+    const author = textOf(commenter?.title) || textOf(commenter?.name) || nameOfProfile(profile) || 'Someone';
+    const headline = textOf(commenter?.subtitle) || textOf(commenter?.description) || textOf(profile?.occupation) || textOf(profile?.headline);
+    const url = [commenter?.navigationUrl, commenter?.url, profile?.publicIdentifier ? `https://www.linkedin.com/in/${profile.publicIdentifier}/` : '']
+      .find((u) => typeof u === 'string' && /^https:\/\/www\.linkedin\.com\//.test(u));
+    const at = [o.createdAt, o.createdTime, o.created?.time, o.commentedAt].find((n) => typeof n === 'number' && n > 0);
+    /** @type {ParsedComment} */
+    const c = { id, author, text: text.trim(), at: at ?? Date.now() };
+    if (headline) c.authorHeadline = headline;
+    if (url) c.authorUrl = url;
+    out.set(id, c);
+  }
+  return [...out.values()];
+}

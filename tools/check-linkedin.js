@@ -5,8 +5,9 @@
 import { voyager, clock } from './linkedin-session.js';
 import { linkedinCall, useLinkedinSession } from '../js/linkedin-session.js';
 import { todayISO } from '../js/ui.js';
-import { dueStep, parsePostCounts } from '../js/linkedin-reads.js';
+import { dueStep, parsePostCounts, parseComments } from '../js/linkedin-reads.js';
 import linkedinMetrics from './jobs/linkedin-metrics.js';
+import linkedinComments from './jobs/linkedin-comments.js';
 
 let failed = 0;
 /** @param {string} name @param {boolean} ok */
@@ -183,6 +184,46 @@ for (const [name, res] of /** @type {[string, () => Response][]} */ ([
   limited.data.linkedin.posts = [post(2)];
   const out = await linkedinMetrics.run(/** @type {any} */ ({ ...ctx, store: limited.store })); // any: as above
   check('the daily limit stops a run without a call or an error', calls.length === 0 && Boolean(out.waiting) && !limited.data.linkedin.posts[0].metrics.length);
+}
+
+// Comments (tools/jobs/linkedin-comments.js): the shapes read, dedupe, the member's own replies, the notification.
+{
+  const normalized = {
+    data: { elements: ['urn:li:fsd_comment:(1,urn:li:activity:9)'] },
+    included: [
+      { entityUrn: 'urn:li:fsd_comment:(1,urn:li:activity:9)', commentary: { text: 'Great point!' }, createdAt: 1700000000000, commenter: { title: { text: 'Sam Example' }, subtitle: 'Head of Growth', navigationUrl: 'https://www.linkedin.com/in/sam-example/' } },
+    ],
+  };
+  const rest = { elements: [{ urn: 'urn:li:comment:(urn:li:activity:9,2)', message: { text: 'How long did it take?' }, created: { time: 1700000100000 }, commenter: 'urn:li:fs_miniProfile:x' }], included: [{ entityUrn: 'urn:li:fs_miniProfile:x', firstName: 'Alex', lastName: 'Example', occupation: 'Writer', publicIdentifier: 'alex-example' }] };
+  const a = parseComments(normalized);
+  check('a dash comment is read with its author and headline', a.length === 1 && a[0].author === 'Sam Example' && a[0].authorHeadline === 'Head of Growth' && a[0].at === 1700000000000);
+  const b = parseComments(rest);
+  check('a REST comment finds its author through the profile it points at', b.length === 1 && b[0].author === 'Alex Example' && b[0].authorUrl === 'https://www.linkedin.com/in/alex-example/' && b[0].text === 'How long did it take?');
+  check('an answer without comments reads as none', parseComments({ elements: [], paging: { total: 0 } }).length === 0);
+
+  // The job dates its reads by the cache entries, on the real clock.
+  fakeNow = Date.now();
+  calls = [];
+  answer = () => new Response(JSON.stringify({ ...normalized, included: [...normalized.included, { entityUrn: 'urn:li:fsd_comment:(3,urn:li:activity:9)', commentary: { text: 'Thanks!' }, commenter: { title: { text: 'Me Myself' } } }] }), { status: 200 });
+  const { store, data } = makeStore();
+  data.linkedin.auth = { name: 'Me Myself' };
+  const recent = Date.now() - 3 * 3600000;
+  data.linkedin.posts = [
+    { id: 'q1', text: 'One', status: 'posted', urn: 'urn:li:share:1', postedAt: recent, createdAt: 0 },
+    { id: 'q2', text: 'Old', status: 'posted', urn: 'urn:li:share:2', postedAt: Date.now() - 20 * 86400000, createdAt: 0 },
+  ];
+  const ctx = /** @type {any} */ ({ store, params: {}, signal: new AbortController().signal, force: false }); // any: a stand-in for the job's context
+  const first = await linkedinComments.run(ctx);
+  check('only recent posts are read, once each', calls.length === 1 && first.added === 1);
+  check('a new comment is saved unread, the member’s own reply read', data.linkedin.comments.length === 2
+    && data.linkedin.comments.find((/** @type {{ author: string }} */ c) => c.author === 'Sam Example').read === false
+    && data.linkedin.comments.find((/** @type {{ author: string }} */ c) => c.author === 'Me Myself').read === true);
+  check('the batch is announced once', data.notifications.items.filter((/** @type {{ key: string }} */ n) => n.key.startsWith('linkedin-comments:')).length === 1);
+  const second = await linkedinComments.run(ctx);
+  check('a post read this run is not read again until its time', calls.length === 1 && second.added === 0);
+  data.linkedin.cache['post:urn:li:share:1:comments'].at -= 3 * 3600000;
+  await linkedinComments.run(ctx);
+  check('a comment seen before is not added twice', calls.length === 2 && data.linkedin.comments.length === 2);
 }
 
 process.exit(failed ? 1 : 0);
