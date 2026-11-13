@@ -1,11 +1,14 @@
 // Preview deployments of pull requests. Repos on Vercel or Netlify get a bot comment on each PR with the link to the
 // PR's preview, edited as each push deploys again. The runners (tools/jobs/previews.js) read those comments for the
 // PRs of open tasks and recent Cron runs into github.json `previews`:
-// { "owner/repo#12": { at, first, items: [{ provider, name, url, state }], error } }.
+// { "owner/repo#12": { at, first, branch, items: [{ provider, name, url, state, … }], error } }.
+// With a Vercel or Netlify token (Settings), a provider that has a project for the repo is read from its API instead
+// (js/deployments.js), which adds the deployment's id, commit, times, error and page, and lets the board read its log.
 // Tasks and Cron runs show them next to their PRs.
 import { h, icon, statusOf } from './ui.js';
-import { GITHUB, issueComments } from './github.js';
+import { GITHUB, issueComments, pullBranch } from './github.js';
 import { runJob } from './runners.js';
+import { deployTokens, deploysRepo, prDeployments } from './deployments.js';
 /** @import { DataStore, Store, CronRunStep, PrPreviews, PreviewItem } from '../types/data' */
 /** @typedef {{ repo: string, number: number }} PrRef */
 // A comment of the GitHub API, as far as it is read here.
@@ -132,7 +135,7 @@ function due(entry, at) {
   if (!entry?.at) return true;
   const since = at - entry.at;
   const items = entry.items ?? [];
-  if (items.some((i) => i.state === 'building')) return since >= AGAIN_BUILDING;
+  if (items.some((i) => i.state === 'building' || i.state === 'queued')) return since >= AGAIN_BUILDING;
   if (items.length) return since >= AGAIN_READY;
   // No bot has commented: likely a repo without previews, so it is read less and less often.
   const age = at - (entry.first ?? entry.at);
@@ -155,12 +158,29 @@ export const duePrs = (store, at = Date.now()) => {
  * @param {number} [at]
  */
 export async function readPreviews(target, prs, at = Date.now()) {
+  const tokens = deployTokens(target);
+  const saved = target.get(GITHUB)?.previews ?? {};
   const found = await Promise.all(prs.map(async (p) => {
-    /** @typedef {[PrRef, Pick<PrPreviews, 'items' | 'error'>]} Found */
+    /** @typedef {[PrRef, Pick<PrPreviews, 'items' | 'error' | 'branch'>]} Found */
+    let items;
     try {
-      return /** @type {Found} */ ([p, { items: previewsFromComments(await issueComments(p.repo, p.number)), error: null }]);
+      items = previewsFromComments(await issueComments(p.repo, p.number));
     } catch (err) {
       return /** @type {Found} */ ([p, { error: /** @type {Error} */ (err).message }]);
+    }
+    if (!tokens.vercel && !tokens.netlify) return /** @type {Found} */ ([p, { items, error: null }]);
+    const before = saved[previewKey(p.repo, p.number)];
+    let branch = before?.branch ?? '';
+    try {
+      if (!branch && await deploysRepo(tokens, p.repo, at)) branch = await pullBranch(p.repo, p.number);
+      const api = await prDeployments(tokens, p.repo, p.number, branch, at);
+      items = [...items.filter((i) => !api.providers.includes(i.provider)), ...api.items];
+      return /** @type {Found} */ ([p, { items, error: null, ...(branch ? { branch } : {}) }]);
+    } catch (err) {
+      // The comments were read: keep what the API found last time over their rougher word on the same provider.
+      const kept = (before?.items ?? []).filter((i) => i.id);
+      items = [...items.filter((i) => !kept.some((k) => k.provider === i.provider)), ...kept];
+      return /** @type {Found} */ ([p, { items, error: /** @type {Error} */ (err).message, ...(branch ? { branch } : {}) }]);
     }
   }));
   const keep = new Set(trackedPrs(target, at).map((p) => previewKey(p.repo, p.number)));
