@@ -109,9 +109,45 @@ function showImage(item, thumb) {
     wide: true,
     body: h('div', { class: 'stack' },
       h('div', { class: 'brand-full' }, h('img', { src: thumb.src, alt: item.label || nameOf(item.value) })),
-      h('div', { class: 'row brand-full-meta' }, size ? h('span', { class: 'muted small' }, size) : null, target(item.value))),
+      h('div', { class: 'row brand-full-meta' }, size ? h('span', { class: 'muted small' }, size) : null, target(item.value),
+        downloadBtn(item, () => thumb))),
   });
 }
+
+// Saves the image under its name. A data: URL (a local SVG) downloads as is; an address is fetched into a blob, since
+// the download attribute is ignored across origins, and opens in a new tab when the site refuses the read (CORS).
+/** @param {string} src @param {string} value */
+async function downloadImage(src, value) {
+  /** @param {string} href @param {string} name */
+  const save = (href, name) => h('a', { href, download: name }).click();
+  const base = nameOf(value) || 'image';
+  if (src.startsWith('data:')) return save(src, `${base}.svg`);
+  try {
+    const res = await fetch(src);
+    if (!res.ok) throw new Error(String(res.status));
+    const blob = await res.blob();
+    const ext = value.split(/[?#]/)[0].match(/\.([a-z0-9]+)$/i)?.[1] ?? blob.type.split('/')[1]?.split('+')[0] ?? 'png';
+    const url = URL.createObjectURL(blob);
+    save(url, `${base}.${ext}`);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch {
+    window.open(src, '_blank', 'noopener');
+  }
+}
+
+// A local file that is not SVG cannot be shown, so it has nothing to download.
+/** @param {BrandItem} item @param {(btn: HTMLElement) => HTMLImageElement | null | undefined} img */
+const downloadBtn = (item, img) => (isUrl(item.value) || /\.svg$/i.test(item.value) ? h('button', {
+  type: 'button',
+  class: 'icon-btn brand-dl',
+  title: 'Download',
+  'aria-label': `Download ${item.label || nameOf(item.value)}`,
+  /** @param {MouseEvent & { currentTarget: HTMLElement }} e */
+  onclick: (e) => {
+    const src = img(e.currentTarget)?.src ?? (isUrl(item.value) ? item.value : svgCache.get(item.value));
+    if (src) downloadImage(src, item.value);
+  },
+}, icon('download')) : null);
 
 // An address opens in a new tab; a local path is copied.
 /** @param {string} value */
@@ -139,7 +175,9 @@ function brandDisplay(store, brand) {
         /** @param {MouseEvent & { currentTarget: HTMLElement }} e */
         onclick: (e) => showImage(i, e.currentTarget.querySelector('img')),
       }, imageThumb(store, i.value), h('span', { class: 'brand-size' })),
-      h('strong', { class: 'small' }, i.label || nameOf(i.value)),
+      h('div', { class: 'row brand-image-name' },
+        h('strong', { class: 'small' }, i.label || nameOf(i.value)),
+        downloadBtn(i, (btn) => btn.closest('.brand-image')?.querySelector('.brand-thumb img'))),
       target(i.value))))) : null,
     brand.fonts.length ? group('Fonts', h('ul', { class: 'brand-list' }, brand.fonts.map((f) => h('li', null,
       h('span', { class: 'muted small' }, f.label || 'Font'),

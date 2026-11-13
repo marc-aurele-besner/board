@@ -606,7 +606,10 @@ body.project-dragging .project-list .root-drop { display: block; }
 .brand-chip { display: block; height: 44px; border-radius: var(--radius); border: 1px solid var(--border); }
 .brand-images { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .brand-image { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.brand-image > strong { overflow-wrap: anywhere; }
+.brand-image-name { gap: 4px; justify-content: space-between; align-items: center; flex-wrap: nowrap; min-width: 0; }
+.brand-image-name > strong { overflow-wrap: anywhere; min-width: 0; }
+.icon-btn.brand-dl { min-width: 28px; min-height: 28px; padding: 0; flex: none; }
+.icon-btn.brand-dl:hover { color: var(--accent); }
 .brand-thumb { position: relative; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; width: 100%; height: 110px;
   min-height: 0; padding: 10px; overflow: hidden; border-radius: var(--radius); border: 1px solid var(--border); color: inherit; cursor: zoom-in;
   /* A checkerboard, so transparent and white logos both show. */
@@ -622,7 +625,7 @@ body.project-dragging .project-list .root-drop { display: block; }
 .brand-full { display: grid; place-items: center; min-height: 160px; padding: 16px; border-radius: var(--radius); border: 1px solid var(--border);
   background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface) 0 50%) 0 0 / 16px 16px; }
 .brand-full img { display: block; max-width: 100%; max-height: 70vh; min-width: min(240px, 100%); object-fit: contain; }
-.brand-full-meta { flex-wrap: wrap; align-items: baseline; gap: 6px 12px; min-width: 0; }
+.brand-full-meta { flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
 .brand-thumb-none { color: var(--muted); font-size: 1.4rem; }
 .brand-addr { overflow-wrap: anywhere; }
 .brand-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -863,6 +866,10 @@ textarea.editable-field { resize: vertical; }
 .menu-hint { color: var(--muted); font-size: 0.78rem; }
 .menu-item > .icon { margin-left: auto; opacity: 0.7; }
 .menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+.menu-item[hidden], .menu-sep[hidden] { display: none; }
+.menu-search { position: sticky; top: -5px; z-index: 1; width: 100%; margin: 0 0 4px; padding: 5px 8px; min-height: 30px; font-size: 16px;
+  border-radius: 6px; box-shadow: 0 -5px 0 var(--surface); }
+@media (min-width: 700px) { .menu-search { font-size: 0.86rem; } }
 /* Colour picker: a swatch button, and a popover with a palette, a hex field and the system picker. */
 .cp-button {
   width: 28px; height: 28px; min-height: 0; padding: 0; flex: none; border-radius: 50%;
@@ -3110,7 +3117,6 @@ button.sum-line:hover { background: var(--surface-2); }
 .slack .stack-sm, .slack-signin .stack-sm { display: flex; flex-direction: column; gap: 4px; }
 .slack .stack-xs { display: flex; flex-direction: column; gap: 0; min-width: 0; }
 .slack.stack { gap: 8px; }
-.slack-page-head h2 { margin: 0; font-size: 1.1rem; }
 .slack-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); height: calc(100vh - 150px); min-height: 460px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
 .slack-layout.with-thread { grid-template-columns: 240px minmax(0, 1fr) minmax(300px, 380px); }
 .slack-layout.alone { grid-template-columns: minmax(0, 1fr); }

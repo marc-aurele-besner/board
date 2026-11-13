@@ -5,9 +5,10 @@ import { h, icon } from './ui.js';
 /** @import { Child } from '../types/ui' */
 /**
  * A row of a menu: an action, a submenu (`items`), or '-' for a separator. `checked` shows a tick, `hint` a muted
- * word on the right.
+ * word on the right. `search` puts a field with that placeholder atop the submenu, which keeps the rows whose label
+ * holds what is typed.
  * @typedef {{ label: string, icon?: Child | (() => Child), hint?: string, checked?: boolean, danger?: boolean,
- *   onSelect?: () => void, items?: MenuEntry[] }} MenuItem
+ *   onSelect?: () => void, items?: MenuEntry[], search?: string }} MenuItem
  * @typedef {MenuItem | '-' | null | false} MenuEntry
  */
 
@@ -39,7 +40,7 @@ function onOutside(e) {
 }
 
 /** @param {HTMLElement} panel */
-const rowsOf = (panel) => /** @type {HTMLElement[]} */ ([...panel.querySelectorAll(':scope > .menu-item:not([disabled])')]);
+const rowsOf = (panel) => /** @type {HTMLElement[]} */ ([...panel.querySelectorAll(':scope > .menu-item:not([disabled]):not([hidden])')]);
 
 /** @param {KeyboardEvent} e */
 function onKey(e) {
@@ -47,7 +48,9 @@ function onKey(e) {
   const panel = open.panels.find((p) => p.contains(document.activeElement)) ?? open.panels[open.panels.length - 1];
   const rows = rowsOf(panel);
   const at = rows.indexOf(/** @type {HTMLElement} */ (document.activeElement));
-  if (e.key === 'Escape' || (e.key === 'ArrowLeft' && panel !== open.root)) {
+  // In a search field the side arrows move the caret.
+  const typing = document.activeElement instanceof HTMLInputElement;
+  if (e.key === 'Escape' || (e.key === 'ArrowLeft' && panel !== open.root && !typing)) {
     e.preventDefault();
     e.stopPropagation();
     if (panel === open.root) return closeMenu();
@@ -81,9 +84,10 @@ function closeAfter(panel) {
   for (const p of open.panels.splice(i + 1)) p.remove();
 }
 
-/** @param {MenuEntry[]} entries @param {number} depth */
-function panelOf(entries, depth) {
+/** @param {MenuEntry[]} entries @param {number} depth @param {string} [search] */
+function panelOf(entries, depth, search) {
   const panel = h('div', { class: 'popover menu', role: 'menu', 'data-depth': String(depth) });
+  if (search) panel.append(searchField(panel, search));
   const list = entries.filter((e) => e);
   list.forEach((entry, i) => {
     if (entry === '-') {
@@ -103,14 +107,15 @@ function panelOf(entries, depth) {
       'aria-checked': item.checked === undefined ? undefined : String(item.checked),
       disabled: sub && !sub.length ? true : undefined,
       onclick: () => {
-        if (sub) return openSub(row, panel, sub, depth);
+        if (sub) return openSub(row, panel, sub, depth, item.search);
         closeMenu();
         item.onSelect?.();
       },
       onpointerenter: () => {
-        row.focus({ preventScroll: true });
+        // The search field keeps the focus, so typing still filters while the pointer is over the rows.
+        if (document.activeElement?.parentElement !== panel || !document.activeElement.matches('.menu-search')) row.focus({ preventScroll: true });
         clearTimeout(hoverTimer);
-        hoverTimer = setTimeout(() => (sub ? openSub(row, panel, sub, depth) : closeAfter(panel)), sub ? 120 : 200);
+        hoverTimer = setTimeout(() => (sub ? openSub(row, panel, sub, depth, item.search) : closeAfter(panel)), sub ? 120 : 200);
       },
     },
       h('span', { class: 'menu-lead' }, item.checked ? icon('check') : lead ?? null),
@@ -122,8 +127,34 @@ function panelOf(entries, depth) {
   return panel;
 }
 
-/** @param {HTMLElement} row @param {HTMLElement} parent @param {MenuEntry[]} entries @param {number} depth */
-function openSub(row, parent, entries, depth) {
+// The field atop a searchable panel: hides the rows that do not match, and the separators while it filters. Enter
+// picks the first row left.
+/** @param {HTMLElement} panel @param {string} placeholder */
+function searchField(panel, placeholder) {
+  return h('input', {
+    type: 'search',
+    class: 'menu-search',
+    placeholder,
+    'aria-label': placeholder,
+    /** @param {Event & { target: HTMLInputElement }} e */
+    oninput: (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      for (const row of /** @type {NodeListOf<HTMLElement>} */ (panel.querySelectorAll(':scope > .menu-item'))) {
+        row.hidden = !!q && !(row.querySelector('.menu-label')?.textContent ?? '').toLowerCase().includes(q);
+      }
+      for (const sep of /** @type {NodeListOf<HTMLElement>} */ (panel.querySelectorAll(':scope > .menu-sep'))) sep.hidden = !!q;
+    },
+    /** @param {KeyboardEvent} e */
+    onkeydown: (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      rowsOf(panel)[0]?.click();
+    },
+  });
+}
+
+/** @param {HTMLElement} row @param {HTMLElement} parent @param {MenuEntry[]} entries @param {number} depth @param {string} [search] */
+function openSub(row, parent, entries, depth, search) {
   if (!open) return;
   // Already open from this row: keep it.
   const next = open.panels[open.panels.indexOf(parent) + 1];
@@ -131,7 +162,7 @@ function openSub(row, parent, entries, depth) {
   closeAfter(parent);
   for (const r of parent.querySelectorAll('.menu-item.open')) r.classList.remove('open');
   row.classList.add('open');
-  const panel = panelOf(entries, depth + 1);
+  const panel = panelOf(entries, depth + 1, search);
   openers.set(panel, row);
   document.body.append(panel);
   open.panels.push(panel);
@@ -143,6 +174,8 @@ function openSub(row, parent, entries, depth) {
   const x = right + w <= window.innerWidth - 8 ? right : Math.max(8, p.left - w + 2);
   const y = Math.max(8, Math.min(r.top - 5, window.innerHeight - hgt - 8));
   Object.assign(panel.style, { left: `${x}px`, top: `${y}px` });
+  // Filtering shrinks the panel, so it keeps the top it opened at instead of being placed again.
+  /** @type {HTMLElement | null} */ (panel.querySelector('.menu-search'))?.focus({ preventScroll: true });
 }
 
 // Opens a menu at a point (a right click) or under an element (a ⋯ button).

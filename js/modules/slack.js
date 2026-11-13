@@ -568,7 +568,7 @@ function itemMenu(store, key, section) {
       { label: 'New group…', icon: () => icon('plus'), onSelect: () => newGroup(store, [key]) },
       group ? { label: `Take out of ${group.name}`, icon: () => icon('x'), onSelect: () => change(store, (dd) => { for (const g of dd.groups) g.items = g.items.filter((k) => k !== key); }) } : null,
     ] },
-    { label: 'Project', icon: () => icon('folder'), hint: own ? undefined : 'inherited', items: projectItems(
+    { label: 'Project', icon: () => icon('folder'), search: 'Find a project', hint: own ? undefined : 'inherited', items: projectItems(
       store,
       own ? d.projects[key] : null,
       (id) => change(store, (dd) => { dd.projects[key] = id; }),
@@ -606,7 +606,7 @@ function sectionMenu(store, section) {
         i > 0 ? { label: 'Up', icon: () => icon('arrow-up'), onSelect: () => swap(-1) } : null,
         i < groups.length - 1 ? { label: 'Down', icon: () => icon('arrow-down'), onSelect: () => swap(1) } : null,
       ] },
-      { label: 'Project', icon: () => icon('folder'), items: projectItems(store, g.projectId ?? '', (id) => change(store, (d) => { const x = d.groups.find((y) => y.id === g.id); if (x) x.projectId = id || null; })) },
+      { label: 'Project', icon: () => icon('folder'), search: 'Find a project', items: projectItems(store, g.projectId ?? '', (id) => change(store, (d) => { const x = d.groups.find((y) => y.id === g.id); if (x) x.projectId = id || null; })) },
       '-',
       { label: 'Remove group', hint: 'keeps its channels', icon: () => icon('trash'), danger: true, onSelect: () => change(store, (d) => { d.groups = d.groups.filter((y) => y.id !== g.id); }) },
     ];
@@ -617,7 +617,7 @@ function sectionMenu(store, section) {
     { label: 'Open in Slack', icon: () => icon('link'), onSelect: () => window.open(w.url || 'https://app.slack.com/', '_blank', 'noopener') },
     { label: 'Read its channels again', icon: () => icon('refresh'), onSelect: () => relist(store, w, { force: true }).then(() => toast(`${w.name}: channels read again.`)) },
     '-',
-    { label: 'Project', icon: () => icon('folder'), items: projectItems(store, w.projectId ?? '', (id) => change(store, (d) => { const x = d.workspaces.find((y) => y.id === w.id); if (x) x.projectId = id || null; })) },
+    { label: 'Project', icon: () => icon('folder'), search: 'Find a project', items: projectItems(store, w.projectId ?? '', (id) => change(store, (d) => { const x = d.workspaces.find((y) => y.id === w.id); if (x) x.projectId = id || null; })) },
     { label: 'Sign in again', icon: () => icon('key'), onSelect: () => openSignIn(store) },
     '-',
     { label: 'Remove workspace…', icon: () => icon('trash'), danger: true, onSelect: () => confirmRemove(store, w) },
@@ -1260,7 +1260,6 @@ function draw(root, store) {
 
   root.replaceChildren(
     h('div', { class: 'stack slack' },
-      h('header', { class: 'row between slack-page-head' }, h('h2', null, 'Slack')),
       ...banners,
       h('div', { class: !d.workspaces.length ? 'slack-layout alone' : view.thread && view.open ? 'slack-layout with-thread' : 'slack-layout' },
         d.workspaces.length ? sidebar(store) : null,
