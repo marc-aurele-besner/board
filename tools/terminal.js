@@ -1375,6 +1375,23 @@ async function gitAction(body) {
   return { ok: true };
 }
 
+// Shows a file or folder in the system's file manager: selected in Finder or Explorer, or its folder opened elsewhere.
+/** @param {unknown} target */
+async function reveal(target) {
+  const full = resolve(expand(String(target ?? '')));
+  const info = await stat(full).catch(() => null);
+  if (!target || !info) throw new Error(`Nothing at ${full}`);
+  /** @type {[string, string[]]} */
+  const [cmd, args] = process.platform === 'darwin' ? ['open', ['-R', full]]
+    : process.platform === 'win32' ? ['explorer', [`/select,${full}`]]
+      : ['xdg-open', [info.isDirectory() ? full : dirname(full)]];
+  await new Promise((done, fail) => {
+    // Explorer exits with 1 even when it opened the window.
+    execFile(cmd, args, (err) => (err && process.platform !== 'win32' ? fail(err) : done(null)));
+  });
+  return { ok: true };
+}
+
 createServer(async (req, res) => {
   const origin = req.headers.origin ?? '';
   // Unlike the relays, a request with no Origin is refused too: only the board's pages may run commands.
@@ -1493,6 +1510,17 @@ createServer(async (req, res) => {
   if (req.method === 'POST' && ['/stop', '/clear', '/close'].includes(path) && json) return control(req, res, cors, path.slice(1));
   if (req.method === 'POST' && path === '/worktree/remove' && json) return removeWorktree(req, res, cors);
   if (req.method === 'POST' && path === '/claude/exit' && json) return exitClaude(req, res, cors);
+  if (req.method === 'POST' && path === '/reveal' && json) {
+    const body = await jsonBody(req, res, cors);
+    if (!body) return;
+    try {
+      const result = await reveal(body.path);
+      res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(result));
+    } catch (err) {
+      res.writeHead(400, cors).end(/** @type {Error} */ (err).message);
+    }
+    return;
+  }
   if (req.method === 'POST' && path === '/usage' && json) {
     const body = await jsonBody(req, res, cors);
     if (!body) return;
