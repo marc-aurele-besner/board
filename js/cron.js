@@ -14,7 +14,9 @@ import { forgetWorktree } from './task-worktrees.js';
 import { findGithubLinks, plainOutput, addTaskLinks, prsOf } from './task-links.js';
 import { buildProfile, profileOf, hasProfileSources } from './profile.js';
 import { findJson } from './json-extract.js';
-/** @import { DataStore, Store, CronStep, CronSource, CronFlow, CronSchedule, CronTemplate, CronRun, CronRunStep, CronRunCurrent, CronTest, CronPr, CronFormatField, Project, Task, DevPreset, SiteLogEntry, TaskLink, IconName } from '../types/data' */
+import { LINKEDIN, latestMetrics, engagement, postsBetween, followerChange } from './linkedin-core.js';
+import { SOCIALS, handleLabel } from './socials.js';
+/** @import { DataStore, Store, CronStep, CronSource, CronFlow, CronSchedule, CronTemplate, CronRun, CronRunStep, CronRunCurrent, CronTest, CronPr, CronFormatField, LinkedinPost, Project, Task, DevPreset, SiteLogEntry, TaskLink, IconName } from '../types/data' */
 // The variables a step's templates read; $data holds what a name reads into with a path.
 /** @typedef {{ [name: string]: unknown, $data?: Record<string, unknown> }} Vars */
 // A step's result: what a test saves, with the variables the step saw.
@@ -156,6 +158,7 @@ const NOTHING = {
   'calendar-week': 'No events in the next 7 days.',
   notifications: 'No unread notifications.',
   flow: 'That flow has no successful run yet.',
+  linkedin: 'No LinkedIn account or post yet.',
 };
 
 // [key, label, icon]
@@ -177,6 +180,7 @@ export const SOURCES = [
   ['sites', 'Site check problems (last 24 hours)', 'activity'],
   ['pools', 'Liquidity pool positions', 'droplet'],
   ['pools-out', 'Pool positions out of range', 'droplet'],
+  ['linkedin', 'LinkedIn this week (followers, posts, comments)', 'linkedin'],
   ['page', 'A web page (a project’s site, its blog, any link)', 'globe'],
   ['history', 'Past outputs of this flow', 'repeat'],
   ['flow', 'Latest output of another flow', 'repeat'],
@@ -231,6 +235,7 @@ export function sourceLabel(store, src) {
   if (src.source === 'project') return project ? `Project: ${project.name}` : base;
   if (src.source === 'page') return project ? `${project.name} website${src.url ? ` ${src.url}` : ''}` : src.url || 'Web page';
   if (src.source === 'history') return `Last ${src.count ?? 5} outputs of this flow`;
+  if (src.source === 'linkedin') return `LinkedIn, last ${linkedinDays(src)} days${project ? ` (${project.name})` : ''}`;
   if (src.source === 'flow') return `Latest output of “${store.get(COLLECTION).flows.find((f) => f.id === src.flowId)?.name ?? 'a removed flow'}”`;
   return base;
 }
@@ -533,6 +538,25 @@ export const TEMPLATES = [
           + 'Start your answer with the topic on one line, then the two posts under the headings “X” and “LinkedIn”.',
       },
       { type: 'task', title: 'Social posts: {{input}}' },
+    ],
+  },
+  {
+    name: 'Weekly LinkedIn summary',
+    about: 'Every Monday, sums up the last week on LinkedIn (followers, posts and their results, comments), says what worked, and adds a task with a draft of the next post. Choose a project to keep only its accounts and posts.',
+    schedule: { every: 'weekly', time: '09:00', weekday: 1 },
+    steps: [
+      { type: 'gather', source: 'linkedin', count: 7 },
+      {
+        type: 'ai',
+        prompt: 'Below is my last week on LinkedIn: followers, the posts published with their results, what is scheduled, the drafts and the new comments.\n\n{{input}}\n\n'
+          + 'Start your answer with one suggested topic for my next post, alone on the first line (no heading, no quotes). Then write:\n'
+          + '1. A summary of the week in three to five short lines, with the follower change and the numbers that matter.\n'
+          + '2. What worked: what the best posts had that the weaker ones did not. Say so plainly when there is too little data to tell.\n'
+          + '3. A draft of that next post, 80 to 150 words, with a hook on the first line and a question at the end, in the tone of my best post.\n'
+          + 'Do not invent numbers, events or results; leave a [placeholder] where the draft needs one.',
+      },
+      { type: 'notify', text: 'LinkedIn this week:\n{{step2}}' },
+      { type: 'task', title: 'Next LinkedIn post: {{step2}}', description: '{{step2}}' },
     ],
   },
 ];
@@ -1314,7 +1338,91 @@ async function gather(store, step, flow, vars = {}) {
     const rows = openPositions(store).filter((/** @type {PoolRow} */ r) => step.source === 'pools' || !r.inRange);
     return rows.map((/** @type {PoolRow} */ r) => `- ${r.pair} on ${r.chain} #${r.tokenId}: ${r.inRange ? 'in range' : 'out of range'}, value ${usd(r.value)}, unclaimed fees ${usd(r.fees)}`).join('\n');
   }
+  if (step.source === 'linkedin') return gatherLinkedin(store, linkedinDays(step), step.projectId || '');
   return fill(step.text, vars);
+}
+
+// The LinkedIn source reads `count` as days: picking the source sets 7.
+/** @param {{ count?: number }} src */
+export const linkedinDays = (src) => Math.min(90, Math.max(1, Number(src.count) || 7));
+
+/** @param {number} t */
+const localDateTime = (t) => {
+  const d = new Date(t);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+// The LinkedIn accounts' followers and their change over the period, the posts published in it with their last read
+// results (best and worst), the scheduled posts next, the drafts waiting and the comments that came in. A project
+// keeps only its accounts and posts. '' when there is no account and no post at all.
+/**
+ * @param {DataStore} store
+ * @param {number} days
+ * @param {string} projectId
+ */
+function gatherLinkedin(store, days, projectId) {
+  const from = Date.now() - days * 24 * 60 * MINUTE;
+  const socials = store.get(SOCIALS);
+  const li = store.get(LINKEDIN);
+  const accounts = (socials.accounts ?? []).filter((a) => a.network === 'linkedin' && (!projectId || a.projectId === projectId));
+  const posts = (li.posts ?? []).filter((p) => !projectId || p.projectId === projectId);
+  if (!accounts.length && !posts.length) return '';
+  /** @param {string} text */
+  const excerpt = (text) => {
+    const one = String(text ?? '').replace(/\s+/g, ' ').trim();
+    return `“${one.length > 100 ? `${one.slice(0, 100)}…` : one}”`;
+  };
+  /** @param {number} n */
+  const signed = (n) => (n > 0 ? `+${n}` : String(n));
+  const out = [];
+
+  out.push('Followers:');
+  if (!accounts.length) out.push('- No LinkedIn account in Settings.');
+  for (const a of accounts) {
+    const ch = followerChange(socials.history?.[a.id], days);
+    const now = a.followers ?? ch?.now;
+    const name = `${a.name || handleLabel(a)} (${a.handle})`;
+    if (now == null) out.push(`- ${name}: not read yet`);
+    else if (!ch) out.push(`- ${name}: ${now}`);
+    else out.push(`- ${name}: ${now}, ${signed(now - ch.before)} since ${ch.since}`);
+  }
+
+  /** @param {LinkedinPost} p */
+  const results = (p) => {
+    const m = latestMetrics(p);
+    if (!m) return 'no results read yet';
+    const parts = [`${m.reactions ?? 0} reactions`, `${m.comments ?? 0} comments`, `${m.reposts ?? 0} reposts`];
+    if (m.impressions != null) parts.push(`${m.impressions} impressions`);
+    return `${parts.join(', ')} (read ${localDateTime(m.at)})`;
+  };
+  const posted = postsBetween(posts, from);
+  out.push('', `Posted in the last ${days} days (${posted.length}):`);
+  if (!posted.length) out.push('- Nothing posted.');
+  for (const p of posted) out.push(`- ${localDateTime(Number(p.postedAt))}: ${excerpt(p.text)}: ${results(p)}${p.url ? ` ${p.url}` : ''}`);
+  const read = posted.filter((p) => latestMetrics(p));
+  if (read.length >= 2) {
+    const ranked = [...read].sort((a, b) => engagement(latestMetrics(b)) - engagement(latestMetrics(a)));
+    out.push(`Best: ${excerpt(ranked[0].text)} (${engagement(latestMetrics(ranked[0]))} reactions, comments and reposts)`);
+    out.push(`Worst: ${excerpt(ranked[ranked.length - 1].text)} (${engagement(latestMetrics(ranked[ranked.length - 1]))} reactions, comments and reposts)`);
+  }
+
+  const next = posts.filter((p) => p.status === 'scheduled' && p.scheduledAt).sort((a, b) => Number(a.scheduledAt) - Number(b.scheduledAt));
+  out.push('', `Scheduled next (${next.length}):`);
+  if (!next.length) out.push('- Nothing scheduled.');
+  for (const p of next.slice(0, 10)) out.push(`- ${localDateTime(Number(p.scheduledAt))}: ${excerpt(p.text)}`);
+
+  const drafts = posts.filter((p) => p.status === 'draft');
+  out.push('', `Drafts waiting (${drafts.length}):`);
+  if (!drafts.length) out.push('- No draft.');
+  for (const p of drafts.slice(0, 10)) out.push(`- ${excerpt(p.text)}`);
+  const failed = posts.filter((p) => (p.status === 'failed' || p.status === 'missed') && (p.updatedAt ?? p.createdAt) >= from);
+  if (failed.length) out.push('', `Failed or missed (${failed.length}):`, ...failed.map((p) => `- ${excerpt(p.text)}${p.error ? `: ${p.error}` : ''}`));
+
+  const postIds = new Set(posts.map((p) => p.id));
+  const comments = (li.comments ?? []).filter((c) => c.at >= from && (!projectId || postIds.has(c.postId)));
+  const unread = comments.filter((c) => !c.read).length;
+  out.push('', `New comments: ${comments.length}${unread ? ` (${unread} unread)` : ''}`);
+  return out.join('\n');
 }
 
 /**

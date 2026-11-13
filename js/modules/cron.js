@@ -13,7 +13,7 @@ import {
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, templateFromFlow, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
   testStep, testsOf, isTesting, clearTests, resumeDevTests, useDevStarter, varsTree, fillParts, pathTo, parseData, INPUT_NONE, reorderSteps, projectVars, runState, devWaits, DEV_WAIT_MINUTES, devJsonOffered, devJson, DEV_JSON_PROMPT,
-  FORMAT_MODES, PARSE_MODES, DEDUPE_MATCH, DEDUPE_SCOPE, SEPARATOR_OPTIONS, LOOP_LIMIT, makeField, loopSpan, loopOf, loopMax, valueOf, listOf, withItem,
+  FORMAT_MODES, PARSE_MODES, DEDUPE_MATCH, DEDUPE_SCOPE, SEPARATOR_OPTIONS, LOOP_LIMIT, makeField, loopSpan, loopOf, loopMax, valueOf, listOf, withItem, linkedinDays,
 } from '../cron.js';
 import { modelForTask } from '../models.js';
 import { DEV_MODELS, DEV_MODEL_NAMES, DEV_EFFORTS } from '../dev-core.js';
@@ -1465,6 +1465,7 @@ const SOURCE_ABOUT = {
   page: 'Read through the r.jina.ai page reader when the flow runs, as text with its headings and links, without images. Long pages are cut at about 12,000 characters, linked pages at about 4,000 each.',
   history: 'The final output of this flow’s last successful runs (not test runs), so the AI can avoid repeating itself.',
   flow: 'The final output of that flow’s last successful run (not a test run).',
+  linkedin: 'Each LinkedIn account’s followers and their change, the posts published in the period with their last read results (best and worst), the scheduled posts next, the drafts waiting and the new comments. A project keeps only its accounts and posts.',
   text: null,
 };
 
@@ -1495,8 +1496,12 @@ function sourceCard(store, flow, own, { setSource, remove }) {
   const otherFlows = store.get(COLLECTION).flows.filter((f) => f.id !== flow.id);
   return h('div', { class: 'cron-source stack' },
     h('div', { class: 'row cron-fields' },
-      field('Source', sourcePick(src.source, (source) => set({ source }))),
-      src.source === 'project' ? field('Project', stepProjectPick(store, flow, own.projectId, (projectId) => set({ projectId }), { none: 'Choose…' })) : null,
+      field('Source', sourcePick(src.source, (source) => set(source === 'linkedin' && src.source !== 'linkedin' ? { source, count: 7 } : { source }))),
+      src.source === 'linkedin' ? field('Project', stepProjectPick(store, flow, own.projectId, (projectId) => set({ projectId }), { none: 'All accounts and posts' })) : null,
+      src.source === 'linkedin'
+        ? field('Days', h('input', { type: 'number', min: 1, max: 90, value: String(linkedinDays(src)), onchange: (/** @type {FieldEvent} */ e) => set({ count: linkedinDays({ count: Number(e.target.value) }) }) }))
+        : null,
+      src.source === 'project' ?field('Project', stepProjectPick(store, flow, own.projectId, (projectId) => set({ projectId }), { none: 'Choose…' })) : null,
       src.source === 'page' ? field('Project', stepProjectPick(store, flow, own.projectId, (projectId) => set({ projectId }), { none: 'None: use the link below' })) : null,
       src.source === 'history'
         ? field('How many runs', h('input', { type: 'number', min: 1, max: 20, value: String(src.count ?? 5), onchange: (/** @type {FieldEvent} */ e) => set({ count: Math.min(20, Math.max(1, Number(e.target.value) || 5)) }) }))
