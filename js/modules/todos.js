@@ -20,7 +20,7 @@ import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startClaudeSession, openSession, runnerOf } from './dev.js';
 import { DEV_MODELS, DEV_MODEL_NAMES, DEV_EFFORTS } from '../dev-core.js';
-import { openMenu } from '../menu.js';
+import { openMenu, copyItem } from '../menu.js';
 import { sessionStatus, runnerInfo } from '../terminal.js';
 import { imagesOf, imageDrop, imageStrip, imagePathsFor, addImages } from '../task-images.js';
 import { dragsFiles, imageFiles } from '../images.js';
@@ -941,10 +941,26 @@ function devControl(store, item) {
 // its Dev button starts every session with them.
 /** @param {Store} store @param {Task} item */
 function devOptionsButton(store, item) {
+  const picked = [item.devModel ?? '', item.devEffort && `${item.devEffort} effort`].filter(Boolean).join(', ');
+  const title = `Dev options: ${picked || 'default model and effort'}`;
+  return h('button', {
+    type: 'button',
+    class: `icon-btn dev-options${picked ? ' set' : ''}`,
+    title,
+    'aria-label': `${title} for "${item.text}"`,
+    'aria-haspopup': 'menu',
+    onclick: (/** @type {MouseEvent} */ e) => {
+      e.stopPropagation();
+      openMenu(devOptionEntries(store, item), /** @type {HTMLElement} */ (e.currentTarget));
+    },
+  }, icon('chevron-down'));
+}
+
+// The rows of a task's Dev options menu: its model and effort, and a new session. Its right-click menu shows them too.
+/** @param {Store} store @param {Task} item @returns {MenuEntry[]} */
+function devOptionEntries(store, item) {
   const model = item.devModel ?? '';
   const effort = item.devEffort ?? '';
-  const picked = [model, effort && `${effort} effort`].filter(Boolean).join(', ');
-  const title = `Dev options: ${picked || 'default model and effort'}`;
   /** @param {'devModel' | 'devEffort'} field @param {string} value */
   const set = (field, value) => store.update(COLLECTION, (d) => {
     const t = d.items.find((x) => x.id === item.id);
@@ -959,22 +975,12 @@ function devOptionsButton(store, item) {
     '-',
     ...values.map((v) => ({ label: name(v), checked: now === v, onSelect: () => set(field, v) })),
   ];
-  return h('button', {
-    type: 'button',
-    class: `icon-btn dev-options${picked ? ' set' : ''}`,
-    title,
-    'aria-label': `${title} for "${item.text}"`,
-    'aria-haspopup': 'menu',
-    onclick: (/** @type {MouseEvent} */ e) => {
-      e.stopPropagation();
-      openMenu([
-        { label: 'Model', hint: model ? name(model) : 'Default', items: rows('devModel', DEV_MODELS, model) },
-        { label: 'Effort', hint: effort || 'Default', items: rows('devEffort', DEV_EFFORTS, effort) },
-        '-',
-        { label: 'Start a new session', icon: icon('terminal'), onSelect: () => devTasks(store, [item]) },
-      ], /** @type {HTMLElement} */ (e.currentTarget));
-    },
-  }, icon('chevron-down'));
+  return [
+    { label: 'Model', hint: model ? name(model) : 'Default', items: rows('devModel', DEV_MODELS, model) },
+    { label: 'Effort', hint: effort || 'Default', items: rows('devEffort', DEV_EFFORTS, effort) },
+    '-',
+    { label: 'Start a new session', icon: icon('terminal'), onSelect: () => devTasks(store, [item]) },
+  ];
 }
 
 // Starts a Dev session on the task, or, once it has one, opens it in Dev; the colour says what the terminal is doing.
@@ -1283,6 +1289,7 @@ function todoRow(store, item, ctx, place) {
       onclick: (/** @type {MouseEvent} */ e) => {
         if (hasDescription || imagesOf(item).length) toggleFromRow(store, item.id, e);
       },
+      oncontextmenu: (/** @type {MouseEvent} */ e) => openTaskMenu(store, item, ctx, repos, e),
     },
       h('span', {
         class: 'grip',
@@ -1319,17 +1326,20 @@ function todoRow(store, item, ctx, place) {
         h('div', { class: 'todo-status' },
           pickChip({
             value: status,
+            className: 'pick-status',
             options: statusOptions(store, status),
             onPick: (v) => updateItem(store, item.id, { status: v }),
           }),
           doneButton(store, item)),
         pickChip({
           value: priority,
+          className: 'pick-priority',
           options: PRIORITIES.map(([v, l]) => ({ value: v, label: l, tone: v === 'none' ? 'plain' : v })),
           onPick: (v) => updateItem(store, item.id, { priority: v }),
         }),
         pickChip({
           value: item.projectId ?? null,
+          className: 'pick-project',
           options: projectOptions,
           nullable: true,
           nullLabel: 'Personal',
@@ -1337,6 +1347,7 @@ function todoRow(store, item, ctx, place) {
         }),
         pickChip({
           value: item.category || null,
+          className: 'pick-category',
           options: categoryNames.map((c) => ({ value: c, label: c, color: categoryColor(store, c) })),
           nullable: true,
           nullLabel: 'No category',
@@ -1389,6 +1400,127 @@ function todoRow(store, item, ctx, place) {
           imageStrip(store, item),
           usageNote(store, item))
       : null);
+}
+
+// A right click on a task row: first what the click landed on (the Dev arrow's menu on Dev, the statuses on the
+// status chip, a link's actions on an issue or PR), then the task's own actions. Text being edited keeps the
+// browser's menu, for spelling and paste.
+/**
+ * @param {Store} store @param {Task} item @param {{ projects: Project[] }} ctx @param {string[]} repos
+ * @param {MouseEvent} e
+ */
+function openTaskMenu(store, item, ctx, repos, e) {
+  const target = /** @type {Element} */ (e.target);
+  if (target.closest('input, textarea, [contenteditable]')) return;
+  e.preventDefault();
+  const specific = clickedEntries(store, item, ctx, target);
+  openMenu([...specific, specific.length ? '-' : null, ...taskEntries(store, item, ctx, repos)], { x: e.clientX, y: e.clientY });
+}
+
+// The status, priority, project and category of a task as menu rows, each a list with a tick on the one it has.
+/** @param {Store} store @param {Task} item @param {Project[]} projects */
+function fieldRows(store, item, projects) {
+  const status = statusOf(item);
+  const priority = item.priority ?? 'none';
+  const categories = categoriesFor(store, item.projectId);
+  if (item.category && !categories.includes(item.category)) categories.push(item.category);
+  return {
+    /** @returns {MenuEntry[]} */
+    status: () => statusOptions(store, status).map((o) => ({ label: o.label, checked: o.value === status, onSelect: () => updateItem(store, item.id, { status: o.value }) })),
+    /** @returns {MenuEntry[]} */
+    priority: () => PRIORITIES.map(([v, l]) => ({ label: l, checked: v === priority, onSelect: () => updateItem(store, item.id, { priority: v }) })),
+    /** @returns {MenuEntry[]} */
+    project: () => [
+      { label: 'Personal', checked: !item.projectId, onSelect: () => moveToProject(store, item.id, null) },
+      '-',
+      ...[...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({
+        label: p.name, icon: () => projectIcon(p), checked: p.id === item.projectId, onSelect: () => moveToProject(store, item.id, p.id),
+      })),
+    ],
+    /** @returns {MenuEntry[]} */
+    category: () => [
+      { label: 'No category', checked: !item.category, onSelect: () => updateItem(store, item.id, { category: '' }) },
+      '-',
+      ...categories.map((c) => ({ label: c, checked: c === item.category, onSelect: () => updateItem(store, item.id, { category: c }) })),
+    ],
+  };
+}
+
+// The rows for the control under the pointer, or none when it is on the row's plain space.
+/**
+ * @param {Store} store @param {Task} item @param {{ projects: Project[] }} ctx @param {Element} target
+ * @returns {MenuEntry[]}
+ */
+function clickedEntries(store, item, ctx, target) {
+  if (target.closest('.dev-control')) return devOptionEntries(store, item);
+  const rows = fieldRows(store, item, ctx.projects);
+  if (target.closest('.pick-status')) return rows.status();
+  if (target.closest('.pick-priority')) return rows.priority();
+  if (target.closest('.pick-project')) return rows.project();
+  if (target.closest('.pick-category')) return rows.category();
+  if (target.closest('.due-control')) return dueEntries(store, item);
+  const link = /** @type {HTMLAnchorElement | null} */ (target.closest('a.issue-link'));
+  if (link) {
+    const tracked = [...issuesOf(item), ...prsOf(item)].find((l) => l.url === link.href);
+    return [
+      { label: 'Open in a new tab', icon: () => icon('globe'), onSelect: () => window.open(link.href, '_blank', 'noopener') },
+      copyItem('Copy link', link.href),
+      tracked ? { label: 'Unlink from the task', icon: () => icon('x'), onSelect: () => unlinkLink(store, item.id, tracked) } : null,
+    ];
+  }
+  return [];
+}
+
+// Set or change a deadline (the native date picker of the row's deadline control), or clear it.
+/** @param {Store} store @param {Task} item @returns {MenuEntry[]} */
+function dueEntries(store, item) {
+  const pick = () => {
+    const input = /** @type {HTMLInputElement | null} */ (document.querySelector(`.todo-item[data-id="${CSS.escape(item.id)}"] .due-picker`));
+    try { input?.showPicker(); } catch { input?.focus(); }
+  };
+  return [
+    { label: item.due ? 'Change the deadline…' : 'Set a deadline…', icon: () => icon('calendar'), onSelect: pick },
+    { label: 'Due today', onSelect: () => updateItem(store, item.id, { due: todayISO() }) },
+    item.due ? { label: 'Clear the deadline', icon: () => icon('x'), onSelect: () => updateItem(store, item.id, { due: '' }) } : null,
+  ];
+}
+
+// What a task's right-click menu always offers.
+/**
+ * @param {Store} store @param {Task} item @param {{ projects: Project[] }} ctx @param {string[]} repos
+ * @returns {MenuEntry[]}
+ */
+function taskEntries(store, item, ctx, repos) {
+  const done = statusOf(item) === 'done';
+  const rows = fieldRows(store, item, ctx.projects);
+  const session = item.devSession ? devWatch.status[item.devSession] : null;
+  const expanded = view.expanded.has(item.id);
+  return [
+    { label: done ? 'Mark as not done' : 'Mark done', icon: () => icon('check-square'), onSelect: () => updateItem(store, item.id, { status: done ? 'todo' : 'done' }) },
+    { label: 'Status', items: rows.status() },
+    { label: 'Priority', items: rows.priority() },
+    { label: 'Project', items: rows.project(), search: 'Find a project' },
+    { label: 'Category', items: rows.category(), search: 'Find a category' },
+    { label: 'Deadline', icon: () => icon('calendar'), items: dueEntries(store, item) },
+    '-',
+    session
+      ? { label: 'Open the Dev terminal', icon: () => icon('terminal'), onSelect: () => openSession({
+          id: /** @type {string} */ (item.devSession),
+          cwd: session.cwd,
+          taskIds: store.get(COLLECTION).items.filter((t) => t.devSession === item.devSession).map((t) => t.id),
+        }) }
+      : { label: 'Start a Dev session', icon: () => icon('terminal'), onSelect: () => devTasks(store, [item]) },
+    { label: 'Dev options', items: devOptionEntries(store, item) },
+    repos.length || issuesOf(item).length || prsOf(item).length
+      ? { label: 'Issues and PRs…', icon: () => icon('repo'), onSelect: () => openIssueDialog(store, item, repos) }
+      : null,
+    { label: expanded ? 'Hide the description' : item.description ? 'Show the description' : 'Add a description', icon: () => icon('align-left'), onSelect: () => toggleExpanded(store, item.id) },
+    '-',
+    { label: 'Copy', icon: () => icon('copy'), hint: 'Markdown', onSelect: () => copyTasks(store, [item]) },
+    copyItem('Copy title', item.text),
+    '-',
+    { label: 'Delete', icon: () => icon('trash'), danger: true, onSelect: () => removeItem(store, item.id) },
+  ];
 }
 
 // A click on a row's empty space, or its plain text, opens or closes its description and images.
