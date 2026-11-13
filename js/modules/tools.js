@@ -9,6 +9,7 @@ import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
 import { barChart } from '../chart.js';
 import { contractsTab, contractsSerialize, contractsRestore } from './tools-contracts.js';
+import { requestsTab, requestsSerialize, requestsRestore } from './tools-requests.js';
 /** @import { CrawlFile, IconName, LlmsFile, Project, Provider, ProviderStatus, RobotsFile, SecurityFile, Site, SiteCrawl, SiteDns, SiteLogEntry, SiteDomain, SiteMeta, SitemapFile, Store } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 
@@ -17,7 +18,7 @@ import { contractsTab, contractsSerialize, contractsRestore } from './tools-cont
 
 const COLLECTION = 'tools';
 /** @type {[string, string, IconName][]} */
-const TABS = [['health', 'Website health', 'globe'], ['ssl', 'SSL and domains', 'shield'], ['dns', 'DNS and email', 'mail'], ['crawl', 'Crawl files', 'file'], ['meta', 'Metadata preview', 'link'], ['status', 'Provider status', 'activity'], ['contracts', 'Contracts', 'code']];
+const TABS = [['health', 'Website health', 'globe'], ['ssl', 'SSL and domains', 'shield'], ['dns', 'DNS and email', 'mail'], ['crawl', 'Crawl files', 'file'], ['meta', 'Metadata preview', 'link'], ['status', 'Provider status', 'activity'], ['contracts', 'Contracts', 'code'], ['requests', 'Requests', 'send']];
 // What "Check all now" looks up on each tab.
 /** @type {Record<string, string[]>} */
 const TAB_PARTS = { health: ['health'], ssl: ['ssl', 'domain'], dns: ['dns'], crawl: ['crawl'] };
@@ -943,15 +944,17 @@ function draw(root, store) {
   const status = view.tab === 'status';
   // Contracts are saved in Settings, not tied to a website.
   const contracts = view.tab === 'contracts';
-  const body = contracts ? contractsTab(store) : status ? statusTab(store) : !sites.length
+  // Requests go to any URL, saved or not.
+  const requests = view.tab === 'requests';
+  const body = requests ? requestsTab(store) : contracts ? contractsTab(store) : status ? statusTab(store) : !sites.length
     ? h('div', { class: 'card stack' }, empty('No project has a website yet. Add one on a project page and it appears here.'), h('div', null, h('a', { href: '#/projects', class: 'btn-link' }, 'Open Projects')))
     : view.tab === 'ssl' ? sslTab(store, sites) : view.tab === 'dns' ? dnsTab(store, sites) : view.tab === 'crawl' ? crawlTab(store, sites) : view.tab === 'meta' ? metaTab(store, sites) : healthTab(store, sites);
 
   root.replaceChildren(
     h('div', { class: 'stack-lg tools' },
       h('header', { class: 'row between' },
-        h('div', null, h('h2', null, 'Tools'), h('p', { class: 'muted small' }, contracts ? 'Read and write the smart contracts saved in Settings.' : 'Checks that run against the website of each project, and the services they rely on. The runners check every 5 minutes, with or without the board open.')),
-        !contracts && (sites.length || (status && store.get(COLLECTION).providers.length)) && view.tab !== 'meta'
+        h('div', null, h('h2', null, 'Tools'), h('p', { class: 'muted small' }, requests ? 'Build and send HTTP requests, read their answers, and keep them with a project.' : contracts ? 'Read and write the smart contracts saved in Settings.' : 'Checks that run against the website of each project, and the services they rely on. The runners check every 5 minutes, with or without the board open.')),
+        !contracts && !requests && (sites.length || (status && store.get(COLLECTION).providers.length)) && view.tab !== 'meta'
           ? h('div', { class: 'row' },
               h('label', { class: 'inline' }, 'Check every',
                 h('select', {
@@ -1004,10 +1007,11 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
   collection: COLLECTION,
   defaults: TOOLS_DEFAULTS,
   render: draw,
-  serialize: () => ({ tab: view.tab === 'health' ? '' : view.tab, project: ['meta', 'crawl', 'health'].includes(view.tab) ? view.project : '', contract: view.tab === 'contracts' ? contractsSerialize() : '' }),
+  serialize: () => ({ tab: view.tab === 'health' ? '' : view.tab, project: ['meta', 'crawl', 'health'].includes(view.tab) ? view.project : '', contract: view.tab === 'contracts' ? contractsSerialize() : '', request: view.tab === 'requests' ? requestsSerialize() : '' }),
   restore: (/** @type {Record<string, string>} */ p = {}) => {
     view.tab = TABS.some(([k]) => k === p.tab) ? p.tab : 'health';
     view.project = p.project || '';
     contractsRestore(p.contract);
+    requestsRestore(p.request);
   },
 });
