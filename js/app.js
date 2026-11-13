@@ -1,7 +1,7 @@
 // Shell: folder connection, hash router, and top navigation.
 import { fsSupported, pickFolder, loadHandle, hasPermission } from './storage.js';
 import { createStore } from './store.js';
-import { h, icon, uid } from './ui.js';
+import { h, icon, uid, keepImages, steadyAnimations } from './ui.js';
 import { configure } from './github.js';
 import { ensureTasks, applyAppearance } from './modules/settings.js';
 import { modules } from './modules/index.js';
@@ -116,9 +116,10 @@ function render({ user = true } = {}) {
   }
   mod.render(main, store);
   syncUrl(mod);
+  if (before && !entered) keepImages(before, main);
   // replaceChildren would print a null as text, so the parts that may be absent are filtered out.
   app.replaceChildren(.../** @type {HTMLElement[]} */ ([
-    h('header', { class: 'topbar' },
+    h('header', { class: entered ? 'topbar enter' : 'topbar' },
       h('nav', { class: 'tabs' },
         modules.filter((m) => !m.hidden).map((m) =>
           h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab', title: m.title, 'aria-current': m.id === mod.id ? 'page' : null },
@@ -156,6 +157,7 @@ function render({ user = true } = {}) {
     main,
   ].filter(Boolean)));
   markDrawn(main);
+  steadyAnimations(app);
   // Within a section the page keeps its place: focusing a field near the top would scroll back up to it.
   if (user) /** @type {HTMLElement | null} */ (main.querySelector('[data-autofocus]'))?.focus({ preventScroll: !entered });
   restore(main, kept);

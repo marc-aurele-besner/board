@@ -2,7 +2,7 @@
 // Channels can be dragged into any order, gathered into groups, and tied to projects (one by one, by group, or a whole
 // workspace). A muted channel stays where it is, dimmed and never counted as unread. Messages, threads and reactions
 // are read live through the runners: the open conversation every few seconds, unread counts every 20 s.
-import { h, icon, uid, notice, refreshIcon, codeBox } from '../ui.js';
+import { h, icon, uid, notice, refreshIcon, codeBox, keepImages, steadyAnimations } from '../ui.js';
 import { projectTree, projectIcon } from './projects.js';
 import { pickButton, pickChip } from '../inline.js';
 import { menuButton, onContextMenu } from '../menu.js';
@@ -323,7 +323,8 @@ function paint(part) {
     const old = m.root.querySelector('.slack-side-list');
     if (old) {
       const fresh = sideList(m.store);
-      old.replaceWith(fresh);
+      if (fresh.outerHTML === old.outerHTML) return;
+      swap(old, fresh);
       fresh.scrollTop = live.sideScroll;
     }
     return;
@@ -332,9 +333,19 @@ function paint(part) {
   const old = m.root.querySelector(selector);
   const fresh = part === 'main' ? messagesPane(m.store) : threadMessages(m.store);
   if (old && fresh) {
-    old.replaceWith(fresh);
+    // A live read that brought nothing new leaves the list as it is.
+    if (fresh.outerHTML === old.outerHTML) return;
+    swap(old, fresh);
     keepScroll(fresh, part === 'main' ? view.open : `${view.open}|${view.thread}`);
   } else if (!old !== !fresh) m.store.refresh();
+}
+
+// Replaces a part with its redrawn self, keeping the images already shown and the pulses in step.
+/** @param {Element} old @param {Element} fresh */
+function swap(old, fresh) {
+  keepImages(old, fresh);
+  old.replaceWith(fresh);
+  steadyAnimations(fresh);
 }
 
 /** @param {Element} el @param {string} key */

@@ -300,7 +300,9 @@ button:active:not(:disabled) { transform: scale(0.97); }
 button:disabled { opacity: 0.55; cursor: not-allowed; }
 .tab, .nav-item, .settings-tab, .seg, .project-item, .recipe-item, .recap-row { transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease; }
 .tab { position: relative; }
-.tab.active::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: -6px; height: 2px; border-radius: 2px; background: var(--accent); animation: fadeIn 0.2s ease both; }
+.tab.active::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: -6px; height: 2px; border-radius: 2px; background: var(--accent); }
+/* Only on a change of section: the bar is drawn again on every redraw. */
+.topbar.enter .tab.active::after { animation: fadeIn 0.2s ease both; }
 .todo-text, .todo-item .chip-pick { transition: color 0.2s ease, opacity 0.2s ease; }
 .chip-pick { transition: background-color 0.15s ease, transform 0.15s ease; }
 .chip-pick:hover { transform: translateY(-1px); }

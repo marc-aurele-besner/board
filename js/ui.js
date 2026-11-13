@@ -43,6 +43,37 @@ export function h(tag, attrs, ...children) {
   return /** @type {ElementOf<T>} */ (el);
 }
 
+// A redraw replaces elements, which would load every image again and restart every CSS animation: an avatar
+// blanks while it decodes and a pulsing dot jumps back to its start, so a page redrawn every few seconds flashes.
+// Call with the part being replaced and the part replacing it, before the swap: each image already shown is moved
+// into the new part (it keeps its decoded picture), taking the new one's attributes.
+/** @param {ParentNode} before @param {ParentNode} after */
+export function keepImages(before, after) {
+  /** @type {Map<string, HTMLImageElement[]>} */
+  const shown = new Map();
+  for (const img of before.querySelectorAll('img')) {
+    const src = img.getAttribute('src');
+    if (src && img.complete && img.naturalWidth) shown.set(src, [...(shown.get(src) ?? []), img]);
+  }
+  if (!shown.size) return;
+  for (const img of after.querySelectorAll('img')) {
+    const old = shown.get(img.getAttribute('src') ?? '')?.shift();
+    if (!old) continue;
+    for (const { name } of [...old.attributes]) if (!img.hasAttribute(name)) old.removeAttribute(name);
+    for (const { name, value } of [...img.attributes]) if (old.getAttribute(name) !== value) old.setAttribute(name, value);
+    img.replaceWith(old);
+  }
+}
+
+// After the swap: endless animations (pulses, spinners) run on the page's clock, so a redrawn one goes on in step
+// with the one it replaced instead of starting over.
+/** @param {Element} root */
+export function steadyAnimations(root) {
+  for (const a of root.getAnimations({ subtree: true })) {
+    if (a.effect?.getTiming().iterations === Infinity && a.startTime !== 0) a.startTime = 0;
+  }
+}
+
 export const uid = () =>
   globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
 
