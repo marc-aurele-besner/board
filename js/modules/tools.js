@@ -906,7 +906,8 @@ function metaTab(store, sites) {
 
 // --- Provider status ---
 
-// Common services and the kind of status page they run. Any other Statuspage or Datadog page can be added by hand.
+// Common services and the kind of status page they run. Any other Statuspage or Datadog page, or a product's page
+// of the Google Workspace dashboard, can be added by hand.
 const PRESETS = [
   ['GitHub', 'https://www.githubstatus.com'],
   ['Vercel', 'https://www.vercel-status.com'],
@@ -921,6 +922,10 @@ const PRESETS = [
   ['Render', 'https://status.render.com'],
   ['DigitalOcean', 'https://status.digitalocean.com'],
   ['Discord', 'https://discordstatus.com'],
+  ['Resend', 'https://resend-status.com'],
+  ['Slack', 'https://slack-status.com', 'slack'],
+  ['Gmail', 'https://www.google.com/appsstatus/dashboard/products/prPt2Yra2CbGsbEm9cpC', 'google'],
+  ['Google Calendar', 'https://www.google.com/appsstatus/dashboard/products/n5hVexuq1PM9onY9qrmo', 'google'],
 ];
 /** @type {Record<string, [string, string]>} */
 const INDICATOR = { none: ['Operational', 'done'], minor: ['Minor issue', 'medium'], maintenance: ['Maintenance', 'medium'], major: ['Major outage', 'high'], critical: ['Critical outage', 'high'] };
@@ -1016,7 +1021,7 @@ function providerCard(store, pr) {
       : null,
     s?.error ? h('p', { class: 'muted small' }, `${s.indicator ? 'Last read failed' : 'Could not read'}: ${s.error}`) : null,
     h('div', { class: 'row between provider-foot' },
-      h('span', { class: 'muted small' }, `Read ${timeOf(s?.at)}${s?.kind === 'datadog' ? ' · Datadog page' : ''}`),
+      h('span', { class: 'muted small' }, `Read ${timeOf(s?.at)}${s?.kind === 'datadog' ? ' · Datadog page' : s?.kind === 'google' ? ' · Google Workspace dashboard' : ''}`),
       h('div', { class: 'row' },
         h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Read again', 'aria-label': `Read ${pr.name} again`, onclick: () => run(store, pr.id, () => checkProviders(store, [pr.id])) }, refreshIcon(busy)),
         h('button', { type: 'button', class: 'icon-btn', title: 'Stop following', 'aria-label': `Stop following ${pr.name}`, onclick: () => unfollow(store, pr) }, icon('x')))));
@@ -1064,7 +1069,7 @@ function statusTab(store) {
           follow(store, name.value, url.value);
         },
       }, name, url, h('button', { type: 'submit', class: 'btn-small primary' }, 'Follow'))),
-    h('p', { class: 'muted small' }, 'Works with status pages hosted on Statuspage (most providers use it) and on Datadog (OpenRouter, for one). The page’s public summary and recent incidents are read on the same interval as website health; nothing about you is sent. Datadog pages are read through r.jina.ai, which receives only the page’s address.'));
+    h('p', { class: 'muted small' }, 'Works with status pages hosted on Statuspage (most providers use it) and on Datadog (OpenRouter, for one), with Slack’s, and with a product’s page of the Google Workspace dashboard. The page’s public summary and recent incidents are read on the same interval as website health; nothing about you is sent. Datadog pages are read through r.jina.ai, which receives only the page’s address.'));
 }
 
 /** @param {HTMLElement} root @param {Store} store */

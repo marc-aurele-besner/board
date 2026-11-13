@@ -24,6 +24,8 @@
 /** @typedef {{ status?: { indicator?: string, description?: string }, components?: { name: string, status: string, group?: boolean }[], incidents?: StatuspageIncident[], scheduled_maintenances?: { id: string, name: string, status: string, scheduled_for: string, scheduled_until: string, shortlink?: string }[] }} StatuspageSummary */
 /** @typedef {{ name: string, status: string, type?: string, components?: DatadogComponent[] }} DatadogComponent */
 /** @typedef {{ id: string, title: string, resolved?: boolean, resolvedDate?: string, lastModifiedAt: string, publishedDate: string, currentStatus: string, description?: string, timeline?: { description?: string }[] }} DatadogIncident */
+/** @typedef {{ id: number, title: string, type: string, status: string, url: string, date_created: string, date_updated: string, services?: string[], notes?: { body?: string, date_created: string }[] }} SlackIncident */
+/** @typedef {{ id: string, begin: string, end?: string | null, modified: string, external_desc?: string, status_impact?: string, severity?: string, uri: string, service_key?: string, affected_products?: { id: string, title: string }[], most_recent_update?: { when?: string, text?: string, status?: string } }} GoogleIncident */
 /** @typedef {{ components?: DatadogComponent[], incidents?: DatadogIncident[], maintenances?: { id: string, title?: string, scheduledDescription?: string, currentStatus: string, startDate: string, completedDate: string }[] }} DatadogConfig */
 
 const TIMEOUT_MS = 12000;
@@ -610,7 +612,9 @@ const STATUS_KEEP = 12; // degraded components kept; large providers list hundre
 export function statusPageOf(input) {
   try {
     const url = new URL(/^https?:\/\//i.test(input.trim()) ? input.trim() : `https://${input.trim()}`);
-    return url.hostname.includes('.') ? url.origin : '';
+    if (!url.hostname.includes('.')) return '';
+    // Google's one dashboard covers every product, so a product's page is kept whole.
+    return `${url.origin}${url.pathname}`.match(GOOGLE_PRODUCT)?.[0] ?? url.origin;
   } catch {
     return '';
   }
@@ -620,6 +624,11 @@ const RECENT_DAYS = 30; // how far back resolved incidents are counted
 const UPDATE_KEEP = 280; // characters of an incident's latest update kept
 const clip = (/** @type {unknown} */ text) => String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, UPDATE_KEEP);
 const recentOf = (/** @type {StatusRecent[]} */ list) => list.filter((i) => i.at && Date.now() - Date.parse(i.at) < RECENT_DAYS * 86400000).sort((a, b) => b.at.localeCompare(a.at));
+
+const GOOGLE_DASHBOARD = 'https://www.google.com/appsstatus/dashboard';
+const GOOGLE_PRODUCT = /^https:\/\/www\.google\.com\/appsstatus\/dashboard\/products\/[\w-]+/;
+/** @type {Record<string, string>} */
+const DESCRIPTION = { none: 'All Systems Operational', minor: 'Minor Service Outage', major: 'Partial System Outage', critical: 'Major Service Outage', maintenance: 'Service Under Maintenance' };
 
 // Every status reader returns the same shape:
 //   indicator: none | minor | major | critical | maintenance; description: the page's own one-line state;
@@ -679,7 +688,7 @@ async function fromDatadog(page) {
   const resolved = recentOf((/** @type {DatadogConfig} */ (data).incidents ?? []).filter((i) => i.resolved).map((i) => ({ name: i.title, impact: '', at: i.resolvedDate ?? i.lastModifiedAt, url: `${page}/incidents/${i.id}` })));
   return {
     indicator,
-    description: { none: 'All Systems Operational', minor: 'Minor Service Outage', major: 'Partial System Outage', critical: 'Major Service Outage', maintenance: 'Service Under Maintenance' }[indicator],
+    description: DESCRIPTION[indicator],
     parts: { total: parts.length, ok: parts.filter((c) => c.status === 'operational').length },
     components: parts.filter((c) => c.status !== 'operational').slice(0, STATUS_KEEP).map((c) => ({ name: c.name, status: c.status })),
     incidents: open.map((i) => ({
@@ -691,10 +700,79 @@ async function fromDatadog(page) {
   };
 }
 
+// Text of an update written as HTML (Slack) or Markdown (Google).
+const plain = (/** @type {string | undefined} */ text) => clip(String(text ?? '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;|&rsquo;/g, '’').replace(/&quot;/g, '"').replace(/\*\*/g, ''));
+
+// Slack runs its own status page: the open incidents, and a history of the recent ones. An outage is a major
+// problem, an incident or a notice a minor one; a scheduled notice is maintenance to come.
+/** @param {string} page @returns {Promise<Omit<ProviderStatus, 'at'>>} */
+async function fromSlack(page) {
+  const res = await timed(`${page}/api/v2.0.0/current`);
+  if (!res.ok) throw new Error(`The status page answered ${res.status}.`);
+  const data = /** @type {{ status?: string, active_incidents?: SlackIncident[] } | null} */ (await res.json().catch(() => null));
+  if (!data?.status) throw new Error('This is not Slack’s status page.');
+  const history = /** @type {SlackIncident[] | null} */ (await timed(`${page}/api/v2.0.0/history`).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+  const active = data.active_incidents ?? [];
+  const open = active.filter((i) => i.status === 'active');
+  const coming = active.filter((i) => i.status === 'scheduled');
+  const latest = (/** @type {SlackIncident} */ i) => [...(i.notes ?? [])].sort((a, b) => Date.parse(b.date_created) - Date.parse(a.date_created))[0];
+  const indicator = open.some((i) => i.type === 'outage') ? 'major' : open.length ? 'minor' : 'none';
+  const resolved = recentOf((Array.isArray(history) ? history : []).filter((i) => ['resolved', 'completed'].includes(i.status) && i.type !== 'notice')
+    .map((i) => ({ name: i.title, impact: i.type === 'outage' ? 'major' : 'minor', at: i.date_updated, url: i.url })));
+  return {
+    indicator,
+    description: DESCRIPTION[indicator],
+    components: [...new Set(open.flatMap((i) => i.services ?? []))].slice(0, STATUS_KEEP).map((name) => ({ name, status: indicator === 'major' ? 'major_outage' : 'degraded_performance' })),
+    incidents: open.map((i) => ({
+      name: i.title, impact: i.type === 'outage' ? 'major' : 'minor', status: i.type === 'outage' ? 'Outage' : i.type === 'notice' ? 'Notice' : 'Incident',
+      url: i.url, started: i.date_created, updated: latest(i)?.date_created ?? i.date_updated, update: plain(latest(i)?.body),
+    })),
+    maintenances: coming.map((i) => ({ name: i.title, status: 'scheduled', start: i.date_created, end: '', url: i.url })),
+    recent: resolved.slice(0, 5),
+    recentCount: Array.isArray(history) ? resolved.length : null,
+  };
+}
+
+// Google Workspace has one dashboard for every product, with no summary: the product's incidents with no end
+// are open. An outage is a major problem, a disruption or a notice a minor one.
+/** @param {string} page @returns {Promise<Omit<ProviderStatus, 'at'>>} */
+async function fromGoogle(page) {
+  const product = page.match(GOOGLE_PRODUCT)?.[0].split('/').pop();
+  if (!product) throw new Error('Follow one product’s page of the Google Workspace status dashboard.');
+  const res = await timed(`${GOOGLE_DASHBOARD}/incidents.json`);
+  if (!res.ok) throw new Error(`The status page answered ${res.status}.`);
+  const all = /** @type {GoogleIncident[] | null} */ (await res.json().catch(() => null));
+  if (!Array.isArray(all)) throw new Error('The Google Workspace dashboard did not list its incidents.');
+  const mine = all.filter((i) => i.service_key === product || i.affected_products?.some((p) => p.id === product));
+  const open = mine.filter((i) => !i.end);
+  const impactOf = (/** @type {GoogleIncident} */ i) => ((i.most_recent_update?.status ?? i.status_impact) === 'SERVICE_OUTAGE' ? 'major' : 'minor');
+  // The text is Markdown under labels ("**Summary:**", "**Title**", "# Incident Report"), which are dropped.
+  const linesOf = (/** @type {string | undefined} */ text) => (text ?? '').split('\n')
+    .map((l) => l.replace(/^#+\s*/, '').replace(/\*\*/g, '').trim())
+    .filter((l) => l && !/^(summary|title|description|symptoms|workaround|incident report)\s*:?$/i.test(l));
+  // The first line of the first description names the incident.
+  const nameOf = (/** @type {GoogleIncident} */ i) => linesOf(i.external_desc)[0]?.slice(0, 140) || 'Incident';
+  const indicator = open.some((i) => impactOf(i) === 'major') ? 'major' : open.length ? 'minor' : 'none';
+  const resolved = recentOf(mine.filter((i) => i.end).map((i) => ({ name: nameOf(i), impact: impactOf(i), at: /** @type {string} */ (i.end), url: `${GOOGLE_DASHBOARD}/${i.uri}` })));
+  return {
+    indicator,
+    description: DESCRIPTION[indicator],
+    incidents: open.map((i) => ({
+      name: nameOf(i), impact: impactOf(i), status: impactOf(i) === 'major' ? 'Outage' : 'Disruption',
+      url: `${GOOGLE_DASHBOARD}/${i.uri}`, started: i.begin, updated: i.most_recent_update?.when ?? i.modified, update: plain(linesOf(i.most_recent_update?.text).join(' ')),
+    })),
+    maintenances: [],
+    recent: resolved.slice(0, 5),
+    recentCount: resolved.length,
+  };
+}
+
 // Reads a status page. `kind` is known for presets and remembered after the first read;
-// an unknown page is tried as Statuspage, then as a Datadog page.
+// Slack's and Google's pages are known by their address; any other page is tried as Statuspage, then as Datadog.
 /** @param {string} page @param {string} [kind] @returns {Promise<Omit<ProviderStatus, 'at'>>} */
 export async function checkProvider(page, kind = '') {
+  if (GOOGLE_PRODUCT.test(page)) return { ...(await fromGoogle(page)), kind: 'google' };
+  if (hostOf(page) === 'slack-status.com') return { ...(await fromSlack(page)), kind: 'slack' };
   if (kind === 'datadog') return { ...(await fromDatadog(page)), kind };
   try {
     return { ...(await fromStatuspage(page)), kind: 'statuspage' };

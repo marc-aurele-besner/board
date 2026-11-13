@@ -157,7 +157,7 @@ export interface Provider {
   id: string;
   name: string;
   url: string;
-  // 'statuspage' | 'datadog'; learned on the first read when missing.
+  // 'statuspage' | 'datadog' | 'slack' | 'google'; learned on the first read when missing.
   kind?: string;
 }
 
