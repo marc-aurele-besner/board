@@ -9,6 +9,7 @@ import { migrateLegacyProjects, migrateProjectShape } from './modules/projects.j
 import { bell, COLLECTION as NOTIFICATIONS, DEFAULTS as NOTIFICATION_DEFAULTS } from './notifications.js';
 import { openPalette } from './palette.js';
 import { watchRunners, runnersOnline, runnersKnown } from './runners.js';
+import { watchAttention, attentionOf, attentionTitle } from './attention.js';
 import { GOOGLE, GOOGLE_DEFAULTS, useGoogleStore } from './google.js';
 import { CALENDAR, CALENDAR_DEFAULTS } from './gcal.js';
 import { GITHUB, GITHUB_DEFAULTS, useGithubStore } from './github.js';
@@ -123,8 +124,10 @@ function render({ user = true } = {}) {
     h('header', { class: entered ? 'topbar enter' : 'topbar' },
       h('nav', { class: 'tabs' },
         modules.filter((m) => !m.hidden).map((m) =>
-          h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab', title: m.title, 'aria-current': m.id === mod.id ? 'page' : null },
-            icon(m.icon), h('span', { class: 'tab-label' }, m.short ?? m.title)))),
+          h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab', title: m.title, 'data-id': m.id, 'aria-current': m.id === mod.id ? 'page' : null },
+            icon(m.icon), h('span', { class: 'tab-label' }, m.short ?? m.title),
+            // What waits on the user there (Slack mentions, Dev terminals); js/attention.js updates it in place.
+            h('span', { class: 'tab-pill', title: attentionTitle(m.id), hidden: !attentionOf(m.id) }, attentionOf(m.id) > 99 ? '99+' : String(attentionOf(m.id)))))),
       h('div', { class: 'topbar-end' },
         h('button', { type: 'button', class: 'search-btn', title: 'Search or jump', onclick: () => openPalette(/** @type {Store} */ (store), modules) },
           icon('search'), h('span', { class: 'grow' }, 'Search or jump…'), h('kbd', null, isMac ? '⌘K' : 'Ctrl K')),
@@ -284,6 +287,7 @@ async function open(handle) {
     // The runners report the folderId they read, so Settings can tell when they write to another folder.
     if (!store.get('settings').folderId) store.update('settings', (d) => { d.folderId = uid(); });
     watchRunners(store, onRunners);
+    watchAttention(store);
   }
   // Another tab or browser may save to the same folder: bring its changes in while this one is in view.
   setInterval(() => document.hidden || /** @type {Store} */ (store).sync(), SYNC_MS);
