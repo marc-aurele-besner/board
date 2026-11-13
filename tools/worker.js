@@ -18,11 +18,11 @@ import { jobs } from './jobs/index.js';
 import { sendWire } from '../js/http-request.js';
 import { slackCall, slackFile } from './slack.js';
 import { voyager, queueState } from './linkedin-session.js';
+import { exchangeLinkedinCode, publishPost } from '../js/linkedin-core.js';
 import { useLinkedinSession } from '../js/linkedin-session.js';
 
 // Shared code (Cron steps) calls linkedinCall(); here it runs the session's queue itself.
 useLinkedinSession(voyager);
-import { exchangeLinkedinCode, publishPost } from '../js/linkedin-core.js';
 
 const PORT = Number(process.env.WORKER_PORT) || 8420;
 const CONFIG = join(homedir(), '.config', 'board', 'worker.json');
