@@ -44,6 +44,8 @@ export interface UsageEntry {
   at: string;
   // The task id from Settings → Models & tasks.
   task: string;
+  // The project the call was made for, when the feature knows it (a profile, a brand, a triage, a Cron flow's).
+  projectId?: string;
   model: string;
   promptTokens: number;
   completionTokens: number;

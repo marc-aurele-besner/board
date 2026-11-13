@@ -35,15 +35,16 @@ function stripData(value) {
 // and the full exchange (messages sent, reply, response details), failed calls included.
 /**
  * @param {DataStore} store
- * @param {{ id: string, task: string, model: string, usage?: OpenRouterUsage, input: AiMessage[], output?: string, meta: AiCallMeta, error?: string }} call
+ * @param {{ id: string, task: string, model: string, projectId?: string, usage?: OpenRouterUsage, input: AiMessage[], output?: string, meta: AiCallMeta, error?: string }} call
  */
-function recordCall(store, { id, task, model, usage, input, output, meta, error }) {
+function recordCall(store, { id, task, model, projectId, usage, input, output, meta, error }) {
   store.update('usage', (d) => {
     d.entries.push({
       id: id || uid(),
       at: now(),
       task,
       model,
+      ...(projectId ? { projectId } : {}),
       promptTokens: Number(usage?.prompt_tokens) || 0,
       completionTokens: Number(usage?.completion_tokens) || 0,
       // A failed call without a reported cost cost nothing; a reply with no text may still have been billed.
@@ -78,15 +79,16 @@ function withGlobal(store, messages) {
 
 // messages: [{ role, content }]. content can be text or an array with text and image_url parts.
 // `model` overrides the task's model for one call (a Cron step can pick its own). `usageId` names the usage.json
-// entry, so a feature can point back to the call that made its result.
+// entry, so a feature can point back to the call that made its result. `projectId` files the call under a project in
+// Monitoring → AI usage.
 /**
  * @param {DataStore} store
  * @param {string} taskId
  * @param {AiMessage[]} messages
- * @param {{ model?: string, usageId?: string }} [options]
+ * @param {{ model?: string, usageId?: string, projectId?: string }} [options]
  * @returns {Promise<string>}
  */
-export async function ask(store, taskId, messages, { model: override = '', usageId = '' } = {}) {
+export async function ask(store, taskId, messages, { model: override = '', usageId = '', projectId = '' } = {}) {
   const key = store.get('settings').openrouter?.key ?? '';
   if (!key) throw new Error('Add an OpenRouter key in Settings first.');
   const model = override || modelForTask(store, taskId);
@@ -99,7 +101,7 @@ export async function ask(store, taskId, messages, { model: override = '', usage
   /** @type {(error: string, usage?: OpenRouterUsage) => never} */
   const fail = (error, usage) => {
     meta.ms = Math.round(performance.now() - started);
-    recordCall(store, { id: usageId, task: taskId, model, usage, input, output: '', meta, error });
+    recordCall(store, { id: usageId, task: taskId, model, projectId, usage, input, output: '', meta, error });
     throw new Error(error);
   };
 
@@ -129,7 +131,7 @@ export async function ask(store, taskId, messages, { model: override = '', usage
   });
   const text = choice?.message?.content;
   if (!text) fail('The model returned no text.', data.usage);
-  recordCall(store, { id: usageId, task: taskId, model, usage: data.usage, input, output: text, meta });
+  recordCall(store, { id: usageId, task: taskId, model, projectId, usage: data.usage, input, output: text, meta });
   return text;
 }
 

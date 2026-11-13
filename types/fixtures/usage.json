@@ -13,6 +13,7 @@
       "id": "u-ok1",
       "at": "2026-11-10T14:30:00.000Z",
       "task": "triage",
+      "projectId": "p-example",
       "model": "example/model-large",
       "promptTokens": 2400,
       "completionTokens": 320,

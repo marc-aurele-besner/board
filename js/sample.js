@@ -2,7 +2,7 @@
 // It has the few methods of a real folder handle that storage.js and store.js call, so the rest of the app cannot tell.
 // Nothing is written to disk, and it is gone when the page reloads.
 
-/** @import { Collections, Task, FinanceEntry, DevUsage, InboxMessage, Site } from '../types/data' */
+/** @import { Collections, Task, FinanceEntry, DevUsage, InboxMessage, Site, UsageEntry } from '../types/data' */
 
 /** @param {number} n */
 const pad = (n) => String(n).padStart(2, '0');
@@ -114,6 +114,16 @@ function collections() {
       models: Object.fromEntries(list.map(([id, [input, output, cacheRead, cacheWrite, cost]]) => [id, { provider: 'Anthropic', input, output, thinking: 0, cacheRead, cacheWrite, cost }])),
     };
   };
+  // A board AI call `daysAgo` days back, so Monitoring → AI usage has something to break down.
+  /**
+   * @param {number} daysAgo @param {string} task @param {string} model @param {string} projectId @param {number} promptTokens
+   * @param {number} completionTokens @param {number} cost
+   * @returns {UsageEntry}
+   */
+  const call = (daysAgo, task, model, projectId, promptTokens, completionTokens, cost) => ({
+    id: `u-${task}-${daysAgo}-${projectId || 'none'}`, at: new Date(Date.now() - daysAgo * 86400000 - 2 * 3600000).toISOString(),
+    task, model, ...(projectId ? { projectId } : {}), promptTokens, completionTokens, cost,
+  });
   /**
    * @param {string} id @param {string} dir @param {number} hoursAgo @param {string} from @param {string} subject
    * @param {Partial<InboxMessage>} [more]
@@ -195,10 +205,19 @@ function collections() {
           : { ref: '8453:v4:100001', pair: 'ETH / USDC', chain: 'Base', tokenId: '100001' }),
       })),
     },
-    // Two claude sessions Dev ran for tasks, so Monitoring, the tasks and Dev show what they used. No folder, so
-    // the runner is never asked about them.
+    // A few board AI calls, and two claude sessions Dev ran for tasks, so Monitoring, the tasks and Dev show what
+    // they used. No folder, so the runner is never asked about them.
     usage: {
-      entries: [],
+      entries: [
+        call(6, 'task-plan', 'example/model-small', '', 1800, 420, 0.0021),
+        call(5, 'task-summary', 'example/model-large', 'p-atlas', 9400, 1200, 0.071),
+        call(4, 'task-review', 'example/model-large', 'p-atlas', 6200, 900, 0.048),
+        call(3, 'task-tidy', 'example/model-small', '', 2600, 610, 0.0032),
+        call(2, 'task-summary', 'example/model-large', 'p-docs', 7100, 1050, 0.055),
+        call(1, 'task-review', 'example/model-large', 'p-docs', 5300, 800, 0.041),
+        call(0, 'task-plan', 'example/model-small', '', 1900, 450, 0.0023),
+        call(9, 'task-summary', 'example/model-large', 'p-atlas', 8800, 1100, 0.066),
+      ],
       dev: {
         'ship-the-pricing-page-a1b2c3': devRecord('ship-the-pricing-page-a1b2c3', ['t1'], -1, { 'claude-opus-5-5': [820, 31200, 4100000, 160000, 2.84], 'claude-haiku-5-5': [1300, 210, 0, 0, 0.0003] }, 'high'),
         'write-the-install-guide-d4e5f6': devRecord('write-the-install-guide-d4e5f6', ['t6'], 0, { 'claude-sonnet-5-5': [410, 18400, 1900000, 90000, 0.97] }, 'medium'),

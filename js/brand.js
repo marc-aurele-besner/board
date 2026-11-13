@@ -217,7 +217,7 @@ export async function findBrand(store, project, { onStep = () => {} } = {}) {
   const reply = await ask(store, 'task-summary', [
     { role: 'system', content: systemPrompt(store, 'project-brand') },
     { role: 'user', content: brandInput(project, sources, brandOf(project)) },
-  ], { usageId });
+  ], { usageId, projectId: project.id });
   const found = parseJson(reply);
   if (!found || typeof found !== 'object' || Array.isArray(found)) throw new Error('The model did not return the brand as a JSON object.');
   let added = 0;

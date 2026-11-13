@@ -515,6 +515,18 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .mon-table tr.dev-live td:first-child { box-shadow: inset 3px 0 0 var(--live); }
 .mon-table tr.dev-working { --live: var(--accent); }
 .mon-table tr.dev-waiting { --live: var(--warn); }
+/* Monitoring → AI usage: filters, breakdown switches and share bars */
+.ai-filters, .ai-chart-controls { gap: 10px; flex-wrap: wrap; align-items: center; }
+.ai-filters { padding-inline: 16px; }
+.ai-chart-head { gap: 10px; flex-wrap: wrap; }
+.ai-seg { margin: 0; flex-wrap: wrap; }
+.ai-seg .seg { flex: none; min-height: 0; padding: 3px 10px; font-size: 0.82rem; white-space: nowrap; }
+.ai-project { flex-direction: row; gap: 6px; align-items: center; margin: 0; }
+.ai-project select { width: auto; min-width: 0; max-width: 100%; }
+.ai-drill { font-weight: inherit; }
+.ai-share { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.ai-share-bar { width: 64px; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; display: inline-block; }
+.ai-share-bar > span { display: block; height: 100%; border-radius: 3px; }
 .pill.dev-state { --c: var(--muted); color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
 .pill.dev-working { --c: var(--accent); }
 .pill.dev-working::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: currentColor; vertical-align: middle; animation: pulse 1.4s ease-in-out infinite; }
