@@ -10,6 +10,7 @@ export const JOBS = [
   { id: 'calendar', label: 'Calendar', every: 10, description: 'Reads every shown calendar from the start of last month to three months ahead.' },
   { id: 'monitoring', label: 'Monitoring', every: 5, description: 'Deadlines, budgets, site checks (health on the Tools interval, the rest daily), status pages and the automation rules.' },
   { id: 'telegram', label: 'Telegram', every: 0.5, fixed: 'Listens all the time', description: 'Turns messages sent to your bot into tasks, within a second or two.' },
+  { id: 'notion', label: 'Notion', every: 5, description: 'Reads the Notion databases linked in Settings → Notion into tasks, and updates tasks whose pages changed.' },
   { id: 'github', label: 'GitHub', every: 15, description: 'Reads open issue and PR counts and the newest open items of every project’s repos.' },
   { id: 'previews', label: 'PR previews', every: 2, description: 'Reads the Vercel and Netlify preview links posted on the PRs of open tasks and recent Cron runs.' },
   { id: 'link-states', label: 'Task issues and PRs', every: 2, description: 'Reads whether the issues and PRs linked to tasks are open, merged or closed, so Tasks can colour them.' },

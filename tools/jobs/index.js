@@ -7,6 +7,7 @@ import resend from './resend.js';
 import calendar from './calendar.js';
 import monitoring from './monitoring.js';
 import telegram from './telegram.js';
+import notion from './notion.js';
 import github from './github.js';
 import previews from './previews.js';
 import linkStates from './link-states.js';
@@ -20,4 +21,4 @@ import cron from './cron.js';
 import defi from './defi.js';
 
 /** @type {Job[]} */
-export const jobs = [google, gmail, resend, calendar, monitoring, telegram, github, previews, linkStates, npm, webstats, socials, fx, devUsage, worktrees, cron, ...defi];
+export const jobs = [google, gmail, resend, calendar, monitoring, telegram, notion, github, previews, linkStates, npm, webstats, socials, fx, devUsage, worktrees, cron, ...defi];
