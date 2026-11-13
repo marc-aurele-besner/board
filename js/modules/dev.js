@@ -10,7 +10,7 @@
 import { h, icon, notice, uid } from '../ui.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
-import { onContextMenu, copyItem, openMenu } from '../menu.js';
+import { onContextMenu, copyItem, openMenu, closeMenu } from '../menu.js';
 import { TERMINAL_RUNNER, runnerInfo, listFolder, listSessions, saveSessionList, listSession, moveSession, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput, saveImage, sessionTurns } from '../terminal.js';
 import { imageFiles, dragsFiles } from '../images.js';
 import { createTerminal, styleOf, colorOf } from '../vt.js';
@@ -29,7 +29,7 @@ import { recordOfSession, sumUsage, usageLine, usageTitle } from '../dev-usage.j
 import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand } from '../dev-core.js';
 import { cronRunOf, cronRunHref } from '../cron.js';
 /** @import { Store, DevSessionList, IconName } from '../../types/data' */
-/** @import { RunnerInfo, RunnerEvent, RunnerTurns } from '../../types/terminal' */
+/** @import { RunnerInfo, RunnerEvent, RunnerTurns, SessionTurn } from '../../types/terminal' */
 /** @import { DevContext } from '../../types/dev' */
 /** @import { Child } from '../../types/ui' */
 /** @import { Terminal, Line } from '../vt.js' */
@@ -1342,6 +1342,7 @@ function refreshTurns(store, s) {
     const changed = JSON.stringify(data) !== JSON.stringify(turnsView.data);
     turnsView.data = data;
     if (changed && document.querySelector('.dev')) store.refresh();
+    if (changed) drawTurns();
   }, () => {}).finally(() => {
     turnsView.busy = false;
     turnsView.at = Date.now();
@@ -1356,10 +1357,134 @@ const turnLine = (/** @type {string} */ text) => {
   return line.length > 70 ? `${line.slice(0, 69)}…` : line;
 };
 const clock = (/** @type {number} */ at) => (at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
-const took = (/** @type {number} */ ms) => (ms < 60000 ? `${Math.max(1, Math.round(ms / 1000))} s` : `${Math.round(ms / 60000)} min`);
+const took = (/** @type {number} */ ms) => {
+  if (ms < 60000) return `${Math.max(1, Math.round(ms / 1000))} s`;
+  const min = Math.round(ms / 60000);
+  return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ''}`;
+};
+const WAIT_KINDS = /** @type {Record<string, string>} */ ({ question: 'a question', plan: 'the plan', permission: 'a permission' });
 
-// How many turns the shown claude took, and where the last one stands; the menu lists them, newest first, and a
-// click copies a prompt.
+// A turn's stretches, in order: claude working, and waiting on its user between them. The last turn still going
+// runs to now, and so does a wait not answered yet.
+/** @param {SessionTurn} t @param {boolean} live @param {number} now */
+function phasesOf(t, live, now) {
+  const end = live ? Math.max(now, t.end) : t.end;
+  /** @type {{ kind: string, at: number, end: number }[]} */
+  const phases = [];
+  let at = t.at;
+  for (const w of t.waits ?? []) {
+    const wEnd = w.end || end;
+    if (w.at > at) phases.push({ kind: 'work', at, end: w.at });
+    phases.push({ kind: w.kind, at: Math.max(w.at, at), end: wEnd });
+    at = Math.max(at, wEnd);
+  }
+  if (end > at) phases.push({ kind: 'work', at, end });
+  const waited = phases.reduce((n, p) => n + (p.kind === 'work' ? 0 : p.end - p.at), 0);
+  return { phases, total: end - t.at, waited, worked: end - t.at - waited };
+}
+
+// The turns panel, open under the turns button: each turn with its prompt, a bar of its working and waiting
+// stretches, and their times. It follows the data while open, and the clock for the turn still going.
+/** @type {{ el: HTMLElement, s: Session, timer: number } | null} */
+let turnsPop = null;
+
+function closeTurns() {
+  if (!turnsPop) return;
+  clearInterval(turnsPop.timer);
+  turnsPop.el.remove();
+  turnsPop = null;
+  document.removeEventListener('pointerdown', onTurnsOutside, true);
+  document.removeEventListener('keydown', onTurnsKey, true);
+  window.removeEventListener('hashchange', closeTurns);
+  window.removeEventListener('resize', closeTurns);
+}
+/** @param {PointerEvent} e */
+function onTurnsOutside(e) {
+  const target = /** @type {Element} */ (e.target);
+  if (turnsPop?.el.contains(target) || target.closest?.('.term-turns')) return;
+  closeTurns();
+}
+/** @param {KeyboardEvent} e */
+function onTurnsKey(e) {
+  if (e.key !== 'Escape') return;
+  e.stopPropagation();
+  closeTurns();
+}
+
+/** @param {HTMLElement} anchor @param {Session} s */
+function openTurns(anchor, s) {
+  closeMenu();
+  closeTurns();
+  const el = h('div', { class: 'popover turns-pop', role: 'dialog', 'aria-label': 'Claude turns' });
+  document.body.append(el);
+  turnsPop = { el, s, timer: window.setInterval(() => drawTurns(), 1000) };
+  drawTurns();
+  const r = anchor.getBoundingClientRect();
+  const x = Math.max(8, Math.min(r.left, window.innerWidth - el.offsetWidth - 8));
+  Object.assign(el.style, { left: `${x}px`, top: `${r.bottom + 4}px`, maxHeight: `${window.innerHeight - r.bottom - 12}px` });
+  document.addEventListener('pointerdown', onTurnsOutside, true);
+  document.addEventListener('keydown', onTurnsKey, true);
+  window.addEventListener('hashchange', closeTurns);
+  window.addEventListener('resize', closeTurns);
+}
+
+function drawTurns() {
+  if (!turnsPop) return;
+  const { el, s } = turnsPop;
+  const data = turnsView.id === s.id ? turnsView.data : null;
+  if (!data || activeSession() !== s || !el.isConnected) return closeTurns();
+  const { turns, state } = data;
+  const now = Date.now();
+  const rows = turns.map((t, i) => ({ t, n: i + 1, live: i === turns.length - 1 && state !== 'done', ...phasesOf(t, i === turns.length - 1 && state !== 'done', now) })).reverse();
+  const worked = rows.reduce((n, r) => n + r.worked, 0);
+  const waited = rows.reduce((n, r) => n + r.waited, 0);
+  const label = TURN_STATES[state] ?? state;
+  const ask = state === 'waiting' && data.ask?.text ? data.ask.text : '';
+  const scroll = el.querySelector('.turns-list')?.scrollTop ?? 0;
+  el.replaceChildren(
+    h('div', { class: 'turns-head' },
+      h('div', { class: 'turns-title' },
+        h('span', { class: `term-turns-state ${state}`, role: 'img', 'aria-label': label }),
+        h('strong', null, label),
+        h('span', { class: 'muted' }, `${turns.length} ${turns.length === 1 ? 'turn' : 'turns'}`)),
+      turns.length ? h('div', { class: 'muted small turns-sum' },
+        h('span', { class: 'turns-key work' }), `${took(worked)} working`,
+        waited ? [h('span', { class: 'turns-key wait' }), `${took(waited)} waiting on you`] : null) : null,
+      ask ? h('div', { class: 'small turns-ask' }, icon('alert'), h('span', null, ask)) : null),
+    rows.length
+      ? h('div', { class: 'turns-list', role: 'list' }, rows.map((r) => {
+        const status = r.live ? state : r.t.interrupted ? 'interrupted' : 'done';
+        const now = r.live ? r.phases.at(-1) : undefined;
+        const waits = r.t.waits?.length ?? 0;
+        return h('button', {
+          type: 'button',
+          class: `turns-row ${status}`,
+          role: 'listitem',
+          title: `${r.t.text}\n\nClick to copy the prompt`,
+          onclick: () => { navigator.clipboard.writeText(r.t.text).then(() => toast('Prompt copied'), () => toast('Could not copy')); },
+        },
+        h('div', { class: 'turns-line' },
+          h('span', { class: 'turns-icon' }, status === 'working' ? h('span', { class: 'term-dot' }) : icon(status === 'waiting' ? 'alert' : status === 'interrupted' ? 'stop' : 'check')),
+          h('span', { class: 'turns-text' }, `${r.n}. ${turnLine(r.t.text)}`),
+          h('span', { class: 'turns-took' }, r.total > 0 ? took(r.total) : '')),
+        r.total > 0 ? h('div', { class: 'turns-bar', 'aria-hidden': 'true' }, r.phases.map((p) => h('span', {
+          class: `turns-seg ${p.kind === 'work' ? 'work' : 'wait'}`,
+          style: { flexGrow: String(Math.max(p.end - p.at, 1)) },
+          title: `${p.kind === 'work' ? 'Working' : `Waiting on ${WAIT_KINDS[p.kind] ?? 'you'}`} · ${clock(p.at)} · ${took(p.end - p.at)}`,
+        }))) : null,
+        h('div', { class: 'muted small turns-meta' },
+          clock(r.t.at),
+          now ? ` · ${now.kind === 'work' ? 'working' : `waiting on ${WAIT_KINDS[now.kind] ?? 'you'}`} for ${took(now.end - now.at)}` : '',
+          r.total > 0 ? ` · ${took(r.worked)} working` : '',
+          r.waited ? ` · ${took(r.waited)} waiting on you${waits > 1 ? ` (${waits} times)` : ''}` : '',
+          status === 'interrupted' ? ' · interrupted' : ''));
+      }))
+      : h('p', { class: 'muted small' }, 'No prompt yet.'));
+  const list = el.querySelector('.turns-list');
+  if (list) list.scrollTop = scroll;
+}
+
+// How many turns the shown claude took, and where the last one stands; a click opens the turns panel.
 /** @param {Store} store @param {Session} s */
 function turnsButton(store, s) {
   refreshTurns(store, s);
@@ -1371,24 +1496,14 @@ function turnsButton(store, s) {
   return h('button', {
     type: 'button',
     class: `term-turns ${state}`,
-    title: `${turns.length} ${turns.length === 1 ? 'turn' : 'turns'} in this claude session · ${label}${ask}`,
+    title: `${turns.length} ${turns.length === 1 ? 'turn' : 'turns'} in this claude session · ${label}${ask}\nShow each turn, with its working and waiting times`,
     'aria-label': `Turns: ${turns.length}, ${label}`,
-    'aria-haspopup': 'menu',
+    'aria-haspopup': 'dialog',
+    'aria-expanded': String(turnsPop?.s === s),
     onclick: (/** @type {MouseEvent} */ e) => {
       e.stopPropagation();
-      const at = /** @type {HTMLElement} */ (e.currentTarget);
-      /** @type {MenuEntry[]} */
-      const rows = [...turns].reverse().map((t, i) => {
-        const last = i === 0;
-        const status = last ? state : t.interrupted ? 'interrupted' : 'done';
-        return {
-          label: `${turns.length - i}. ${turnLine(t.text)}`,
-          hint: last && state !== 'done' ? TURN_STATES[state] : `${clock(t.at)}${t.end > t.at ? ` · ${took(t.end - t.at)}` : ''}`,
-          icon: () => status === 'working' ? h('span', { class: 'term-dot' }) : icon(status === 'waiting' ? 'alert' : status === 'interrupted' ? 'stop' : 'check'),
-          onSelect: () => { navigator.clipboard.writeText(t.text).then(() => toast('Prompt copied'), () => toast('Could not copy')); },
-        };
-      });
-      openMenu(rows.length ? rows : [{ label: 'No prompt yet' }], at);
+      if (turnsPop?.s === s) return closeTurns();
+      openTurns(/** @type {HTMLElement} */ (e.currentTarget), s);
     },
   }, icon('message'), h('span', null, String(turns.length)), h('span', { class: 'term-turns-state', role: 'img', 'aria-label': label }));
 }

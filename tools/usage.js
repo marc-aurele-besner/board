@@ -135,7 +135,7 @@ function parse(text, billing) {
   /** @type {Set<string>} */
   const written = new Set();
   // Tool calls still waiting for their result, by id: the last one is what claude waits on when the terminal is quiet.
-  /** @type {Map<string, { name: string, input: ToolInput }>} */
+  /** @type {Map<string, { name: string, input: ToolInput, at: number }>} */
   const pending = new Map();
   // The Artifacts it published (claude.ai links) with their titles, and the publish calls awaiting their result.
   /** @type {Map<string, string>} */
@@ -166,7 +166,7 @@ function parse(text, billing) {
         if (said === INTERRUPTED) {
           if (last) last.interrupted = true;
         } else if (said) {
-          turns.push({ text: said.slice(0, PROMPT_KEPT), at, end: at, interrupted: false });
+          turns.push({ text: said.slice(0, PROMPT_KEPT), at, end: at, interrupted: false, waits: [] });
           if (turns.length > TURNS_KEPT) turns.shift();
         }
       } else if (o.type === 'assistant' && at && turns.length) turns[turns.length - 1].end = at;
@@ -182,7 +182,7 @@ function parse(text, billing) {
           replyId = id;
         }
         for (const b of c) {
-          if (b.type === 'tool_use' && b.id) pending.set(b.id, { name: b.name ?? '', input: b.input ?? {} });
+          if (b.type === 'tool_use' && b.id) pending.set(b.id, { name: b.name ?? '', input: b.input ?? {}, at });
           const path = b.type === 'tool_use' && WRITES.includes(b.name ?? '') ? b.input?.file_path ?? b.input?.notebook_path : null;
           if (typeof path === 'string' && path) {
             written.delete(path);
@@ -190,7 +190,15 @@ function parse(text, billing) {
           }
         }
       } else if (o.type === 'user' && Array.isArray(c)) {
-        for (const b of c) if (b.type === 'tool_result' && b.tool_use_id) pending.delete(b.tool_use_id);
+        for (const b of c) {
+          if (b.type !== 'tool_result' || !b.tool_use_id) continue;
+          // A question or a plan held the turn until the user answered it: that time was theirs, not claude's.
+          const call = pending.get(b.tool_use_id);
+          const kind = call ? ASKS[call.name] : undefined;
+          const turn = turns.at(-1);
+          if (kind && turn && call?.at && at > call.at && call.at >= turn.at) turn.waits.push({ kind, at: call.at, end: at });
+          pending.delete(b.tool_use_id);
+        }
       }
     }
     const quota = o.quotaLimits ?? o.apiErrorParams?.rate_limit_info;
@@ -246,6 +254,7 @@ function parse(text, billing) {
     worktrees: [...worktrees], models, cost, extraCost, billing, duration, apiDuration, linesAdded, linesRemoved, efforts,
     replies: replies.size, start, end, open, prompt, reply, written: [...written], turns,
     ask: last ? askOf(last) : null,
+    since: last?.at || 0,
     artifacts: [...artifacts].map(([url, title]) => ({ url, title })),
   };
 }
@@ -323,6 +332,8 @@ function carries(next, prev) {
   return Object.entries(prev.modelUsage ?? {}).every(([id, u]) => Number(next.modelUsage?.[id]?.outputTokens) >= Number(u.outputTokens));
 }
 
+// The tools whose call waits on the user's answer, and what that wait is.
+const ASKS = /** @type {Record<string, string>} */ ({ AskUserQuestion: 'question', ExitPlanMode: 'plan' });
 const PROMPT_KEPT = 400;
 const TURNS_KEPT = 200;
 const INTERRUPTED = '\0interrupted';
@@ -488,5 +499,5 @@ export async function sessionTranscript({ cwd, at, prompt = '', worktree = '', k
   const t = file ? await readTranscript(file, billing) : null;
   if (!t) return null;
   const agents = await agentsOf(file, billing);
-  return { file, busy: t.open || agents > 0, agents, reply: t.reply, written: t.written, ask: t.ask, artifacts: t.artifacts, turns: t.turns };
+  return { file, busy: t.open || agents > 0, agents, reply: t.reply, written: t.written, ask: t.ask, since: t.since, artifacts: t.artifacts, turns: t.turns };
 }

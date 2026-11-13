@@ -3013,6 +3013,32 @@ button.cal-agenda-name:hover { color: var(--accent); }
 .term-turns.working .term-turns-state { background: var(--income); animation: pulse 1.4s ease-in-out infinite; }
 .term-turns.waiting .term-turns-state { background: var(--accent); }
 .term-turns.waiting { color: var(--text); }
+.term-turns-state.working { background: var(--income); animation: pulse 1.4s ease-in-out infinite; }
+.term-turns-state.waiting { background: var(--accent); }
+.turns-pop { width: min(420px, calc(100vw - 16px)); padding: 0; gap: 0; overflow: hidden; animation-duration: 0.1s; }
+.turns-head { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.turns-title { display: flex; align-items: center; gap: 7px; font-size: 0.88rem; }
+.turns-title .muted { margin-left: auto; font-size: 0.8rem; }
+.turns-sum { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+.turns-key { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.turns-key.wait { margin-left: 6px; }
+.turns-key.work, .turns-seg.work { background: var(--income); }
+.turns-key.wait, .turns-seg.wait { background: var(--accent); }
+.turns-ask { display: flex; gap: 6px; align-items: flex-start; color: var(--text); }
+.turns-ask .icon { width: 13px; height: 13px; flex: none; margin-top: 2px; color: var(--accent); }
+.turns-list { display: flex; flex-direction: column; gap: 2px; padding: 5px; overflow-y: auto; min-height: 0; flex: 1; }
+.turns-row { display: flex; flex-direction: column; align-items: stretch; gap: 4px; width: 100%; min-height: 0; padding: 6px 8px; border: none; border-radius: 6px; background: none; color: var(--text); text-align: left; font-size: 0.85rem; }
+.turns-row:hover, .turns-row:focus-visible { background: var(--surface-2); outline: none; }
+.turns-line { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.turns-icon { display: inline-flex; width: 14px; flex: none; justify-content: center; color: var(--muted); }
+.turns-icon .icon { width: 13px; height: 13px; }
+.turns-row.waiting .turns-icon { color: var(--accent); }
+.turns-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turns-took { flex: none; color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.turns-bar { display: flex; gap: 1px; height: 5px; margin-left: 21px; border-radius: 3px; overflow: hidden; background: var(--surface-2); }
+.turns-seg { min-width: 2px; flex-basis: 0; }
+.turns-row.working .turns-seg:last-child.work { animation: pulse 1.4s ease-in-out infinite; }
+.turns-meta { margin-left: 21px; font-variant-numeric: tabular-nums; }
 .term-close { background: none; border: none; min-height: 0; padding: 4px; border-radius: 6px; color: var(--muted); opacity: 0.6; }
 .term-close:hover { opacity: 1; background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
 .term-close .icon { width: 12px; height: 12px; }

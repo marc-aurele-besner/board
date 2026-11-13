@@ -38,13 +38,22 @@ export interface SessionAsk {
   text: string;
 }
 
-// One prompt of a claude session: what the user said, when (ms), when claude last answered it, and whether the
-// user interrupted it.
+// A stretch of a turn spent waiting on the user: a question, a plan to approve or (only while it lasts) a permission.
+// end 0 while it goes on.
+export interface SessionWait {
+  kind: string;
+  at: number;
+  end: number;
+}
+
+// One prompt of a claude session: what the user said, when (ms), when claude last answered it, whether the user
+// interrupted it, and the waits on the user inside it.
 export interface SessionTurn {
   text: string;
   at: number;
   end: number;
   interrupted: boolean;
+  waits: SessionWait[];
 }
 
 // GET /turns: the prompts of a terminal's claude session, oldest first, and where its last turn stands: working,

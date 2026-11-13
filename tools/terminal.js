@@ -314,7 +314,13 @@ async function turnsOf(id) {
   const t = await transcriptOf(await sessionOf(id)).catch(() => null);
   if (!t) return { claude: false, state: status.state, turns: [] };
   const state = status.state === 'working' || status.state === 'waiting' ? status.state : 'done';
-  return { claude: true, state, ask: 'ask' in status ? status.ask : null, turns: t.turns };
+  const ask = 'ask' in status ? status.ask : null;
+  // The wait going on now, whatever it waits on (a permission too, which leaves no trace once answered).
+  const last = t.turns.at(-1);
+  const turns = state === 'waiting' && last && t.since >= last.at
+    ? [...t.turns.slice(0, -1), { ...last, waits: [...last.waits, { kind: ask?.kind ?? 'permission', at: t.since, end: 0 }] }]
+    : t.turns;
+  return { claude: true, state, ask, turns };
 }
 
 // Each page reads every terminal through one stream: a browser opens only six connections to a host, so a stream
