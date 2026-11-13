@@ -412,6 +412,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.8rem; color: var(--muted); }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .legend-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.dev-by-icon { width: 14px; height: 14px; margin-left: 5px; vertical-align: -2px; }
 .mini-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
 .mini { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; background: var(--surface-2); border-radius: 8px; }
 .mini strong { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
