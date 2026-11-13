@@ -11,6 +11,8 @@
       "due": "2026-01-15",
       "created": "2026-01-01T09:00:00.000Z",
       "devSession": "example-session-1",
+      "devModel": "opus",
+      "devEffort": "high",
       "images": [{ "path": "tasks/task-1-image-1.png", "name": "Pasted image", "type": "image/png" }],
       "worktrees": [{ "name": "example-worktree", "cwd": "~/example/project", "session": "example-session-1", "kept": "Example git message" }],
       "prs": [{ "repo": "example-org/example-repo", "number": 12, "url": "https://github.com/example-org/example-repo/pull/12", "title": "Example PR" }],

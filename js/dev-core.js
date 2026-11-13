@@ -34,18 +34,35 @@ function worktreeName(title, id) {
   return `${slug || 'task'}-${id.replace(/-/g, '').slice(0, 6)}`;
 }
 
+// The models and efforts a task can pick for its Dev session (claude's --model aliases and --effort levels).
+export const DEV_MODELS = ['fable', 'opus', 'sonnet', 'haiku'];
+export const DEV_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+// A command that runs claude, so --model and --effort mean something to it; another tool's preset is left as is.
+const RUNS_CLAUDE = /^\s*(\S*\/)?claude(\s|$)/;
+
+// The command with a task's model and effort added; unset ones keep the command's own (or claude's default).
+// Added last, they win over the same flags in the project's command.
+/** @param {string} command @param {{ model?: string, effort?: string }} options */
+export function withClaudeOptions(command, { model = '', effort = '' } = {}) {
+  if (!RUNS_CLAUDE.test(command)) return command;
+  const flags = [model && `--model ${shellQuote(model)}`, effort && `--effort ${shellQuote(effort)}`].filter(Boolean);
+  return flags.length ? `${command} ${flags.join(' ')}` : command;
+}
+
 // The project's Dev command (or the default), with a name for the worktree it makes. `fallbackCwd` is the folder
-// used when the project has none.
+// used when the project has none. `options` adds a task's model and effort.
 /**
  * @param {DataStore} store
  * @param {string} projectId
  * @param {string} title
  * @param {string} id
  * @param {string} fallbackCwd
+ * @param {{ model?: string, effort?: string }} [options]
  */
-export function claudeCommand(store, projectId, title, id, fallbackCwd, override = '') {
+export function claudeCommand(store, projectId, title, id, fallbackCwd, override = '', options = {}) {
   const project = store.get('projects').projects.find((p) => p.id === projectId);
-  let command = override.trim() || devCommandOf(store, project);
+  let command = withClaudeOptions(override.trim() || devCommandOf(store, project), options);
   let worktree = null;
   if (BARE_WORKTREE.test(command)) {
     worktree = { name: worktreeName(title, id), cwd: project?.localPath || fallbackCwd };
