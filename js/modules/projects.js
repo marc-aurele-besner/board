@@ -26,6 +26,7 @@ import { openDialog } from '../modal.js';
 import { buildProfile, profileOf, hasProfileSources, profilesFor } from '../profile.js';
 import { fmtCost } from '../dev-usage.js';
 import { brandBlock } from './project-brand.js';
+import { linkedinBlock } from './project-linkedin.js';
 import { contactsBlock, contactsPanel } from './project-contacts.js';
 import { resizableSide } from '../side-resize.js';
 import { PALETTE, makeProject, createProject } from '../projects-core.js';
@@ -1196,6 +1197,7 @@ function projectView(store, p, items, categories) {
     npmOf(p).org || npmOf(p).packages.length ? npmTable(store, p) : null,
     profileBlock(store, p),
     brandBlock(store, p),
+    linkedinBlock(store, p),
     contactsBlock(store, p, () => showContacts(store)),
     overviewBlock(store, p),
     triageBlock(store, p));
