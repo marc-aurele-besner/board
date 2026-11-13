@@ -8,7 +8,7 @@ import { modelChip } from '../model-picker.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import {
-  COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, PROFILE_EDITED, profileEditedMode, TEMPLATES, devRunOptions, devRunValue, devCommandPreview, daysOf,
+  COLLECTION, DEFAULTS, AI_TASK, STEP_TYPES, SOURCES, WEEKDAYS, SHORT_DAYS, MONTHS, SHORT_MONTHS, REPEATS, STOP_WHEN, PROFILE_EDITED, profileEditedMode, UPDATE_DUE, TEMPLATES, devRunOptions, devRunValue, devCommandPreview, daysOf,
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, templateFromFlow, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
   testStep, testsOf, isTesting, clearTests, resumeDevTests, useDevStarter, varsTree, fillParts, pathTo, parseData, INPUT_NONE, reorderSteps, projectVars, runState, devWaits, DEV_WAIT_MINUTES, devJsonOffered, devJson, DEV_JSON_PROMPT,
@@ -503,6 +503,7 @@ function stepSummary(store, flow, step) {
   }
   if (step.type === 'ai') return step.model || modelForTask(store, AI_TASK) || 'No model set';
   if (step.type === 'task') return step.title || '{{input}}';
+  if (step.type === 'update') return `${step.mode === 'replace' ? 'New description' : 'Note'} on ${step.taskId || '{{input}}'}`;
   if (step.type === 'stop') return stopLabel(step);
   if (step.type === 'format') {
     if (step.mode === 'fields') return (step.fields ?? []).map((f) => f.name.trim()).filter(Boolean).join(', ') || 'Name a field';
@@ -1441,6 +1442,23 @@ function stepForm(store, flow, step) {
       varField('Parent task (optional)', h('input', { value: step.parent ?? '', autocomplete: 'off', placeholder: '{{step2}}', onchange: (/** @type {FieldEvent} */ e) => set({ parent: e.target.value.trim() }) }), key('parent'), names,
         'Puts the new task under another one: the id an earlier Create task step gives as its output, such as {{step2}}. This step’s own output is the new task’s id.', vars));
   }
+  if (step.type === 'update') {
+    const keep = /** @type {[string, string][]} */ ([['', 'Keep']]);
+    return h('div', { class: 'stack' },
+      varField('Task id', h('input', { value: step.taskId ?? '{{input}}', autocomplete: 'off', placeholder: '{{step2}}', onchange: (/** @type {FieldEvent} */ e) => set({ taskId: e.target.value.trim() }) }), key('taskId'), names,
+        'The task to change: the id an earlier Create task step gives as its output, such as {{step2}}, or a task’s id.', vars),
+      varField('Note', h('textarea', { rows: 5, class: 'mono-text', placeholder: '{{input}}', onchange: (/** @type {FieldEvent} */ e) => set({ description: e.target.value }) }, step.description ?? ''), key('description'), names,
+        'Markdown is fine. Leave it empty to change only the fields below.', vars),
+      h('div', { class: 'row cron-fields' },
+        field('Note goes', select(step.mode === 'replace' ? 'replace' : 'append', [['append', 'Below the description'], ['replace', 'In place of the description']], (mode) => set({ mode })))),
+      varField('New title (optional)', h('input', { value: step.title ?? '', autocomplete: 'off', onchange: (/** @type {FieldEvent} */ e) => set({ title: e.target.value }) }), key('title'), names,
+        'The first line is used. Empty keeps the title.', vars),
+      h('div', { class: 'row cron-fields' },
+        field('Status', select(step.status ?? '', [...keep, ...statusOptions(store, step.status || null).map((o) => /** @type {[string, string]} */ ([o.value, o.label]))], (status) => set({ status }))),
+        field('Priority', select(step.priority ?? '', [...keep, ['none', 'No priority'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], (priority) => set({ priority }))),
+        field('Due', select(step.due ?? '', UPDATE_DUE, (due) => set({ due })))),
+      h('p', { class: 'muted small' }, 'Its output is the task’s id. A Run in Dev step after it works on this task. A test of this step only says what it would change; “Test run” of the flow changes the task.'));
+  }
   if (step.type === 'stop') {
     const needsText = step.when === 'contains' || step.when === 'lacks';
     return h('div', { class: 'stack' },
@@ -1471,7 +1489,7 @@ function stepForm(store, flow, step) {
     const claude = step.mode !== 'command';
     const own = withFlowProject(flow, step).projectId;
     const folders = projectsOf(store).filter((p) => p.localPath || p.id === own);
-    const hasTask = flow.steps.slice(0, flow.steps.indexOf(step)).some((s) => s.type === 'task');
+    const hasTask = flow.steps.slice(0, flow.steps.indexOf(step)).some((s) => s.type === 'task' || s.type === 'update');
     const options = devRunOptions(store);
     const value = devRunValue(step);
     // A preset removed in Settings still shows as chosen, so the step does not silently change what it runs.
@@ -1486,7 +1504,7 @@ function stepForm(store, flow, step) {
     const preview = claude && step.mode !== 'custom' ? devCommandPreview(store, flow, step) : '';
     const waits = devWaits(flow, step);
     const last = flow.steps.at(-1)?.id === step.id;
-    const devNames = varNames(flow, flow.steps.indexOf(step), [['task', 'The task made above: its title and description']]);
+    const devNames = varNames(flow, flow.steps.indexOf(step), [['task', 'The task made or updated above: its title and description']]);
     return h('div', { class: 'stack' },
       h('div', { class: 'row cron-fields' },
         field('Run', pickChip({
@@ -1540,8 +1558,8 @@ function stepForm(store, flow, step) {
       h('p', { class: 'muted small' },
         claude ? 'The command starts in the folder, in a worktree of its own when it asks for one. ' : '',
         hasTask
-          ? 'The task made above goes with it, as from its Dev button: it moves to In progress, and the issues and PRs the terminal prints are added to it. '
-          : 'Put a “Create task” step before this one to follow the work from a task. ',
+          ? 'The task made or updated above goes with it, as from its Dev button: it moves to In progress, and the issues and PRs the terminal prints are added to it. '
+          : 'Put a “Create task” or “Update task” step before this one to follow the work from a task. ',
         'Needs the runner that bun start starts.'));
   }
   return h('div', { class: 'stack' },
