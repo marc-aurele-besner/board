@@ -2086,9 +2086,13 @@ function watchTerminals(store, ids) {
       status = await sessionStatus(runnerOf(store), termWatch.ids);
     } catch {}
     termWatch.timer ||= setTimeout(poll, TERM_POLL_MS);
-    if (!status || JSON.stringify(status) === JSON.stringify(termWatch.status)) return;
+    if (!status) return;
+    // Only the states are shown. The rest (subagents, artifacts) changes on most polls while claude works, and
+    // redrawing the page for it every few seconds made Cron flash.
+    const states = (/** @type {typeof status} */ s) => JSON.stringify(Object.entries(s).map(([id, x]) => [id, x?.state]));
+    const changed = states(status) !== states(termWatch.status);
     termWatch.status = status;
-    store.refresh();
+    if (changed) store.refresh();
   };
   termWatch.timer = setTimeout(poll, 0);
 }
