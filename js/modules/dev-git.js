@@ -74,6 +74,8 @@ export async function refreshGit(ctx, path, { force = false } = {}) {
   }
   if (!ctx.ready() || state.loading || (!force && Date.now() - state.at < STALE_MS)) return;
   state.loading = true;
+  // A read every few seconds that finds what was shown redraws nothing: rebuilding the page each time made it flash.
+  const before = JSON.stringify([state.status, state.loadError]);
   try {
     const status = await gitStatus(ctx.base(), path);
     if (path !== state.path) return;
@@ -84,7 +86,7 @@ export async function refreshGit(ctx, path, { force = false } = {}) {
   } finally {
     state.loading = false;
     state.at = Date.now();
-    ctx.refresh();
+    if (force || path !== state.path || JSON.stringify([state.status, state.loadError]) !== before) ctx.refresh();
   }
 }
 
