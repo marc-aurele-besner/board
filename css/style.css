@@ -3219,8 +3219,14 @@ button.sum-line:hover { background: var(--surface-2); }
 .view:has(> .slack) { padding: 0; }
 .slack.stack { gap: 0; }
 .slack > .notice { margin: 8px 12px; }
-.slack-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); height: calc(100dvh - var(--slack-top, 55px)); min-height: 460px; overflow: hidden; background: var(--surface); }
-.slack-layout.with-thread { grid-template-columns: 240px minmax(0, 1fr) minmax(300px, 380px); }
+.slack-layout { position: relative; display: grid; grid-template-columns: var(--slack-side-w, 240px) minmax(0, 1fr); height: calc(100dvh - var(--slack-top, 55px)); min-height: 460px; overflow: hidden; background: var(--surface); }
+.slack-layout.with-thread { grid-template-columns: var(--slack-side-w, 240px) minmax(0, 1fr) var(--slack-thread-w, 380px); }
+.slack-resize { position: absolute; top: 0; bottom: 0; width: 8px; z-index: 2; cursor: col-resize; touch-action: none; }
+.slack-resize-side { left: calc(var(--slack-side-w, 240px) - 4px); }
+.slack-resize-thread { right: calc(var(--slack-thread-w, 380px) - 4px); }
+.slack-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background 0.15s; }
+.slack-resize:hover::after, .slack-layout.resizing .slack-resize::after { background: var(--accent); }
+.slack-layout.resizing { cursor: col-resize; user-select: none; }
 .slack-layout.alone { grid-template-columns: minmax(0, 1fr); }
 .slack-side, .slack-main, .slack-thread { background: var(--surface); min-height: 0; min-width: 0; }
 .slack-main, .slack-thread { border-left: 1px solid var(--border); }
@@ -3373,8 +3379,9 @@ button.sum-line:hover { background: var(--surface-2); }
 .emoji-picker-tone { min-height: 28px; min-width: 28px; padding: 0; font-size: 1.05rem; line-height: 1; background: transparent; border: 1px solid transparent; border-radius: 6px; }
 .emoji-picker-tone[aria-pressed="true"] { border-color: var(--accent); background: var(--surface-2); }
 @media (max-width: 1100px) {
-  .slack-layout.with-thread { grid-template-columns: 240px minmax(0, 1fr); }
+  .slack-layout.with-thread { grid-template-columns: var(--slack-side-w, 240px) minmax(0, 1fr); }
   .slack-layout.with-thread .slack-main { display: none; }
+  .slack-resize-thread { display: none; }
 }
 @media (max-width: 720px) {
   .slack-layout, .slack-layout.with-thread { grid-template-columns: minmax(0, 1fr); height: auto; }
@@ -3382,5 +3389,6 @@ button.sum-line:hover { background: var(--surface-2); }
   .slack-main, .slack-thread { border-left: none; border-top: 1px solid var(--border); }
   .slack-main, .slack-thread { height: 70vh; }
   .slack-layout.with-thread .slack-side { display: none; }
+  .slack-resize { display: none; }
   .slack-topic { max-width: 30ch; }
 }
