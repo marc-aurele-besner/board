@@ -1,4 +1,4 @@
-/** @import { Store, Task, TaskArtifact, TaskLink, Project, ProjectLabel, IconName } from '../../types/data' */
+/** @import { Store, Task, TaskArtifact, TaskLink, TaskWebLink, Project, ProjectLabel, IconName } from '../../types/data' */
 /** @import { RunnerStatus } from '../../types/terminal' */
 /** @import { PickOption } from '../inline.js' */
 /** @import { MenuEntry } from '../menu.js' */
@@ -16,6 +16,7 @@ import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
 import { openDialog } from '../modal.js';
 import { issuesOf, prsOf, artifactsOf, addTaskArtifacts, moveToReview } from '../task-links.js';
 import { previewChips } from '../previews.js';
+import { openLinkedinComposer } from '../linkedin-composer.js';
 import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startClaudeSession, openSession, runnerOf } from './dev.js';
@@ -733,7 +734,8 @@ function linkChips(store, item) {
   const issues = issuesOf(item);
   const prs = prsOf(item);
   const artifacts = artifactsOf(item);
-  if (!issues.length && !prs.length && !artifacts.length) return null;
+  const links = item.links ?? [];
+  if (!issues.length && !prs.length && !artifacts.length && !links.length) return null;
   /** @param {TaskLink} l @param {boolean} pr */
   const chip = (l, pr) => {
     const state = linkState(store, l);
@@ -746,7 +748,7 @@ function linkChips(store, item) {
     'aria-label': `Open ${pr ? 'pull request' : 'issue'} ${l.repo} #${l.number}`,
   }, icon(pr ? 'pull-request' : 'repo'), `#${l.number}`);
   };
-  return h('span', { class: 'task-link-chips' }, issues.map((l) => chip(l, false)), prs.map((l) => chip(l, true)), previewChips(store, prs, 'issue-link'), artifacts.map(artifactChip));
+  return h('span', { class: 'task-link-chips' }, issues.map((l) => chip(l, false)), prs.map((l) => chip(l, true)), previewChips(store, prs, 'issue-link'), artifacts.map(artifactChip), links.map(webChip));
 }
 
 // A claude.ai Artifact a Dev session published, by its title (or "Artifact"), opening in a new tab.
@@ -759,6 +761,22 @@ const artifactChip = (a) => h('a', {
   title: `Artifact${a.title ? ` “${a.title}”` : ''} · ${a.url}`,
   'aria-label': `Open the artifact ${a.title || a.url}`,
 }, icon('sparkle'), h('span', { class: 'artifact-link-title' }, a.title || 'Artifact'));
+
+// Another page the task led to, such as its LinkedIn post.
+/** @param {TaskWebLink} l */
+const webChip = (l) => h('a', {
+  href: l.url,
+  target: '_blank',
+  rel: 'noopener',
+  class: 'issue-link artifact-link',
+  title: `${l.title || 'Link'} · ${l.url}`,
+  'aria-label': `Open ${l.title || l.url}`,
+}, icon(/linkedin\.com/.test(l.url) ? 'linkedin' : 'link'), h('span', { class: 'artifact-link-title' }, l.title || 'Link'));
+
+// The actions under an open task's description.
+/** @param {Store} store @param {Task} item */
+const taskActions = (store, item) => h('div', { class: 'row task-actions' },
+  h('button', { type: 'button', class: 'btn-small', onclick: () => openLinkedinComposer(store, { taskId: item.id }) }, icon('linkedin'), 'LinkedIn post'));
 
 /** @type {Record<string, string>} */
 const STATE_NAMES = { open: 'open', merged: 'merged', closed: 'closed', completed: 'closed as completed', not_planned: 'closed as not planned' };
@@ -1381,6 +1399,7 @@ function todoRow(store, item, ctx, place) {
             onSave: (description) => updateItem(store, item.id, { description }),
           }),
           imageStrip(store, item),
+          taskActions(store, item),
           usageNote(store, item))
       : null);
 }
@@ -1497,6 +1516,7 @@ function taskEntries(store, item, ctx, repos) {
     repos.length || issuesOf(item).length || prsOf(item).length
       ? { label: 'Issues and PRs…', icon: () => icon('repo'), onSelect: () => openIssueDialog(store, item, repos) }
       : null,
+    { label: 'LinkedIn post…', icon: () => icon('linkedin'), onSelect: () => openLinkedinComposer(store, { taskId: item.id }) },
     { label: expanded ? 'Hide the description' : item.description ? 'Show the description' : 'Add a description', icon: () => icon('align-left'), onSelect: () => toggleExpanded(store, item.id) },
     '-',
     { label: 'Copy', icon: () => icon('copy'), hint: 'Markdown', onSelect: () => copyTasks(store, [item]) },
@@ -1637,6 +1657,7 @@ function boardCard(store, item, projects, order, place) {
             onSave: (description) => updateItem(store, item.id, { description }),
           }),
           imageStrip(store, item),
+          taskActions(store, item),
           usageNote(store, item))
       : null);
 }

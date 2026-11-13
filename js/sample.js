@@ -168,6 +168,10 @@ function collections() {
         task('t6', 'Write the install guide', 'review', 'medium', 'p-docs', { due: day(3) }),
         task('t7', 'Book the plumber', 'done', 'none', 'p-reno'),
         task('t8', 'Buy oat milk', 'todo', 'low', null),
+        task('t9', 'Social posts: the new pricing page', 'todo', 'medium', 'p-atlas', {
+          auto: 'cron',
+          description: 'The new pricing page\n\n## X\nPricing is now one page, one plan. See it at example.com/pricing\n\n## LinkedIn\nWe rewrote our pricing page from scratch.\n\nThree plans became one, with every feature in it. The page is shorter, and so are the questions we get.\n\nWhat made you pick your last tool: the price, or how clear it was?',
+        }),
       ],
     },
     // The pricing task's PR, with the previews a Vercel and a Netlify token would read (js/previews.js).
@@ -278,6 +282,17 @@ function collections() {
       },
     },
     // Four accounts with three months of follower counts (and stars for GitHub), so Monitoring → Socials has lines to draw.
+    // A placeholder sign-in (it posts nothing: sample data has no runners) and a draft, so the composer and the
+    // LinkedIn screens have something to show.
+    linkedin: {
+      auth: { token: 'sample', expires: Date.now() + 40 * 86400000, sub: 'sample', name: 'Sample Person', picture: '', at: Date.now() - 20 * 86400000 },
+      posts: [
+        { id: 'li-1', taskId: null, projectId: 'p-atlas', text: 'Atlas Docs now has an install guide for every platform.', link: 'https://docs.example.com', status: 'draft', scheduledAt: null, createdAt: Date.now() - 86400000 },
+      ],
+      comments: [],
+      cache: {},
+      session: { calls: {} },
+    },
     socials: {
       accounts: [
         { id: 's-x', network: 'x', handle: 'atlas_example', name: 'Atlas', projectId: 'p-atlas', followers: 1789, following: 180, at: Date.now() - 2 * 3600000, error: null },
