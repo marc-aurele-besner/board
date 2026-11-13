@@ -316,7 +316,12 @@ async function statusOf(id) {
     const ask = activity?.ask ?? shown;
     if (activity) s.artifacts = activity.artifacts;
     const more = activity ? { agents: activity.agents, ask, artifacts: activity.artifacts, ...(shown ? { since: s.askSince } : {}) } : {};
-    return { state: activity?.busy && !ask ? 'working' : 'waiting', cwd, ...more };
+    const state = activity?.busy && !ask ? 'working' : 'waiting';
+    // For the terminal's dot in Dev: a turn that ended with the done signal, and how long a working claude with no
+    // subagent has neither printed nor written to its transcript (one that hangs does neither).
+    const signalled = state === 'waiting' && !ask && !!activity && 'turns' in activity && !!/** @type {{ done?: boolean }[]} */ (activity.turns).at(-1)?.done;
+    const written = state === 'working' && !activity?.agents && s.transcript ? (await stat(s.transcript).catch(() => null))?.mtimeMs : 0;
+    return { state, cwd, ...more, ...(signalled ? { signalled } : {}), ...(written ? { quiet: Math.max(0, Date.now() - Math.max(s.lastOut ?? 0, written)) } : {}) };
   }
   const exit = s.events.findLast((e) => e.t === 'exit');
   const where = s.events.findLast((e) => e.t === 'cwd' || e.t === 'start');

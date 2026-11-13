@@ -32,6 +32,10 @@ export interface RunnerStatus {
   since?: number;
   // The Artifacts claude published in this session.
   artifacts?: SessionArtifact[];
+  // Waiting after a turn that ended with claude's done signal.
+  signalled?: boolean;
+  // Milliseconds a working claude with no subagent has neither printed nor written to its transcript.
+  quiet?: number;
 }
 
 // kind: question, plan or permission. text: the question, or the tool and what it runs.

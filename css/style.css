@@ -3354,6 +3354,17 @@ button.cal-agenda-name:hover { color: var(--accent); }
 .wt-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); opacity: 0.55; }
 .wt-dot.running { background: var(--income); opacity: 1; animation: pulse 1.4s ease-in-out infinite; }
 .wt-dot.held { background: var(--warn); opacity: 1; }
+/* What a terminal is doing, on its dot in the Terminals panel and on the bar: a flash is something going on or asked. */
+.wt-dot[class*=" is-"], .term-dot[class*=" is-"] { opacity: 1; animation: none; }
+.wt-dot.is-running, .term-dot.is-running { background: var(--muted); animation: pulse 1.4s ease-in-out infinite; }
+.wt-dot.is-working, .term-dot.is-working { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+.wt-dot.is-asks, .term-dot.is-asks { background: var(--ai); animation: termAsk 0.9s ease-in-out infinite; }
+.wt-dot.is-waiting, .term-dot.is-waiting { background: var(--warn); animation: pulse 2.4s ease-in-out infinite; }
+.wt-dot.is-done, .term-dot.is-done { background: var(--income); }
+.wt-dot.is-failed, .term-dot.is-failed { background: var(--danger); }
+.wt-dot.is-stalled, .term-dot.is-stalled { background: var(--danger); animation: pulse 0.9s ease-in-out infinite; }
+.wt-dot.is-stopped, .wt-dot.is-idle, .term-dot.is-stopped, .term-dot.is-idle { background: var(--muted); opacity: 0.55; }
+@keyframes termAsk { 0%, 100% { opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb, var(--ai) 55%, transparent); } 50% { opacity: 0.55; box-shadow: 0 0 0 4px transparent; } }
 .scm-row .wt-busy { display: inline-flex; opacity: 1; }
 .wt-item { padding-bottom: 3px; }
 .wt-item + .wt-item { border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); padding-top: 2px; }
