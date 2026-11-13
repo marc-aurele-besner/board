@@ -167,7 +167,7 @@ function remove(ctx, w, use) {
 /** @param {Task} t */
 const openTask = (t) => { location.hash = `#/todos?${new URLSearchParams({ filter: t.projectId || 'personal', status: 'all', task: t.id })}`; };
 
-// A worktree's right-click menu: its terminal, its task, copies, and removing it, forced or not.
+// A worktree's right-click menu: its terminal, its task, copies (name, path, branch, commit), and removing it, forced or not.
 /** @param {DevContext} ctx @param {RunnerWorktree} w @param {Use} use @returns {MenuEntry[]} */
 function menuOf(ctx, w, use) {
   const busy = state.busy.has(w.path);
@@ -179,6 +179,7 @@ function menuOf(ctx, w, use) {
     w.prunable ? null : { label: 'Open a new terminal in it', icon: () => icon('plus'), onSelect: () => ctx.openTerminal(w.path) },
     use.task ? { label: 'Open its task', icon: () => icon('check-square'), onSelect: () => openTask(/** @type {Task} */ (use.task)) } : null,
     '-',
+    copyItem('Copy worktree name', w.name),
     copyItem('Copy path', w.path),
     w.branch ? copyItem('Copy branch name', w.branch) : null,
     w.head ? copyItem('Copy commit hash', w.head) : null,
