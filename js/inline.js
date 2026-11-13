@@ -311,6 +311,32 @@ export function pickButton({ label, options, title, className = 'btn-small', onP
   return button;
 }
 
+// A small "i" button that opens a short explanation, for places too tight for the text itself (a table header).
+/** @param {{ title: string, text: string }} options */
+export function infoButton({ title, text }) {
+  const button = h('button', {
+    type: 'button',
+    class: 'info-btn',
+    'aria-label': `About ${title}`,
+    'aria-haspopup': 'dialog',
+    /** @param {MouseEvent} e */
+    onclick: (e) => {
+      e.stopPropagation();
+      if (openPicker && openPicker.anchor === button) return closePicker();
+      closePicker();
+      const el = h('div', { class: 'popover info-pop', role: 'dialog', 'aria-label': title }, h('strong', null, title), h('p', null, text));
+      document.body.append(el);
+      openPicker = { el, anchor: button, key: null };
+      positionPopover(el, button);
+      document.addEventListener('pointerdown', onOutside, true);
+      document.addEventListener('keydown', onKey, true);
+      // A shortcut can change the page with no click; an open popover would hold its re-renders.
+      window.addEventListener('hashchange', closePicker, { once: true });
+    },
+  }, icon('info'));
+  return button;
+}
+
 // A colored pill. An option with `color` (a project's color) gets that color; otherwise `tone` picks one from the CSS palette.
 /** @param {unknown} label @param {Partial<PickOption<unknown>>} [opt] */
 export function pill(label, opt = {}) {

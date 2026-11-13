@@ -8,7 +8,7 @@ import { makeTask } from '../capture.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
 import { barChart } from '../chart.js';
-import { pickChip } from '../inline.js';
+import { pickChip, infoButton } from '../inline.js';
 import { contractsTab, contractsSerialize, contractsRestore } from './tools-contracts.js';
 import { requestsTab, requestsSerialize, requestsRestore } from './tools-requests.js';
 /** @import { CrawlFile, HealthSample, IconName, LlmsFile, Project, Provider, ProviderStatus, RobotsFile, SecurityFile, Site, SiteCrawl, SiteDns, SiteLogEntry, SiteDomain, SiteMeta, SitemapFile, Store } from '../../types/data' */
@@ -632,7 +632,8 @@ function crawlAll(store, sites) {
   return h('div', { class: 'stack-lg' }, siteBar(store, sites, null),
     h('div', { class: 'card mon-scroll' },
       h('table', { class: 'mon-table tool-table crawl-table' },
-        h('thead', null, h('tr', null, ['Site', ...CRAWL_FILES.map(([, name, short]) => h('span', { title: name }, short)), 'Read', ''].map((t) => h('th', null, t)))),
+        h('thead', null, h('tr', null, ['Site', ...CRAWL_FILES.map(([, name, short, why, core]) =>
+          h('span', { class: 'th-info' }, h('span', { title: name }, short), infoButton({ title: name, text: `${why} ${core ? 'Most sites should have it.' : 'Optional: only some sites need it.'}` }))), 'Read', ''].map((t) => h('th', null, t)))),
         h('tbody', null, sites.flatMap((p) => {
           const c = siteData(store, p.id).crawl;
           const busy = view.busy.has(p.id) || view.busy.has('all');
@@ -905,7 +906,8 @@ function metaTab(store, sites) {
 
 // --- Provider status ---
 
-// Common services and the kind of status page they run. Any other Statuspage or Datadog page can be added by hand.
+// Common services and the kind of status page they run. Any other Statuspage or Datadog page, or a product's page
+// of the Google Workspace dashboard, can be added by hand.
 const PRESETS = [
   ['GitHub', 'https://www.githubstatus.com'],
   ['Vercel', 'https://www.vercel-status.com'],
@@ -920,6 +922,10 @@ const PRESETS = [
   ['Render', 'https://status.render.com'],
   ['DigitalOcean', 'https://status.digitalocean.com'],
   ['Discord', 'https://discordstatus.com'],
+  ['Resend', 'https://resend-status.com'],
+  ['Slack', 'https://slack-status.com', 'slack'],
+  ['Gmail', 'https://www.google.com/appsstatus/dashboard/products/prPt2Yra2CbGsbEm9cpC', 'google'],
+  ['Google Calendar', 'https://www.google.com/appsstatus/dashboard/products/n5hVexuq1PM9onY9qrmo', 'google'],
 ];
 /** @type {Record<string, [string, string]>} */
 const INDICATOR = { none: ['Operational', 'done'], minor: ['Minor issue', 'medium'], maintenance: ['Maintenance', 'medium'], major: ['Major outage', 'high'], critical: ['Critical outage', 'high'] };
@@ -977,7 +983,7 @@ function providerCard(store, pr) {
         h('span', { class: `status-dot tone-${s?.indicator ? tone : 'plain'}`, 'aria-hidden': 'true' }),
         h('div', null,
           h('strong', null, pr.name),
-          h('div', null, h('a', { href: pr.url, target: '_blank', rel: 'noopener', class: 'small' }, new URL(pr.url).hostname)))),
+          h('div', null, h('a', { href: pr.url, target: '_blank', rel: 'noopener', class: 'small' }, pr.url.includes('/appsstatus/dashboard/') ? 'Google Workspace status' : new URL(pr.url).hostname)))),
       busy ? pillOf('Reading…', 'plain') : pillOf(label, tone)),
     s?.description ? h('p', { class: 'provider-state' }, s.description) : null,
     parts?.total
@@ -1063,7 +1069,7 @@ function statusTab(store) {
           follow(store, name.value, url.value);
         },
       }, name, url, h('button', { type: 'submit', class: 'btn-small primary' }, 'Follow'))),
-    h('p', { class: 'muted small' }, 'Works with status pages hosted on Statuspage (most providers use it) and on Datadog (OpenRouter, for one). The page’s public summary and recent incidents are read on the same interval as website health; nothing about you is sent. Datadog pages are read through r.jina.ai, which receives only the page’s address.'));
+    h('p', { class: 'muted small' }, 'Works with status pages hosted on Statuspage (most providers use it) and on Datadog (OpenRouter, for one), with Slack’s, and with a product’s page of the Google Workspace dashboard. The page’s public summary and recent incidents are read on the same interval as website health; nothing about you is sent. Datadog pages are read through r.jina.ai, which receives only the page’s address.'));
 }
 
 /** @param {HTMLElement} root @param {Store} store */

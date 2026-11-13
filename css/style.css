@@ -1916,6 +1916,12 @@ span.tick.todo { color: var(--muted); }
 .file-raw { counter-reset: line; max-height: 360px; overflow: auto; margin: 0; padding: 8px 0; border-radius: 6px; background: var(--surface-2); font: 0.78rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .file-raw .line { display: block; padding: 0 10px 0 3.6em; text-indent: -2.8em; }
 .file-raw .line::before { counter-increment: line; content: counter(line); display: inline-block; width: 2.2em; margin-right: 0.6em; text-align: right; color: var(--muted); opacity: 0.7; user-select: none; }
+.th-info { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+.info-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; min-height: 0; min-width: 0; padding: 0; border: none; border-radius: 50%; background: transparent; color: var(--muted); font-size: 0.9rem; cursor: help; }
+.info-btn:hover { color: var(--accent); background: var(--surface-2); }
+.info-pop { font-weight: normal; }
+.info-pop strong { font-size: 0.9rem; }
+.info-pop p { margin: 0; font-size: 0.85rem; color: var(--muted); line-height: 1.45; }
 .crawl-table td.picked { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .tool-table tr.has-preview td { border-bottom: 0; }
 .preview-row > td { background: color-mix(in srgb, var(--accent) 4%, transparent); }
@@ -2029,6 +2035,11 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .copy-chip:hover .copy-mark { color: var(--accent); }
 .copy-chip.copied { border-color: var(--income); }
 .copy-chip.copied .copy-mark { color: var(--income); }
+/* A snippet in a block of its own, with a Copy button on its right. */
+.code-box { display: flex; align-items: flex-start; gap: 8px; margin: 6px 0 2px; padding: 6px 6px 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.code-box pre { flex: 1; min-width: 0; margin: 0; padding: 3px 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; line-height: 1.5; user-select: all; }
+.code-box-copy { flex: none; display: inline-flex; align-items: center; gap: 4px; }
+.code-box-copy.copied { color: var(--income); border-color: var(--income); }
 
 /* Keyboard shortcut sheet */
 .shortcut-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
@@ -3145,7 +3156,8 @@ button.sum-line:hover { background: var(--surface-2); }
 .slack-empty-text { align-items: center; text-align: center; max-width: 360px; }
 .slack-empty-text > .icon { width: 36px; height: 36px; color: var(--muted); }
 .slack-signin { max-width: 620px; width: 100%; }
-.slack-signin ol { padding-left: 20px; margin: 0; }
+.slack-signin ol { padding-left: 20px; margin: 0; list-style: decimal; gap: 8px; }
+.slack-signin ol li::marker { color: var(--muted); }
 .slack-signin code { overflow-wrap: anywhere; }
 .slack-messages, .slack-thread-messages { flex: 1; overflow-y: auto; padding: 8px 0; }
 .slack-loading { padding: 16px; }
