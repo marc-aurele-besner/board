@@ -2412,7 +2412,7 @@ button.json-key:hover { background: color-mix(in srgb, var(--accent) 15%, transp
 /* Inbox: Resend emails of every project */
 .inbox-pickers select { min-width: 0; max-width: 100%; }
 /* The project picker sits beside the selects, so it takes their outline and height. */
-.inbox-pickers .inbox-project-pick { min-height: 38px; padding: 4px 10px; border-color: var(--border); border-radius: 8px; background: var(--bg); font-size: 0.95rem; }
+.inbox-pickers .inbox-project-pick { min-height: 38px; padding: 4px 8px; border-color: var(--border); border-radius: 8px; background: var(--bg); font-size: 0.95rem; }
 .inbox-search { width: 100%; font-size: 16px; }
 .inbox-card { padding: 0; overflow: hidden; }
 .mail-list { list-style: none; margin: 0; padding: 0; }
@@ -2799,9 +2799,10 @@ button.sum-line:hover { background: var(--surface-2); }
 .inbox-main > .inbox-card { border-radius: 0; border-left: none; border-right: none; }
 .inbox-pickers { gap: 4px; }
 .inbox-pickers .icon-btn { flex: none; }
-/* Flex, so the chip sits centred on the pickers' row with no line box below it. */
-.inbox-errors { position: relative; flex: none; display: flex; }
-.inbox-errors-chip { list-style: none; display: inline-flex; align-items: center; gap: 4px; min-height: 38px; padding: 4px 10px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
+/* Flex, so the chip sits centred on the pickers' row with no line box below it; details and summary
+   carry a bottom margin by default, which lifted the chip above the pickers. */
+.inbox-errors { position: relative; flex: none; display: flex; margin: 0; }
+.inbox-errors-chip { list-style: none; display: inline-flex; align-items: center; gap: 4px; min-height: 38px; margin: 0; padding: 4px 8px; border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent); border-radius: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
 .inbox-errors-chip::-webkit-details-marker { display: none; }
 .inbox-errors-chip:hover, .inbox-errors[open] > .inbox-errors-chip { background: color-mix(in srgb, var(--danger) 16%, transparent); }
 .inbox-errors-chip .icon { width: 15px; height: 15px; }
