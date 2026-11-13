@@ -18,6 +18,7 @@ export const KINDS = [
   ['ssl', 'SSL certificates and domains', 'shield'],
   ['status', 'Provider outages and recoveries', 'activity'],
   ['telegram', 'Telegram messages', 'send'],
+  ['notion', 'Tasks from Notion', 'notion'],
   ['pools', 'Liquidity Pools out of range', 'droplet'],
   ['lending', 'Aave health factor low', 'landmark'],
   ['budget', 'Budgets gone over', 'wallet'],

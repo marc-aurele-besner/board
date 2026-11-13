@@ -121,6 +121,29 @@ export interface TelegramSettings {
   offset?: number;
 }
 
+// A Notion database whose pages become tasks in one project (js/notion.js).
+export interface NotionLink {
+  id: string;
+  // The database's id, 32 hex digits without dashes.
+  databaseId: string;
+  // The database's title, read when the link is added.
+  name: string;
+  // null means Personal, and its tasks wait in To Organize.
+  projectId: string | null;
+  // Missing means on.
+  on?: boolean;
+  // The newest last_edited_time read, so the next sync asks only for later edits.
+  syncedAt?: string;
+  // The last sync's error, '' after one that worked.
+  error?: string;
+}
+
+export interface NotionSettings {
+  // An internal integration's secret (ntn_… or secret_…).
+  token: string;
+  links: NotionLink[];
+}
+
 export interface AnalyticsSettings {
   // Project id -> its Google Analytics property id.
   properties: Record<string, string>;
@@ -227,6 +250,7 @@ export interface Settings {
   blockchains: BlockchainsSettings;
   contracts: Contract[];
   telegram: TelegramSettings;
+  notion?: NotionSettings;
   vercel?: DeploySettings;
   netlify?: DeploySettings;
   analytics: AnalyticsSettings;

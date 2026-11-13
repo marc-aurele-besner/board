@@ -32,7 +32,8 @@
       "cronRun": "run-1",
       "parentId": "task-1",
       "inbox": true,
-      "email": { "id": "email-1", "dir": "in" }
+      "email": { "id": "email-1", "dir": "in" },
+      "notion": { "url": "https://www.notion.so/example-page", "link": "notion-link-1", "edited": "2026-01-02T09:00:00.000Z", "text": "Example task", "status": "todo", "due": "", "priority": "none" }
     },
     {
       "id": "task-3",

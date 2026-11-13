@@ -40,6 +40,18 @@ export interface TaskEmail {
   dir: string;
 }
 
+// The Notion page a task was imported from (js/notion.js), with the values last read from it: a field changes on the
+// board only when it changed in Notion since, so edits made on the board are kept.
+export interface TaskNotion {
+  url: string;
+  link: string; // the NotionLink's id
+  edited: string; // the page's last_edited_time
+  text: string;
+  status: string;
+  due: string;
+  priority: string;
+}
+
 export interface Task {
   id: string;
   text: string;
@@ -76,6 +88,7 @@ export interface Task {
   // Old: a single issue, before several were allowed.
   issue?: TaskLink;
   email?: TaskEmail;
+  notion?: TaskNotion;
 }
 
 // A task category. scope: 'all', 'project' (projectId) or 'projectCategory' (projectCategoryIds, project label ids).
