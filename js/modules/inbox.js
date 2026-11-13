@@ -53,8 +53,9 @@ const STATUS = {
 
 // View state. open: an email to open once it is on screen (from a link in a task).
 // collapsed: directories whose mailboxes are folded away. dirsOpen: whether the directory list is open (null: by screen width).
-/** @type {{ folder: string, project: string, mailbox: string, status: string, flagged: boolean, query: string, limit: number, open: string, collapsed: Set<string>, dirsOpen: boolean | null }} */
-const view = { folder: 'inbox', project: 'all', mailbox: 'all', status: 'all', flagged: false, query: '', limit: STEP, open: '', collapsed: new Set(), dirsOpen: null };
+// selected: ticked emails, for the batch actions; lastPicked: the last one ticked, where a Shift+click range starts.
+/** @type {{ folder: string, project: string, mailbox: string, status: string, flagged: boolean, query: string, limit: number, open: string, collapsed: Set<string>, dirsOpen: boolean | null, selected: Set<string>, lastPicked: string }} */
+const view = { folder: 'inbox', project: 'all', mailbox: 'all', status: 'all', flagged: false, query: '', limit: STEP, open: '', collapsed: new Set(), dirsOpen: null, selected: new Set(), lastPicked: '' };
 // The last read: whether one runs now, what failed, and which Gmail accounts need a sign-in first.
 // errors: what the last Refresh reported, or null to show what the runners' last reads reported.
 /** @type {{ busy: boolean, errors: RunnerJobError[] | null, waiting: string[] }} */
@@ -118,15 +119,41 @@ function patch(store, ids, fields) {
     for (const e of d.emails) if (set.has(e.id)) Object.assign(e, fields);
   });
 }
+// Sets fields on several emails with a toast whose Undo gives each email back the values it had.
 /**
  * @param {Store} store
- * @param {InboxMessage} e
+ * @param {string[]} ids
+ * @param {Partial<InboxMessage>} fields
+ * @param {string} message
+ */
+function change(store, ids, fields, message) {
+  const set = new Set(ids);
+  const keys = /** @type {(keyof InboxMessage)[]} */ (Object.keys(fields));
+  const before = new Map(store.get(COLLECTION).emails.filter((e) => set.has(e.id)).map((e) => [e.id, Object.fromEntries(keys.map((k) => [k, e[k]]))]));
+  patch(store, ids, fields);
+  toast(message, {
+    undo: () => store.update(COLLECTION, (d) => {
+      for (const e of d.emails) if (before.has(e.id)) Object.assign(e, before.get(e.id));
+    }),
+  });
+}
+/** @param {number} n */
+const emailsWord = (n) => (n === 1 ? 'Email' : `${n} emails`);
+/**
+ * @param {Store} store
+ * @param {string[]} ids
  * @param {boolean} archived
  */
-function archive(store, e, archived) {
-  patch(store, [e.id], { archived });
-  toast(archived ? 'Archived' : 'Moved to the Inbox', { undo: () => patch(store, [e.id], { archived: !archived }) });
-}
+const archive = (store, ids, archived) => change(store, ids, { archived }, archived ? `${emailsWord(ids.length)} archived` : `${emailsWord(ids.length)} moved to the Inbox`);
+// Deleting only hides the email on the board: Gmail is read-only here, and Resend keeps its own copy.
+/**
+ * @param {Store} store
+ * @param {string[]} ids
+ */
+const remove = (store, ids) => change(store, ids, { deleted: true }, `${emailsWord(ids.length)} deleted`);
+// The emails the board shows: every saved one but those deleted.
+/** @param {Store} store */
+const liveEmails = (store) => store.get(COLLECTION).emails.filter((e) => !e.deleted);
 /**
  * @param {Store} store
  * @param {InboxMessage} e
@@ -342,10 +369,19 @@ function openReader(store, e) {
               class: 'btn-small',
               onclick: () => {
                 dialog.close();
-                archive(store, now, !now.archived);
+                archive(store, [now.id], !now.archived);
               },
             }, icon(now.archived ? 'inbox' : 'archive'), now.archived ? 'Move to Inbox' : 'Archive')
           : null,
+        h('button', {
+          type: 'button',
+          class: 'btn-small danger',
+          title: 'Delete this email from the board',
+          onclick: () => {
+            dialog.close();
+            remove(store, [now.id]);
+          },
+        }, icon('trash'), 'Delete'),
         now.dir === 'received'
           ? h('button', {
               type: 'button',
@@ -363,7 +399,7 @@ function openReader(store, e) {
   };
 
   // The other emails of the conversation, sent and received, oldest first.
-  const thread = store.get(COLLECTION).emails
+  const thread = liveEmails(store)
     .filter((x) => x.id !== e.id && threadKey(x) === threadKey(e))
     .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
 
@@ -425,18 +461,108 @@ function matches(e, q) {
   return [e.subject, e.from, ...e.to, ...e.cc].some((s) => s.toLowerCase().includes(q));
 }
 
+// The checkbox ticks the email for the batch actions. Shift+click ticks the whole range from the last one.
+/**
+ * @param {InboxMessage} e
+ * @param {string[]} order the ids shown, top to bottom
+ * @param {() => void} repaint
+ */
+function selectBox(e, order, repaint) {
+  return h('input', {
+    type: 'checkbox',
+    class: 'mail-select',
+    checked: view.selected.has(e.id),
+    title: 'Select (Shift+click for a range)',
+    'aria-label': `Select “${e.subject || '(no subject)'}”`,
+    onclick: (/** @type {MouseEvent & { currentTarget: HTMLInputElement }} */ ev) => {
+      const on = ev.currentTarget.checked;
+      const from = order.indexOf(view.lastPicked);
+      const to = order.indexOf(e.id);
+      const ids = ev.shiftKey && from >= 0 && to >= 0 ? order.slice(Math.min(from, to), Math.max(from, to) + 1) : [e.id];
+      for (const id of ids) on ? view.selected.add(id) : view.selected.delete(id);
+      view.lastPicked = e.id;
+      repaint();
+    },
+  });
+}
+
+// Shown while emails are ticked: read state, star, archive and delete for all of them at once.
+/**
+ * @param {Store} store
+ * @param {InboxMessage[]} shown the emails on screen, for Select all
+ * @param {() => void} repaint
+ */
+function batchBar(store, shown, repaint) {
+  const picked = liveEmails(store).filter((e) => view.selected.has(e.id));
+  if (!picked.length) return null;
+  const ids = picked.map((e) => e.id);
+  const received = picked.filter((e) => e.dir === 'received');
+  // Each toggle offers what some picked email still needs: Star while any is not starred, and so on.
+  const star = picked.some((e) => !e.starred);
+  const toArchive = received.some((e) => !e.archived);
+  const markRead = received.some((e) => e.unread);
+  /**
+   * @param {IconName} iconName
+   * @param {string} label
+   * @param {string} title
+   * @param {() => void} onclick
+   * @param {string} [cls]
+   */
+  const button = (iconName, label, title, onclick, cls = 'btn-small') => h('button', { type: 'button', class: cls, title, onclick }, icon(iconName), label);
+  return h('div', { class: 'batch-bar mail-batch', role: 'toolbar', 'aria-label': 'Selected emails' },
+    h('button', {
+      type: 'button',
+      class: 'btn-small batch-count',
+      title: 'Clear the selection',
+      'aria-label': `${picked.length} selected, clear the selection`,
+      onclick: () => {
+        view.selected.clear();
+        repaint();
+      },
+    }, `${picked.length} selected`, icon('x')),
+    shown.every((e) => view.selected.has(e.id))
+      ? null
+      : h('button', {
+          type: 'button',
+          class: 'btn-small',
+          onclick: () => {
+            for (const e of shown) view.selected.add(e.id);
+            repaint();
+          },
+        }, `Select all ${shown.length} shown`),
+    h('span', { class: 'grow' }),
+    received.length
+      ? button(markRead ? 'check' : 'mail', markRead ? 'Mark read' : 'Mark unread', markRead ? 'Mark the selected emails read' : 'Mark the selected emails unread',
+          () => patch(store, received.map((e) => e.id), { unread: !markRead }))
+      : null,
+    button('star', star ? 'Star' : 'Unstar', star ? 'Star the selected emails' : 'Unstar the selected emails', () => patch(store, ids, { starred: star })),
+    received.length
+      ? button(toArchive ? 'archive' : 'inbox', toArchive ? 'Archive' : 'Move to Inbox', toArchive ? 'Archive the selected emails' : 'Move the selected emails to the Inbox', () => {
+          // Emails that leave the list leave the selection too.
+          if (toArchive || view.folder === 'archive') view.selected.clear();
+          archive(store, received.map((e) => e.id), toArchive);
+        })
+      : null,
+    button('trash', 'Delete', 'Delete the selected emails from the board', () => {
+      view.selected.clear();
+      remove(store, ids);
+    }, 'btn-small danger'));
+}
+
 /**
  * @param {Store} store
  * @param {InboxMessage} e
  * @param {Map<string | null, Project>} projects
  * @param {number} threadSize
+ * @param {Child} select
  */
-function rowEl(store, e, projects, threadSize) {
+function rowEl(store, e, projects, threadSize, select) {
   const project = projects.get(e.projectId);
   const [, tone] = STATUS[e.status] ?? ['', 'plain'];
   // Outside the Sent folder, a sent email says who it went to, as a mail client does.
   const who = e.dir === 'sent' && view.folder !== 'sent' ? `To: ${counterparty(e)}` : counterparty(e);
-  return h('li', { class: e.unread ? 'mail-row unread' : 'mail-row' },
+  return h('li', { class: ['mail-row', e.unread ? 'unread' : '', view.selected.has(e.id) ? 'selected' : ''].filter(Boolean).join(' ') },
+    select,
     starButton(store, e),
     h('button', { type: 'button', class: 'mail-open', onclick: () => openReader(store, e), 'aria-label': `${e.unread ? 'Unread. ' : ''}${who}: ${e.subject || '(no subject)'}` },
       view.folder === 'inbox' || view.folder === 'sent' ? null : h('span', { class: `mail-dir ${e.dir}`, title: e.dir === 'sent' ? 'Sent' : 'Received' }, icon(e.dir === 'sent' ? 'send' : 'inbox')),
@@ -455,7 +581,7 @@ function rowEl(store, e, projects, threadSize) {
           class: 'icon-btn mail-archive',
           title: e.archived ? 'Move to Inbox' : 'Archive',
           'aria-label': e.archived ? `Move “${e.subject}” to the Inbox` : `Archive “${e.subject}”`,
-          onclick: () => archive(store, e, !e.archived),
+          onclick: () => archive(store, [e.id], !e.archived),
         }, icon(e.archived ? 'inbox' : 'archive'))
       : null,
     taskControl(store, e));
@@ -578,7 +704,8 @@ function draw(root, store) {
   const keyed = store.get('projects').projects.filter((p) => withMail.has(p.id));
   /** @type {Map<string | null, Project>} */
   const projects = new Map(store.get('projects').projects.map((p) => [p.id, p]));
-  const { emails, syncedAt } = store.get(COLLECTION);
+  const { syncedAt } = store.get(COLLECTION);
+  const emails = liveEmails(store);
   // A Gmail account needs no project, so it counts on its own.
   const hasMail = keyed.length > 0 || accounts.length > 0;
   const last = lastReads();
@@ -611,8 +738,19 @@ function draw(root, store) {
   const filtered = inFolder.filter((e) => (view.status === 'all' || e.status === view.status) && (!view.flagged || taskOf(store, e)));
   const unread = byProject.filter((e) => FOLDERS[0][3](e) && e.unread);
 
+  // Ticked emails no longer here (deleted, or gone in a read) leave the selection.
+  const live = new Set(emails.map((e) => e.id));
+  for (const id of view.selected) if (!live.has(id)) view.selected.delete(id);
+
   const list = h('ul', { class: 'mail-list' });
   const more = h('div', { class: 'row end' });
+  const bar = h('div', { class: 'mail-batch-wrap' });
+  const selectAll = h('input', {
+    type: 'checkbox',
+    class: 'mail-select',
+    title: 'Select all shown',
+    'aria-label': 'Select all shown emails',
+  });
   const paint = () => {
     const q = view.query.trim().toLowerCase();
     // A search looks through all mail, as in a mail client; the folder applies when the field is empty.
@@ -621,11 +759,22 @@ function draw(root, store) {
     /** @type {HTMLLIElement[]} */
     const rows = [];
     let group = '';
-    for (const e of shown.slice(0, view.limit)) {
+    const onScreen = shown.slice(0, view.limit);
+    const order = onScreen.map((e) => e.id);
+    for (const e of onScreen) {
       const g = groupOf(e.at);
       if (g !== group) rows.push(h('li', { class: 'mail-group muted small' }, (group = g)));
-      rows.push(rowEl(store, e, projects, threads.get(threadKey(e))?.length ?? 1));
+      rows.push(rowEl(store, e, projects, threads.get(threadKey(e))?.length ?? 1, selectBox(e, order, paint)));
     }
+    const ticked = onScreen.filter((e) => view.selected.has(e.id)).length;
+    selectAll.checked = onScreen.length > 0 && ticked === onScreen.length;
+    selectAll.indeterminate = ticked > 0 && ticked < onScreen.length;
+    selectAll.disabled = !onScreen.length;
+    selectAll.onchange = () => {
+      for (const e of onScreen) selectAll.checked ? view.selected.add(e.id) : view.selected.delete(e.id);
+      paint();
+    };
+    bar.replaceChildren(...[batchBar(store, onScreen, paint)].filter((x) => x !== null));
     list.replaceChildren(...(rows.length
       ? rows
       : [h('li', { class: 'empty' }, read.busy && !emails.length ? 'Reading your emails…' : q ? 'No email matches this search.' : view.flagged || view.status !== 'all' ? 'No email matches these filters.' : EMPTY[folder[0]])]));
@@ -645,7 +794,9 @@ function draw(root, store) {
 
   /** @param {Partial<typeof view>} patchView */
   const set = (patchView) => {
+    // Another folder or filter shows other emails; what was ticked would act out of sight.
     Object.assign(view, patchView, { limit: STEP });
+    view.selected.clear();
     store.refresh();
   };
   /**
@@ -710,6 +861,7 @@ function draw(root, store) {
           h('div', { class: 'stack inbox-main' },
           h('div', { class: 'row between' },
             h('div', { class: 'row lp-filters' },
+              selectAll,
               chip(view.flagged, 'With a task', flaggedCount, () => set({ flagged: !view.flagged })),
               view.folder === 'inbox' && unread.length
                 ? h('button', { type: 'button', class: 'btn-small', onclick: () => patch(store, unread.map((e) => e.id), { unread: false }) }, icon('check'), 'Mark all read')
@@ -759,6 +911,7 @@ function draw(root, store) {
               paint();
             },
           }),
+          bar,
           h('section', { class: 'card inbox-card' }, list),
           more))
       : null));
@@ -766,7 +919,7 @@ function draw(root, store) {
 
 // Received emails in the Inbox not opened yet, for the Home page.
 /** @param {Store} store */
-export const unreadCount = (store) => store.get(COLLECTION).emails.filter((e) => FOLDERS[0][3](e) && e.unread).length;
+export const unreadCount = (store) => liveEmails(store).filter((e) => FOLDERS[0][3](e) && e.unread).length;
 
 export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'inbox',

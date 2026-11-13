@@ -29,6 +29,7 @@
       "status": "delivered",
       "unread": false,
       "archived": true,
+      "deleted": true,
       "taskId": null
     },
     {

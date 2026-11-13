@@ -2182,6 +2182,10 @@ button.json-key:hover { background: color-mix(in srgb, var(--accent) 15%, transp
 .mail-row { padding-left: 6px; }
 .mail-row .mail-open { padding-left: 4px; }
 .mail-row.unread { box-shadow: inset 3px 0 0 var(--accent); }
+.mail-row.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.mail-select { flex: none; margin: 0 2px 0 6px; cursor: pointer; }
+.mail-batch { margin-bottom: 0; }
+.mail-batch-wrap:empty { display: none; }
 .mail-row.unread .mail-who, .mail-row.unread .mail-subject { font-weight: 700; color: var(--text); }
 .mail-row:not(.unread) .mail-who { font-weight: 500; }
 .mail-group { padding: 8px 14px 4px; background: var(--surface-2); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.72rem; border-bottom: 1px solid var(--border); }
