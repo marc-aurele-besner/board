@@ -1,13 +1,15 @@
-// pools.json: DeFi → Positions (Uniswap v3/v4 liquidity), Wallets and Lending. Written by the board's tab and by the
+// pools.json: DeFi → Positions (Uniswap v2/v3/v4 liquidity), Wallets and Lending. Written by the board's tab and by the
 // runners (js/defi/*.js, tools/jobs/defi.js). Most maps are keyed by chain id, "<chainId>:<version>" or a position ref.
 
 // One Uniswap position as last read (buildRow in js/defi/positions-read.js).
 export interface PoolRow {
-  version: string; // 'v3' | 'v4'
-  // "<chainId>:<tokenId>" for v3, "<chainId>:<version>:<tokenId>" otherwise.
+  version: string; // 'v2' | 'v3' | 'v4'
+  // "<chainId>:<tokenId>" for v3, "<chainId>:v4:<tokenId>" for v4, and "<chainId>:v2:<pair>:<wallet>" for v2,
+  // where two wallets can hold the same pair.
   ref: string;
   chain: string; // the chain's name
   chainId: number;
+  // v2: the pair's address, in lowercase.
   tokenId: string;
   wallet: string; // lowercase owner address
   // Set when the values use saved prices (pricesAt) or the row is from an earlier read (staleAt); ms.
@@ -46,8 +48,11 @@ export interface PoolRow {
   url: string | null;
   tickLower: number;
   tickUpper: number;
-  liq: string; // liquidity as a decimal string
-  pool: string; // pool address (v3) or pool id (v4)
+  liq: string; // liquidity as a decimal string; v2: the balance of the pair's token
+  // v2 only: the pair's token supply, as a decimal string. The balance over it is the position's share of the pair.
+  supply?: string;
+  pool: string; // pair (v2) or pool (v3) address, or pool id (v4)
+  // What liquidity keeps of a swap, in pips. v2: 3000, or 2500 once the protocol takes its cut.
   feePips: number;
   dec0: number;
   dec1: number;
@@ -74,6 +79,20 @@ export interface V4Scan {
   ids: string[];
   // The search reached v4's deployment or the node refused older blocks.
   done: boolean;
+}
+
+// A wallet's search for Uniswap v2 pairs on a chain, through Etherscan's token transfers (findV2 in
+// js/defi/positions-read.js).
+export interface V2Scan {
+  // The block the next search starts at.
+  block: number;
+  // Uniswap v2 pairs the wallet received tokens of, in lowercase.
+  pairs: string[];
+  // Tokens named like a v2 pair that are not Uniswap's, so they are not checked again.
+  rejected?: string[];
+  // When Etherscan was last asked (ms), and what it answered when it failed.
+  at: number;
+  error?: string;
 }
 
 // A position's fee baseline: unclaimed fees in tokens when counting started.
@@ -263,6 +282,8 @@ export interface PositionsReadState {
   // Chain names whose v4 search did not reach the deployment.
   shallow: string[];
   pending: string[];
+  // Chain name -> why Etherscan could not list the wallets' v2 pairs there.
+  v2lookup?: Record<string, string>;
 }
 
 // Fee APR over a window: aprs["<window>|<ref>"].
@@ -280,6 +301,8 @@ export interface PoolsData {
   prices: Record<string, ChainPrices>;
   // chainId -> lowercase wallet -> search.
   scan: Record<string, Record<string, V4Scan>>;
+  // chainId -> lowercase wallet -> search. Missing in files saved before v2 was read.
+  v2scan?: Record<string, Record<string, V2Scan>>;
   // ref -> baseline.
   fees: Record<string, FeeBaseline>;
   earned: Record<string, EarnedHours>;
