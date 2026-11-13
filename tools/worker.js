@@ -17,7 +17,12 @@ import { serve } from './worker/http.js';
 import { jobs } from './jobs/index.js';
 import { sendWire } from '../js/http-request.js';
 import { slackCall, slackFile } from './slack.js';
+import { voyager, queueState } from './linkedin-session.js';
 import { exchangeLinkedinCode } from '../js/linkedin-core.js';
+import { useLinkedinSession } from '../js/linkedin-session.js';
+
+// Shared code (Cron steps) calls linkedinCall(); here it runs the session's queue itself.
+useLinkedinSession(voyager);
 
 const PORT = Number(process.env.WORKER_PORT) || 8420;
 const CONFIG = join(homedir(), '.config', 'board', 'worker.json');
@@ -128,6 +133,27 @@ serve({
       code: String(body.code ?? ''),
       redirectUri: String(body.redirectUri ?? ''),
     }),
+    // A tab's LinkedIn session call: it waits its turn in the queue, so the answer can take minutes.
+    'POST /linkedin/voyager': async (body) => {
+      const store = scheduler.store();
+      if (!store) throw new Error('The runners have no data folder. Set it in Settings → Runners.');
+      const { path, cacheKey, maxAge, method, headers } = body;
+      if (typeof path !== 'string' || !path) throw Object.assign(new Error('No path.'), { status: 400 });
+      try {
+        const value = await voyager(store, {
+          path,
+          cacheKey: typeof cacheKey === 'string' ? cacheKey : undefined,
+          maxAge: typeof maxAge === 'number' ? maxAge : undefined,
+          method: typeof method === 'string' ? method : undefined,
+          headers: headers && typeof headers === 'object' ? /** @type {Record<string, string>} */ (headers) : undefined,
+        });
+        return { ok: true, value };
+      } catch (err) {
+        const e = /** @type {Error & { code?: string, status?: number }} */ (err);
+        return { ok: false, error: e.message, code: e.code, status: e.status };
+      }
+    },
+    'GET /linkedin/queue': () => queueState(),
     'GET /status': () => ({ ...scheduler.status(), folder: { path: folder.path, from: folder.from, error: folder.error } }),
     'POST /run/*': (body, id) => scheduler.run(id, { params: body ?? {} }),
     'POST /config': (body) => {
