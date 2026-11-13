@@ -2886,10 +2886,15 @@ button.sum-line:hover { background: var(--surface-2); }
 .tok-meta { color: var(--syn-meta); }
 .tok-variable { color: var(--syn-variable); }
 
-.term { flex: 2 1 0; min-height: 220px; display: flex; flex-direction: column; gap: 8px; }
+/* The terminal runs edge to edge: one bar above the output, one below, no frame around it. */
+.term { flex: 2 1 0; min-height: 220px; display: flex; flex-direction: column; gap: 0; padding: 0; }
 .term > * { flex: none; }
-.term-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
-.term-tabs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; min-width: 0; }
+.term > p { margin: 0; padding: 12px; }
+.term-head { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 4px 0 2px; border-bottom: 1px solid var(--border); }
+/* Tabs stay on one line and scroll sideways, so the bar never grows a second row. */
+.term-tabs { flex: 1 1 auto; display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.term-tabs::-webkit-scrollbar { display: none; }
+.term-tab { flex: none; white-space: nowrap; }
 .term-tab { display: inline-flex; align-items: center; border-radius: 6px; color: var(--muted); }
 .term-tab.active { background: var(--surface-2); color: var(--text); }
 .term-tab > button[role="tab"] { background: none; border: none; min-height: 0; padding: 4px 2px 4px 8px; display: inline-flex; align-items: center; gap: 6px; color: inherit; font-size: 0.82rem; font-weight: 500; }
@@ -2901,12 +2906,14 @@ button.sum-line:hover { background: var(--surface-2); }
 .term-new { background: none; border: none; min-height: 0; padding: 4px 6px; border-radius: 6px; color: var(--muted); }
 .term-new:hover { background: var(--surface-2); color: var(--text); }
 .term-new .icon { width: 14px; height: 14px; }
-.term-usage { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.term-usage { flex: none; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .term-usage .icon { width: 14px; height: 14px; flex: none; }
-.term-cwd { flex: 1; min-width: 8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 0.78rem ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); text-align: right; }
+/* The path is cut at its start, so the folder's own name stays in view. */
+.term-cwd { flex: 0 1 auto; min-width: 4rem; max-width: 34%; min-height: 0; padding: 3px 6px; border: none; border-radius: 6px; background: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; font: 0.78rem ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); cursor: copy; }
+.term-cwd:hover { background: var(--surface-2); color: var(--text); }
 .term-actions { flex: none; gap: 2px; }
 .term > .term-out { flex: 1; min-height: 0; }
-.term-out { position: relative; overflow: auto; padding: 10px 12px; border-radius: 8px; background: var(--surface-2); color: var(--text); font: 0.8rem/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; outline: none; }
+.term-out { position: relative; overflow: auto; padding: 8px 10px; border-radius: 0; background: var(--surface-2); color: var(--text); font: 0.8rem/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; outline: none; }
 .term-out:focus { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
 .term-out.dropping { box-shadow: inset 0 0 0 2px var(--accent); }
 .term-line { min-height: 1.35em; overflow: hidden; }
@@ -2924,14 +2931,22 @@ button.sum-line:hover { background: var(--surface-2); }
 .term-cursor { outline: 1px solid var(--text); outline-offset: -1px; }
 .term-out:focus .term-cursor { background: var(--text); color: var(--surface-2); outline: none; }
 .term-probe { position: absolute; visibility: hidden; white-space: pre; }
-.term-form { display: flex; align-items: center; gap: 8px; }
-.term-prompt { font: 600 1rem ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); }
-.term-input { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 16px; }
-.term-form .btn-small { min-height: 36px; padding: 4px 12px; }
-.term-status { gap: 8px; flex-wrap: nowrap; }
-.term-state { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.term-recent { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
-.term-chip { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; min-height: 26px; padding: 2px 10px; }
+/* The command bar: prompt, command line (or what runs), the exit, and Run or Stop flush at the right edge. */
+.term-form { display: flex; align-items: center; gap: 8px; min-height: 34px; padding-left: 10px; border-top: 1px solid var(--border); font: 0.8rem ui-monospace, SFMono-Regular, Menlo, monospace; }
+.term-prompt { flex: none; font-weight: 600; color: var(--accent); }
+.term-input { flex: 1; min-width: 0; min-height: 0; padding: 6px 0; border: none; border-radius: 0; background: none; box-shadow: none; font: inherit; color: var(--text); }
+.term-input:focus, .term-input:focus-visible { outline: none; box-shadow: none; border: none; }
+.term-state { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.term-exit { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.term-exit.ok { color: var(--income); }
+.term-key { flex: none; min-height: 0; padding: 2px 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 0.75rem; }
+.term-key:hover { border-color: var(--accent); }
+.term-history { flex: none; }
+.term-run { flex: none; align-self: stretch; display: inline-flex; align-items: center; gap: 5px; min-height: 0; padding: 0 14px; border: none; border-left: 1px solid var(--border); border-radius: 0; background: none; color: var(--accent); font: 600 0.82rem var(--font); }
+.term-run:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.term-run.stop { color: var(--danger); }
+.term-run.stop:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.term-run .icon { width: 13px; height: 13px; }
 .term-runner input { flex: 1; min-width: 0; font-size: 16px; }
 /* Dev side panel switch (Files / Source control), and the tree's git colours */
 .ide-side-tabs { display: flex; gap: 4px; flex: none; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
@@ -3113,8 +3128,8 @@ button.sum-line:hover { background: var(--surface-2); }
   .pr { flex-direction: column; }
   .pr-files { width: auto; max-height: 30dvh; border-right: none; border-bottom: 1px solid var(--border); }
   .pr-main { padding: 0 8px 12px; }
-  .term-cwd { text-align: left; }
-  .term-recent { justify-content: flex-start; }
+  .term-input { font-size: 16px; }
+  .term-cwd { max-width: 40%; }
 }
 
 /* Folder picker (Projects → Local folder) */
