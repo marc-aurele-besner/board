@@ -331,7 +331,7 @@ export function makeFlow(fields = {}) {
   };
 }
 
-// Starting points for the Templates tab.
+// The built-in templates of the Templates tab, shown with the saved ones.
 export const TEMPLATES = [
   {
     name: 'Morning plan',

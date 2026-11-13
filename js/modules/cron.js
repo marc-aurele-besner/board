@@ -21,7 +21,7 @@ import { previewChips } from '../previews.js';
 import { attachSession, sessionStatus, listSkills } from '../terminal.js';
 import { createTerminal } from '../vt.js';
 import { hasProfileSources } from '../profile.js';
-/** @import { Store, CronFlow, CronStep, CronSource, CronFormatField, CronSchedule, CronTemplate, CronRun, CronRunStep, CronRunTerminal, CronPr, Project, Task, IconName } from '../../types/data' */
+/** @import { Store, CronFlow, CronStep, CronSource, CronFormatField, CronSchedule, CronRun, CronRunStep, CronRunTerminal, CronPr, Project, Task, IconName } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @import { Vars } from '../cron.js' */
 /** @import { Exit } from './dev.js' */
@@ -41,19 +41,20 @@ import { hasProfileSources } from '../profile.js';
 // sort: the order of the flow list, a key of FLOW_SORTS.
 // openRuns: the runs unfolded; focusRun: the run a link opened (#/cron?tab=runs&run=…), scrolled to once.
 // openSubtasks: the tasks of a run whose subtasks are unfolded, as `runId/taskId`.
+// runProject, runFlow: the Runs tab's narrowing to one project (NO_PROJECT for none) or one flow.
 /**
- * @type {{ tab: string, flow: string, node: string, runs: string, project: string, sort: string, field: string,
+ * @type {{ tab: string, flow: string, node: string, runs: string, runProject: string, runFlow: string, project: string, sort: string, field: string,
  *   cursor: { key: string, start: number, end: number } | null, preview: Set<string>, terms: Set<string>,
  *   seenTerms: Set<string>, openRuns: Set<string>, openSubtasks: Set<string>, focusRun: string, scrollTo: string }}
  */
-const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', project: '', sort: 'next', field: '', cursor: null, preview: new Set(), terms: new Set(), seenTerms: new Set(), openRuns: new Set(), openSubtasks: new Set(), focusRun: '', scrollTo: '' };
+const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', runProject: '', runFlow: '', project: '', sort: 'next', field: '', cursor: null, preview: new Set(), terms: new Set(), seenTerms: new Set(), openRuns: new Set(), openSubtasks: new Set(), focusRun: '', scrollTo: '' };
 const NO_PROJECT = 'none';
 const TABS = [['flows', 'Flows'], ['runs', 'Runs'], ['templates', 'Templates']];
 /** @type {Record<string, string>} */
 const SUBTITLES = {
   flows: 'Recurring flows that gather data from the board, ask an AI model, and turn the answer into a task, a notification or work for claude in Dev.',
   runs: 'What every flow did, step by step.',
-  templates: 'Starting points, and the flows you saved as templates. A template becomes a paused flow you can adjust before switching it on.',
+  templates: 'Ready-made flows, and those you saved with the bookmark in a flow’s editor. A template becomes a paused flow you adjust, then switch on.',
 };
 
 /**
@@ -75,6 +76,42 @@ const projectName = (store, id) => (id ? store.get('projects').projects.find((p)
  * @param {string} flowId
  */
 const lastRunOf = (store, flowId) => store.get(COLLECTION).runs.find((r) => r.flowId === flowId) ?? null;
+
+// Opens the Runs tab on this flow's runs, its latest one unfolded and scrolled to.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ */
+function openLatestRun(store, flow) {
+  const last = lastRunOf(store, flow.id);
+  view.tab = 'runs';
+  view.runs = 'all';
+  view.runProject = '';
+  view.runFlow = flow.id;
+  if (last) {
+    view.openRuns.add(last.id);
+    view.focusRun = last.id;
+    view.scrollTo = last.id;
+  }
+  store.refresh();
+}
+
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {string} [className]
+ */
+function latestRunButton(store, flow, className = 'icon-btn') {
+  const last = lastRunOf(store, flow.id);
+  return h('button', {
+    type: 'button',
+    class: className,
+    disabled: !last,
+    title: last ? `See the latest run (${timeOf(last.at)})` : 'No run yet',
+    'aria-label': `See the latest run of “${flow.name}”`,
+    onclick: () => openLatestRun(store, flow),
+  }, icon('activity'));
+}
 
 /**
  * @param {Store} store
@@ -327,6 +364,7 @@ function flowList(store, all, flows) {
               'aria-label': `Run “${f.name}” on schedule`,
               onchange: (/** @type {FieldEvent} */ e) => setEnabled(store, f, e.target.checked),
             }),
+            latestRunButton(store, f, 'icon-btn cron-flow-copy'),
             h('button', {
               type: 'button',
               class: 'icon-btn cron-flow-copy',
@@ -387,66 +425,106 @@ function saveAsTemplate(store, flow) {
   });
 }
 
+// A template's steps in words, for its card. A prompt's ask is usually its last line, after the data it quotes.
 /**
  * @param {Store} store
- * @param {CronTemplate} t
+ * @param {CronFlow} flow
+ * @param {CronStep} step
  */
-function removeTemplate(store, t) {
-  const before = structuredClone(store.get(COLLECTION).templates ?? []);
-  store.update(COLLECTION, (d) => {
-    d.templates = (d.templates ?? []).filter((x) => x.id !== t.id);
-  });
-  toast(`Removed the template “${t.name}”`, { undo: () => store.update(COLLECTION, (d) => { d.templates = before; }) });
+function templateStepText(store, flow, step) {
+  const lines = (/** @type {string | undefined} */ text) => String(text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+  if (step.type === 'ai') return lines(step.prompt).filter((l) => !/^\{\{[^}]+\}\}$/.test(l)).at(-1) || 'Your prompt';
+  if (step.type === 'notify') return lines(step.text).join(' ') || 'The input';
+  return stepSummary(store, flow, step);
 }
 
-// A built-in template has no id or project; the blank one starts a flow with one AI step.
+// Hides a built-in template, or removes a saved one; both can be undone.
 /**
  * @param {Store} store
- * @param {{ name: string, about: string, schedule: CronSchedule, steps: Array<Omit<CronStep, 'id'>>, projectId?: string, blank?: boolean }} template
- * @param {{ remove?: (() => void) | null }} [options]
+ * @param {{ id?: string, name: string }} t
  */
-function templateCard(store, { name, about, schedule, steps, projectId = '', blank = false }, { remove = null } = {}) {
-  const project = projectId ? store.get('projects').projects.find((p) => p.id === projectId) : null;
-  return h('article', { class: 'card stack cron-template-card' },
-    h('div', { class: 'row between' },
-      h('h3', null, name),
-      remove ? h('button', { type: 'button', class: 'icon-btn', title: 'Remove template', 'aria-label': `Remove the template “${name}”`, onclick: remove }, icon('trash')) : null),
-    h('p', { class: 'muted small grow' }, about || 'Saved from a flow.'),
-    project ? h('span', { class: 'muted small cron-flow-meta' }, projectIcon(project), h('span', { class: 'cron-flow-project' }, project.name)) : null,
-    h('div', { class: 'cron-template-steps', 'aria-label': 'Steps' },
-      h('span', { class: 'flow-node-icon kind-trigger', title: scheduleLabel(schedule) }, icon('clock')),
-      steps.map((s) => {
-        const [, label, iconName] = typeOf(s.type);
-        return h('span', { class: `flow-node-icon kind-${s.type}`, title: label }, icon(iconName));
+function dropTemplate(store, t) {
+  const before = structuredClone(store.get(COLLECTION));
+  store.update(COLLECTION, (d) => {
+    if (t.id) d.templates = (d.templates ?? []).filter((x) => x.id !== t.id);
+    else d.hiddenTemplates = [...new Set([...(d.hiddenTemplates ?? []), t.name])];
+  });
+  toast(`Removed the template “${t.name}”`, {
+    undo: () => store.update(COLLECTION, (d) => {
+      d.templates = before.templates;
+      d.hiddenTemplates = before.hiddenTemplates;
+    }),
+  });
+}
+
+// Brings back the built-in templates that were removed.
+/** @param {Store} store */
+function restoreTemplates(store) {
+  store.update(COLLECTION, (d) => {
+    delete d.hiddenTemplates;
+  });
+}
+
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ */
+function useTemplate(store, flow) {
+  view.tab = 'flows';
+  // A flow made while the list shows one project starts in it.
+  if (view.project && view.project !== NO_PROJECT) flow.projectId = view.project;
+  addFlow(store, flow);
+}
+
+// A template's card: its name and purpose, when it runs, each step in words, and the button that makes a flow of it.
+/**
+ * @param {Store} store
+ * @param {{ id?: string, name: string, about: string, schedule: CronSchedule, steps: Array<Omit<CronStep, 'id'>>, projectId?: string }} t
+ */
+function templateCard(store, t) {
+  const project = t.projectId ? store.get('projects').projects.find((p) => p.id === t.projectId) : null;
+  // A template's project that was removed since is dropped.
+  const make = () => flowFromTemplate({ name: t.name, schedule: t.schedule, steps: t.steps, projectId: project ? t.projectId : '' });
+  const preview = make();
+  return h('article', { class: 'card cron-template-card' },
+    h('div', { class: 'cron-template-head' },
+      h('h3', null, t.name),
+      h('button', { type: 'button', class: 'icon-btn cron-template-remove', title: 'Remove template', 'aria-label': `Remove the template “${t.name}”`, onclick: () => dropTemplate(store, t) }, icon('trash'))),
+    t.about ? h('p', { class: 'muted small cron-template-about' }, t.about) : null,
+    h('ol', { class: 'cron-template-steps', 'aria-label': 'What it does' },
+      h('li', null,
+        h('span', { class: 'flow-node-icon kind-trigger' }, icon('clock')),
+        h('span', { class: 'cron-template-step' }, h('strong', null, 'Runs'), h('span', { class: 'muted' }, scheduleLabel(t.schedule)))),
+      preview.steps.map((step) => {
+        const [, label, iconName] = typeOf(step.type);
+        const text = templateStepText(store, preview, step);
+        return h('li', null,
+          h('span', { class: `flow-node-icon kind-${step.type}` }, icon(iconName)),
+          h('span', { class: 'cron-template-step' }, h('strong', null, label), h('span', { class: 'muted', title: text }, text)));
       })),
-    h('p', { class: 'muted small' }, scheduleLabel(schedule)),
-    h('div', null, h('button', {
-      type: 'button',
-      class: 'btn-small primary',
-      onclick: () => {
-        view.tab = 'flows';
-        // A template's project that was removed since is dropped.
-        const flow = blank ? makeFlow({ steps: [makeStep('ai')] }) : flowFromTemplate({ name, schedule, steps, projectId: project ? projectId : '' });
-        // A flow made while the list shows one project starts in it.
-        if (view.project && view.project !== NO_PROJECT) flow.projectId = view.project;
-        addFlow(store, flow);
-      },
-    }, icon('plus'), blank ? 'Start blank' : 'Use template')));
+    h('div', { class: 'cron-template-foot' },
+      project ? h('span', { class: 'muted small cron-flow-meta' }, projectIcon(project), h('span', { class: 'cron-flow-project' }, project.name)) : h('span'),
+      h('button', { type: 'button', class: 'btn-small primary', title: 'Makes a paused flow from it, to adjust before switching it on', onclick: () => useTemplate(store, make()) }, icon('plus'), 'Use template')));
 }
 
 /** @param {Store} store */
 function templatesTab(store) {
-  const blank = { name: 'Blank flow', about: 'One AI step to start with. Add data, conditions and outputs around it.', schedule: makeFlow().schedule, steps: [{ type: 'ai' }], blank: true };
-  const builtIn = h('div', { class: 'cron-template-grid' }, [...TEMPLATES, blank].map((t) => templateCard(store, t)));
-  const saved = store.get(COLLECTION).templates ?? [];
-  if (!saved.length) return builtIn;
-  return h('div', { class: 'stack-lg' },
-    h('section', { class: 'stack' },
-      h('h3', null, 'Your templates'),
-      h('div', { class: 'cron-template-grid' }, saved.map((t) => templateCard(store, t, { remove: () => removeTemplate(store, t) })))),
-    h('section', { class: 'stack' },
-      h('h3', null, 'Starting points'),
-      builtIn));
+  const { templates: saved = [], hiddenTemplates: hidden = [] } = store.get(COLLECTION);
+  const builtIn = TEMPLATES.filter((t) => !hidden.includes(t.name));
+  const blank = h('button', {
+    type: 'button',
+    class: 'card cron-template-blank',
+    onclick: () => useTemplate(store, makeFlow({ steps: [makeStep('ai')] })),
+  },
+    h('span', { class: 'flow-node-icon kind-ai' }, icon('plus')),
+    h('strong', null, 'Blank flow'),
+    h('span', { class: 'muted small' }, 'One AI step to start with. Add data, conditions and outputs around it.'));
+  return h('div', { class: 'stack' },
+    h('div', { class: 'cron-template-grid' }, blank, [...saved, ...builtIn].map((t) => templateCard(store, t))),
+    hidden.length
+      ? h('p', { class: 'muted small' }, `${hidden.length} template${hidden.length === 1 ? '' : 's'} removed. `,
+          h('button', { type: 'button', class: 'btn-link small', onclick: () => restoreTemplates(store) }, 'Bring them back'))
+      : null);
 }
 
 // --- Runs tab ---
@@ -458,16 +536,71 @@ const RUN_FILTERS = [['all', 'All'], ['running', 'Running'], ['error', 'Failed']
  */
 const runMatches = (r, key) => (key === 'all' ? true : key === 'dry' ? r.dry : key === 'error' ? ['error', 'lost'].includes(runState(r)) : runState(r) === key);
 
+// The Runs tab's project and flow pickers. Only the projects and flows some run has are offered; a deleted
+// flow's runs count as having no project.
+/**
+ * @param {Store} store
+ * @param {CronRun[]} runs
+ */
+function runPickers(store, runs) {
+  const { flows } = store.get(COLLECTION);
+  /** @param {CronRun} r */
+  const projectOf = (r) => flowProjectId(flows.find((f) => f.id === r.flowId)) || NO_PROJECT;
+  const usedProjects = new Set(runs.map(projectOf));
+  const projects = projectsOf(store).filter((p) => usedProjects.has(p.id));
+  const inProject = runs.filter((r) => !view.runProject || projectOf(r) === view.runProject);
+  const usedFlows = new Set(inProject.map((r) => r.flowId));
+  const flowOptions = flows.filter((f) => usedFlows.has(f.id)).sort((a, b) => a.name.localeCompare(b.name));
+  return h('div', { class: 'row cron-run-pickers' },
+    usedProjects.size > 1 || view.runProject
+      ? pickChip({
+          value: view.runProject || null,
+          options: [
+            ...projects.map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
+            ...(usedProjects.has(NO_PROJECT) ? [{ value: NO_PROJECT, label: 'No project', plainIcon: () => icon('folder') }] : []),
+          ],
+          nullable: true,
+          nullLabel: 'All projects',
+          className: 'field-pick project-field-pick cron-project-filter',
+          onPick: (v) => {
+            view.runProject = v ?? '';
+            // A flow outside the new project is dropped.
+            const flow = flows.find((f) => f.id === view.runFlow);
+            if (flow && view.runProject && (flowProjectId(flow) || NO_PROJECT) !== view.runProject) view.runFlow = '';
+            store.refresh();
+          },
+        })
+      : null,
+    pickChip({
+      value: view.runFlow || null,
+      options: flowOptions.map((f) => ({ value: f.id, label: f.name, plainIcon: () => icon('repeat') })),
+      nullable: true,
+      nullLabel: 'All flows',
+      className: 'field-pick cron-flow-filter',
+      onPick: (v) => {
+        view.runFlow = v ?? '';
+        store.refresh();
+      },
+    }));
+}
+
 /** @param {Store} store */
 function runsTab(store) {
-  const { flows, runs } = store.get(COLLECTION);
+  const { flows, runs: all } = store.get(COLLECTION);
+  /** @param {CronRun} r */
+  const projectOf = (r) => flowProjectId(flows.find((f) => f.id === r.flowId)) || NO_PROJECT;
+  // A filter whose flow or project no run has any more is dropped.
+  if (view.runFlow && !all.some((r) => r.flowId === view.runFlow)) view.runFlow = '';
+  if (view.runProject && !all.some((r) => projectOf(r) === view.runProject)) view.runProject = '';
+  const runs = all.filter((r) => (!view.runProject || projectOf(r) === view.runProject) && (!view.runFlow || r.flowId === view.runFlow));
   const shown = runs.filter((r) => runMatches(r, view.runs));
   watchTerminals(store, sessionsOf(shown));
   /** @param {string} key */
   const count = (key) => runs.filter((r) => runMatches(r, key)).length;
   return h('section', { class: 'card stack' },
-    h('div', { class: 'row between' },
-      h('p', { class: 'muted small' }, `The last ${runs.length} runs of every flow, newest first. Older runs are dropped. Open a run to see each step.`),
+    h('p', { class: 'muted small' }, `The last ${all.length} runs of every flow, newest first. Older runs are dropped. Open a run to see each step.`),
+    h('div', { class: 'row between cron-run-filters' },
+      runPickers(store, all),
       h('div', { class: 'segmented', role: 'group', 'aria-label': 'Show' },
         RUN_FILTERS.map(([key, label]) => {
           const n = key === 'all' ? 0 : count(key);
@@ -483,7 +616,7 @@ function runsTab(store) {
         }))),
     shown.length
       ? h('ul', { class: 'cron-runs' }, shown.map((r) => runCard(store, flows.find((f) => f.id === r.flowId) ?? null, r, { showFlow: true })))
-      : empty(runs.length ? 'No run matches this filter.' : 'No run yet. Runs of every flow show here.'));
+      : empty(all.length ? 'No run matches this filter.' : 'No run yet. Runs of every flow show here.'));
 }
 
 // --- Canvas ---
@@ -2337,8 +2470,15 @@ function runCard(store, flow, r, { showFlow = false } = {}) {
   const groups = tops.filter((id) => children.has(id)).map((id) => taskGroup(store, r, id, children));
   const links = [...tops.filter((id) => !children.has(id)).map((id) => taskChip(store, id)), ...terms.map((t) => terminalChip(store, t)), ...prs.map(prChip), ...issues.map(issueChip), ...previewChips(store, prs, 'run-chip'), ...branches.map(branchChip)];
   return h('li', { class: `cron-run${view.focusRun === r.id ? ' focus' : ''}`, 'data-run': r.id },
-    h('div', { class: 'cron-run-head' },
-      h('button', { type: 'button', class: 'cron-run-toggle', 'aria-expanded': String(open), onclick: toggle },
+    // The whole header opens the run, not only its name: a click beside the chevron or on the empty space too.
+    // Its own buttons and links keep their clicks; the toggle button handles its own for the keyboard.
+    h('div', {
+      class: 'cron-run-head',
+      onclick: (/** @type {MouseEvent} */ e) => {
+        if (!(/** @type {Element} */ (e.target)).closest('button, a, input, select')) toggle();
+      },
+    },
+      h('button', { type: 'button', class: 'cron-run-toggle', 'aria-expanded': String(open), title: open ? 'Hide the steps' : 'Show the steps', onclick: toggle },
         h('span', { class: `icon-wrap chevron${open ? ' open' : ''}` }, icon('chevron-down')),
         h('span', { class: `cron-dot ${dot}`, title: label }),
         h('span', { class: 'cron-run-name' },
@@ -2419,6 +2559,7 @@ function editor(store, flow) {
             onclick: () => startRun(store, flow, { dry: true }),
           }, icon('filter'), 'Test run'),
           h('button', { type: 'button', class: 'btn-small primary', disabled: busy || !flow.steps.length, onclick: () => startRun(store, flow) }, icon('play'), busy ? 'Running…' : 'Run now'),
+          latestRunButton(store, flow),
           h('button', { type: 'button', class: 'icon-btn', title: 'Save as template', 'aria-label': 'Save as template', disabled: !flow.steps.length, onclick: () => saveAsTemplate(store, flow) }, icon('bookmark')),
           h('button', { type: 'button', class: 'icon-btn', title: 'Duplicate flow', 'aria-label': 'Duplicate flow', onclick: () => duplicateFlow(store, flow) }, icon('copy')),
           h('button', { type: 'button', class: 'icon-btn', title: 'Delete flow', 'aria-label': 'Delete flow', onclick: () => deleteFlow(store, flow) }, icon('trash')))),
@@ -2506,6 +2647,8 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
     if (p.run) {
       view.tab = 'runs';
       view.runs = 'all';
+      view.runProject = '';
+      view.runFlow = '';
       view.openRuns.add(p.run);
       view.focusRun = p.run;
       view.scrollTo = p.run;
