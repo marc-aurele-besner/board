@@ -5,6 +5,7 @@
 import { h, icon, uid, notice, refreshIcon, codeBox } from '../ui.js';
 import { projectTree, projectIcon } from './projects.js';
 import { pickButton, pickChip } from '../inline.js';
+import { menuButton, onContextMenu } from '../menu.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import { runnersOnline, runnersKnown } from '../runners.js';
@@ -16,6 +17,7 @@ import {
 } from '../slack.js';
 /** @import { Store, SlackData, SlackWorkspace, SlackChannel, SlackGroup, Project } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
+/** @import { MenuEntry } from '../menu.js' */
 /** @import { Message, Count } from '../slack.js' */
 /**
  * A sidebar section: a group, a workspace's channels outside groups, or a project's.
@@ -499,109 +501,127 @@ function projectOptions(store) {
 
 // ---- sidebar ----------------------------------------------------------------------------------------------------
 
-// The menu of a conversation: mute, read, group, project, order.
-/** @param {Store} store @param {string} key @param {Section} section */
-function itemMenu(store, key, section) {
-  const d = data(store);
-  const group = groupOf(d, key);
-  const muted = isMuted(store, key);
-  const projects = projectsOf(store);
-  const own = key in d.projects;
-  const options = [
-    { value: 'mute', label: muted ? 'Unmute' : 'Mute', plainIcon: () => icon(muted ? 'bell' : 'bell-off') },
-    { value: 'read', label: 'Mark as read', plainIcon: () => icon('check') },
-    { value: 'up', label: 'Move up', plainIcon: () => icon('arrow-up') },
-    { value: 'down', label: 'Move down', plainIcon: () => icon('arrow-down') },
-    ...d.groups.filter((g) => g !== group).map((g) => ({ value: `group:${g.id}`, label: `Move to group ${g.name}`, plainIcon: () => icon('folder') })),
-    { value: 'new-group', label: 'New group with this…', plainIcon: () => icon('plus') },
-    ...(group ? [{ value: 'ungroup', label: `Take out of ${group.name}`, plainIcon: () => icon('x') }] : []),
-    ...projects.map((p) => ({ value: `project:${p.id}`, label: `Tie to ${p.name}`, plainIcon: () => projectIcon(p) })),
-    ...(projectOf(d, key) ? [{ value: 'project:', label: 'Tie to no project', plainIcon: () => icon('x') }] : []),
-    ...(own ? [{ value: 'project-inherit', label: 'Follow its group’s or workspace’s project', plainIcon: () => icon('undo') }] : []),
-    { value: 'slack', label: 'Open in Slack', plainIcon: () => icon('link') },
-  ];
-  return pickButton({
-    label: '',
-    title: 'More',
-    className: 'icon-btn slack-item-menu',
-    options,
-    onPick: (/** @type {string} */ v) => {
-      const [team, channel] = splitKey(key);
-      const w = workspaceOf(store, team);
-      if (v === 'mute') toggleMute(store, key);
-      else if (v === 'read') {
-        const c = countOf(key);
-        if (w && c?.latest) {
-          markRead(w, channel, c.latest).catch((err) => toast(err.message));
-          Object.assign(c, { unread: false, mentions: 0, lastRead: c.latest });
-          paint('side');
-        }
-      } else if (v === 'up' || v === 'down') nudge(store, key, section, v === 'up' ? -1 : 1);
-      else if (v.startsWith('group:')) {
-        const target = sections(store).find((s) => s.id === v.slice(6));
-        if (target) moveTo(store, key, target, null);
-      } else if (v === 'new-group') newGroup(store, [key]);
-      else if (v === 'ungroup') change(store, (dd) => { for (const g of dd.groups) g.items = g.items.filter((k) => k !== key); });
-      else if (v === 'project-inherit') change(store, (dd) => { delete dd.projects[key]; });
-      else if (v.startsWith('project:')) change(store, (dd) => { dd.projects[key] = v.slice(8); });
-      else if (v === 'slack' && w) window.open(slackLink(w, channel), '_blank', 'noopener');
-    },
-  });
+/** @param {string} text @param {string} what */
+const copyText = (text, what) => navigator.clipboard.writeText(text).then(() => toast(`Copied ${what}`), () => toast('Could not copy'));
+
+// The Project submenu: every project with a tick on the one chosen, then none. `inherit` adds a row that drops the
+// conversation's own choice, so it follows its group or workspace again.
+/** @param {Store} store @param {string | null} current @param {(id: string) => void} set @param {{ checked: boolean, onSelect: () => void } | null} [inherit] */
+function projectItems(store, current, set, inherit = null) {
+  return /** @type {MenuEntry[]} */ ([
+    ...projectsOf(store).map((p) => ({ label: p.name, icon: () => projectIcon(p), checked: current === p.id, onSelect: () => set(p.id) })),
+    '-',
+    { label: 'No project', checked: current === '', icon: () => icon('x'), onSelect: () => set('') },
+    inherit ? { label: 'Follow group or workspace', checked: inherit.checked, icon: () => icon('undo'), onSelect: inherit.onSelect } : null,
+  ]);
 }
 
-// The menu of a section: a group's name, project, place and removal; a workspace's project, listing and sign-in.
+// A conversation's menu, as Slack's: open and copy, read and mute, then where it sits (order, group, project).
+/** @param {Store} store @param {string} key @param {Section} section @returns {MenuEntry[]} */
+function itemMenu(store, key, section) {
+  const d = data(store);
+  const [team, channel] = splitKey(key);
+  const w = workspaceOf(store, team);
+  const c = channelOf(store, key);
+  const name = c ? nameOf(store, team, c) : key;
+  const group = groupOf(d, key);
+  const muted = isMuted(store, key);
+  const { unread, mentions } = unreadOf(store, key);
+  const own = key in d.projects;
+  const at = section.keys.indexOf(key);
+  const link = w ? slackLink(w, channel) : '';
+  return [
+    { label: 'Open', icon: () => icon('message'), onSelect: () => openConversation(store, key) },
+    w ? { label: 'Open in Slack', icon: () => icon('link'), onSelect: () => window.open(link, '_blank', 'noopener') } : null,
+    { label: 'Copy', icon: () => icon('copy'), items: [
+      { label: 'Copy name', onSelect: () => copyText(c?.kind === 'im' || c?.kind === 'mpim' ? name : `#${name}`, 'name') },
+      w ? { label: 'Copy link', onSelect: () => copyText(link, 'link') } : null,
+    ] },
+    '-',
+    {
+      label: 'Mark as read',
+      icon: () => icon('check'),
+      onSelect: () => {
+        const n = countOf(key);
+        if (!(unread || mentions) || !w || !n?.latest) return;
+        markRead(w, channel, n.latest).catch((err) => toast(err.message));
+        Object.assign(n, { unread: false, mentions: 0, lastRead: n.latest });
+        paint('side');
+      },
+    },
+    { label: muted ? 'Unmute conversation' : 'Mute conversation', icon: () => icon(muted ? 'bell' : 'bell-off'), onSelect: () => toggleMute(store, key) },
+    '-',
+    { label: 'Move', icon: () => icon('arrow-left-right'), items: [
+      at > 0 ? { label: 'Up', icon: () => icon('arrow-up'), onSelect: () => nudge(store, key, section, -1) } : null,
+      at >= 0 && at < section.keys.length - 1 ? { label: 'Down', icon: () => icon('arrow-down'), onSelect: () => nudge(store, key, section, 1) } : null,
+      '-',
+      ...d.groups.map((g) => ({
+        label: g.name,
+        icon: () => icon('folder'),
+        checked: g === group,
+        onSelect: () => {
+          const target = sections(store).find((x) => x.id === g.id);
+          if (target && g !== group) moveTo(store, key, target, null);
+        },
+      })),
+      '-',
+      { label: 'New group…', icon: () => icon('plus'), onSelect: () => newGroup(store, [key]) },
+      group ? { label: `Take out of ${group.name}`, icon: () => icon('x'), onSelect: () => change(store, (dd) => { for (const g of dd.groups) g.items = g.items.filter((k) => k !== key); }) } : null,
+    ] },
+    { label: 'Project', icon: () => icon('folder'), hint: own ? undefined : 'inherited', items: projectItems(
+      store,
+      own ? d.projects[key] : null,
+      (id) => change(store, (dd) => { dd.projects[key] = id; }),
+      { checked: !own, onSelect: () => change(store, (dd) => { delete dd.projects[key]; }) },
+    ) },
+  ];
+}
+
 /** @param {Store} store @param {Section} section */
+const toggleFold = (store, section) => change(store, (d) => {
+  d.collapsed = d.collapsed.includes(section.id) ? d.collapsed.filter((x) => x !== section.id) : [...d.collapsed, section.id];
+});
+
+// A section's menu: fold it, then a group's name, project, place and removal, or a workspace's project, listing and sign-in.
+/** @param {Store} store @param {Section} section @returns {MenuEntry[]} */
 function sectionMenu(store, section) {
-  const projects = projectOptions(store);
-  if (section.kind === 'project') return null;
+  const folded = data(store).collapsed.includes(section.id);
+  const fold = { label: folded ? 'Expand' : 'Collapse', icon: () => icon(folded ? 'chevron-down' : 'chevron-up'), onSelect: () => toggleFold(store, section) };
+  if (section.kind === 'project') return [fold];
   if (section.kind === 'group') {
     const g = /** @type {SlackGroup} */ (section.group);
-    const i = data(store).groups.indexOf(g);
-    return pickButton({
-      label: '',
-      title: 'Group',
-      className: 'icon-btn slack-item-menu',
-      options: [
-        { value: 'rename', label: 'Rename', plainIcon: () => icon('pencil') },
-        { value: 'up', label: 'Move group up', plainIcon: () => icon('arrow-up') },
-        { value: 'down', label: 'Move group down', plainIcon: () => icon('arrow-down') },
-        ...projects.map((p) => ({ ...p, value: `project:${p.value}`, label: `Tie to ${p.label}` })),
-        ...(g.projectId ? [{ value: 'project:', label: 'Tie to no project', plainIcon: () => icon('x') }] : []),
-        { value: 'delete', label: 'Remove group (keeps its channels)', plainIcon: () => icon('trash') },
-      ],
-      onPick: (/** @type {string} */ v) => {
-        if (v === 'rename') askText({ title: 'Rename group', label: 'Name', value: g.name, onSave: (name) => change(store, (d) => { const x = d.groups.find((y) => y.id === g.id); if (x) x.name = name; }) });
-        else if (v === 'up' || v === 'down') change(store, (d) => {
-          const j = i + (v === 'up' ? -1 : 1);
-          if (j < 0 || j >= d.groups.length) return;
-          [d.groups[i], d.groups[j]] = [d.groups[j], d.groups[i]];
-        });
-        else if (v.startsWith('project:')) change(store, (d) => { const x = d.groups.find((y) => y.id === g.id); if (x) x.projectId = v.slice(8) || null; });
-        else if (v === 'delete') change(store, (d) => { d.groups = d.groups.filter((y) => y.id !== g.id); });
-      },
+    const groups = data(store).groups;
+    const i = groups.indexOf(g);
+    /** @param {number} by */
+    const swap = (by) => change(store, (d) => {
+      const j = i + by;
+      if (j < 0 || j >= d.groups.length) return;
+      [d.groups[i], d.groups[j]] = [d.groups[j], d.groups[i]];
     });
+    return [
+      fold,
+      { label: 'Rename…', icon: () => icon('pencil'), onSelect: () => askText({ title: 'Rename group', label: 'Name', value: g.name, onSave: (name) => change(store, (d) => { const x = d.groups.find((y) => y.id === g.id); if (x) x.name = name; }) }) },
+      '-',
+      { label: 'Move', icon: () => icon('arrow-left-right'), items: [
+        i > 0 ? { label: 'Up', icon: () => icon('arrow-up'), onSelect: () => swap(-1) } : null,
+        i < groups.length - 1 ? { label: 'Down', icon: () => icon('arrow-down'), onSelect: () => swap(1) } : null,
+      ] },
+      { label: 'Project', icon: () => icon('folder'), items: projectItems(store, g.projectId ?? '', (id) => change(store, (d) => { const x = d.groups.find((y) => y.id === g.id); if (x) x.projectId = id || null; })) },
+      '-',
+      { label: 'Remove group', hint: 'keeps its channels', icon: () => icon('trash'), danger: true, onSelect: () => change(store, (d) => { d.groups = d.groups.filter((y) => y.id !== g.id); }) },
+    ];
   }
   const w = /** @type {SlackWorkspace} */ (section.ws);
-  return pickButton({
-    label: '',
-    title: 'Workspace',
-    className: 'icon-btn slack-item-menu',
-    options: [
-      { value: 'relist', label: 'Read its channels again', plainIcon: () => icon('refresh') },
-      ...projects.map((p) => ({ ...p, value: `project:${p.value}`, label: `Tie workspace to ${p.label}` })),
-      ...(w.projectId ? [{ value: 'project:', label: 'Tie to no project', plainIcon: () => icon('x') }] : []),
-      { value: 'signin', label: 'Sign in again', plainIcon: () => icon('key') },
-      { value: 'slack', label: 'Open in Slack', plainIcon: () => icon('link') },
-      { value: 'remove', label: 'Remove workspace', plainIcon: () => icon('trash') },
-    ],
-    onPick: (/** @type {string} */ v) => {
-      if (v === 'relist') relist(store, w, { force: true }).then(() => toast(`${w.name}: channels read again.`));
-      else if (v.startsWith('project:')) change(store, (d) => { const x = d.workspaces.find((y) => y.id === w.id); if (x) x.projectId = v.slice(8) || null; });
-      else if (v === 'signin') openSignIn(store);
-      else if (v === 'slack') window.open(w.url || 'https://app.slack.com/', '_blank', 'noopener');
-      else if (v === 'remove') confirmRemove(store, w);
-    },
-  });
+  return [
+    fold,
+    { label: 'Open in Slack', icon: () => icon('link'), onSelect: () => window.open(w.url || 'https://app.slack.com/', '_blank', 'noopener') },
+    { label: 'Read its channels again', icon: () => icon('refresh'), onSelect: () => relist(store, w, { force: true }).then(() => toast(`${w.name}: channels read again.`)) },
+    '-',
+    { label: 'Project', icon: () => icon('folder'), items: projectItems(store, w.projectId ?? '', (id) => change(store, (d) => { const x = d.workspaces.find((y) => y.id === w.id); if (x) x.projectId = id || null; })) },
+    { label: 'Sign in again', icon: () => icon('key'), onSelect: () => openSignIn(store) },
+    '-',
+    { label: 'Remove workspace…', icon: () => icon('trash'), danger: true, onSelect: () => confirmRemove(store, w) },
+  ];
 }
 
 /** @param {Store} store @param {SlackWorkspace} w */
@@ -651,7 +671,7 @@ function sideItem(store, key, section, multi) {
     ? avatar(name, person?.avatar ?? '', 'slack-item-avatar')
     : h('span', { class: 'slack-item-glyph' }, icon(c.kind === 'private' ? 'lock' : c.kind === 'mpim' ? 'users' : 'hash'));
   const cls = ['slack-item', view.open === key && 'active', unread && 'unread', muted && 'muted'].filter(Boolean).join(' ');
-  return h('div', {
+  const row = h('div', {
     class: cls,
     draggable: 'true',
     'data-key': key,
@@ -687,7 +707,8 @@ function sideItem(store, key, section, multi) {
       h('span', { class: 'slack-item-name' }, name),
       muted ? h('span', { class: 'slack-item-muted', title: 'Muted' }, icon('bell-off')) : null,
       mentions ? h('span', { class: muted ? 'slack-badge muted' : 'slack-badge' }, String(mentions)) : null),
-    itemMenu(store, key, section));
+    menuButton({ title: 'More', className: 'icon-btn slack-item-menu', build: () => itemMenu(store, key, section) }));
+  return onContextMenu(row, () => itemMenu(store, key, section));
 }
 
 /** @param {Store} store */
@@ -723,21 +744,20 @@ function sideList(store) {
         if (moved) moveTo(store, moved, s, null);
       },
     },
-      h('div', { class: 'slack-section-head' },
+      onContextMenu(h('div', { class: 'slack-section-head' },
         h('button', {
           type: 'button',
           class: 'slack-section-toggle',
           'aria-expanded': String(!folded),
-          onclick: () => change(store, (dd) => {
-            dd.collapsed = dd.collapsed.includes(s.id) ? dd.collapsed.filter((x) => x !== s.id) : [...dd.collapsed, s.id];
-          }),
+          onclick: () => toggleFold(store, s),
         },
           icon(folded ? 'chevron-right' : 'chevron-down'),
           s.kind === 'team' && s.ws ? teamIcon(s.ws) : s.project ? projectIcon(s.project) : s.kind === 'group' ? icon('folder') : null,
           h('span', { class: 'slack-section-title' }, s.title),
           project && s.kind !== 'project' ? h('span', { class: 'slack-section-project', title: `Tied to ${project.name}` }, projectIcon(project), project.name) : null,
           folded && unreadCount ? h('span', { class: 'slack-badge soft' }, String(unreadCount)) : null),
-        sectionMenu(store, s)),
+        menuButton({ title: s.kind === 'group' ? 'Group' : s.kind === 'team' ? 'Workspace' : 'Section', className: 'icon-btn slack-item-menu', build: () => sectionMenu(store, s) })),
+      () => sectionMenu(store, s)),
       error ? h('p', { class: 'slack-section-error small' }, icon('alert'), error) : null,
       folded ? null : h('div', { class: 'slack-section-items' },
         keys.length ? keys.map((k) => sideItem(store, k, s, multi)) : h('p', { class: 'muted small slack-drop-hint' }, s.kind === 'group' ? 'Drag channels here.' : live.listed.has(s.id) ? 'No conversations.' : 'Reading…')));
