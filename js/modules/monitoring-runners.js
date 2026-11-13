@@ -334,7 +334,9 @@ export function runnersTab(store, shown) {
     .sort((a, b) => RANK[a.state] - RANK[b.state]);
   const listed = view.filter ? rows.filter((r) => r.state === view.filter) : rows;
 
-  return h('div', { class: 'stack-lg rs' },
+  // The page is built before it replaces the one on screen: a runners view already there means a heartbeat redraw.
+  const entering = !document.querySelector('main.view .rs');
+  return h('div', { class: entering ? 'stack-lg rs enter' : 'stack-lg rs' },
     hero(store, rows, online),
     processes(store),
     h('section', { class: 'card stack' },
