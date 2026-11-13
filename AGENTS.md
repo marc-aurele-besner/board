@@ -8,7 +8,7 @@ A personal command center that runs locally. It is plain HTML, CSS and JavaScrip
 
 ## Run and verify
 
-- Start the board with `bun start` (or `node tools/start.js`): it runs the static server, the command runner and the runners (the worker) together, each logging with its name as prefix. `bun dev` runs the same and restarts them when a file in `tools/` changes. `bun run serve` alone serves the folder. Then open `http://localhost:8000` in Chrome or Edge. The File System Access API needs a secure context (`localhost` counts) and does not work in Firefox or Safari.
+- Start the board with `bun start` (or `node tools/start.js`): it runs the static server, the command runner and the runners (the worker) together, each logging with its name as prefix. `bun dev` (`tools/dev.js`) runs the same and restarts the static server and the worker when a file they import changes; the command runner runs apart and is never restarted, since a restart stops every command in Dev's terminals (a pull that changes `tools/` would end every claude session). After changing `tools/terminal.js`, restart `bun dev`. `bun run serve` alone serves the folder. Then open `http://localhost:8000` in Chrome or Edge. The File System Access API needs a secure context (`localhost` counts) and does not work in Firefox or Safari.
 - A changed module is not always picked up: `python3 -m http.server` sends no cache headers, so the browser reuses the module it cached and keeps running the old code. `tools/serve.js` marks every file `no-cache`, so a reload runs the new code. With the Python server, ask the user for a hard reload (Cmd+Shift+R) before checking a change in the browser.
 - Run `bun install` once after cloning. It installs TypeScript as a dev-only tool (it never ships to the browser) and turns on `.githooks/pre-commit`.
 - Syntax check every module before committing:
@@ -100,6 +100,7 @@ jsconfig.json         the type check of the browser code (tools/jsconfig.json ch
 types/                .d.ts files: browser APIs missing from lib.dom, and the shared data model
 .githooks/pre-commit  runs bun run check before each commit
 tools/start.js        one command for the board: starts serve.js, terminal.js and worker.js together
+tools/dev.js          bun dev: the command runner unwatched, the rest of start.js under bun --watch
 tools/log.js          terminal lines prefixed with each runner's name
 tools/serve.js        local static server with no-cache headers; no dependencies
 tools/slack.js        POST /slack and /slack/file: Slack calls from Node, which can send the session's d cookie
