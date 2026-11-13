@@ -25,7 +25,7 @@ import { resizableSide } from '../side-resize.js';
 import { projectIcon } from './projects.js';
 import { linkWatcher, moveToReview } from '../task-links.js';
 import { watchDevSessions } from './todos.js';
-import { recordOfSession, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
+import { recordOfSession, sumUsage, usageLine, usageTitle, byUse, mcpTool } from '../dev-usage.js';
 import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand } from '../dev-core.js';
 import { cronRunOf, cronRunHref } from '../cron.js';
 /** @import { Store, DevSessionList, IconName } from '../../types/data' */
@@ -1304,6 +1304,7 @@ function sessionTitle(store, s) {
       },
     }, s.running ? h('span', { class: 'term-dot', title: 'Running' }) : icon('terminal'), h('span', null, `${numberOf(s)} · ${s.cwd ? baseName(s.cwd) : 'board'}`)), () => sessionMenu(store, s)),
     turnsButton(store, s),
+    toolButtons(store, s),
     h('button', {
       type: 'button',
       class: 'term-new',
@@ -1550,6 +1551,55 @@ function turnsButton(store, s) {
       openTurns(/** @type {HTMLElement} */ (e.currentTarget), s);
     },
   }, icon('message'), h('span', null, String(turns.length)), h('span', { class: 'term-turns-state', role: 'img', 'aria-label': label }));
+}
+
+// The skills and the MCP tools the shown claude used, read with its turns: a button each, with its own count. A click
+// lists them, the most used first: a skill is typed into the terminal again, an MCP tool's name is copied.
+/** @param {Store} store @param {Session} s */
+function toolButtons(store, s) {
+  const data = turnsView.id === s.id ? turnsView.data : null;
+  if (!data?.claude) return null;
+  const skills = byUse(data.skills);
+  const tools = byUse(data.mcp).map(([name, n]) => ({ name, n, ...mcpTool(name) }));
+  const sum = (/** @type {{ n: number }[]} */ list) => list.reduce((t, x) => t + x.n, 0);
+  const skillUses = skills.reduce((t, [, n]) => t + n, 0);
+  const mcpCalls = sum(tools);
+  const servers = [...new Set(tools.map((t) => t.server))];
+  const toolItem = (/** @type {typeof tools[number]} */ t, /** @type {boolean} */ named) => ({
+    label: named ? `${t.server} · ${t.tool}` : t.tool || t.server,
+    hint: `${t.n}×`,
+    icon: () => icon('plug'),
+    onSelect: () => navigator.clipboard.writeText(t.name).then(() => toast('Tool name copied'), () => toast('Could not copy')),
+  });
+  /** @type {() => MenuEntry[]} */
+  const skillMenu = () => (skills.length
+    ? skills.map(([name, n]) => ({ label: `/${name}`, hint: `${n}×`, icon: () => icon('zap'), onSelect: () => filesCtx(store).typeInTerminal(`/${name} `) }))
+    : [{ label: 'No skill used yet' }]);
+  /** @type {() => MenuEntry[]} */
+  const mcpMenu = () => {
+    if (!tools.length) return [{ label: 'No MCP tool called yet' }];
+    if (servers.length === 1) return tools.map((t) => toolItem(t, true));
+    return servers.map((server) => {
+      const own = tools.filter((t) => t.server === server);
+      return { label: server, hint: `${sum(own)}×`, icon: () => icon('plug'), items: own.map((t) => toolItem(t, false)) };
+    });
+  };
+  /** @param {string} kind @param {IconName} name @param {number} count @param {string} title @param {() => MenuEntry[]} menu */
+  const button = (kind, name, count, title, menu) => h('button', {
+    type: 'button',
+    class: count ? `term-tool ${kind}` : `term-tool ${kind} none`,
+    title,
+    'aria-label': title.split('\n')[0],
+    'aria-haspopup': 'menu',
+    onclick: (/** @type {MouseEvent} */ e) => {
+      e.stopPropagation();
+      openMenu(menu(), /** @type {HTMLElement} */ (e.currentTarget));
+    },
+  }, icon(name), h('span', null, String(count)));
+  return [
+    button('skills', 'zap', skillUses, `${skillUses} skill ${skillUses === 1 ? 'use' : 'uses'} in this claude session${skills.length ? ` (${skills.length} ${skills.length === 1 ? 'skill' : 'skills'})` : ''}\nShow the skills it ran`, skillMenu),
+    button('mcp', 'plug', mcpCalls, `${mcpCalls} MCP ${mcpCalls === 1 ? 'call' : 'calls'} in this claude session${servers.length ? ` (${servers.length} ${servers.length === 1 ? 'server' : 'servers'})` : ''}\nShow the MCP tools it called`, mcpMenu),
+  ];
 }
 
 /** @param {Store} store @param {Session} s */

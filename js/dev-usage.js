@@ -159,6 +159,17 @@ export const recordsOfTask = (/** @type {DataStore} */ store, /** @type {string}
 export const recordOfSession = (/** @type {DataStore} */ store, /** @type {string} */ sessionId) => Object.values(devUsage(store)).find((r) => r.session === sessionId && hasUsage(r)) ?? null;
 export const usageRecords = (/** @type {DataStore} */ store) => Object.values(devUsage(store)).filter(hasUsage);
 
+// An MCP tool's server and tool from its name, `mcp__<server>__<tool>`; claude.ai's connectors drop their prefix.
+/** @param {string} name */
+export function mcpTool(name) {
+  const rest = name.replace(/^mcp__/, '');
+  const at = rest.indexOf('__');
+  const server = at < 0 ? rest : rest.slice(0, at);
+  return { server: server.replace(/^claude_ai_/, '').replace(/_/g, ' '), tool: at < 0 ? '' : rest.slice(at + 2) };
+}
+// Counts by name, the most used first.
+export const byUse = (/** @type {Record<string, number> | undefined} */ counts) => Object.entries(counts ?? {}).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+
 // The models by name, the one with the most output first: "claude-opus-5-5" reads "Opus 5.5".
 /** @param {string} id */
 export function modelName(id) {
