@@ -1260,7 +1260,6 @@ function draw(root, store) {
 
   root.replaceChildren(
     h('div', { class: 'stack slack' },
-      h('header', { class: 'row between slack-page-head' }, h('h2', null, 'Slack')),
       ...banners,
       h('div', { class: !d.workspaces.length ? 'slack-layout alone' : view.thread && view.open ? 'slack-layout with-thread' : 'slack-layout' },
         d.workspaces.length ? sidebar(store) : null,

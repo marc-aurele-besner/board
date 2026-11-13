@@ -3117,7 +3117,6 @@ button.sum-line:hover { background: var(--surface-2); }
 .slack .stack-sm, .slack-signin .stack-sm { display: flex; flex-direction: column; gap: 4px; }
 .slack .stack-xs { display: flex; flex-direction: column; gap: 0; min-width: 0; }
 .slack.stack { gap: 8px; }
-.slack-page-head h2 { margin: 0; font-size: 1.1rem; }
 .slack-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); height: calc(100vh - 150px); min-height: 460px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
 .slack-layout.with-thread { grid-template-columns: 240px minmax(0, 1fr) minmax(300px, 380px); }
 .slack-layout.alone { grid-template-columns: minmax(0, 1fr); }
