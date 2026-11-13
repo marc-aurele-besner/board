@@ -2790,11 +2790,17 @@ button.sum-line:hover { background: var(--surface-2); }
 }
 
 /* Dev: files and terminals on this machine, Cursor style */
-/* The page fills the window below where it starts (--dev-top, measured by dev.js; the top bar and the view's
-   padding until then): the side panel runs its full height, and the editor and the terminal share it. */
-.dev { height: calc(100dvh - var(--dev-top, 95px)); min-height: 460px; }
-.ide { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 12px; }
-.ide-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; }
+/* Dev takes the whole page below the top bar, edge to edge, like Slack: no padding around it, and its height runs to
+   the bottom of the window from where it starts (--dev-top, measured by dev.js under any banners). The panels meet
+   on a single line instead of floating as separate cards. */
+.view:has(> .dev) { padding: 0; }
+.dev { height: calc(100dvh - var(--dev-top, 55px)); min-height: 460px; gap: 0; }
+.dev > .stack { padding: 12px; border-bottom: 1px solid var(--border); }
+.ide { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 0; }
+.ide-main { display: flex; flex-direction: column; gap: 0; min-width: 0; min-height: 0; }
+.ide > .card, .ide-main > .card { border: none; border-radius: 0; }
+.ide > .ide-explorer { border-right: 1px solid var(--border); }
+.ide-main > .ide-editor { border-bottom: 1px solid var(--border); }
 .ide-explorer { padding: 8px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
 .ide-explorer-head { display: flex; gap: 6px; align-items: center; flex: none; }
 .ide-workspace { flex: 1; min-width: 0; }
@@ -3069,6 +3075,7 @@ button.sum-line:hover { background: var(--surface-2); }
   .dev { height: auto; min-height: 0; }
   .ide { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
   .ide-explorer { max-height: 260px; }
+  .ide > .ide-explorer { border-right: none; border-bottom: 1px solid var(--border); }
   .ide-editor, .term { flex: none; }
   .term > .term-out { flex: none; height: 60dvh; }
   .code-view { flex: none; height: 50dvh; }
