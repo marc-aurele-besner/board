@@ -13,6 +13,7 @@ import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import { resizableSide } from '../side-resize.js';
 import { contactChip, contactOfSender } from './project-contacts.js';
+import { linkedinPane, hasComments, unreadComments } from './inbox-linkedin.js';
 /** @import { Store, InboxMessage, Project, GmailAccount, RunnerJobError, IconName } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @typedef {[string, string, IconName, (e: InboxMessage) => unknown]} Folder */
@@ -720,6 +721,8 @@ function draw(root, store) {
   const hasNone = accounts.some((a) => !a.projectId) || emails.some((e) => !e.projectId);
 
   const folder = FOLDERS.find(([key]) => key === view.folder) ?? FOLDERS[0];
+  const withComments = hasComments(store);
+  if (view.folder === 'linkedin' && !withComments) view.folder = 'inbox';
   const mailboxes = [...(resendKeyed.length || emails.some((e) => !e.source) ? [['resend', 'Resend']] : []), ...accounts.map((a) => [a.email, a.email])];
   if (!mailboxes.some(([key]) => key === view.mailbox)) view.mailbox = 'all';
   // The project filter is a project id, 'none', or "label:<id>" for a project label: Gmail mail can carry its account's label.
@@ -841,7 +844,7 @@ function draw(root, store) {
         })
       : null,
 
-    hasMail || emails.length
+    hasMail || emails.length || withComments
       ? resizableSide(h('div', { class: 'inbox-layout' },
           h('aside', { class: 'inbox-side' },
             h('div', { class: 'inbox-folders', role: 'tablist', 'aria-label': 'Folders' },
@@ -849,7 +852,15 @@ function draw(root, store) {
                 role: 'tab',
                 'aria-selected': String(view.folder === f[0]),
                 title: f[0] === 'inbox' ? `${unread.length} unread` : undefined,
-              }))),
+              })),
+              // The comments on the member's LinkedIn posts (js/modules/inbox-linkedin.js), once there are any.
+              withComments
+                ? chip(view.folder === 'linkedin', [icon('linkedin'), h('span', { class: 'inbox-folder-name' }, 'LinkedIn')], unreadComments(store), () => set({ folder: 'linkedin', status: 'all' }), {
+                    role: 'tab',
+                    'aria-selected': String(view.folder === 'linkedin'),
+                    title: `${unreadComments(store)} unread LinkedIn comments`,
+                  })
+                : null),
             // Open on wide screens; on a phone it starts folded so the mail comes first.
             h('details', {
               class: 'inbox-dirs-wrap',
@@ -858,7 +869,7 @@ function draw(root, store) {
             },
               h('summary', { class: 'muted small' }, 'Projects'),
               directories(store, emails, accounts, resendKeyed, set))),
-          h('div', { class: 'stack inbox-main' },
+          view.folder === 'linkedin' ? linkedinPane(store) : h('div', { class: 'stack inbox-main' },
           h('div', { class: 'row between' },
             h('div', { class: 'row lp-filters' },
               selectAll,
@@ -977,7 +988,7 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
   }),
   restore: (/** @type {Record<string, string>} */ p = {}) => {
     // Older links used dir=sent|received.
-    view.folder = FOLDERS.some(([k]) => k === p.folder) ? p.folder : p.dir === 'sent' ? 'sent' : 'inbox';
+    view.folder = FOLDERS.some(([k]) => k === p.folder) || p.folder === 'linkedin' ? p.folder : p.dir === 'sent' ? 'sent' : 'inbox';
     view.project = p.project || 'all';
     view.mailbox = p.mailbox || 'all';
     view.status = p.status || 'all';

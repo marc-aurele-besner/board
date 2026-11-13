@@ -2499,6 +2499,19 @@ button.json-key:hover { background: color-mix(in srgb, var(--accent) 15%, transp
 .mail-list > .empty { padding: 16px; }
 .mail-row { display: flex; align-items: center; gap: 4px; padding-right: 8px; border-bottom: 1px solid var(--border); }
 .mail-row:last-child { border-bottom: none; }
+.li-comments { list-style: none; margin: 0; padding: 0; }
+.li-comment { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-bottom: 1px solid var(--border); min-width: 0; }
+.li-comment:last-child { border-bottom: none; }
+.li-comment.unread { box-shadow: inset 3px 0 0 var(--accent); }
+.li-comment.unread .li-comment-who strong { font-weight: 700; }
+.li-comment-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.li-comment-who { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.li-comment-who strong, .li-comment-who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.li-comment-when { flex: none; }
+.li-comment-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.li-comment-post { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.li-comment-actions { flex-wrap: wrap; gap: 6px; }
+.li-reply-text { width: 100%; font-size: 16px; resize: vertical; }
 .mail-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 10px 8px 10px 14px; background: none; border: none; border-radius: 0; color: inherit; text-align: left; font: inherit; min-height: 0; cursor: pointer; }
 .mail-open:hover { background: var(--surface-2); }
 .mail-dir { display: inline-flex; color: var(--muted); }
