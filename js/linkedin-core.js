@@ -91,3 +91,32 @@ export function followerChange(history, days, at = Date.now()) {
   const before = history[since];
   return { now, before, change: now - before, since };
 }
+
+// The age of a read of a post's results, in the steps the runners read them at: about 1 hour, 24 hours and 7 days.
+/** @param {LinkedinPost} post @param {LinkedinPostMetrics} m */
+export const metricsAge = (post, m) => {
+  const hours = (m.at - Number(post.postedAt)) / 3600000;
+  return hours < 6 ? '1h' : hours < 72 ? '24h' : '7d';
+};
+
+// How a post's last read compares with the member's earlier posts read at the same age: its reactions, the median
+// reactions of those posts and how many there were. Null before its first read or without an earlier post read then.
+/**
+ * @param {LinkedinPost} post
+ * @param {LinkedinPost[]} posts
+ * @returns {{ age: string, reactions: number, median: number, compared: number } | null}
+ */
+export function postStandout(post, posts) {
+  const m = latestMetrics(post);
+  if (!m || post.status !== 'posted' || typeof post.postedAt !== 'number') return null;
+  const age = metricsAge(post, m);
+  const earlier = posts
+    .filter((p) => p.id !== post.id && p.status === 'posted' && typeof p.postedAt === 'number' && p.postedAt < Number(post.postedAt))
+    .map((p) => (p.metrics ?? []).filter((x) => metricsAge(p, x) === age).at(-1)?.reactions)
+    .filter((n) => typeof n === 'number')
+    .sort((a, b) => a - b);
+  if (!earlier.length) return null;
+  const mid = Math.floor(earlier.length / 2);
+  const median = earlier.length % 2 ? earlier[mid] : (earlier[mid - 1] + earlier[mid]) / 2;
+  return { age, reactions: m.reactions ?? 0, median, compared: earlier.length };
+}

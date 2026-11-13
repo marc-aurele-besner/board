@@ -670,7 +670,15 @@ export function automationsCard(store) {
             ? h('label', { class: 'row rule-days' },
                 h('span', { class: 'muted small' }, 'below'),
                 h('input', { type: 'number', min: '1', max: '5', step: '0.05', value: String(rule.factor), 'aria-label': `${title}: health factor`, onchange: (/** @type {InputEvent_} */ e) => setRule(key, { factor: Math.min(5, Math.max(1, Number(e.target.value) || 1.2)) }) }))
-            : null,
+            : setting === 'drop'
+              ? h('label', { class: 'row rule-days' },
+                  h('input', { type: 'number', min: '1', max: '100000', value: String(rule.drop), 'aria-label': `${title}: followers lost`, onchange: (/** @type {InputEvent_} */ e) => setRule(key, { drop: Math.max(1, Math.round(Number(e.target.value) || 10)) }) }),
+                  h('span', { class: 'muted small' }, 'followers lost'))
+              : setting === 'times'
+                ? h('label', { class: 'row rule-days' },
+                    h('input', { type: 'number', min: '1.5', max: '20', step: '0.5', value: String(rule.times), 'aria-label': `${title}: times the median`, onchange: (/** @type {InputEvent_} */ e) => setRule(key, { times: Math.min(20, Math.max(1.5, Number(e.target.value) || 3)) }) }),
+                    h('span', { class: 'muted small' }, '× the median'))
+                : null,
         h('input', { type: 'checkbox', checked: rule.on, 'aria-label': `${title}: on`, onchange: (/** @type {InputEvent_} */ e) => setRule(key, { on: e.target.checked }) }));
     })),
     h('p', { class: 'muted small' }, `${open} automated task${open === 1 ? ' is' : 's are'} open now. Site checks run in the runners (Settings → Runners → Monitoring) and show in `, h('a', { href: '#/tools' }, 'Tools'), '.'));
