@@ -67,14 +67,22 @@ export async function sendWire(wire, signal) {
   const url = new URL(String(wire.url));
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Only http and https URLs can be sent.');
   const started = performance.now();
-  const res = await fetch(url, {
-    method: String(wire.method || 'GET').toUpperCase(),
-    headers: (wire.headers ?? []).map(([k, v]) => [String(k), String(v)]),
-    body: wire.body ?? undefined,
-    redirect: 'follow',
-    cache: 'no-store',
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS),
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method: String(wire.method || 'GET').toUpperCase(),
+      headers: (wire.headers ?? []).map(([k, v]) => [String(k), String(v)]),
+      body: wire.body ?? undefined,
+      redirect: 'follow',
+      cache: 'no-store',
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err) {
+    // Node says only "fetch failed"; the reason (an unknown host, a refused connection) is its cause.
+    const cause = /** @type {{ cause?: { message?: string } }} */ (err).cause?.message;
+    if (/** @type {Error} */ (err).name === 'TimeoutError') throw new Error(`No answer after ${TIMEOUT_MS / 1000} seconds.`);
+    throw cause ? new Error(`Could not reach ${url.host}: ${cause}`) : err;
+  }
   const bytes = new Uint8Array(await res.arrayBuffer());
   const ms = Math.round(performance.now() - started);
   const contentType = res.headers.get('content-type') ?? '';
