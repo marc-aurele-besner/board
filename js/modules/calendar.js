@@ -11,6 +11,7 @@ import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import { runJob } from '../runners.js';
 import { resizableSide } from '../side-resize.js';
+import { eventGuests } from './project-contacts.js';
 /** @import { Store, Task, CalendarAccount, CalendarEvent } from '../../types/data' */
 /**
  * The part of a timed event on one day, in hours from midnight; placeSegments() adds its column and the column count.
@@ -243,6 +244,7 @@ function openEvent(store, e) {
       (copiesOf.get(e) ?? []).map((c) => h('p', { class: 'row muted small' },
         h('span', { class: 'gcal-swatch', style: { '--c': c.color || 'var(--accent)' } }),
         `${c.calendar} · ${c.account}`)),
+      eventGuests(store, e),
       text ? h('p', { class: 'cal-notes' }, text) : null,
       h('div', { class: 'row' },
         h('button', { type: 'button', class: 'primary', onclick: () => { eventAsTask(store, e); dialog.close(); } }, icon('check-square'), 'Make a task'),

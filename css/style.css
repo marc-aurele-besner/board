@@ -2832,6 +2832,27 @@ button.sum-line:hover { background: var(--surface-2); }
 .account-avatar.large { width: 28px; height: 28px; font-size: 0.85rem; }
 .opt-plain .account-avatar { width: 16px; height: 16px; font-size: 0.6rem; }
 
+/* Contacts: a project's block, the full list, the chip Inbox and Calendar show for a known address. */
+.contact-avatar { flex: none; width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: var(--surface-2); }
+.contact-avatar.is-letter { display: inline-flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 600; color: var(--muted); }
+.contact-avatar.small { width: 20px; height: 20px; font-size: 0.6rem; }
+.contact-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.contact-row { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.contact-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.contact-main > * { overflow-wrap: anywhere; }
+.contact-emails { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.contact-projects-line { flex-wrap: wrap; gap: 4px 10px; }
+.contact-notes { white-space: pre-line; }
+.contact-li { flex: none; color: var(--muted); }
+.contact-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; padding: 2px 4px 2px 2px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); }
+.contact-chip .contact-li { min-height: 0; padding: 0 2px; }
+.contact-chip-role { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.contact-projects { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; max-height: 30vh; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.contact-projects legend { font-size: 0.85rem; color: var(--muted); padding: 0 4px; }
+.contact-form .row.wrap > label { flex: 1 1 180px; min-width: 0; }
+.cal-guests { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cal-guests li { flex-wrap: wrap; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+
 /* Inbox: folders and project directories in a side column, like a mail client. On a phone they sit above the list. */
 /* The side column runs from the top bar to the bottom of the window, and meets the mail list with one border. */
 .inbox-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 0; align-items: start; }
