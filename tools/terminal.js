@@ -15,6 +15,7 @@
 /** @import { ChildProcessByStdio } from 'node:child_process' */
 /** @import { Readable, Writable } from 'node:stream' */
 /** @import { RequestBody } from '../types/runner' */
+/** @import { DevSession } from '../types/data' */
 /** @import { GitFile, RunnerEvent, RunnerSearch, SearchMatch } from '../types/terminal' */
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
@@ -488,12 +489,18 @@ async function control(req, res, cors, action) {
     for (const listener of s.listeners) listener.write(lineOf({ t: 'closed', s: s.id }));
     s.listeners.clear();
     s.disk.then(() => rm(logFile(s.id), { force: true })).catch(() => {});
+    // Every browser drops it from its terminals on its next read of the list.
+    await editList((list) => {
+      list.sessions = list.sessions.filter((x) => x.id !== s.id);
+    }).catch(() => {});
   }
   res.writeHead(204, cors).end();
 }
 
 // The open terminals: { active, sessions: [{ id, n, cwd, tasks?, prompt? }] }, or { sessions: null } before the
-// page saved any. Writes go one after another, each replacing the file whole.
+// page saved any. The runner owns this list: every browser adds, updates and closes terminals in it one change at a
+// time and shows each terminal under the number the runner picked, so two browsers show the same terminals under
+// the same numbers. Changes go one after another, each replacing the file whole.
 /** @type {Promise<unknown>} */
 let listWrite = Promise.resolve();
 async function readList() {
@@ -520,16 +527,78 @@ function cleanList(body) {
   }
   return { active: seen.has(String(body.active)) ? String(body.active) : '', sessions };
 }
+/** @param {{ active: string, sessions: DevSession[] }} list */
+const writeList = async (list) => {
+  const tmp = `${LIST_FILE}.${process.pid}.tmp`;
+  await writeFile(tmp, JSON.stringify(list), { mode: 0o600 });
+  await rename(tmp, LIST_FILE);
+};
+
+// Changes the list: read, changed by `change` (which returns its answer), written back, one change after another.
+/** @template T @param {(list: { active: string, sessions: DevSession[] }) => T} change @returns {Promise<T>} */
+function editList(change) {
+  const done = listWrite.then(async () => {
+    /** @type {{ active: string, sessions: DevSession[] }} */
+    let list = { active: '', sessions: [] };
+    try {
+      const saved = JSON.parse(await readFile(LIST_FILE, 'utf8'));
+      if (Array.isArray(saved.sessions)) list = { active: String(saved.active ?? ''), sessions: saved.sessions };
+    } catch {}
+    const answer = change(list);
+    await writeList(list);
+    return answer;
+  });
+  listWrite = done.catch((err) => log.error(`Could not save the terminal list: ${err.message}`));
+  return done;
+}
+
+// Adds a terminal to the list, numbered one past the highest listed, and answers its entry. A terminal already
+// listed keeps its number, so an add sent twice (two browsers, or a retry) is harmless.
+/** @param {IncomingMessage} req @param {ServerResponse} res @param {Cors} cors */
+async function addToList(req, res, cors) {
+  const body = await jsonBody(req, res, cors);
+  if (!body) return;
+  const id = String(body.session ?? '');
+  if (!SESSION_ID.test(id)) return res.writeHead(400, cors).end('No terminal session.');
+  const tasks = Array.isArray(body.tasks) ? body.tasks.filter((/** @type {unknown} */ t) => typeof t === 'string').slice(0, 200) : [];
+  try {
+    const entry = await editList((list) => {
+      const known = list.sessions.find((x) => x.id === id);
+      if (known) return known;
+      const n = Math.max(0, ...list.sessions.map((x) => Number(x.n) || 0)) + 1;
+      const added = { id, n, cwd: String(body.cwd ?? ''), ...(tasks.length ? { tasks, prompt: String(body.prompt ?? '') } : {}) };
+      list.sessions = [...list.sessions, added].slice(-200);
+      return added;
+    });
+    res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(entry));
+  } catch (err) {
+    res.writeHead(500, cors).end(`Could not save the terminal list: ${/** @type {Error} */ (err).message}`);
+  }
+}
+
+// A listed terminal's folder changed (cd in it, or a command started in another folder).
+/** @param {IncomingMessage} req @param {ServerResponse} res @param {Cors} cors */
+async function updateList(req, res, cors) {
+  const body = await jsonBody(req, res, cors);
+  if (!body) return;
+  const id = String(body.session ?? '');
+  if (!SESSION_ID.test(id)) return res.writeHead(400, cors).end('No terminal session.');
+  await editList((list) => {
+    const known = list.sessions.find((x) => x.id === id);
+    if (known && typeof body.cwd === 'string') known.cwd = body.cwd;
+  }).catch(() => {});
+  res.writeHead(204, cors).end();
+}
+
+// The whole list, sent once by a page that kept it in its own storage before the runner kept it.
 /** @param {IncomingMessage} req @param {ServerResponse} res @param {Cors} cors */
 async function saveList(req, res, cors) {
   const body = await jsonBody(req, res, cors, LIST_MAX);
   if (!body) return;
   const list = cleanList(body);
   if (!list) return res.writeHead(400, cors).end('Send the terminals as { active, sessions }.');
-  const tmp = `${LIST_FILE}.${process.pid}.tmp`;
   listWrite = listWrite
-    .then(() => writeFile(tmp, JSON.stringify(list), { mode: 0o600 }))
-    .then(() => rename(tmp, LIST_FILE))
+    .then(() => writeList(list))
     .catch((err) => log.error(`Could not save the terminal list: ${err.message}`));
   await listWrite;
   res.writeHead(204, cors).end();
@@ -1359,6 +1428,8 @@ createServer(async (req, res) => {
   if (req.method === 'POST' && (path === '/attach' || path === '/detach') && json) return attach(req, res, cors, path.slice(1));
   if (req.method === 'POST' && path === '/input' && json) return input(req, res, cors);
   if (req.method === 'POST' && path === '/sessions' && json) return saveList(req, res, cors);
+  if (req.method === 'POST' && path === '/sessions/add' && json) return addToList(req, res, cors);
+  if (req.method === 'POST' && path === '/sessions/update' && json) return updateList(req, res, cors);
   if (req.method === 'POST' && ['/stop', '/clear', '/close'].includes(path) && json) return control(req, res, cors, path.slice(1));
   if (req.method === 'POST' && path === '/worktree/remove' && json) return removeWorktree(req, res, cors);
   if (req.method === 'POST' && path === '/claude/exit' && json) return exitClaude(req, res, cors);

@@ -2,7 +2,7 @@
 // terminal through the command runner. The Dev section and the runners (Cron's Run in Dev step) both use it.
 /** @import { DataStore, Project } from '../types/data' */
 import { uid } from './ui.js';
-import { TERMINAL_RUNNER, runnerInfo, runCommand, listSessions, saveSessionList } from './terminal.js';
+import { TERMINAL_RUNNER, runnerInfo, runCommand, listSession } from './terminal.js';
 
 const COLLECTION = 'dev';
 
@@ -73,10 +73,7 @@ export async function startRunnerSession({ store, claude = false, prompt = '', c
   }
   // The terminal is not on a page yet: it starts at a usual size and is fitted once shown.
   await runCommand(base, { session: id, command, cwd, cols: 120, rows: 32, theme });
-  const saved = await listSessions(base).catch(() => null);
-  const list = { active: saved?.active ?? '', sessions: saved?.sessions ?? [] };
-  const n = Math.max(0, ...list.sessions.map((x) => Number(x.n) || 0)) + 1;
-  list.sessions.push({ id, n, cwd, ...(taskIds.length ? { tasks: taskIds, prompt: claude ? prompt : '' } : {}) });
-  await saveSessionList(base, list).catch(() => {});
-  return { id, n, worktree };
+  // The runner numbers it, so the number matches the one every browser shows.
+  const entry = await listSession(base, { session: id, cwd, ...(taskIds.length ? { tasks: taskIds, prompt: claude ? prompt : '' } : {}) }).catch(() => null);
+  return { id, n: entry?.n ?? 0, worktree };
 }

@@ -10,7 +10,7 @@
 import { h, icon, notice, uid } from '../ui.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
-import { TERMINAL_RUNNER, runnerInfo, listSessions, saveSessionList, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput, saveImage } from '../terminal.js';
+import { TERMINAL_RUNNER, runnerInfo, listSessions, saveSessionList, listSession, moveSession, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput, saveImage } from '../terminal.js';
 import { imageFiles, dragsFiles } from '../images.js';
 import { createTerminal, styleOf, colorOf } from '../vt.js';
 import { readTheme, themedColors } from '../term-colors.js';
@@ -39,7 +39,7 @@ import { cronRunOf, cronRunHref } from '../cron.js';
  * @typedef {LinesEl & { out: HTMLElement, top: number }} TermEl
  * @typedef {{ id: string, n: number, cwd: string, tasks: string[], prompt: string, running: boolean, attach: AbortController | null,
  *   replaying: boolean, pid: number, exit: Exit | null, command: string, browse: number, stick: boolean, el: TermEl | null,
- *   term: Terminal, watch?: (text: string) => void, observer?: ResizeObserver }} Session
+ *   term: Terminal, watch?: (text: string) => void, observer?: ResizeObserver, listed: boolean, listedAt: number }} Session
  */
 
 export { runnerOf, devPresets, DEFAULT_DEV_COMMAND, devCommandOf };
@@ -53,17 +53,21 @@ const RECENT_SHOWN = 8;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 // Where this browser kept the open terminals before the runner did; read once, then removed.
 const OLD_SESSIONS_KEY = 'board:dev-sessions';
+// The terminal this browser shows. Each browser keeps its own, so two screens can show two terminals.
+const ACTIVE_KEY = 'board:dev-active';
+// How often an open Dev page reads the runner's list again, to show terminals opened or closed in another browser.
+const SYNC_MS = 2000;
 // The side panel shown: 'files', 'search', 'git', 'worktrees', 'skills' or 'terminals'.
 const SIDE_KEY = 'board:dev-side';
 
 // View state: the workspace, the sessions, the one shown, and what the runner said about itself.
 /**
  * @type {{ side: string, workspace: string, sessions: Session[], active: string, wanted: number, info: RunnerInfo | null,
- *   infoError: string, checking: boolean, count: number, pending: string | null,
+ *   infoError: string, checking: boolean, pending: string | null,
  *   queued: { id: string, prompt: string, projectId: string, taskIds: string[], command: string } | null,
  *   opening: { id: string, cwd: string, taskIds: string[] } | null, restored: boolean, back: string, filesOnly: boolean }}
  */
-const view = { side: readSide(), workspace: 'board', sessions: [], active: '', wanted: 0, info: null, infoError: '', checking: false, count: 0, pending: null, queued: null, opening: null, restored: false, back: '', filesOnly: false };
+const view = { side: readSide(), workspace: 'board', sessions: [], active: '', wanted: 0, info: null, infoError: '', checking: false, pending: null, queued: null, opening: null, restored: false, back: '', filesOnly: false };
 // Set by draw(), before any terminal is made or used.
 /** @type {Store | null} */
 let currentStore = null;
@@ -115,10 +119,11 @@ const filesCtx = (store) => ({
     if (!view.sessions.some((s) => s.id === id)) {
       if (view.sessions.length >= maxSessions()) return toast(`${maxSessions()} terminals are open. Close one first.`);
       const s = makeSession({ id, cwd });
+      listOnRunner(store, s);
       if (view.info) attach(store, s);
     }
     view.active = id;
-    saveSessions();
+    saveActive();
     store.refresh();
   },
   // A skill picked in the Skills panel: typed into the running program of the terminal shown, or, when nothing
@@ -149,23 +154,44 @@ function themeColor(which) {
   return m ? `rgb:${m[1]}${m[1]}/${m[2]}${m[2]}/${m[3]}${m[3]}` : '';
 }
 
-// The open terminals (id, number, folder, the tasks handed to claude in it) and the one shown go to the runner, so
-// a reload, or another browser, attaches to them again. Saves wait until the runner's list was read, so a blank
-// terminal drawn before it answered does not replace that list; changes close together are sent once.
-let saveTimer = 0;
-function saveSessions() {
-  if (!view.restored || saveTimer) return;
-  saveTimer = setTimeout(() => {
-    saveTimer = 0;
-    const list = { active: view.active, sessions: view.sessions.map(({ id, n, cwd, tasks, prompt }) => ({ id, n, cwd, ...(tasks.length ? { tasks, prompt } : {}) })) };
-    saveSessionList(runnerOf(/** @type {Store} */ (currentStore)), list).catch(() => {});
-  }, 150);
+// The open terminals (id, number, folder, the tasks handed to claude in it) are the runner's: a reload, or another
+// browser, shows the same ones. The page asks the runner to list a terminal it opens and takes the number the runner
+// gives it, so a number names the same terminal in every browser; it never sends its whole list, which would drop
+// the terminals another browser opened since. Changes wait until the runner's list was read.
+/** @param {Store} store @param {Session} s */
+async function listOnRunner(store, s) {
+  if (!view.restored || s.listed) return;
+  try {
+    const entry = await listSession(runnerOf(store), { session: s.id, cwd: s.cwd, ...(s.tasks.length ? { tasks: s.tasks, prompt: s.prompt } : {}) });
+    Object.assign(s, { n: Number(entry.n) || s.n, listed: true, listedAt: Date.now() });
+    sortSessions();
+    store.refresh();
+  } catch {}
 }
 
-/** @param {{ id?: string, n?: number, cwd?: string, tasks?: string[], prompt?: string }} options @returns {Session} */
-function makeSession({ id = uid(), n = ++view.count, cwd = '', tasks = [], prompt = '' }) {
+// A terminal's new folder, for the list other browsers read.
+/** @param {Session} s */
+function moveOnRunner(s) {
+  if (view.restored && s.listed && currentStore) moveSession(runnerOf(currentStore), s.id, s.cwd).catch(() => {});
+}
+
+// The terminal shown is this browser's own.
+function saveActive() {
+  try {
+    localStorage.setItem(ACTIVE_KEY, view.active);
+  } catch {}
+}
+
+// Terminals in the order of their numbers, so the tabs read the same in every browser; one waiting for its number last.
+const sortSessions = () => view.sessions.sort((a, b) => (a.n || Infinity) - (b.n || Infinity));
+
+// A terminal's number, or an ellipsis while the runner has not given it one yet.
+const numberOf = (/** @type {Session} */ s) => (s.n ? String(s.n) : '…');
+
+/** @param {{ id?: string, n?: number, cwd?: string, tasks?: string[], prompt?: string, listed?: boolean }} options @returns {Session} */
+function makeSession({ id = uid(), n = 0, cwd = '', tasks = [], prompt = '', listed = false }) {
   // term is added next.
-  const s = /** @type {Session} */ ({ id, n, cwd, tasks, prompt, running: false, attach: null, replaying: false, pid: 0, exit: null, command: '', browse: -1, stick: true, el: null });
+  const s = /** @type {Session} */ ({ id, n, cwd, tasks, prompt, running: false, attach: null, replaying: false, pid: 0, exit: null, command: '', browse: -1, stick: true, el: null, listed, listedAt: 0 });
   s.term = createTerminal({
     // Questions in replayed output were answered long ago; only a live program gets an answer.
     reply: (data) => !s.replaying && s.running && s.pid && sendInput(runnerOf(/** @type {Store} */ (currentStore)), s.pid, { data }),
@@ -195,29 +221,97 @@ async function restoreSessions(store) {
     if (saved) localStorage.removeItem(OLD_SESSIONS_KEY);
   } catch {}
   if (!saved) saved = { sessions: null };
-  if (!saved.sessions) saved = old ?? { sessions: [] };
+  if (!saved.sessions) {
+    // The list this browser kept is moved to the runner once, numbered as it was.
+    if (old?.sessions?.length) {
+      const sessions = old.sessions.filter((x) => typeof x?.id === 'string').map((x, i) => ({ id: x.id, n: Number(x.n) || i + 1, cwd: String(x.cwd ?? ''), ...(x.tasks?.length ? { tasks: x.tasks, prompt: x.prompt ?? '' } : {}) }));
+      saved = { active: old.active, sessions };
+      await saveSessionList(runnerOf(store), { active: String(old.active ?? ''), sessions }).catch(() => {});
+    } else saved = { sessions: [] };
+  }
   view.restored = true;
-  if (saved.sessions?.length) {
+  const listed = saved.sessions ?? [];
+  if (listed.length) {
     for (const s of view.sessions) {
       s.attach?.abort();
       s.observer?.disconnect();
     }
     view.sessions = [];
-    view.count = 0;
   }
-  for (const x of saved.sessions ?? []) {
+  for (const x of listed) {
     if (typeof x?.id === 'string' && !view.sessions.some((s) => s.id === x.id)) makeSession({
       id: x.id,
-      n: Number(x.n) || ++view.count,
+      n: Number(x.n) || 0,
       cwd: String(x.cwd ?? ''),
       tasks: Array.isArray(x.tasks) ? x.tasks.filter((t) => typeof t === 'string') : [],
       prompt: String(x.prompt ?? ''),
+      listed: true,
     });
   }
-  view.count = Math.max(view.count, ...view.sessions.map((s) => s.n));
-  if (view.sessions.some((s) => s.id === saved.active)) view.active = /** @type {string} */ (saved.active);
-  saveSessions();
+  // Blank terminals drawn while the runner could not be reached are listed now that it answers.
+  for (const s of view.sessions) listOnRunner(store, s);
+  sortSessions();
+  let mine = '';
+  try {
+    mine = localStorage.getItem(ACTIVE_KEY) ?? '';
+  } catch {}
+  const active = [mine, saved.active].find((id) => id && view.sessions.some((s) => s.id === id));
+  if (active) view.active = active;
 }
+
+// Reads the runner's list again: terminals another browser opened are shown here, those closed there are dropped,
+// and numbers follow the runner's. A terminal this page listed after the read was asked for is kept.
+let syncing = false;
+/** @param {Store} store */
+async function syncSessions(store) {
+  if (syncing || !view.restored || !view.info) return;
+  syncing = true;
+  const asked = Date.now();
+  try {
+    const saved = await listSessions(runnerOf(store));
+    if (!saved.sessions) return;
+    const listed = new Map(saved.sessions.map((x) => [x.id, x]));
+    let changed = false;
+    for (const s of [...view.sessions]) {
+      const x = listed.get(s.id);
+      if (x) {
+        const n = Number(x.n) || s.n;
+        if (n !== s.n) changed = true;
+        Object.assign(s, { n, listed: true });
+      } else if (s.listed && s.listedAt < asked) {
+        forget(s);
+        changed = true;
+      }
+    }
+    for (const x of saved.sessions) {
+      if (typeof x?.id !== 'string' || view.sessions.some((s) => s.id === x.id)) continue;
+      const s = makeSession({
+        id: x.id,
+        n: Number(x.n) || 0,
+        cwd: String(x.cwd ?? ''),
+        tasks: Array.isArray(x.tasks) ? x.tasks.filter((t) => typeof t === 'string') : [],
+        prompt: String(x.prompt ?? ''),
+        listed: true,
+      });
+      attach(store, s);
+      changed = true;
+    }
+    if (changed) {
+      sortSessions();
+      store.refresh();
+    }
+  } catch {
+  } finally {
+    syncing = false;
+  }
+}
+setInterval(() => {
+  if (currentStore && location.hash.startsWith('#/dev') && document.visibilityState === 'visible') syncSessions(currentStore);
+}, SYNC_MS);
+// Back on this screen: the other one may have changed the list.
+addEventListener('focus', () => {
+  if (currentStore && location.hash.startsWith('#/dev')) syncSessions(currentStore);
+});
 
 // The terminal the URL names (#/dev?term=<number>) is shown, over the one saved last.
 function showWanted() {
@@ -225,7 +319,7 @@ function showWanted() {
   view.wanted = 0;
   if (!s || s.id === view.active) return;
   view.active = s.id;
-  saveSessions();
+  saveActive();
 }
 
 /**
@@ -240,19 +334,28 @@ function newSession(store, cwd = rootPath(store, view.workspace), { id, tasks = 
   }
   const s = makeSession({ id, cwd, tasks, prompt });
   view.active = s.id;
-  saveSessions();
+  saveActive();
+  listOnRunner(store, s);
   if (view.info) attach(store, s);
   return s;
 }
 
+// Drops a terminal from this page: closed here, or in another browser.
 /** @param {Session} s */
-function closeSession(s) {
+function forget(s) {
   s.attach?.abort();
   s.observer?.disconnect();
-  closeOnRunner(runnerOf(/** @type {Store} */ (currentStore)), s.id).catch(() => {});
   view.sessions = view.sessions.filter((x) => x !== s);
-  if (view.active === s.id) view.active = view.sessions.at(-1)?.id ?? '';
-  saveSessions();
+  if (view.active === s.id) {
+    view.active = view.sessions.at(-1)?.id ?? '';
+    saveActive();
+  }
+}
+
+/** @param {Session} s */
+function closeSession(s) {
+  forget(s);
+  closeOnRunner(runnerOf(/** @type {Store} */ (currentStore)), s.id).catch(() => {});
 }
 
 // Reads the session's events: first everything so far (drawn without toasts or answers), then live ones.
@@ -261,11 +364,18 @@ async function attach(store, s) {
   if (s.attach) return;
   const ctl = new AbortController();
   s.attach = ctl;
+  let closed = false;
   try {
-    await attachSession(runnerOf(store), { session: s.id, signal: ctl.signal, onEvent: (e) => onSessionEvent(store, s, e) });
+    closed = await attachSession(runnerOf(store), { session: s.id, signal: ctl.signal, onEvent: (e) => onSessionEvent(store, s, e) });
   } catch {}
   if (s.attach === ctl) s.attach = null;
   if (ctl.signal.aborted || !view.sessions.includes(s)) return;
+  // Closed in another browser: this page drops it too.
+  if (closed) {
+    forget(s);
+    store.refresh();
+    return;
+  }
   // The stream ended by itself: the runner stopped. What ran is marked; the page asks again in a moment.
   s.replaying = false;
   if (s.running) finish(store, s, { lost: true });
@@ -295,19 +405,21 @@ function onSessionEvent(store, s, e) {
     // The program drew what follows at this size; replayed at another one, its cursor moves land in the wrong place.
     if (s.replaying) s.term.resize(e.cols, e.rows);
   } else if (e.t === 'start') {
+    const moved = e.cwd !== s.cwd;
     Object.assign(s, { running: true, pid: e.pid, cwd: e.cwd, command: e.command, exit: null });
     if (s.replaying && e.cols) s.term.resize(e.cols, e.rows);
     s.term.note(`${e.cwd || 'board'} $ ${oneLine(e.command)}`, 't-cmd');
     if (!s.replaying) {
-      saveSessions();
+      if (moved) moveOnRunner(s);
       store.refresh();
     }
   } else if (e.t === 'out' || e.t === 'err') {
     s.term.write(e.d);
     if (!s.replaying) s.watch?.(e.d);
   } else if (e.t === 'cwd') {
+    const moved = e.d !== s.cwd;
     s.cwd = e.d;
-    if (!s.replaying) saveSessions();
+    if (!s.replaying && moved) moveOnRunner(s);
   } else if (e.t === 'exit') finish(store, s, e);
   schedulePaint();
 }
@@ -642,7 +754,7 @@ function elementsOf(store, s) {
     class: 'term-out',
     tabindex: '0',
     role: 'log',
-    'aria-label': `Terminal ${s.n} output`,
+    'aria-label': `Terminal ${numberOf(s)} output`,
     onscroll: () => onTerminalScroll(s),
     onwheel: (/** @type {WheelEvent} */ e) => onTerminalWheel(store, s, e),
     onkeydown: (/** @type {KeyboardEvent} */ e) => onTerminalKey(store, s, e),
@@ -750,17 +862,13 @@ export async function startDevSession({ store, claude = false, prompt = '', comm
     // Dev has its list: the terminal joins it, and its output streams in like any other's.
     currentStore ??= store;
     const s = makeSession({ id, cwd, tasks, prompt });
-    n = s.n;
-    saveSessions();
     if (view.info) attach(store, s);
+    await listOnRunner(store, s);
+    n = s.n;
     store.refresh();
   } else {
     // Dev was not opened on this page: the runner's list gets the terminal, and Dev reads it from there.
-    const saved = await listSessions(base).catch(() => null);
-    const list = { active: saved?.active ?? '', sessions: saved?.sessions ?? [] };
-    n = Math.max(0, ...list.sessions.map((x) => Number(x.n) || 0)) + 1;
-    list.sessions.push({ id, n, cwd, ...(tasks.length ? { tasks, prompt } : {}) });
-    await saveSessionList(base, list).catch(() => {});
+    n = (await listSession(base, { session: id, cwd, ...(tasks.length ? { tasks, prompt } : {}) }).catch(() => null))?.n ?? 0;
   }
   return { id, n, worktree };
 }
@@ -806,10 +914,11 @@ function showOpening(store) {
   let s = view.sessions.find((x) => x.id === id);
   if (!s) {
     s = makeSession({ id, cwd, tasks: taskIds });
+    listOnRunner(store, s);
     if (view.info) attach(store, s);
   }
   view.active = s.id;
-  saveSessions();
+  saveActive();
 }
 
 /** @param {Store} store */
@@ -929,7 +1038,7 @@ function sideSwitcher(store) {
 /** @param {Store} store @param {Session} s */
 function jumpTo(store, s) {
   view.active = s.id;
-  saveSessions();
+  saveActive();
   store.refresh();
   requestAnimationFrame(() => s.el?.out.focus({ preventScroll: true }));
 }
@@ -988,20 +1097,20 @@ function terminalsPanel(store, picker, switcher) {
       h('button', {
         type: 'button',
         class: 'tree-item',
-        title: [`Terminal ${s.n} · ${s.cwd || 'board'}`, s.running ? s.command : '', ...titles].filter(Boolean).join('\n'),
+        title: [`Terminal ${numberOf(s)} · ${s.cwd || 'board'}`, s.running ? s.command : '', ...titles].filter(Boolean).join('\n'),
         'aria-current': s.id === shown ? 'true' : null,
         onclick: () => jumpTo(store, s),
       },
         h('span', { class: `wt-dot ${s.running ? 'running' : 'idle'}`, role: 'img', 'aria-label': state, title: state }),
         h('span', { class: 'term-list-text' },
-          h('span', { class: 'tree-name' }, `${s.n} · ${s.cwd ? baseName(s.cwd) : 'board'}`),
+          h('span', { class: 'tree-name' }, `${numberOf(s)} · ${s.cwd ? baseName(s.cwd) : 'board'}`),
           h('span', { class: 'term-list-sub muted' }, titles[0] ? `${titles[0]}${titles.length > 1 ? ` +${titles.length - 1}` : ''}` : what))),
-      cronLink(store, { session: s.id, runId: s.tasks.map((id) => tasks.find((t) => t.id === id)?.cronRun).find(Boolean) }, `terminal ${s.n}`),
+      cronLink(store, { session: s.id, runId: s.tasks.map((id) => tasks.find((t) => t.id === id)?.cronRun).find(Boolean) }, `terminal ${numberOf(s)}`),
       h('button', {
         type: 'button',
         class: 'tree-action',
         title: s.running ? 'Stop and close this terminal' : 'Close this terminal',
-        'aria-label': `Close terminal ${s.n}`,
+        'aria-label': `Close terminal ${numberOf(s)}`,
         onclick: () => {
           closeSession(s);
           store.refresh();
@@ -1038,15 +1147,15 @@ function sessionTabs(store) {
           title: s.cwd,
           onclick: () => {
             view.active = s.id;
-            saveSessions();
+            saveActive();
             store.refresh();
           },
-        }, s.running ? h('span', { class: 'term-dot', title: 'Running' }) : icon('terminal'), `${s.n} · ${s.cwd ? baseName(s.cwd) : 'board'}`),
+        }, s.running ? h('span', { class: 'term-dot', title: 'Running' }) : icon('terminal'), `${numberOf(s)} · ${s.cwd ? baseName(s.cwd) : 'board'}`),
         h('button', {
           type: 'button',
           class: 'term-close',
           title: s.running ? 'Stop and close this terminal' : 'Close this terminal',
-          'aria-label': `Close terminal ${s.n}`,
+          'aria-label': `Close terminal ${numberOf(s)}`,
           onclick: () => {
             closeSession(s);
             store.refresh();
@@ -1253,7 +1362,7 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
   defaults: DEFAULTS,
   render: draw,
   // The terminal shown is in the URL, so a refresh or a shared link opens it.
-  serialize: () => ({ term: view.sessions.length > 1 ? activeSession()?.n : '' }),
+  serialize: () => ({ term: view.sessions.length > 1 ? activeSession()?.n || '' : '' }),
   // #/dev?project=<id> (from a project page) opens that project's folder, with a terminal in it.
   // With &side=files (a task list's Explorer button) it shows the folder's files instead of a new terminal.
   restore: (/** @type {Record<string, string>} */ p = {}) => {
