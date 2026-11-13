@@ -34,6 +34,26 @@ const SAME_AUTHOR_S = 5 * 60;
 // View state. open: the conversation on screen ("<team>|<channel>"); thread: the ts of the thread beside it.
 /** @type {{ open: string, thread: string, filter: string, unread: boolean, by: string }} */
 const view = { open: '', thread: '', filter: '', unread: false, by: 'workspace' };
+// The conversation last open in this browser, so coming back to Slack from another section (whose link carries no
+// view) opens it again.
+const OPEN_KEY = 'board:slack-open';
+const KEY_RE = /^[A-Z0-9]+\|[A-Z0-9]+$/;
+const TS_RE = /^\d+\.\d+$/;
+
+function rememberOpen() {
+  try {
+    localStorage.setItem(OPEN_KEY, JSON.stringify({ c: view.open, t: view.thread }));
+  } catch {}
+}
+
+/** @returns {{ c?: unknown, t?: unknown }} */
+function lastOpen() {
+  try {
+    return JSON.parse(localStorage.getItem(OPEN_KEY) ?? '{}') ?? {};
+  } catch {
+    return {};
+  }
+}
 
 // What is read live. history and threads by "<team>|<channel>" and "<team>|<channel>|<ts>".
 /**
@@ -1246,6 +1266,7 @@ function draw(root, store) {
     const team = splitKey(view.open)[0];
     if (!workspaceOf(store, team) || live.listed.has(team)) view.open = '';
   }
+  rememberOpen();
   live.mounted = { root, store };
   if (!live.timer) live.timer = setInterval(tick, 1000);
   for (const w of d.workspaces) if (!w.error) relist(store, w);
@@ -1290,8 +1311,11 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
   render: draw,
   serialize: () => ({ c: view.open, t: view.thread, by: view.by === 'workspace' ? '' : view.by }),
   restore: (/** @type {Record<string, string>} */ p = {}) => {
-    view.open = /^[A-Z0-9]+\|[A-Z0-9]+$/.test(p.c ?? '') ? p.c : '';
-    view.thread = view.open && /^\d+\.\d+$/.test(p.t ?? '') ? p.t : '';
+    // A link with no conversation (the section's tab) opens the one last open in this browser.
+    /** @type {{ c?: unknown, t?: unknown }} */
+    const from = 'c' in p ? p : lastOpen();
+    view.open = typeof from.c === 'string' && KEY_RE.test(from.c) ? from.c : '';
+    view.thread = view.open && typeof from.t === 'string' && TS_RE.test(from.t) ? from.t : '';
     view.by = p.by === 'project' ? 'project' : 'workspace';
   },
 });
