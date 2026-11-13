@@ -22,7 +22,7 @@ import { LINKEDIN } from '../linkedin-core.js';
 import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startDevSession, openSession, runnerOf } from './dev.js';
-import { DEV_MODELS, DEV_MODEL_NAMES, DEV_EFFORTS } from '../dev-core.js';
+import { DEV_MODELS, DEV_MODEL_NAMES, DEV_EFFORTS, ASK_LABELS, claudeState } from '../dev-core.js';
 import { DONE_ASK } from '../dev-done.js';
 import { openMenu, copyItem } from '../menu.js';
 import { sessionStatus, runnerInfo, listSkills } from '../terminal.js';
@@ -952,20 +952,6 @@ async function devTasks(store, items) {
 const DEV_POLL_MS = 4000;
 /** @type {{ status: Record<string, RunnerStatus>, withPr: Set<string>, timer: number, polled: boolean }} */
 const devWatch = { status: {}, withPr: new Set(), timer: 0, polled: false };
-// What claude waits on, when it stopped at a tool call (tools/usage.js askOf).
-/** @type {Record<string, string>} */
-const ASK_LABELS = { question: 'claude asks you', plan: 'claude waits for its plan to be approved', permission: 'claude waits for your permission' };
-
-/** @type {Record<string, string>} */
-const DEV_STATES = {
-  working: 'claude is working',
-  waiting: 'Waiting for you',
-  done: 'Finished',
-  failed: 'Ended with an error',
-  stopped: 'Stopped',
-  idle: 'Nothing running',
-};
-
 /** @param {Store} store */
 export function watchDevSessions(store) {
   if (devWatch.timer || !store.get(COLLECTION).items.some((t) => t.devSession)) return;
@@ -1059,13 +1045,10 @@ function devButton(store, item) {
       onclick: () => devTasks(store, [item]),
     }, icon('terminal'));
   }
-  const state = DEV_STATES[status.state] ? status.state : 'idle';
-  const label = state === 'failed' && status.code != null ? `${DEV_STATES.failed} (exit ${status.code})`
-    : state === 'waiting' && status.ask ? `${ASK_LABELS[status.ask.kind] ?? ASK_LABELS.permission}${status.ask.text ? `: ${status.ask.text}` : ''}`
-    : DEV_STATES[state];
+  const { key: state, label } = claudeState(status);
   return h('button', {
     type: 'button',
-    class: `icon-btn dev-btn dev-${state}`,
+    class: `icon-btn dev-btn is-${state}`,
     title: `Dev: ${label}. Click to open its terminal; Shift-click to start a new session; right-click for its model and effort.`,
     'aria-label': `Open the Dev terminal of "${item.text}" (${label})`,
     onclick: (/** @type {MouseEvent} */ e) => {
