@@ -16,7 +16,7 @@ export interface PeriodWindow {
   hourly: boolean;
 }
 
-// The sub-tab and period, and the website tabs' site and engine ('google' or 'bing').
+// The sub-tab and period, and the website tabs' site and engine ('all', 'google' or 'bing').
 export interface MonitoringView {
   tab: string;
   period: string;
