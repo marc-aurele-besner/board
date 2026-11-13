@@ -591,25 +591,29 @@ function addedList(store, added, remove) {
       store.refresh();
     });
   }
-  // The same key as a pools row's ref: v3 rows have no version in it.
+  // The same key as a pools row's ref: v3 rows have no version in it. A v2 pair is read once per wallet that
+  // holds it, so it is found by its address, and any of its rows names its tokens.
   /** @param {Added} x */
-  const refOf = (x) => (x.version === 'v3' ? `${x.chainId}:${x.tokenId}` : `${x.chainId}:${x.version}:${x.tokenId}`);
+  const refOf = (x) => (x.version === 'v3' ? `${x.chainId}:${x.tokenId}` : `${x.chainId}:${x.version}:${String(x.tokenId).toLowerCase()}`);
   /** @type {Map<string, PoolRow>} */
   const read = new Map();
-  for (const part of Object.values(store.get('pools')?.cache ?? {})) for (const r of part.rows ?? []) read.set(r.ref, r);
+  for (const part of Object.values(store.get('pools')?.cache ?? {})) for (const r of part.rows ?? []) read.set(r.version === 'v2' ? `${r.chainId}:v2:${r.tokenId}` : r.ref, r);
   /** @param {number} chainId @param {string | undefined} address */
   const tokenLogo = (chainId, address) => (address ? tokenLogoMap.get(`${chainId}:${address.toLowerCase()}`) ?? null : null);
   const rows = added
     .map((x) => ({ x, r: read.get(refOf(x)) ?? null, chain: CHAINS.find((c) => c.id === x.chainId) }))
     .sort((a, b) => (a.chain?.name ?? '').localeCompare(b.chain?.name ?? '') || Number(a.x.tokenId) - Number(b.x.tokenId));
-  /** @param {PoolRow | null} r */
-  const status = (r) => (!r ? ['unread', 'Not read yet'] : r.closed ? ['closed', 'Closed'] : r.inRange ? ['in', 'In range'] : ['out', 'Out of range']);
+  // A v2 pair no wallet holds has no row either.
+  /** @param {PoolRow | null} r @param {Added} x */
+  const status = (r, x) => (!r ? ['unread', x.version === 'v2' ? 'Not read, or not held' : 'Not read yet'] : r.closed ? ['closed', 'Closed'] : r.inRange ? ['in', 'In range'] : ['out', 'Out of range']);
+  /** @param {Added} x */
+  const nameOf = (x) => (x.version === 'v2' ? `v2 ${String(x.tokenId).slice(0, 6)}…${String(x.tokenId).slice(-4)}` : `${x.version} #${x.tokenId}`);
 
   return h('ul', { class: 'added-list' },
     h('li', { class: 'added-row added-head', 'aria-hidden': 'true' },
       h('span', null, 'Chain'), h('span', null, 'Pair'), h('span', null, 'Position'), h('span', null, 'Status'), h('span')),
     rows.map(({ x, r, chain }) => {
-      const [tone, label] = status(r);
+      const [tone, label] = status(r, x);
       return h('li', { class: `added-row tone-${tone}` },
         h('span', { class: 'added-chain' }, logo(chain?.logo, chain?.name ?? `Chain ${x.chainId}`, 'xs'), chain?.name ?? `Chain ${x.chainId}`),
         r
@@ -617,7 +621,7 @@ function addedList(store, added, remove) {
               h('span', { class: 'pair' }, logo(tokenLogo(x.chainId, r.addr0), r.sym0, 'sm'), logo(tokenLogo(x.chainId, r.addr1), r.sym1, 'sm second')),
               h('strong', null, `${r.sym0} / ${r.sym1}`))
           : h('span', { class: 'added-pair muted' }, 'Open Liquidity Pools to read it'),
-        h('span', { class: 'added-id' }, r?.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener' }, `${x.version} #${x.tokenId}`) : `${x.version} #${x.tokenId}`),
+        h('span', { class: 'added-id', title: x.version === 'v2' ? String(x.tokenId) : null }, r?.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener' }, nameOf(x)) : nameOf(x)),
         h('span', { class: 'added-status small' }, h('span', { class: `pos-dot ${tone === 'unread' ? 'gone' : tone}`, 'aria-hidden': 'true' }), label),
         h('button', { type: 'button', class: 'btn-small', onclick: () => remove(x) }, 'Remove'));
     }));
@@ -706,9 +710,10 @@ function uniswapCard(store) {
 
   return h('section', { class: 'card panel' },
     h('h2', null, 'Uniswap'),
-    h('p', { class: 'muted small' }, 'Uniswap v3 and v4 positions are read from the wallets in ',
+    h('p', { class: 'muted small' }, 'Uniswap v2, v3 and v4 positions are read from the wallets in ',
       h('button', { type: 'button', class: 'btn-link-inline', onclick: () => { view.section = 'wallets'; store.refresh(); } }, 'Wallets'), '.'),
     h('p', { class: 'muted small' }, 'Positions added by hand: a v3 position held by an address that is not in Wallets, or a v4 position the board does not find. v4 positions are found by searching each wallet\'s history on the chain, and most public nodes only search recent blocks. The Liquidity Pools tab has the same Add position button.'),
+    h('p', { class: 'muted small' }, 'A v2 position is a wallet\'s share of a pair, and the chain cannot list the pairs a wallet holds. Add a pair by its link or its address, and it is read for every wallet. With an Etherscan key in Blockchains, the pairs your wallets hold are found by themselves.'),
     added.length ? addedList(store, added, removeAdded) : null,
     (() => {
       const f = positionFields();
