@@ -2942,6 +2942,11 @@ button.sum-line:hover { background: var(--surface-2); }
 .term-key { flex: none; min-height: 0; padding: 2px 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 0.75rem; }
 .term-key:hover { border-color: var(--accent); }
 .term-history { flex: none; }
+.term-favorites { flex: none; }
+.term-suggest { flex: 0 1 auto; min-width: 0; max-width: 45%; display: inline-flex; align-items: center; gap: 5px; min-height: 0; padding: 2px 9px; border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); border-radius: 999px; background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); font: inherit; font-size: 0.75rem; }
+.term-suggest:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.term-suggest .icon { flex: none; width: 12px; height: 12px; }
+.term-suggest span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .term-run { flex: none; align-self: stretch; display: inline-flex; align-items: center; gap: 5px; min-height: 0; padding: 0 14px; border: none; border-left: 1px solid var(--border); border-radius: 0; background: none; color: var(--accent); font: 600 0.82rem var(--font); }
 .term-run:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .term-run.stop { color: var(--danger); }
