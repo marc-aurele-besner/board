@@ -19,6 +19,25 @@ export interface ProjectProfile {
   usageId: string;
 }
 
+// One entry of a brand list: a name and what it points to. Images and links hold a URL or a path in the local
+// folder; colours a CSS colour; fonts a font family.
+export interface BrandItem {
+  label: string;
+  value: string;
+}
+
+// The project's brand: images (logo, favicon, share image), colours, fonts, links (stylesheets, guidelines) and notes.
+// Filled by hand or by Find with AI (js/brand.js), which only adds what is not there yet.
+export interface ProjectBrand {
+  images: BrandItem[];
+  colors: BrandItem[];
+  fonts: BrandItem[];
+  links: BrandItem[];
+  notes: string;
+  updated: string;
+  usageId: string;
+}
+
 export interface ProjectGithub {
   org: string;
   repos: string[]; // owner/repo
@@ -51,6 +70,7 @@ export interface Project {
   github: ProjectGithub;
   npm?: ProjectNpm;
   profile?: ProjectProfile;
+  brand?: ProjectBrand;
   created: string;
 }
 
