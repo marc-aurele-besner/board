@@ -1302,30 +1302,28 @@ function draw(root, store) {
 
   root.replaceChildren(
     h('div', { class: 'money stack-lg' },
-      h('header', { class: 'row between money-head' },
-        h('div', null,
-          h('h2', null, 'Money'),
-          h('p', { class: 'muted small' }, `${rangeLabel} · ${entries.length} entries`)),
-        h('div', { class: 'segmented money-currency', role: 'group', 'aria-label': 'Show totals in' },
-          CURRENCIES.map((c) =>
-            h('button', {
-              type: 'button',
-              class: c === cur ? 'seg active' : 'seg',
-              'aria-pressed': String(c === cur),
-              onclick: () => {
-                view.currency = c;
-                store.refresh();
-              },
-            }, c)))),
-
       fxBanner(store),
       receiptPanel(store),
 
+      // The page has no header: the controls come first, the currency with them, and the count of entries is
+      // in the month's tooltip.
       h('div', { class: 'money-controls' },
-        h('div', { class: 'month-step', role: 'group', 'aria-label': 'Month' },
-          h('button', { type: 'button', class: 'icon-btn', title: 'Previous month', 'aria-label': 'Previous month', onclick: stepTo(-1) }, icon('chevron-left')),
-          h('strong', null, monthName || rangeLabel),
-          h('button', { type: 'button', class: 'icon-btn', title: 'Next month', 'aria-label': 'Next month', disabled: !month || month >= monthKeyOf(new Date()), onclick: stepTo(1) }, icon('chevron-right'))),
+        h('div', { class: 'row' },
+          h('div', { class: 'month-step', role: 'group', 'aria-label': 'Month' },
+            h('button', { type: 'button', class: 'icon-btn', title: 'Previous month', 'aria-label': 'Previous month', onclick: stepTo(-1) }, icon('chevron-left')),
+            h('strong', { title: `${rangeLabel} · ${entries.length} entries` }, monthName || rangeLabel),
+            h('button', { type: 'button', class: 'icon-btn', title: 'Next month', 'aria-label': 'Next month', disabled: !month || month >= monthKeyOf(new Date()), onclick: stepTo(1) }, icon('chevron-right'))),
+          h('div', { class: 'period', role: 'group', 'aria-label': 'Show totals in' },
+            CURRENCIES.map((c) =>
+              h('button', {
+                type: 'button',
+                class: c === cur ? 'period-btn active' : 'period-btn',
+                'aria-pressed': String(c === cur),
+                onclick: () => {
+                  view.currency = c;
+                  store.refresh();
+                },
+              }, c)))),
         h('div', { class: 'period', role: 'group', 'aria-label': 'Period' },
           RANGES.map(([k, l]) =>
             h('button', {

@@ -624,11 +624,8 @@ function gallery(store, recipes) {
         store.refresh();
       },
     }, icon(iconName), label);
-  const testing = recipes.filter((r) => r.status === 'testing').length;
+  // The page has no header: the search and filters come first.
   return h('div', { class: 'stack-lg kitchen' },
-    h('header', null,
-      h('h2', null, 'Kitchen'),
-      h('p', { class: 'muted small' }, `${recipes.length} recipe${recipes.length === 1 ? '' : 's'} · ${testing} in testing. Each attempt is an iteration, so you can see what changed and what to try next.`)),
     h('div', { class: 'r-bar' },
       h('label', { class: 'r-search' }, icon('search'),
         h('input', {

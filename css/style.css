@@ -751,9 +751,6 @@ body.project-dragging .project-list .root-drop { display: block; }
 
 /* Money dashboard: period and grouping buttons, chart, breakdowns, and a side column for adding */
 .money { gap: 14px; }
-.money-head { align-items: flex-end; gap: 12px; flex-wrap: wrap; }
-.money-head h2 { margin: 0; }
-.money-head p { margin: 0; }
 .money-currency { display: inline-flex; min-width: 0; }
 .money-currency .seg { min-width: 56px; }
 .money-controls { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -1526,8 +1523,6 @@ button.run-chip.preview-link { min-height: 28px; padding: 3px 10px; border-radiu
 .k-photo-remove { position: absolute; top: 4px; right: 4px; background: var(--surface); border-radius: 999px; }
 
 /* LP positions: Uniswap v3 positions read from the chain */
-.lp-head { align-items: flex-start; gap: var(--gap); }
-.lp-head .money-currency { margin-bottom: 0; }
 .lp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: var(--gap); }
 .lp-stat { display: flex; flex-direction: column; gap: 4px; }
 .lp-stat strong { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
