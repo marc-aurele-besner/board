@@ -41,12 +41,13 @@ import { hasProfileSources } from '../profile.js';
 // sort: the order of the flow list, a key of FLOW_SORTS.
 // openRuns: the runs unfolded; focusRun: the run a link opened (#/cron?tab=runs&run=…), scrolled to once.
 // openSubtasks: the tasks of a run whose subtasks are unfolded, as `runId/taskId`.
+// runProject, runFlow: the Runs tab's narrowing to one project (NO_PROJECT for none) or one flow.
 /**
- * @type {{ tab: string, flow: string, node: string, runs: string, project: string, sort: string, field: string,
+ * @type {{ tab: string, flow: string, node: string, runs: string, runProject: string, runFlow: string, project: string, sort: string, field: string,
  *   cursor: { key: string, start: number, end: number } | null, preview: Set<string>, terms: Set<string>,
  *   seenTerms: Set<string>, openRuns: Set<string>, openSubtasks: Set<string>, focusRun: string, scrollTo: string }}
  */
-const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', project: '', sort: 'next', field: '', cursor: null, preview: new Set(), terms: new Set(), seenTerms: new Set(), openRuns: new Set(), openSubtasks: new Set(), focusRun: '', scrollTo: '' };
+const view = { tab: 'flows', flow: '', node: 'trigger', runs: 'all', runProject: '', runFlow: '', project: '', sort: 'next', field: '', cursor: null, preview: new Set(), terms: new Set(), seenTerms: new Set(), openRuns: new Set(), openSubtasks: new Set(), focusRun: '', scrollTo: '' };
 const NO_PROJECT = 'none';
 const TABS = [['flows', 'Flows'], ['runs', 'Runs'], ['templates', 'Templates']];
 /** @type {Record<string, string>} */
@@ -75,6 +76,42 @@ const projectName = (store, id) => (id ? store.get('projects').projects.find((p)
  * @param {string} flowId
  */
 const lastRunOf = (store, flowId) => store.get(COLLECTION).runs.find((r) => r.flowId === flowId) ?? null;
+
+// Opens the Runs tab on this flow's runs, its latest one unfolded and scrolled to.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ */
+function openLatestRun(store, flow) {
+  const last = lastRunOf(store, flow.id);
+  view.tab = 'runs';
+  view.runs = 'all';
+  view.runProject = '';
+  view.runFlow = flow.id;
+  if (last) {
+    view.openRuns.add(last.id);
+    view.focusRun = last.id;
+    view.scrollTo = last.id;
+  }
+  store.refresh();
+}
+
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {string} [className]
+ */
+function latestRunButton(store, flow, className = 'icon-btn') {
+  const last = lastRunOf(store, flow.id);
+  return h('button', {
+    type: 'button',
+    class: className,
+    disabled: !last,
+    title: last ? `See the latest run (${timeOf(last.at)})` : 'No run yet',
+    'aria-label': `See the latest run of “${flow.name}”`,
+    onclick: () => openLatestRun(store, flow),
+  }, icon('activity'));
+}
 
 /**
  * @param {Store} store
@@ -327,6 +364,7 @@ function flowList(store, all, flows) {
               'aria-label': `Run “${f.name}” on schedule`,
               onchange: (/** @type {FieldEvent} */ e) => setEnabled(store, f, e.target.checked),
             }),
+            latestRunButton(store, f, 'icon-btn cron-flow-copy'),
             h('button', {
               type: 'button',
               class: 'icon-btn cron-flow-copy',
@@ -458,16 +496,71 @@ const RUN_FILTERS = [['all', 'All'], ['running', 'Running'], ['error', 'Failed']
  */
 const runMatches = (r, key) => (key === 'all' ? true : key === 'dry' ? r.dry : key === 'error' ? ['error', 'lost'].includes(runState(r)) : runState(r) === key);
 
+// The Runs tab's project and flow pickers. Only the projects and flows some run has are offered; a deleted
+// flow's runs count as having no project.
+/**
+ * @param {Store} store
+ * @param {CronRun[]} runs
+ */
+function runPickers(store, runs) {
+  const { flows } = store.get(COLLECTION);
+  /** @param {CronRun} r */
+  const projectOf = (r) => flowProjectId(flows.find((f) => f.id === r.flowId)) || NO_PROJECT;
+  const usedProjects = new Set(runs.map(projectOf));
+  const projects = projectsOf(store).filter((p) => usedProjects.has(p.id));
+  const inProject = runs.filter((r) => !view.runProject || projectOf(r) === view.runProject);
+  const usedFlows = new Set(inProject.map((r) => r.flowId));
+  const flowOptions = flows.filter((f) => usedFlows.has(f.id)).sort((a, b) => a.name.localeCompare(b.name));
+  return h('div', { class: 'row cron-run-pickers' },
+    usedProjects.size > 1 || view.runProject
+      ? pickChip({
+          value: view.runProject || null,
+          options: [
+            ...projects.map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
+            ...(usedProjects.has(NO_PROJECT) ? [{ value: NO_PROJECT, label: 'No project', plainIcon: () => icon('folder') }] : []),
+          ],
+          nullable: true,
+          nullLabel: 'All projects',
+          className: 'field-pick project-field-pick cron-project-filter',
+          onPick: (v) => {
+            view.runProject = v ?? '';
+            // A flow outside the new project is dropped.
+            const flow = flows.find((f) => f.id === view.runFlow);
+            if (flow && view.runProject && (flowProjectId(flow) || NO_PROJECT) !== view.runProject) view.runFlow = '';
+            store.refresh();
+          },
+        })
+      : null,
+    pickChip({
+      value: view.runFlow || null,
+      options: flowOptions.map((f) => ({ value: f.id, label: f.name, plainIcon: () => icon('repeat') })),
+      nullable: true,
+      nullLabel: 'All flows',
+      className: 'field-pick cron-flow-filter',
+      onPick: (v) => {
+        view.runFlow = v ?? '';
+        store.refresh();
+      },
+    }));
+}
+
 /** @param {Store} store */
 function runsTab(store) {
-  const { flows, runs } = store.get(COLLECTION);
+  const { flows, runs: all } = store.get(COLLECTION);
+  /** @param {CronRun} r */
+  const projectOf = (r) => flowProjectId(flows.find((f) => f.id === r.flowId)) || NO_PROJECT;
+  // A filter whose flow or project no run has any more is dropped.
+  if (view.runFlow && !all.some((r) => r.flowId === view.runFlow)) view.runFlow = '';
+  if (view.runProject && !all.some((r) => projectOf(r) === view.runProject)) view.runProject = '';
+  const runs = all.filter((r) => (!view.runProject || projectOf(r) === view.runProject) && (!view.runFlow || r.flowId === view.runFlow));
   const shown = runs.filter((r) => runMatches(r, view.runs));
   watchTerminals(store, sessionsOf(shown));
   /** @param {string} key */
   const count = (key) => runs.filter((r) => runMatches(r, key)).length;
   return h('section', { class: 'card stack' },
-    h('div', { class: 'row between' },
-      h('p', { class: 'muted small' }, `The last ${runs.length} runs of every flow, newest first. Older runs are dropped. Open a run to see each step.`),
+    h('p', { class: 'muted small' }, `The last ${all.length} runs of every flow, newest first. Older runs are dropped. Open a run to see each step.`),
+    h('div', { class: 'row between cron-run-filters' },
+      runPickers(store, all),
       h('div', { class: 'segmented', role: 'group', 'aria-label': 'Show' },
         RUN_FILTERS.map(([key, label]) => {
           const n = key === 'all' ? 0 : count(key);
@@ -483,7 +576,7 @@ function runsTab(store) {
         }))),
     shown.length
       ? h('ul', { class: 'cron-runs' }, shown.map((r) => runCard(store, flows.find((f) => f.id === r.flowId) ?? null, r, { showFlow: true })))
-      : empty(runs.length ? 'No run matches this filter.' : 'No run yet. Runs of every flow show here.'));
+      : empty(all.length ? 'No run matches this filter.' : 'No run yet. Runs of every flow show here.'));
 }
 
 // --- Canvas ---
@@ -2426,6 +2519,7 @@ function editor(store, flow) {
             onclick: () => startRun(store, flow, { dry: true }),
           }, icon('filter'), 'Test run'),
           h('button', { type: 'button', class: 'btn-small primary', disabled: busy || !flow.steps.length, onclick: () => startRun(store, flow) }, icon('play'), busy ? 'Running…' : 'Run now'),
+          latestRunButton(store, flow),
           h('button', { type: 'button', class: 'icon-btn', title: 'Save as template', 'aria-label': 'Save as template', disabled: !flow.steps.length, onclick: () => saveAsTemplate(store, flow) }, icon('bookmark')),
           h('button', { type: 'button', class: 'icon-btn', title: 'Duplicate flow', 'aria-label': 'Duplicate flow', onclick: () => duplicateFlow(store, flow) }, icon('copy')),
           h('button', { type: 'button', class: 'icon-btn', title: 'Delete flow', 'aria-label': 'Delete flow', onclick: () => deleteFlow(store, flow) }, icon('trash')))),
@@ -2513,6 +2607,8 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
     if (p.run) {
       view.tab = 'runs';
       view.runs = 'all';
+      view.runProject = '';
+      view.runFlow = '';
       view.openRuns.add(p.run);
       view.focusRun = p.run;
       view.scrollTo = p.run;
