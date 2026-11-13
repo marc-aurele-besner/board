@@ -3142,7 +3142,7 @@ button.cal-agenda-name:hover { color: var(--accent); }
 .term-tool.none { opacity: 0.55; }
 .term-tool.agents.working { color: var(--text); }
 .term-tool.agents .term-dot { width: 6px; height: 6px; }
-.agents-pop .turns-title .icon { width: 14px; height: 14px; color: var(--muted); }
+.agents-pop .turns-title .icon, .tools-pop .turns-title .icon { width: 14px; height: 14px; color: var(--muted); }
 .agents-empty { margin: 0; padding: 12px; }
 .agent-now { display: flex; align-items: flex-start; gap: 5px; min-width: 0; }
 .agent-now .icon { width: 12px; height: 12px; flex: none; margin-top: 2px; }
@@ -3175,6 +3175,12 @@ button.cal-agenda-name:hover { color: var(--accent); }
 .turns-key.work, .turns-seg.work { background: var(--income); }
 .turns-key.wait, .turns-seg.wait { background: var(--accent); }
 .turns-key.idle, .turns-seg.idle { background: var(--warn); }
+.turns-key.fail, .turns-seg.fail { background: var(--danger); }
+.turns-sum .turns-key.fail { margin-left: 6px; }
+.turns-seg.rest { min-width: 0; }
+.tools-time { margin-left: auto; }
+.tool-row { flex: none; cursor: default; }
+.tool-row:hover { background: none; }
 .turns-row.idle:hover { background: none; }
 .turns-row.idle .turns-icon, .turns-row.idle .turns-text { color: var(--warn); }
 .turns-row.idle.live .turns-seg.idle { animation: pulse 1.4s ease-in-out infinite; }
@@ -3431,6 +3437,10 @@ button.cal-agenda-name:hover { color: var(--accent); }
   .pr-main { padding: 0 8px 12px; }
   .term-input { font-size: 16px; }
   .term-cwd { max-width: 40%; }
+  /* claude's buttons take the bar's width: the folder and the actions go below. */
+  .term-head { flex-wrap: wrap; }
+  .term-title { flex-basis: 100%; }
+  .term-head .term-actions { margin-left: auto; }
 }
 
 /* Folder picker (Projects → Local folder) */

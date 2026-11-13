@@ -27,6 +27,7 @@ import { linkWatcher, moveToReview } from '../task-links.js';
 import { watchDevSessions } from './todos.js';
 import { recordOfSession, sumUsage, usageLine, usageTitle, byUse, mcpTool } from '../dev-usage.js';
 import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand } from '../dev-core.js';
+import { toolRows, fmtSpan, pct } from '../dev-turns.js';
 import { cronRunOf, cronRunHref } from '../cron.js';
 /** @import { Store, DevSessionList, IconName } from '../../types/data' */
 /** @import { RunnerInfo, RunnerEvent, RunnerTurns, SessionTurn, SessionAgent } from '../../types/terminal' */
@@ -1317,11 +1318,12 @@ function sessionTitle(store, s) {
     }, icon('plus')));
 }
 
-// What the bar shows of the claude the shown terminal runs: its turns, its subagents, its skills and MCP tools.
+// What the bar shows of the claude the shown terminal runs: its turns, its subagents, its tools, its skills and
+// MCP tools.
 /** @param {Store} store @param {Session} s */
 function claudeButtons(store, s) {
   refreshTurns(store, s);
-  return [turnsButton(s), agentsButton(s), toolButtons(store, s)];
+  return [turnsButton(s), agentsButton(s), toolsButton(s), toolButtons(store, s)];
 }
 
 // Draws those buttons again where they stand, without the page: the shell holds a page render back while a panel
@@ -1332,7 +1334,7 @@ function claudeButtons(store, s) {
 function drawClaudeButtons(store, s) {
   const slot = document.querySelector('.dev .term-claude');
   if (!slot || activeSession() !== s || slot.querySelector(':active')) return;
-  const next = h('span', null, turnsButton(s), agentsButton(s), toolButtons(store, s));
+  const next = h('span', null, turnsButton(s), agentsButton(s), toolsButton(s), toolButtons(store, s));
   if (next.innerHTML === slot.innerHTML) return;
   const focused = [...slot.children].findIndex((el) => el === document.activeElement);
   const kind = focused < 0 ? '' : slot.children[focused].className.split(' ').slice(0, 2).join('.');
@@ -1417,7 +1419,7 @@ function phasesOf(t, live, now) {
 // The turns panel, open under the turns button: each turn with its prompt, a bar of its working and waiting
 // stretches, and their times. It follows the data while open, and the clock for the turn still going. The
 // subagents panel opens in its place, under the subagents button (kind 'agents').
-/** @type {{ el: HTMLElement, s: Session, timer: number, kind: 'turns' | 'agents' } | null} */
+/** @type {{ el: HTMLElement, s: Session, timer: number, kind: 'turns' | 'agents' | 'tools' } | null} */
 let turnsPop = null;
 
 function closeTurns() {
@@ -1433,7 +1435,7 @@ function closeTurns() {
 /** @param {PointerEvent} e */
 function onTurnsOutside(e) {
   const target = /** @type {Element} */ (e.target);
-  if (turnsPop?.el.contains(target) || target.closest?.('.term-turns, .term-tool.agents')) return;
+  if (turnsPop?.el.contains(target) || target.closest?.('.term-turns, .term-tool.agents, .term-tool.tools')) return;
   closeTurns();
 }
 /** @param {KeyboardEvent} e */
@@ -1443,11 +1445,11 @@ function onTurnsKey(e) {
   closeTurns();
 }
 
-/** @param {HTMLElement} anchor @param {Session} s @param {'turns' | 'agents'} [kind] */
+/** @param {HTMLElement} anchor @param {Session} s @param {'turns' | 'agents' | 'tools'} [kind] */
 function openTurns(anchor, s, kind = 'turns') {
   closeMenu();
   closeTurns();
-  const el = h('div', { class: `popover turns-pop ${kind}-pop`, role: 'dialog', 'aria-label': kind === 'agents' ? 'Claude subagents' : 'Claude turns' });
+  const el = h('div', { class: `popover turns-pop ${kind}-pop`, role: 'dialog', 'aria-label': kind === 'agents' ? 'Claude subagents' : kind === 'tools' ? 'Claude tools' : 'Claude turns' });
   document.body.append(el);
   turnsPop = { el, s, kind, timer: window.setInterval(() => drawTurns(), 1000) };
   drawTurns();
@@ -1466,6 +1468,7 @@ function drawTurns() {
   const data = turnsView.id === s.id ? turnsView.data : null;
   if (!data || activeSession() !== s || !el.isConnected) return closeTurns();
   if (turnsPop.kind === 'agents') return drawAgents(el, data.agents ?? []);
+  if (turnsPop.kind === 'tools') return drawTools(el, data.turns);
   const { turns, state } = data;
   const now = Date.now();
   const idle = idleOf(data, now);
@@ -1672,6 +1675,85 @@ function drawAgents(el, agents) {
     unfolded ? h('div', { class: 'small agent-more' },
       a.task ? [h('div', { class: 'muted' }, 'Task'), h('p', null, a.task)] : null,
       a.said ? [h('div', { class: 'muted' }, live ? 'Last said' : 'Answer'), h('p', null, a.said)] : null) : null);
+  }
+}
+
+// The tools the shown claude called, read with its turns: how many calls its session made so far. A click opens
+// the tools panel.
+/** @param {Session} s */
+function toolsButton(s) {
+  const data = turnsView.id === s.id ? turnsView.data : null;
+  if (!data?.claude) return null;
+  const rows = toolRows(data.turns);
+  const calls = rows.reduce((n, r) => n + r.calls, 0);
+  const errors = rows.reduce((n, r) => n + r.errors, 0);
+  const isOpen = () => turnsPop?.s === s && turnsPop.kind === 'tools';
+  const title = `${calls} tool ${calls === 1 ? 'call' : 'calls'} in this claude session${rows.length ? ` (${rows.length} ${rows.length === 1 ? 'tool' : 'tools'}${errors ? `, ${errors} failed` : ''})` : ''}\nShow each tool, with its calls, failures and time`;
+  return h('button', {
+    type: 'button',
+    class: `term-tool tools${calls ? '' : ' none'}`,
+    title,
+    'aria-label': title.split('\n')[0],
+    'aria-haspopup': 'dialog',
+    'aria-expanded': String(isOpen()),
+    onclick: (/** @type {MouseEvent} */ e) => {
+      e.stopPropagation();
+      if (isOpen()) return closeTurns();
+      openTurns(/** @type {HTMLElement} */ (e.currentTarget), s, 'tools');
+    },
+  }, icon('wrench'), h('span', null, String(calls)));
+}
+
+// The tools panel: every tool the session called, the most called first, with a bar of its share of the calls
+// (the failed ones in red), its failures and its time per call. A row naming several tools (an MCP server's, the
+// subagents') lists them in its tooltip.
+/** @param {HTMLElement} el @param {SessionTurn[]} turns */
+function drawTools(el, turns) {
+  const rows = toolRows(turns);
+  const calls = rows.reduce((n, r) => n + r.calls, 0);
+  const errors = rows.reduce((n, r) => n + r.errors, 0);
+  const ms = rows.reduce((n, r) => n + r.ms, 0);
+  const most = rows[0]?.calls ?? 0;
+  const scroll = el.querySelector('.turns-list')?.scrollTop ?? 0;
+  el.replaceChildren(
+    h('div', { class: 'turns-head' },
+      h('div', { class: 'turns-title' },
+        icon('wrench'),
+        h('strong', null, 'Tools'),
+        h('span', { class: 'muted' }, `${calls} ${calls === 1 ? 'call' : 'calls'} · ${rows.length} ${rows.length === 1 ? 'tool' : 'tools'}`)),
+      calls ? h('div', { class: 'muted small turns-sum' },
+        h('span', { class: 'turns-key work' }), `${calls - errors} succeeded`,
+        errors ? [h('span', { class: 'turns-key fail' }), `${errors} failed (${pct(errors, calls)})`] : null,
+        ms ? h('span', { class: 'tools-time' }, `${fmtSpan(ms)} in calls`) : null) : null),
+    rows.length
+      ? h('div', { class: 'turns-list', role: 'list' }, rows.map(toolRow))
+      : h('p', { class: 'muted small agents-empty' }, 'No tool called yet.'));
+  const list = el.querySelector('.turns-list');
+  if (list) list.scrollTop = scroll;
+
+  // Most calls answer in well under a second.
+  const perCall = (/** @type {number} */ t) => (t < 1000 ? `${Math.max(1, Math.round(t))} ms` : fmtSpan(t));
+  /** @param {typeof rows[number]} r */
+  function toolRow(r) {
+    const names = r.names.map((n) => (n.startsWith('mcp__') ? mcpTool(n).tool || n : n));
+    const row = h('div', { class: 'turns-row tool-row', role: 'listitem' },
+      h('div', { class: 'turns-line' },
+        h('span', { class: 'turns-icon' }, icon(r.key.startsWith('mcp:') ? 'plug' : r.key === 'Agent' ? 'users' : r.key === 'Skill' ? 'zap' : 'wrench')),
+        h('span', { class: 'turns-text' }, r.label),
+        h('span', { class: 'turns-took' }, `${r.calls}×`)),
+      h('div', { class: 'turns-bar', 'aria-hidden': 'true' },
+        h('span', { class: 'turns-seg work', style: { flexGrow: String(r.calls - r.errors) } }),
+        r.errors ? h('span', { class: 'turns-seg fail', style: { flexGrow: String(r.errors) } }) : null,
+        h('span', { class: 'turns-seg rest', style: { flexGrow: String(most - r.calls) } })),
+      h('div', { class: 'muted small turns-meta' },
+        h('span', null, [
+          `${pct(r.calls, calls)} of the calls`,
+          r.errors ? `${r.errors} failed (${pct(r.errors, r.calls)})` : '',
+          r.ms ? `${perCall(r.ms / r.calls)} a call` : '',
+          r.ms >= 1000 && r.calls > 1 ? `${fmtSpan(r.ms)} in all` : '',
+        ].filter(Boolean).join(' · '))));
+    if (names.length > 1 || names[0] !== r.label) row.title = names.join('\n');
+    return row;
   }
 }
 
