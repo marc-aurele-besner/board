@@ -1,7 +1,7 @@
 // DeFi → Summary: the first tab. What every other tab holds in one place: total liquidity across wallets, LP
 // positions and Aave, what needs attention, and the main lines of each tab. It reads nothing itself: each tab's
 // module reads (or shows its last saved read) and hands its totals here.
-import { h, icon, notice } from '../ui.js';
+import { h, icon } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { walletsSummary, load as loadBalances } from './defi-wallets.js';
 import { lendingSummary, load as loadLending, healthTone, healthText, RISK } from './defi-lending.js';
@@ -79,17 +79,19 @@ export function summaryTab(store, ui) {
 
   const out = lp?.out ?? [];
   const atRisk = l?.atRisk ?? [];
-  const body = [
-    failed.length ? notice({ tone: 'info', text: `Could not read ${failed.join(', ')}. Those totals are from an earlier read.` }) : null,
+  /** @type {DefiTab['notices']} */
+  const notices = [
+    failed.length ? { tone: 'info', text: `Could not read ${failed.join(', ')}. Those totals are from an earlier read.` } : null,
     atRisk.length
-      ? notice({ text: `${atRisk.length === 1 ? 'One Aave account is' : `${atRisk.length} Aave accounts are`} close to liquidation (health factor under ${RISK}): ${atRisk.map((r) => `${r.walletName} on ${r.chainName}`).join(', ')}.`,
-        actions: [h('button', { type: 'button', class: 'btn-small', onclick: () => ui.go('lending') }, 'Open Lending / Borrowing')] })
+      ? { text: `${atRisk.length === 1 ? 'One Aave account is' : `${atRisk.length} Aave accounts are`} close to liquidation (health factor under ${RISK}): ${atRisk.map((r) => `${r.walletName} on ${r.chainName}`).join(', ')}.`,
+        actions: [h('button', { type: 'button', class: 'btn-small', onclick: () => ui.go('lending') }, 'Open Lending / Borrowing')] }
       : null,
     out.length
-      ? notice({ tone: 'info', text: `${out.length === 1 ? 'One LP position is' : `${out.length} LP positions are`} out of range and earning no fees: ${out.slice(0, 4).map((r) => `${r.pair} on ${r.chain}`).join(', ')}${out.length > 4 ? ` and ${out.length - 4} more` : ''}.`,
-        actions: [h('button', { type: 'button', class: 'btn-small', onclick: () => ui.go('positions', 'out') }, 'Show them')] })
+      ? { tone: 'info', text: `${out.length === 1 ? 'One LP position is' : `${out.length} LP positions are`} out of range and earning no fees: ${out.slice(0, 4).map((r) => `${r.pair} on ${r.chain}`).join(', ')}${out.length > 4 ? ` and ${out.length - 4} more` : ''}.`,
+        actions: [h('button', { type: 'button', class: 'btn-small', onclick: () => ui.go('positions', 'out') }, 'Show them')] }
       : null,
-
+  ];
+  const body = [
     h('section', { class: 'card sum-hero' },
       h('div', { class: 'row between sum-hero-head' },
         h('div', null,
@@ -140,5 +142,5 @@ export function summaryTab(store, ui) {
         : null),
     first ? h('p', { class: 'muted small' }, 'Totals fill in as each chain is read.') : null,
   ];
-  return { subtitle, actions, body };
+  return { subtitle, actions, notices, body };
 }

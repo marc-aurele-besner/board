@@ -1,4 +1,4 @@
-import { h, icon, refreshIcon, money, empty, notice, uid, todayISO, copyable, CURRENCIES } from '../ui.js';
+import { h, icon, refreshIcon, money, empty, notice, noticePills, uid, todayISO, copyable, CURRENCIES } from '../ui.js';
 import { knownRate, fetchDayRate } from '../fx.js';
 import { barChart, lineChart, legend } from '../chart.js';
 import { toast } from '../toast.js';
@@ -13,7 +13,7 @@ import { walletsTab, walletsView } from './defi-wallets.js';
 import { lendingTab, lendingView } from './defi-lending.js';
 import { summaryTab } from './defi-summary.js';
 /** @import { Store, PoolsData, CollectEntry, FeeBaseline, IconName } from '../../types/data' */
-/** @import { PositionRow, DefiUi, DefiTab, LpSummary } from '../../types/defi' */
+/** @import { PositionRow, DefiUi, DefiTab, DefiNotice, LpSummary } from '../../types/defi' */
 /** @import { Child } from '../../types/ui' */
 /**
  * A row with its fee APR over the chosen window (aprOf): from swaps (aprSecs, aprFull, aprPrev), else from the
@@ -444,11 +444,21 @@ function currencySwitch(store) {
     }, c)));
 }
 
+/** @returns {DefiNotice | null} */
 function rateNotice() {
   if (view.currency !== 'CAD' || shownRate()) return null;
   return fxToday.status === 'error'
-    ? notice({ text: `The USD to CAD rate could not be read, so amounts stay in USD: ${fxToday.error}` })
-    : notice({ tone: 'info', text: 'Reading today\'s USD to CAD rate. Amounts show in USD until then.' });
+    ? { text: `The USD to CAD rate could not be read, so amounts stay in USD: ${fxToday.error}` }
+    : { tone: 'info', text: 'Reading today\'s USD to CAD rate. Amounts show in USD until then.' };
+}
+
+// The Fees tab's note when Etherscan could not be read on some chains.
+/** @param {Store} store @returns {DefiNotice | null} */
+function etherscanNotice(store) {
+  const errors = /** @type {Record<string, string>} */ (store.get(COLLECTION)?.etherscanErrors ?? {});
+  return Object.keys(errors).length
+    ? { tone: 'info', text: `Etherscan could not be read for ${Object.entries(errors).map(([name, text]) => `${name} (${text})`).join(', ')}. Collects there come from the node only.` }
+    : null;
 }
 /** @param {number} n */
 const pct = (n) => `${(n * 100).toFixed(n < 0.1 ? 2 : 1)}%`;
@@ -1781,9 +1791,6 @@ function feesView(store) {
       stat('Per month', cash(perDay * 30.44)),
       stat('Per year', cash(perDay * 365))),
     coverageCard(store),
-    Object.keys(store.get(COLLECTION)?.etherscanErrors ?? {}).length
-      ? notice({ tone: 'info', text: `Etherscan could not be read for ${Object.entries(/** @type {Record<string, string>} */ (store.get(COLLECTION).etherscanErrors)).map(([name, text]) => `${name} (${text})`).join(', ')}. Collects there come from the node only.` })
-      : null,
     unpriced ? h('p', { class: 'muted small' }, `${plural(unpriced, 'collection')} without a USD value (prices were unavailable) ${unpriced === 1 ? 'is' : 'are'} left out of the totals.`) : null,
     list.length
       ? h('section', { class: 'card stack' },
@@ -2151,8 +2158,10 @@ const OWN_TABS = { summary: ['Summary', summaryTab], wallets: ['Wallets', wallet
 
 // The tabs, with the open tab's controls at the end of their row: the page has no header. What the open tab
 // shows, and what is being read, is in its tooltip.
-/** @param {Store} store @param {string} [subtitle] @param {Child[]} [tools] */
-function tabs(store, subtitle = '', tools = []) {
+// The open tab's notices fold into pills at the start of those controls (noticePills() in js/ui.js).
+/** @param {Store} store @param {string} [subtitle] @param {Child[]} [tools] @param {(DefiNotice | null)[]} [notices] */
+function tabs(store, subtitle = '', tools = [], notices = []) {
+  tools = [noticePills(`defi-${view.tab}`, notices), ...tools];
   return h('div', { class: 'sub-tabs-bar' },
     h('nav', { class: 'sub-tabs lp-tabs', role: 'tablist', 'aria-label': 'DeFi view' },
       TABS.map(([key, label, iconName]) =>
@@ -2238,10 +2247,9 @@ function drawOwnTab(root, store) {
     openPosition: (ref) => openDetail(store, ref),
   };
   const [, drawTab] = OWN_TABS[view.tab];
-  const { subtitle, actions, body } = drawTab(store, ui);
+  const { subtitle, actions, notices = [], body } = drawTab(store, ui);
   root.replaceChildren(h('div', { class: 'stack-lg lp' },
-    tabs(store, subtitle, [currencySwitch(store), ...actions]),
-    rateNotice(),
+    tabs(store, subtitle, [currencySwitch(store), ...actions], [rateNotice(), ...notices]),
     body));
 }
 
@@ -2265,8 +2273,8 @@ function draw(root, store) {
     }
     askRate(store);
     root.replaceChildren(h('div', { class: 'stack-lg lp' },
-      tabs(store, logged && view.tab === 'fees' ? FEES_SUBTITLE : '', [logged ? currencySwitch(store) : null]),
-      logged ? rateNotice() : null,
+      tabs(store, logged && view.tab === 'fees' ? FEES_SUBTITLE : '', [logged ? currencySwitch(store) : null],
+        logged ? [rateNotice(), view.tab === 'fees' ? etherscanNotice(store) : null] : []),
       view.tab === 'fees'
         ? feesView(store)
         : [setupBanner('wallets', 'Add a wallet address in Settings to see its Uniswap positions.'),
@@ -2374,17 +2382,20 @@ function draw(root, store) {
         h('button', { type: 'button', class: 'btn-small', disabled: reading || chainCount === 0, onclick: () => load(store), title: state.at ? updatedText() : null },
           refreshIcon(reading),
           reading ? 'Reading…' : 'Refresh'),
+      ],
+      [
+        rateNotice(),
+        view.tab === 'fees' ? etherscanNotice(store) : null,
+        state.shallow.length
+          ? { tone: 'info', text: `The node for ${state.shallow.join(', ')} keeps only recent history, so older v4 positions there are not found. Add them with Add position, or set a node that keeps full history in Settings.` }
+          : null,
+        staleText ? { tone: 'info', text: staleText } : null,
+        !state.at && all.length ? { tone: 'info', text: 'Showing the positions saved by the last read while the chains are read again.' } : null,
+        state.warning ? { tone: 'info', text: state.warning } : null,
+        state.status === 'error' ? { text: `The positions could not be read: ${state.error}` } : null,
+        chainCount === 0 ? { tone: 'info', text: 'No chains are selected. Pick the chains to read in Settings.' } : null,
       ]),
-    rateNotice(),
     view.adding && view.tab !== 'fees' ? addForm(store) : null,
-    state.shallow.length
-      ? notice({ tone: 'info', text: `The node for ${state.shallow.join(', ')} keeps only recent history, so older v4 positions there are not found. Add them with Add position, or set a node that keeps full history in Settings.` })
-      : null,
-    staleText ? notice({ tone: 'info', text: staleText }) : null,
-    !state.at && all.length ? notice({ tone: 'info', text: 'Showing the positions saved by the last read while the chains are read again.' }) : null,
-    state.warning ? notice({ tone: 'info', text: state.warning }) : null,
-    state.status === 'error' ? notice({ text: `The positions could not be read: ${state.error}` }) : null,
-    chainCount === 0 ? notice({ tone: 'info', text: 'No chains are selected. Pick the chains to read in Settings.' }) : null,
 
     view.tab === 'fees' ? feesView(store) : [
     h('div', { class: 'lp-stats' },

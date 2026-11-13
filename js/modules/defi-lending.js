@@ -1,6 +1,6 @@
 // DeFi → Lending: the Aave v3 positions of every DeFi wallet, per chain: what is supplied and borrowed, at what rate,
 // and how far each account is from liquidation. Drawn inside the Liquidity Pools section, like Wallets.
-import { h, icon, refreshIcon, notice } from '../ui.js';
+import { h, icon, refreshIcon } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { CHAINS, chainSettings, isAddress } from '../uniswap.js';
 import { aaveChains } from '../defi/lending-read.js';
@@ -276,14 +276,17 @@ export function lendingTab(store, ui) {
     h('button', { type: 'button', class: 'btn-small', disabled: reading || !chains.length, onclick: () => load(store) }, refreshIcon(reading), reading ? 'Reading…' : 'Refresh'),
   ];
 
-  const body = [
-    chains.length ? null : notice({ tone: 'info', text: 'None of the chains read has Aave v3. Pick chains in Settings → Blockchains.' }),
+  /** @type {DefiTab['notices']} */
+  const notices = [
+    chains.length ? null : { tone: 'info', text: 'None of the chains read has Aave v3. Pick chains in Settings → Blockchains.' },
     state.failed.length
-      ? notice({ tone: 'info', text: `Could not read ${state.failed.map((f) => (f.at ? `${f.name} (shown from an earlier read)` : f.name)).join(', ')}: ${state.failed[0].error}` })
+      ? { tone: 'info', text: `Could not read ${state.failed.map((f) => (f.at ? `${f.name} (shown from an earlier read)` : f.name)).join(', ')}: ${state.failed[0].error}` }
       : null,
     atRisk.length
-      ? notice({ text: `${atRisk.length === 1 ? 'One account is' : `${atRisk.length} accounts are`} close to liquidation (health factor under ${RISK}): ${atRisk.map((r) => `${r.walletName} on ${r.chainName}`).join(', ')}.` })
+      ? { text: `${atRisk.length === 1 ? 'One account is' : `${atRisk.length} accounts are`} close to liquidation (health factor under ${RISK}): ${atRisk.map((r) => `${r.walletName} on ${r.chainName}`).join(', ')}.` }
       : null,
+  ];
+  const body = [
     h('div', { class: 'lp-stats' },
       h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Supplied'), h('strong', null, firstRead ? '…' : ui.cash(supplied))),
       h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Borrowed'), h('strong', null, firstRead ? '…' : ui.cash(borrowed))),
@@ -311,5 +314,5 @@ export function lendingTab(store, ui) {
         ? lendingView.layout === 'list' ? accountTable(shown, ui) : h('div', { class: 'lend-grid' }, shown.map((r, i) => accountCard(r, ui, i)))
         : h('div', { class: 'lp-empty' }, h('span', { class: 'float' }, icon('landmark')), h('p', null, all.length ? 'No positions match these filters.' : 'No Aave positions for these wallets.')),
   ];
-  return { subtitle, actions, body };
+  return { subtitle, actions, notices, body };
 }

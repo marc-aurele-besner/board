@@ -41,5 +41,14 @@ export interface DefiUi {
 export interface DefiTab {
   subtitle: string;
   actions: Child[];
+  // Shown as pills at the right of the tab bar (noticePills() in js/ui.js), not above the body.
+  notices?: (DefiNotice | null)[];
   body: Child;
+}
+
+// A notice of a DeFi tab: as notice() in js/ui.js takes it.
+export interface DefiNotice {
+  tone?: 'error' | 'ok' | 'info';
+  text: Child;
+  actions?: Child[];
 }

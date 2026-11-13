@@ -1,6 +1,6 @@
 // DeFi → Wallets: the native coin and ERC-20 balances of every DeFi wallet, on each chain read for Liquidity Pools.
 // Drawn inside the Liquidity Pools section, which owns the tab bar, the currency switch and pools.json.
-import { h, icon, refreshIcon, notice, copyable } from '../ui.js';
+import { h, icon, refreshIcon, copyable } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { CHAINS, chainSettings, isAddress, tokenMeta } from '../uniswap.js';
 import { tokenRef } from '../balances.js';
@@ -336,12 +336,15 @@ export function walletsTab(store, ui) {
     h('button', { type: 'button', class: 'btn-small', disabled: reading || !chains.length, onclick: () => load(store) }, refreshIcon(reading), reading ? 'Reading…' : 'Refresh'),
   ];
 
+  /** @type {DefiTab['notices']} */
+  const notices = [
+    chains.length ? null : { tone: 'info', text: 'No chains are selected. Pick the chains to read in Settings → Blockchains.' },
+    state.failed.length
+      ? { tone: 'info', text: `Could not read ${state.failed.map((f) => (f.at ? `${f.name} (shown from an earlier read)` : f.name)).join(', ')}: ${state.failed[0].error}` }
+      : null,
+  ];
   const body = [
     walletsView.adding ? addPanel(store, ui) : null,
-    chains.length ? null : notice({ tone: 'info', text: 'No chains are selected. Pick the chains to read in Settings → Blockchains.' }),
-    state.failed.length
-      ? notice({ tone: 'info', text: `Could not read ${state.failed.map((f) => (f.at ? `${f.name} (shown from an earlier read)` : f.name)).join(', ')}: ${state.failed[0].error}` })
-      : null,
     h('div', { class: 'lp-stats' },
       h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Total value'), h('strong', null, firstRead ? '…' : ui.cash(total))),
       h('div', { class: 'card lp-stat' }, h('span', { class: 'muted' }, 'Tokens held'), h('strong', null, String(inChain.length))),
@@ -376,5 +379,5 @@ export function walletsTab(store, ui) {
         ? balanceTable(store, shown, ui, wallets.length > 1 && walletsView.wallet === 'all')
         : h('div', { class: 'lp-empty' }, h('span', { class: 'float' }, icon('wallet')), h('p', null, all.length ? 'No balances match these filters.' : 'No balances found on these chains.')),
   ];
-  return { subtitle, actions, body };
+  return { subtitle, actions, notices, body };
 }
