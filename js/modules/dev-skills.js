@@ -50,6 +50,9 @@ export async function refreshSkills(ctx, path, { force = false } = {}) {
   }
 }
 
+// The skills read for the folder at `path`, or null before they were: what the skills button on Dev's bar names.
+export const knownSkills = (/** @type {string} */ path) => (path === state.path ? state.data : null);
+
 const matches = (/** @type {RunnerSkill} */ s) => {
   const q = state.filter.trim().toLowerCase();
   return !q || s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q);

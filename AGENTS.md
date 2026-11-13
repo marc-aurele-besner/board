@@ -71,7 +71,7 @@ js/modules/monitoring-dev.js  Monitoring → AI usage → Dev sessions: a chart 
 js/modules/monitoring-tools.js  Monitoring → AI usage → Skills and MCP: the skills Dev sessions ran and the MCP tools they called, each counted on its own
 js/modules/monitoring-development.js  Monitoring → Development: the Dev sessions' claude turns (usage.json `dev` turns) in four views under one project filter; Overview (summary against the period before, insights, time, projects, hours) and Turns (lengths, tasks, a log of recent turns)
 js/modules/monitoring-development-tools.js  Monitoring → Development → Skills & MCP and Tools: each skill, MCP tool or server, and every tool, with its calls, turns, failures and time per call
-js/dev-turns.js       Development's numbers without the DOM: a turn's working and review time, its tools grouped and added up, and the findings of the Insights card; toolRows() also feeds the tools button on Dev's bar
+js/dev-turns.js       Development's numbers without the DOM: a turn's working and review time, its tools grouped and added up, and the findings of the Insights card; toolRows() also feeds the tools button on Dev's bar, sessionSkills() and sessionMcp() its skills and MCP buttons
 js/chains.js          every chain the board reads: the built-in ones and those added in Settings → Blockchains
 js/abi.js             Solidity ABI encoding and decoding: calls, answers and event logs
 js/contracts.js       saved smart contracts: reads through the node, writes through the browser wallet, activity
@@ -103,6 +103,7 @@ js/images.js          which pasted or dropped files are images claude reads
 js/task-images.js     a task's images: kept in the data folder, shown on the task, saved through the runner for claude
 js/task-worktrees.js  the worktrees Dev sessions made for tasks; removed through the runner once their tasks are done, their terminals closed
 js/modules/dev-worktrees.js  Dev's Worktrees panel: the repo's worktrees, whether each is in use, and removing them
+js/modules/dev-uses.js  the skills and MCP panels of Dev's bar: a session's skills (what each does, its turns) and its MCP calls by server and tool (failures, time per call)
 js/modules/dev-pr.js   Dev's pull request view: the branch against the default branch, file list, diffs as cards that fold, Viewed marks
 js/dev-usage.js       what a task's claude session used (model, effort, tokens, cost), kept in usage.json `dev`
 js/dev-done.js        claude's done signal: the line a task prompt asks for, and whether a reply ends with it (Dev's turns)

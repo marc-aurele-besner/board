@@ -19,13 +19,14 @@ import { explorer, editor, setRoot, hasOpenFiles, baseName, panelHead, panelActi
 import { sourceControl, refreshGit, decorOf, changeCount } from './dev-git.js';
 import { searchPanel } from './dev-search.js';
 import { worktreesPanel, refreshWorktrees } from './dev-worktrees.js';
-import { skillsPanel, refreshSkills } from './dev-skills.js';
+import { skillsPanel, refreshSkills, knownSkills } from './dev-skills.js';
+import { drawSkills, drawMcp, skillsOf, mcpOf, skillsTitle, mcpTitle } from './dev-uses.js';
 import { pickChip } from '../inline.js';
 import { resizableSide } from '../side-resize.js';
 import { projectIcon } from './projects.js';
 import { linkWatcher, moveToReview } from '../task-links.js';
 import { watchDevSessions } from './todos.js';
-import { recordOfSession, sumUsage, usageLine, usageTitle, byUse, mcpTool } from '../dev-usage.js';
+import { recordOfSession, sumUsage, usageLine, usageTitle, mcpTool } from '../dev-usage.js';
 import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand, claudeState } from '../dev-core.js';
 import { sessionTools, toolGroup, fmtSpan, pct } from '../dev-turns.js';
 import { cronRunOf, cronRunHref } from '../cron.js';
@@ -1137,6 +1138,16 @@ function workspacePicker(store) {
   return chip;
 }
 
+// Shows a side panel, and remembers it for this browser.
+/** @param {Store} store @param {string} side */
+function showSide(store, side) {
+  view.side = side;
+  try {
+    localStorage.setItem(SIDE_KEY, side);
+  } catch {}
+  store.refresh();
+}
+
 // Files, Search or Source Control, as icons along the top like Cursor's activity bar. Source Control shows how many files
 // changed as a badge on its icon.
 /** @param {Store} store */
@@ -1149,13 +1160,7 @@ function sideSwitcher(store) {
     'aria-selected': String(view.side === side),
     'aria-label': label,
     title: label,
-    onclick: () => {
-      view.side = side;
-      try {
-        localStorage.setItem(SIDE_KEY, side);
-      } catch {}
-      store.refresh();
-    },
+    onclick: () => showSide(store, side),
   }, icon(name), badge);
   const count = changeCount();
   const running = view.sessions.filter((x) => x.running).length;
@@ -1342,7 +1347,7 @@ function sessionTitle(store, s) {
 /** @param {Store} store @param {Session} s */
 function claudeButtons(store, s) {
   refreshTurns(store, s);
-  return [turnsButton(s), agentsButton(s), toolsButton(s), toolButtons(store, s)];
+  return [turnsButton(store, s), agentsButton(store, s), toolsButton(store, s), toolButtons(store, s)];
 }
 
 // Draws those buttons again where they stand, without the page: the shell holds a page render back while a panel
@@ -1353,7 +1358,7 @@ function claudeButtons(store, s) {
 function drawClaudeButtons(store, s) {
   const slot = document.querySelector('.dev .term-claude');
   if (!slot || activeSession() !== s || slot.querySelector(':active')) return;
-  const next = h('span', null, turnsButton(s), agentsButton(s), toolsButton(s), toolButtons(store, s));
+  const next = h('span', null, turnsButton(store, s), agentsButton(store, s), toolsButton(store, s), toolButtons(store, s));
   if (next.innerHTML === slot.innerHTML) return;
   const focused = [...slot.children].findIndex((el) => el === document.activeElement);
   const kind = focused < 0 ? '' : slot.children[focused].className.split(' ').slice(0, 2).join('.');
@@ -1437,8 +1442,10 @@ function phasesOf(t, live, now) {
 
 // The turns panel, open under the turns button: each turn with its prompt, a bar of its working and waiting
 // stretches, and their times. It follows the data while open, and the clock for the turn still going. The
-// subagents panel opens in its place, under the subagents button (kind 'agents').
-/** @type {{ el: HTMLElement, s: Session, timer: number, kind: 'turns' | 'agents' | 'tools' } | null} */
+// subagents panel opens in its place, under the subagents button (kind 'agents'), and so do the tools, skills and
+// MCP panels under theirs.
+/** @typedef {'turns' | 'agents' | 'tools' | 'skills' | 'mcp'} PopKind */
+/** @type {{ el: HTMLElement, s: Session, timer: number, kind: PopKind, store: Store } | null} */
 let turnsPop = null;
 
 function closeTurns() {
@@ -1454,7 +1461,7 @@ function closeTurns() {
 /** @param {PointerEvent} e */
 function onTurnsOutside(e) {
   const target = /** @type {Element} */ (e.target);
-  if (turnsPop?.el.contains(target) || target.closest?.('.term-turns, .term-tool.agents, .term-tool.tools')) return;
+  if (turnsPop?.el.contains(target) || target.closest?.('.term-turns, .term-tool')) return;
   closeTurns();
 }
 /** @param {KeyboardEvent} e */
@@ -1464,13 +1471,14 @@ function onTurnsKey(e) {
   closeTurns();
 }
 
-/** @param {HTMLElement} anchor @param {Session} s @param {'turns' | 'agents' | 'tools'} [kind] */
-function openTurns(anchor, s, kind = 'turns') {
+const POP_LABELS = { turns: 'Claude turns', agents: 'Claude subagents', tools: 'Claude tools', skills: 'Claude skills', mcp: 'Claude MCP calls' };
+/** @param {Store} store @param {HTMLElement} anchor @param {Session} s @param {PopKind} [kind] */
+function openTurns(store, anchor, s, kind = 'turns') {
   closeMenu();
   closeTurns();
-  const el = h('div', { class: `popover turns-pop ${kind}-pop`, role: 'dialog', 'aria-label': kind === 'agents' ? 'Claude subagents' : kind === 'tools' ? 'Claude tools' : 'Claude turns' });
+  const el = h('div', { class: `popover turns-pop ${kind}-pop`, role: 'dialog', 'aria-label': POP_LABELS[kind] });
   document.body.append(el);
-  turnsPop = { el, s, kind, timer: window.setInterval(() => drawTurns(), 1000) };
+  turnsPop = { el, s, kind, store, timer: window.setInterval(() => drawTurns(), 1000) };
   drawTurns();
   const r = anchor.getBoundingClientRect();
   const x = Math.max(8, Math.min(r.left, window.innerWidth - el.offsetWidth - 8));
@@ -1488,6 +1496,11 @@ function drawTurns() {
   if (!data || activeSession() !== s || !el.isConnected) return closeTurns();
   if (turnsPop.kind === 'agents') return drawAgents(el, data.agents ?? []);
   if (turnsPop.kind === 'tools') return drawTools(el, data);
+  if (turnsPop.kind === 'mcp') return drawMcp(el, data);
+  if (turnsPop.kind === 'skills') {
+    const { store } = turnsPop;
+    return drawSkills(el, data, { ctx: filesCtx(store), known: knownSkills(rootPath(store, view.workspace)), close: closeTurns, browse: () => showSide(store, 'skills') });
+  }
   const { turns, state } = data;
   const now = Date.now();
   const idle = idleOf(data, now);
@@ -1590,8 +1603,8 @@ function idleRow(g) {
 }
 
 // How many turns the shown claude took, and where the last one stands; a click opens the turns panel.
-/** @param {Session} s */
-function turnsButton(s) {
+/** @param {Store} store @param {Session} s */
+function turnsButton(store, s) {
   const data = turnsView.id === s.id ? turnsView.data : null;
   if (!data?.claude) return null;
   const { turns, state } = data;
@@ -1609,7 +1622,7 @@ function turnsButton(s) {
     onclick: (/** @type {MouseEvent} */ e) => {
       e.stopPropagation();
       if (turnsPop?.s === s && turnsPop.kind === 'turns') return closeTurns();
-      openTurns(/** @type {HTMLElement} */ (e.currentTarget), s);
+      openTurns(store, /** @type {HTMLElement} */ (e.currentTarget), s);
     },
   }, icon('message'), h('span', null, String(turns.length)), signalled
     ? h('span', { class: 'term-turns-check', role: 'img', 'aria-label': label }, icon('check'))
@@ -1618,8 +1631,8 @@ function turnsButton(s) {
 
 // The subagents the shown claude started, read with its turns: how many still work (or how many it ran, once all
 // are done). A click opens the subagents panel.
-/** @param {Session} s */
-function agentsButton(s) {
+/** @param {Store} store @param {Session} s */
+function agentsButton(store, s) {
   const data = turnsView.id === s.id ? turnsView.data : null;
   if (!data?.claude) return null;
   const agents = data.agents ?? [];
@@ -1636,7 +1649,7 @@ function agentsButton(s) {
     onclick: (/** @type {MouseEvent} */ e) => {
       e.stopPropagation();
       if (isOpen()) return closeTurns();
-      openTurns(/** @type {HTMLElement} */ (e.currentTarget), s, 'agents');
+      openTurns(store, /** @type {HTMLElement} */ (e.currentTarget), s, 'agents');
     },
   }, icon('users'), h('span', null, working ? `${working}/${agents.length}` : String(agents.length)), working ? h('span', { class: 'term-dot' }) : null);
 }
@@ -1699,8 +1712,8 @@ function drawAgents(el, agents) {
 
 // The tools the shown claude called, read with its turns: how many calls its session and its subagents made so
 // far. A click opens the tools panel.
-/** @param {Session} s */
-function toolsButton(s) {
+/** @param {Store} store @param {Session} s */
+function toolsButton(store, s) {
   const data = turnsView.id === s.id ? turnsView.data : null;
   if (!data?.claude) return null;
   const { rows, calls, errors, agents } = sessionTools(data.turns, data.agentTools);
@@ -1717,7 +1730,7 @@ function toolsButton(s) {
     onclick: (/** @type {MouseEvent} */ e) => {
       e.stopPropagation();
       if (isOpen()) return closeTurns();
-      openTurns(/** @type {HTMLElement} */ (e.currentTarget), s, 'tools');
+      openTurns(store, /** @type {HTMLElement} */ (e.currentTarget), s, 'tools');
     },
   }, icon('wrench'), h('span', null, String(calls)));
 }
@@ -1830,52 +1843,33 @@ function drawTools(el, data) {
   }
 }
 
-// The skills and the MCP tools the shown claude used, read with its turns: a button each, with its own count. A click
-// lists them, the most used first: a skill is typed into the terminal again, an MCP tool's name is copied.
+// The skills and the MCP tools the shown claude used, read with its turns: a button each, with its own count, and
+// the MCP one with its failed calls in red. A click opens its panel (dev-uses.js).
 /** @param {Store} store @param {Session} s */
 function toolButtons(store, s) {
   const data = turnsView.id === s.id ? turnsView.data : null;
   if (!data?.claude) return null;
-  const skills = byUse(data.skills);
-  const tools = byUse(data.mcp).map(([name, n]) => ({ name, n, ...mcpTool(name) }));
-  const sum = (/** @type {{ n: number }[]} */ list) => list.reduce((t, x) => t + x.n, 0);
-  const skillUses = skills.reduce((t, [, n]) => t + n, 0);
-  const mcpCalls = sum(tools);
-  const servers = [...new Set(tools.map((t) => t.server))];
-  const toolItem = (/** @type {typeof tools[number]} */ t, /** @type {boolean} */ named) => ({
-    label: named ? `${t.server} · ${t.tool}` : t.tool || t.server,
-    hint: `${t.n}×`,
-    icon: () => icon('plug'),
-    onSelect: () => navigator.clipboard.writeText(t.name).then(() => toast('Tool name copied'), () => toast('Could not copy')),
-  });
-  /** @type {() => MenuEntry[]} */
-  const skillMenu = () => (skills.length
-    ? skills.map(([name, n]) => ({ label: `/${name}`, hint: `${n}×`, icon: () => icon('zap'), onSelect: () => filesCtx(store).typeInTerminal(`/${name} `) }))
-    : [{ label: 'No skill used yet' }]);
-  /** @type {() => MenuEntry[]} */
-  const mcpMenu = () => {
-    if (!tools.length) return [{ label: 'No MCP tool called yet' }];
-    if (servers.length === 1) return tools.map((t) => toolItem(t, true));
-    return servers.map((server) => {
-      const own = tools.filter((t) => t.server === server);
-      return { label: server, hint: `${sum(own)}×`, icon: () => icon('plug'), items: own.map((t) => toolItem(t, false)) };
-    });
+  const mcp = mcpOf(data);
+  /** @param {'skills' | 'mcp'} kind @param {IconName} name @param {number} count @param {string} title @param {number} [failed] */
+  const button = (kind, name, count, title, failed = 0) => {
+    const isOpen = () => turnsPop?.s === s && turnsPop.kind === kind;
+    return h('button', {
+      type: 'button',
+      class: `term-tool ${kind}${count ? '' : ' none'}`,
+      title,
+      'aria-label': title.split('\n')[0],
+      'aria-haspopup': 'dialog',
+      'aria-expanded': String(isOpen()),
+      onclick: (/** @type {MouseEvent} */ e) => {
+        e.stopPropagation();
+        if (isOpen()) return closeTurns();
+        openTurns(store, /** @type {HTMLElement} */ (e.currentTarget), s, kind);
+      },
+    }, icon(name), h('span', null, String(count)), failed ? h('span', { class: 'term-fail' }, `${failed} failed`) : null);
   };
-  /** @param {string} kind @param {IconName} name @param {number} count @param {string} title @param {() => MenuEntry[]} menu */
-  const button = (kind, name, count, title, menu) => h('button', {
-    type: 'button',
-    class: count ? `term-tool ${kind}` : `term-tool ${kind} none`,
-    title,
-    'aria-label': title.split('\n')[0],
-    'aria-haspopup': 'menu',
-    onclick: (/** @type {MouseEvent} */ e) => {
-      e.stopPropagation();
-      openMenu(menu(), /** @type {HTMLElement} */ (e.currentTarget));
-    },
-  }, icon(name), h('span', null, String(count)));
   return [
-    button('skills', 'zap', skillUses, `${skillUses} skill ${skillUses === 1 ? 'use' : 'uses'} in this claude session${skills.length ? ` (${skills.length} ${skills.length === 1 ? 'skill' : 'skills'})` : ''}\nShow the skills it ran`, skillMenu),
-    button('mcp', 'plug', mcpCalls, `${mcpCalls} MCP ${mcpCalls === 1 ? 'call' : 'calls'} in this claude session${servers.length ? ` (${servers.length} ${servers.length === 1 ? 'server' : 'servers'})` : ''}\nShow the MCP tools it called`, mcpMenu),
+    button('skills', 'zap', skillsOf(data).uses, skillsTitle(data)),
+    button('mcp', 'plug', mcp.calls, mcpTitle(data), mcp.errors),
   ];
 }
 
