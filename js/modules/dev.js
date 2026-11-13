@@ -11,7 +11,7 @@ import { h, icon, notice, uid } from '../ui.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
 import { onContextMenu, copyItem, openMenu, closeMenu } from '../menu.js';
-import { TERMINAL_RUNNER, runnerInfo, listFolder, listSessions, saveSessionList, listSession, moveSession, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput, saveImage, sessionTurns } from '../terminal.js';
+import { TERMINAL_RUNNER, runnerInfo, listFolder, listSessions, sessionStatus, saveSessionList, listSession, moveSession, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput, saveImage, sessionTurns } from '../terminal.js';
 import { imageFiles, dragsFiles } from '../images.js';
 import { createTerminal, styleOf, colorOf } from '../vt.js';
 import { readTheme, themedColors } from '../term-colors.js';
@@ -30,7 +30,7 @@ import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, cl
 import { sessionTools, fmtSpan, pct } from '../dev-turns.js';
 import { cronRunOf, cronRunHref } from '../cron.js';
 /** @import { Store, DevSessionList, IconName } from '../../types/data' */
-/** @import { RunnerInfo, RunnerEvent, RunnerTurns, SessionTurn, SessionAgent } from '../../types/terminal' */
+/** @import { RunnerInfo, RunnerEvent, RunnerTurns, RunnerStatus, SessionTurn, SessionAgent } from '../../types/terminal' */
 /** @import { DevContext } from '../../types/dev' */
 /** @import { Child } from '../../types/ui' */
 /** @import { Terminal, Line } from '../vt.js' */
@@ -313,8 +313,77 @@ async function syncSessions(store) {
   }
 }
 setInterval(() => {
-  if (currentStore && location.hash.startsWith('#/dev') && document.visibilityState === 'visible') syncSessions(currentStore);
+  if (!currentStore || !location.hash.startsWith('#/dev') || document.visibilityState !== 'visible') return;
+  syncSessions(currentStore);
+  readDots(currentStore);
 }, SYNC_MS);
+
+// What each terminal is doing, for its dot in the Terminals panel and on the bar: asked of the runner every few
+// seconds while Dev shows, and the dots are coloured where they stand, with no page render.
+const DOTS_MS = 4000;
+// A working claude that neither printed nor wrote to its transcript for this long is taken as not responding.
+const STALL_MS = 5 * 60000;
+/** @type {{ status: Record<string, RunnerStatus>, at: number, busy: boolean }} */
+const dots = { status: {}, at: 0, busy: false };
+const ASKS = /** @type {Record<string, string>} */ ({ question: 'claude asks you a question', plan: 'claude waits for its plan to be approved', permission: 'claude waits for your permission' });
+const RUNS_CLAUDE = /(?:^|[\s/])claude(?:\s|$)/;
+
+/** @param {Store} store */
+async function readDots(store) {
+  if (dots.busy || !view.info || !view.sessions.length || Date.now() - dots.at < DOTS_MS) return;
+  dots.busy = true;
+  try {
+    dots.status = await sessionStatus(runnerOf(store), view.sessions.map((s) => s.id));
+    for (const el of document.querySelectorAll('.dev [data-dot]')) {
+      const s = view.sessions.find((x) => x.id === /** @type {HTMLElement} */ (el).dataset.dot);
+      if (!s) continue;
+      const { key, label } = dotOf(s);
+      el.className = el.className.replace(/ is-\w+/, '') + ` is-${key}`;
+      el.setAttribute('title', label);
+      el.setAttribute('aria-label', label);
+    }
+  } catch {
+    // An unreachable runner says nothing: the dots keep what they showed.
+  } finally {
+    dots.at = Date.now();
+    dots.busy = false;
+  }
+}
+
+// Where a terminal stands, as the class of its dot and the words for it: a command running, claude working, asking
+// (a question, a plan, a permission), waiting after its turn, done, ended with an error, not responding, or idle.
+/** @param {Session} s @returns {{ key: string, label: string }} */
+function dotOf(s) {
+  const st = dots.status[s.id];
+  const live = st?.state === 'working' || st?.state === 'waiting';
+  // The status is a few seconds old: a command started or ended since is told by the terminal itself.
+  if (!st || s.running !== live) {
+    if (s.running) return { key: 'running', label: 'Running' };
+    if (st?.state === 'done' || s.exit?.code === 0) return { key: 'done', label: 'Finished' };
+    if (s.exit?.stopped) return { key: 'stopped', label: 'Stopped' };
+    return s.exit ? { key: 'failed', label: exitText(s.exit) } : { key: 'idle', label: 'Idle' };
+  }
+  if (live && st.agents === undefined && !st.ask && !RUNS_CLAUDE.test(s.command.split(/\s--\s/)[0])) return { key: 'running', label: 'Running' };
+  if (st.state === 'working') {
+    return (st.quiet ?? 0) >= STALL_MS
+      ? { key: 'stalled', label: `Not responding: claude gave no sign for ${Math.round(/** @type {number} */ (st.quiet) / 60000)} min` }
+      : { key: 'working', label: 'claude is working' };
+  }
+  if (st.state === 'waiting') {
+    if (st.ask) return { key: 'asks', label: `${ASKS[st.ask.kind] ?? ASKS.permission}${st.ask.text ? `: ${st.ask.text}` : ''}` };
+    return st.signalled ? { key: 'done', label: 'Done: claude gave the done signal' } : { key: 'waiting', label: 'claude finished its turn and waits for you' };
+  }
+  if (st.state === 'done') return { key: 'done', label: 'Finished' };
+  if (st.state === 'failed') return { key: 'failed', label: exitText(s.exit) || 'Ended with an error' };
+  return st.state === 'stopped' ? { key: 'stopped', label: 'Stopped' } : { key: 'idle', label: 'Idle' };
+}
+
+// A terminal's dot, coloured again in place as its state is read.
+/** @param {Session} s @param {string} base */
+function dot(s, base) {
+  const { key, label } = dotOf(s);
+  return h('span', { class: `${base} is-${key}`, 'data-dot': s.id, role: 'img', 'aria-label': label, title: label });
+}
 // Back on this screen: the other one may have changed the list.
 addEventListener('focus', () => {
   if (currentStore && location.hash.startsWith('#/dev')) syncSessions(currentStore);
@@ -1210,7 +1279,6 @@ function terminalsPanel(store, picker, switcher) {
   const row = (/** @type {Session} */ s) => {
     const titles = s.tasks.map((id) => tasks.find((t) => t.id === id)?.text).filter(Boolean);
     const what = s.running ? oneLine(s.command) : exitText(s.exit) || 'Ready';
-    const state = s.running ? 'Running' : 'Idle';
     return onContextMenu(h('div', { class: s.id === shown ? 'tree-row scm-row term-list-row active' : 'tree-row scm-row term-list-row' },
       h('button', {
         type: 'button',
@@ -1219,7 +1287,7 @@ function terminalsPanel(store, picker, switcher) {
         'aria-current': s.id === shown ? 'true' : null,
         onclick: () => jumpTo(store, s),
       },
-        h('span', { class: `wt-dot ${s.running ? 'running' : 'idle'}`, role: 'img', 'aria-label': state, title: state }),
+        dot(s, 'wt-dot'),
         h('span', { class: 'term-list-text' },
           h('span', { class: 'tree-name' }, `${numberOf(s)} · ${s.cwd ? baseName(s.cwd) : 'board'}`),
           h('span', { class: 'term-list-sub muted' }, titles[0] ? `${titles[0]}${titles.length > 1 ? ` +${titles.length - 1}` : ''}` : what))),
@@ -1267,7 +1335,7 @@ function sessionTitle(store, s) {
         } catch {}
         store.refresh();
       },
-    }, s.running ? h('span', { class: 'term-dot', title: 'Running' }) : icon('terminal'), h('span', null, `${numberOf(s)} · ${s.cwd ? baseName(s.cwd) : 'board'}`)), () => sessionMenu(store, s)),
+    }, s.running || dots.status[s.id] ? dot(s, 'term-dot') : icon('terminal'), h('span', null, `${numberOf(s)} · ${s.cwd ? baseName(s.cwd) : 'board'}`)), () => sessionMenu(store, s)),
     h('span', { class: 'term-claude' }, claudeButtons(store, s)),
     h('button', {
       type: 'button',
