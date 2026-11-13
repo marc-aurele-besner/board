@@ -1,6 +1,7 @@
 /** @import { Store, Task, TaskArtifact, TaskLink, Project, ProjectLabel, IconName } from '../../types/data' */
 /** @import { RunnerStatus } from '../../types/terminal' */
 /** @import { PickOption } from '../inline.js' */
+/** @import { MenuEntry } from '../menu.js' */
 /** @typedef {{ text: string, status: string[], priority: string[], project: string[], category: string[] }} ColFilter */
 /** @typedef {{ id: string, title: string, category: string, priority: string }} TidySuggestion */
 // What this section reads of repoStats(): the counts are there when status is 'ok'.
@@ -18,6 +19,8 @@ import { previewChips } from '../previews.js';
 import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startClaudeSession, openSession, runnerOf } from './dev.js';
+import { DEV_MODELS, DEV_EFFORTS } from '../dev-core.js';
+import { openMenu } from '../menu.js';
 import { sessionStatus, runnerInfo } from '../terminal.js';
 import { imagesOf, imageDrop, imageStrip, imagePathsFor, addImages } from '../task-images.js';
 import { dragsFiles, imageFiles } from '../images.js';
@@ -846,7 +849,10 @@ async function devTasks(store, items) {
   const moving = items.filter((i) => !['done', 'doing'].includes(statusOf(i))).map((i) => i.id);
   if (moving.length) updateItems(store, moving, { status: 'doing' });
   const ids = items.map((i) => i.id);
-  const { id: session, worktree } = startClaudeSession({ store, prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}`, projectId: folder?.id, taskIds: ids, title: items[0].text });
+  // Several tasks share one session: the first one that picked a model (or effort) sets it.
+  const model = items.find((i) => i.devModel)?.devModel ?? '';
+  const effort = items.find((i) => i.devEffort)?.devEffort ?? '';
+  const { id: session, worktree } = startClaudeSession({ store, prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}`, projectId: folder?.id, taskIds: ids, title: items[0].text, model, effort });
   // The task keeps its terminal: its Dev button shows what the terminal is doing and opens it.
   // It keeps the worktree claude makes too, removed once the task is completed (task-worktrees.js).
   const pick = new Set(ids);
@@ -923,6 +929,51 @@ export function watchDevSessions(store) {
     if (location.hash.startsWith('#/todos')) store.refresh();
   };
   devWatch.timer = setTimeout(poll, 0);
+}
+
+// The Dev button and, beside it, a down arrow with the model and effort the task's sessions use.
+/** @param {Store} store @param {Task} item */
+function devControl(store, item) {
+  return h('span', { class: 'dev-control' }, devButton(store, item), devOptionsButton(store, item));
+}
+
+// The task's model and effort: Default leaves the project's command (or claude) to choose. Saved on the task, so
+// its Dev button starts every session with them.
+/** @param {Store} store @param {Task} item */
+function devOptionsButton(store, item) {
+  const model = item.devModel ?? '';
+  const effort = item.devEffort ?? '';
+  const picked = [model, effort && `${effort} effort`].filter(Boolean).join(', ');
+  const title = `Dev options: ${picked || 'default model and effort'}`;
+  /** @param {'devModel' | 'devEffort'} field @param {string} value */
+  const set = (field, value) => store.update(COLLECTION, (d) => {
+    const t = d.items.find((x) => x.id === item.id);
+    if (!t) return;
+    if (value) t[field] = value;
+    else delete t[field];
+  });
+  /** @param {'devModel' | 'devEffort'} field @param {string[]} values @param {string} now @returns {MenuEntry[]} */
+  const rows = (field, values, now) => [
+    { label: 'Default', checked: !now, onSelect: () => set(field, '') },
+    '-',
+    ...values.map((v) => ({ label: v[0].toUpperCase() + v.slice(1), checked: now === v, onSelect: () => set(field, v) })),
+  ];
+  return h('button', {
+    type: 'button',
+    class: `icon-btn dev-options${picked ? ' set' : ''}`,
+    title,
+    'aria-label': `${title} for "${item.text}"`,
+    'aria-haspopup': 'menu',
+    onclick: (/** @type {MouseEvent} */ e) => {
+      e.stopPropagation();
+      openMenu([
+        { label: 'Model', hint: model || 'Default', items: rows('devModel', DEV_MODELS, model) },
+        { label: 'Effort', hint: effort || 'Default', items: rows('devEffort', DEV_EFFORTS, effort) },
+        '-',
+        { label: 'Start a new session', icon: icon('terminal'), onSelect: () => devTasks(store, [item]) },
+      ], /** @type {HTMLElement} */ (e.currentTarget));
+    },
+  }, icon('chevron-down'));
 }
 
 // Starts a Dev session on the task, or, once it has one, opens it in Dev; the colour says what the terminal is doing.
@@ -1303,7 +1354,7 @@ function todoRow(store, item, ctx, place) {
         repos.length || issuesOf(item).length || prsOf(item).length ? issueControl(store, item, repos) : null,
         cronButton(store, item),
         sourceButton(item),
-        devButton(store, item),
+        devControl(store, item),
         item.email
           ? h('a', { href: `#/inbox?email=${encodeURIComponent(item.email.id)}`, class: 'icon-btn', title: 'Open the email', 'aria-label': 'Open the email this task came from' }, icon('mail'))
           : null,
@@ -1439,7 +1490,7 @@ function boardCard(store, item, projects, order, place) {
         imageCount(item),
         cronButton(store, item),
         sourceButton(item),
-        devButton(store, item),
+        devControl(store, item),
         copyButton(store, item),
         h('button', {
           type: 'button',

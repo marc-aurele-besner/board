@@ -1178,6 +1178,10 @@ button.danger { color: var(--danger); }
 .icon-btn.dev-btn.dev-failed { color: var(--danger); }
 .icon-btn.dev-btn.dev-stopped, .icon-btn.dev-btn.dev-idle { color: var(--text); }
 .icon-btn.dev-btn:hover { filter: brightness(1.15); }
+/* The down arrow beside it: the task's model and effort; accent once one is picked. */
+.dev-control { display: inline-flex; align-items: center; }
+.dev-control .icon-btn.dev-options { min-width: 16px; padding: 0; font-size: 0.8rem; }
+.dev-control .icon-btn.dev-options:hover, .dev-control .icon-btn.dev-options.set { color: var(--accent); }
 .icon-btn.cron-btn { color: var(--accent); }
 .icon-btn.cron-btn:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 :is(.todo-item, .kanban-card).flash { animation: taskFlash 2.4s ease-out; }
