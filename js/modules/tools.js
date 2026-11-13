@@ -8,7 +8,7 @@ import { makeTask } from '../capture.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
 import { barChart } from '../chart.js';
-import { pickChip } from '../inline.js';
+import { pickChip, infoButton } from '../inline.js';
 import { contractsTab, contractsSerialize, contractsRestore } from './tools-contracts.js';
 import { requestsTab, requestsSerialize, requestsRestore } from './tools-requests.js';
 /** @import { CrawlFile, HealthSample, IconName, LlmsFile, Project, Provider, ProviderStatus, RobotsFile, SecurityFile, Site, SiteCrawl, SiteDns, SiteLogEntry, SiteDomain, SiteMeta, SitemapFile, Store } from '../../types/data' */
@@ -632,7 +632,8 @@ function crawlAll(store, sites) {
   return h('div', { class: 'stack-lg' }, siteBar(store, sites, null),
     h('div', { class: 'card mon-scroll' },
       h('table', { class: 'mon-table tool-table crawl-table' },
-        h('thead', null, h('tr', null, ['Site', ...CRAWL_FILES.map(([, name, short]) => h('span', { title: name }, short)), 'Read', ''].map((t) => h('th', null, t)))),
+        h('thead', null, h('tr', null, ['Site', ...CRAWL_FILES.map(([, name, short, why, core]) =>
+          h('span', { class: 'th-info' }, h('span', { title: name }, short), infoButton({ title: name, text: `${why} ${core ? 'Most sites should have it.' : 'Optional: only some sites need it.'}` }))), 'Read', ''].map((t) => h('th', null, t)))),
         h('tbody', null, sites.flatMap((p) => {
           const c = siteData(store, p.id).crawl;
           const busy = view.busy.has(p.id) || view.busy.has('all');
