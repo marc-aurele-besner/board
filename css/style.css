@@ -3059,9 +3059,13 @@ button.cal-agenda-name:hover { color: var(--accent); }
 .turns-title .muted { margin-left: auto; font-size: 0.8rem; }
 .turns-sum { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
 .turns-key { width: 8px; height: 8px; border-radius: 2px; flex: none; }
-.turns-sum .turns-key.wait { margin-left: 6px; }
+.turns-sum .turns-key.wait, .turns-sum .turns-key.idle { margin-left: 6px; }
 .turns-key.work, .turns-seg.work { background: var(--income); }
 .turns-key.wait, .turns-seg.wait { background: var(--accent); }
+.turns-key.idle, .turns-seg.idle { background: var(--warn); }
+.turns-row.idle:hover { background: none; }
+.turns-row.idle .turns-icon, .turns-row.idle .turns-text { color: var(--warn); }
+.turns-row.idle.live .turns-seg.idle { animation: pulse 1.4s ease-in-out infinite; }
 .turns-ask { display: flex; gap: 6px; align-items: flex-start; color: var(--text); }
 .turns-ask .icon { width: 13px; height: 13px; flex: none; margin-top: 2px; color: var(--accent); }
 .turns-list { display: flex; flex-direction: column; gap: 2px; padding: 5px; overflow-y: auto; min-height: 0; flex: 1; }

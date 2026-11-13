@@ -1435,9 +1435,16 @@ function drawTurns() {
   if (!data || activeSession() !== s || !el.isConnected) return closeTurns();
   const { turns, state } = data;
   const now = Date.now();
-  const rows = turns.map((t, i) => ({ t, n: i + 1, live: i === turns.length - 1 && state !== 'done', ...phasesOf(t, i === turns.length - 1 && state !== 'done', now) })).reverse();
+  const idle = idleOf(data, now);
+  const rows = turns.map((t, i) => {
+    const live = i === turns.length - 1 && state !== 'done' && !idle.now;
+    return { t, n: i + 1, live, ...phasesOf(t, live, now) };
+  }).reverse();
   const worked = rows.reduce((n, r) => n + r.worked, 0);
   const waited = rows.reduce((n, r) => n + r.waited, 0);
+  const idled = idle.gaps.reduce((n, g) => n + g.end - g.at, 0);
+  // Each wait for the next prompt sits after the turn it follows, newest first like the turns.
+  const gapAfter = new Map(idle.gaps.map((g) => [g.after, g]));
   const label = TURN_STATES[state] ?? state;
   const ask = state === 'waiting' && data.ask?.text ? data.ask.text : '';
   const scroll = el.querySelector('.turns-list')?.scrollTop ?? 0;
@@ -1449,40 +1456,76 @@ function drawTurns() {
         h('span', { class: 'muted' }, `${turns.length} ${turns.length === 1 ? 'turn' : 'turns'}`)),
       turns.length ? h('div', { class: 'muted small turns-sum' },
         h('span', { class: 'turns-key work' }), `${took(worked)} working`,
-        waited ? [h('span', { class: 'turns-key wait' }), `${took(waited)} waiting on you`] : null) : null,
+        waited ? [h('span', { class: 'turns-key wait' }), `${took(waited)} waiting on you`] : null,
+        idled ? [h('span', { class: 'turns-key idle' }), `${took(idled)} waiting for your next prompt`] : null) : null,
       ask ? h('div', { class: 'small turns-ask' }, icon('alert'), h('span', null, ask)) : null),
     rows.length
-      ? h('div', { class: 'turns-list', role: 'list' }, rows.map((r) => {
-        const status = r.live ? state : r.t.interrupted ? 'interrupted' : 'done';
-        const now = r.live ? r.phases.at(-1) : undefined;
-        const waits = r.t.waits?.length ?? 0;
-        return h('button', {
-          type: 'button',
-          class: `turns-row ${status}`,
-          role: 'listitem',
-          title: `${r.t.text}\n\nClick to copy the prompt`,
-          onclick: () => { navigator.clipboard.writeText(r.t.text).then(() => toast('Prompt copied'), () => toast('Could not copy')); },
-        },
-        h('div', { class: 'turns-line' },
-          h('span', { class: 'turns-icon' }, status === 'working' ? h('span', { class: 'term-dot' }) : icon(status === 'waiting' ? 'alert' : status === 'interrupted' ? 'stop' : 'check')),
-          h('span', { class: 'turns-text' }, `${r.n}. ${turnLine(r.t.text)}`),
-          h('span', { class: 'turns-took' }, r.total > 0 ? took(r.total) : '')),
-        r.total > 0 ? h('div', { class: 'turns-bar', 'aria-hidden': 'true' }, r.phases.map((p) => h('span', {
-          class: `turns-seg ${p.kind === 'work' ? 'work' : 'wait'}`,
-          style: { flexGrow: String(Math.max(p.end - p.at, 1)) },
-          title: `${p.kind === 'work' ? 'Working' : `Waiting on ${WAIT_KINDS[p.kind] ?? 'you'}`} · ${clock(p.at)} · ${took(p.end - p.at)}`,
-        }))) : null,
-        h('div', { class: 'muted small turns-meta' },
-          h('span', null, `Started ${clock(r.t.at)}`),
-          now ? h('span', null, h('span', { class: `turns-key ${now.kind === 'work' ? 'work' : 'wait'}` }),
-            `Now ${now.kind === 'work' ? 'working' : `waiting on ${WAIT_KINDS[now.kind] ?? 'you'}`} for ${took(now.end - now.at)}`) : null,
-          r.total > 0 ? h('span', null, h('span', { class: 'turns-key work' }), `${took(r.worked)} working`) : null,
-          r.waited ? h('span', null, h('span', { class: 'turns-key wait' }), `${took(r.waited)} waiting on you${waits > 1 ? ` (${waits} times)` : ''}`) : null,
-          status === 'interrupted' ? h('span', null, 'Interrupted') : null));
+      ? h('div', { class: 'turns-list', role: 'list' }, rows.flatMap((r) => {
+        const gap = gapAfter.get(r.n);
+        return [gap ? idleRow(gap) : null, turnRow(r)];
       }))
       : h('p', { class: 'muted small' }, 'No prompt yet.'));
   const list = el.querySelector('.turns-list');
   if (list) list.scrollTop = scroll;
+
+  /** @param {typeof rows[number]} r */
+  function turnRow(r) {
+    const status = r.live ? state : r.t.interrupted ? 'interrupted' : 'done';
+    const now = r.live ? r.phases.at(-1) : undefined;
+    const waits = r.t.waits?.length ?? 0;
+    return h('button', {
+      type: 'button',
+      class: `turns-row ${status}`,
+      role: 'listitem',
+      title: `${r.t.text}\n\nClick to copy the prompt`,
+      onclick: () => { navigator.clipboard.writeText(r.t.text).then(() => toast('Prompt copied'), () => toast('Could not copy')); },
+    },
+    h('div', { class: 'turns-line' },
+      h('span', { class: 'turns-icon' }, status === 'working' ? h('span', { class: 'term-dot' }) : icon(status === 'waiting' ? 'alert' : status === 'interrupted' ? 'stop' : 'check')),
+      h('span', { class: 'turns-text' }, `${r.n}. ${turnLine(r.t.text)}`),
+      h('span', { class: 'turns-took' }, r.total > 0 ? took(r.total) : '')),
+    r.total > 0 ? h('div', { class: 'turns-bar', 'aria-hidden': 'true' }, r.phases.map((p) => h('span', {
+      class: `turns-seg ${p.kind === 'work' ? 'work' : 'wait'}`,
+      style: { flexGrow: String(Math.max(p.end - p.at, 1)) },
+      title: `${p.kind === 'work' ? 'Working' : `Waiting on ${WAIT_KINDS[p.kind] ?? 'you'}`} · ${clock(p.at)} · ${took(p.end - p.at)}`,
+    }))) : null,
+    h('div', { class: 'muted small turns-meta' },
+      h('span', null, `Started ${clock(r.t.at)}`),
+      now ? h('span', null, h('span', { class: `turns-key ${now.kind === 'work' ? 'work' : 'wait'}` }),
+        `Now ${now.kind === 'work' ? 'working' : `waiting on ${WAIT_KINDS[now.kind] ?? 'you'}`} for ${took(now.end - now.at)}`) : null,
+      r.total > 0 ? h('span', null, h('span', { class: 'turns-key work' }), `${took(r.worked)} working`) : null,
+      r.waited ? h('span', null, h('span', { class: 'turns-key wait' }), `${took(r.waited)} waiting on you${waits > 1 ? ` (${waits} times)` : ''}`) : null,
+      status === 'interrupted' ? h('span', null, 'Interrupted') : null));
+  }
+}
+
+// The times claude waited for its user's next prompt: between two turns, and after the last one while claude sits
+// at its prompt with nothing asked. A pause of a moment is left out.
+const IDLE_MIN_MS = 1000;
+/** @param {RunnerTurns} data @param {number} now */
+function idleOf(data, now) {
+  const { turns, state } = data;
+  /** @type {{ after: number, at: number, end: number, live: boolean }[]} */
+  const gaps = [];
+  turns.slice(1).forEach((t, i) => {
+    if (t.at - turns[i].end >= IDLE_MIN_MS) gaps.push({ after: i + 1, at: turns[i].end, end: t.at, live: false });
+  });
+  const last = turns.at(-1);
+  const idleNow = !!last && state === 'waiting' && !data.ask && !last.waits.some((w) => !w.end);
+  if (idleNow && last) gaps.push({ after: turns.length, at: last.end, end: Math.max(now, last.end), live: true });
+  return { gaps, now: idleNow };
+}
+
+/** @param {{ at: number, end: number, live: boolean }} g */
+function idleRow(g) {
+  return h('div', { class: `turns-row idle${g.live ? ' live' : ''}`, role: 'listitem' },
+    h('div', { class: 'turns-line' },
+      h('span', { class: 'turns-icon' }, icon('clock')),
+      h('span', { class: 'turns-text' }, 'Waiting for you'),
+      h('span', { class: 'turns-took' }, took(g.end - g.at))),
+    h('div', { class: 'turns-bar', 'aria-hidden': 'true' }, h('span', { class: 'turns-seg idle', style: { flexGrow: '1' } })),
+    h('div', { class: 'muted small turns-meta' },
+      h('span', null, g.live ? `Since ${clock(g.at)}` : `From ${clock(g.at)} to ${clock(g.end)}`)));
 }
 
 // How many turns the shown claude took, and where the last one stands; a click opens the turns panel.
