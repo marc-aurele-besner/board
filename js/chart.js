@@ -86,18 +86,23 @@ export function barChart(labels, series, { grouped = false, format = (v) => v.to
 
 // Lines per label, for running totals and rates. A null value leaves a gap; `dashed` draws a series as a
 // dashed line (an estimate), and `area` shades under it. Hover works as on the bar chart, one point per label.
+// `fit` scales the axis to the values instead of starting at 0, so a small change on a large number shows.
 /**
  * @param {string[]} labels
  * @param {LineSeries[]} series
- * @param {{ format?: (v: number) => string, tip?: ChartTip | null }} [options]
+ * @param {{ format?: (v: number) => string, tip?: ChartTip | null, fit?: boolean }} [options]
  */
-export function lineChart(labels, series, { format = (v) => v.toLocaleString(), tip = null } = {}) {
+export function lineChart(labels, series, { format = (v) => v.toLocaleString(), tip = null, fit = false } = {}) {
   const MIN_W = 360;
   const H = 200;
   const PAD = 24;
   const TOP = 16;
   const values = series.flatMap((sr) => sr.values.filter((v) => v != null));
-  const max = Math.max(0, ...values) || 1;
+  const top = Math.max(0, ...values);
+  const low = Math.min(top, ...values);
+  const margin = fit ? (top - low || top || 1) * 0.15 : 0;
+  const min = fit ? Math.max(0, low - margin) : 0;
+  const max = fit ? top + margin : top || 1;
   const totals = labels.map((_, i) => Math.max(0, ...series.map((sr) => sr.values[i] ?? 0)));
   tip ??= (i) => [
     h('span', { class: 'muted' }, labels[i]),
@@ -109,10 +114,10 @@ export function lineChart(labels, series, { format = (v) => v.toLocaleString(), 
   const draw = (/** @type {number} */ W) => {
     const slot = W / labels.length;
     const xOf = (/** @type {number} */ i) => i * slot + slot / 2;
-    const yOf = (/** @type {number} */ v) => H - PAD - (v / max) * (H - PAD - TOP);
+    const yOf = (/** @type {number} */ v) => H - PAD - ((v - min) / (max - min)) * (H - PAD - TOP);
     const every = Math.max(1, Math.ceil(labelWidth / slot));
     // A light grid at the top value and its half, labelled, since a line has no bar height to compare.
-    let body = [max, max / 2].map((v) => `<line x1="0" x2="${W}" y1="${yOf(v).toFixed(1)}" y2="${yOf(v).toFixed(1)}" class="grid"/>`
+    let body = [max, (max + min) / 2].map((v) => `<line x1="0" x2="${W}" y1="${yOf(v).toFixed(1)}" y2="${yOf(v).toFixed(1)}" class="grid"/>`
       + `<text x="2" y="${(yOf(v) - 4).toFixed(1)}" class="axis">${esc(format(v))}</text>`).join('');
     for (const sr of series) {
       // Runs of points without a gap, each drawn as its own path.
