@@ -11,7 +11,7 @@ import { h, icon, notice, uid } from '../ui.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
 import { onContextMenu, copyItem, openMenu } from '../menu.js';
-import { TERMINAL_RUNNER, runnerInfo, listSessions, saveSessionList, listSession, moveSession, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput, saveImage } from '../terminal.js';
+import { TERMINAL_RUNNER, runnerInfo, listFolder, listSessions, saveSessionList, listSession, moveSession, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput, saveImage } from '../terminal.js';
 import { imageFiles, dragsFiles } from '../images.js';
 import { createTerminal, styleOf, colorOf } from '../vt.js';
 import { readTheme, themedColors } from '../term-colors.js';
@@ -41,7 +41,8 @@ import { cronRunOf, cronRunHref } from '../cron.js';
  * @typedef {LinesEl & { out: HTMLElement, top: number, holding?: boolean }} TermEl
  * @typedef {{ id: string, n: number, cwd: string, tasks: string[], prompt: string, running: boolean, attach: AbortController | null,
  *   replaying: boolean, pid: number, exit: Exit | null, command: string, browse: number, stick: boolean, el: TermEl | null,
- *   term: Terminal, watch?: (text: string) => void, observer?: ResizeObserver, listed: boolean, listedAt: number }} Session
+ *   term: Terminal, watch?: (text: string) => void, observer?: ResizeObserver, listed: boolean, listedAt: number,
+ *   pickup?: { key: string, ok: boolean | null } }} Session
  */
 
 export { runnerOf, devPresets, DEFAULT_DEV_COMMAND, devCommandOf };
@@ -49,9 +50,10 @@ export { runnerOf, devPresets, DEFAULT_DEV_COMMAND, devCommandOf };
 const COLLECTION = 'dev';
 // presets: commands named in Settings → Dev environment ({ id, name, command }), which projects pick instead of
 // typing the same command each time.
-const DEFAULTS = { history: [], runner: '', presets: [] };
+const DEFAULTS = { history: [], favorites: [], runner: '', presets: [] };
 const HISTORY_MAX = 100;
 const RECENT_SHOWN = 8;
+const FAVORITES_MAX = 40;
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 // Where this browser kept the open terminals before the runner did; read once, then removed.
 const OLD_SESSIONS_KEY = 'board:dev-sessions';
@@ -974,6 +976,84 @@ function remember(store, command) {
   });
 }
 
+/** @param {Store} store @param {string} command */
+function addFavorite(store, command) {
+  const favorites = store.get(COLLECTION).favorites ?? [];
+  if (favorites.includes(command)) return;
+  if (favorites.length >= FAVORITES_MAX) return toast(`${FAVORITES_MAX} favorites already. Remove one first.`);
+  store.update(COLLECTION, (d) => {
+    d.favorites = [...(d.favorites ?? []), command];
+  });
+  toast('Added to favorites');
+}
+
+/** @param {Store} store @param {string} command */
+function removeFavorite(store, command) {
+  store.update(COLLECTION, (d) => {
+    d.favorites = (d.favorites ?? []).filter((c) => c !== command);
+  });
+}
+
+// The favorites menu: a favorite runs at once; the command typed, or a recent one, can be added, and any removed.
+/** @param {Store} store @param {Session} s @param {HTMLInputElement} input @returns {MenuEntry[]} */
+function favoritesMenu(store, s, input) {
+  const { history, favorites = [] } = store.get(COLLECTION);
+  const typed = input.value.trim();
+  const recent = history.filter((c) => !favorites.includes(c));
+  return [
+    ...favorites.map((c) => ({ label: oneLine(c), icon: () => icon('play'), hint: 'Run', onSelect: () => run(store, s, c) })),
+    favorites.length ? '-' : null,
+    typed && !favorites.includes(typed) ? { label: `Add “${oneLine(typed)}”`, icon: () => icon('plus'), onSelect: () => addFavorite(store, typed) } : null,
+    recent.length
+      ? { label: 'Add a recent command', icon: () => icon('clock'), search: 'Find a command', items: recent.map((c) => ({ label: oneLine(c), onSelect: () => addFavorite(store, c) })) }
+      : null,
+    favorites.length
+      ? { label: 'Remove a favorite', icon: () => icon('trash'), items: favorites.map((c) => ({ label: oneLine(c), danger: true, onSelect: () => removeFavorite(store, c) })) }
+      : null,
+    !favorites.length && !typed && !recent.length ? { label: 'Type a command, then add it here', icon: () => icon('info'), onSelect: () => input.focus() } : null,
+  ];
+}
+
+// claude started again with the options it had: the prompt (after `--`, or quoted) is not sent again, the worktree
+// it named is returned apart, and --continue picks up its last conversation. null for a command that is not claude.
+// A command the suggestion made (`cd <worktree> && claude …`) counts as claude run in that folder.
+const CD_PREFIX = /^\s*cd\s+(?:'[^']*'|\S+)\s*&&\s*/;
+const WORKTREE_NAMED = /(^|\s)(?:--worktree|-w)(?:=|\s+)(?!-)([\w.-]{1,64})(?=\s|$)/;
+const WORKTREE_BARE = /(^|\s)(?:--worktree|-w)(?=\s|$)/;
+const RESUME_FLAGS = /(^|\s)(?:--continue|-c|--resume(?:[= ](?!-)\S+)?|-r(?: (?!-)\S+)?)(?=\s|$)/g;
+/** @param {string} command */
+function claudeAgain(command) {
+  const head = command.replace(CD_PREFIX, '').split(/\s--(?:\s|$)/)[0].split(/["']/)[0];
+  if (!/^\s*claude(?=\s|$)/.test(head)) return null;
+  const worktree = WORKTREE_NAMED.exec(head)?.[2] ?? '';
+  const options = head.replace(WORKTREE_NAMED, '$1').replace(WORKTREE_BARE, '$1').replace(RESUME_FLAGS, '$1').trim().replace(/\s+/g, ' ');
+  return { worktree, command: `${options} --continue` };
+}
+
+// What the bar suggests once a command ended. claude that ran in a worktree (`claude --worktree <name>`) and quit:
+// pick its conversation up in the same worktree, while the worktree is still there. claude anywhere else: continue it.
+/** @param {Store} store @param {Session} s @returns {{ label: string, command: string } | null} */
+function suggestion(store, s) {
+  if (s.running || !s.exit || !s.command) return null;
+  const again = claudeAgain(s.command);
+  if (!again) return null;
+  if (!again.worktree) return { label: 'Continue claude here', command: again.command };
+  const path = `${s.cwd.replace(/\/+$/, '')}/.claude/worktrees/${again.worktree}`;
+  // Whether the worktree is still there is asked of the runner once per command that ended.
+  const key = `${path}\n${s.command}`;
+  if (s.pickup?.key !== key && view.info) {
+    const pickup = { key, ok: /** @type {boolean | null} */ (null) };
+    s.pickup = pickup;
+    listFolder(runnerOf(store), path).then(() => true, () => false).then((ok) => {
+      pickup.ok = ok;
+      if (s.pickup === pickup) store.refresh();
+    });
+  }
+  return s.pickup?.key === key && s.pickup.ok
+    ? { label: `Pick up claude in ${again.worktree}`, command: `cd ${shellQuote(path)} && ${again.command}` }
+    : null;
+}
+
 /** @param {Session} s */
 function clearTerminal(s) {
   s.term.clear();
@@ -1300,6 +1380,20 @@ function terminal(store, s) {
     }, icon('clock'))
     : null;
   const state = s.running ? '' : exitText(s.exit);
+  const next = suggestion(store, s);
+  const favorites = s.running
+    ? null
+    : h('button', {
+      type: 'button',
+      class: 'icon-btn term-favorites',
+      title: 'Favorite commands: run one, or add the command typed',
+      'aria-label': 'Favorite commands',
+      'aria-haspopup': 'menu',
+      onclick: (/** @type {MouseEvent} */ e) => {
+        e.stopPropagation();
+        openMenu(favoritesMenu(store, s, input), /** @type {HTMLElement} */ (e.currentTarget));
+      },
+    }, icon('star'));
 
   return h('section', { class: 'card term' },
     h('div', { class: 'term-head' },
@@ -1347,7 +1441,16 @@ function terminal(store, s) {
         : input,
       s.running ? keys('Esc', '\x1b', 'Send Escape (interrupts claude)') : null,
       s.running ? keys('Ctrl+C', '\x03', 'Send Ctrl+C') : null,
+      next
+        ? h('button', {
+          type: 'button',
+          class: 'term-suggest',
+          title: `${next.label}: runs\n${next.command}`,
+          onclick: () => run(store, s, next.command, { remember: false }),
+        }, icon('lightbulb'), h('span', {}, next.label))
+        : null,
       state ? h('span', { class: s.exit && !s.exit.stopped && !s.exit.lost && !s.exit.signal && s.exit.code === 0 ? 'term-exit ok' : 'term-exit', title: state }, state) : null,
+      favorites,
       recent,
       s.running
         ? h('button', { type: 'submit', class: 'term-run stop', title: 'Stop the command and anything it started' }, icon('stop'), 'Stop')

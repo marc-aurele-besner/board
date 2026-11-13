@@ -1,4 +1,4 @@
-// dev.json: the Dev section's command history, its command runner and the command presets (js/modules/dev.js).
+// dev.json: the Dev section's command history and favorites, its command runner and the command presets (js/modules/dev.js).
 
 // A command named in Settings → Dev environment, which projects pick (project.devPreset) instead of typing it.
 export interface DevPreset {
@@ -10,6 +10,8 @@ export interface DevPreset {
 export interface DevData {
   // Commands run from Dev, newest first.
   history: string[];
+  // Commands kept at hand in the bar's Favorites menu, in the order they were added.
+  favorites?: string[];
   // The command runner's address; '' means the default (TERMINAL_RUNNER).
   runner: string;
   presets: DevPreset[];
