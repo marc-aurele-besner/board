@@ -83,6 +83,13 @@
     }
   ],
   "telegram": { "token": "", "chatId": "", "confirm": true, "offset": 0 },
+  "notion": {
+    "token": "",
+    "links": [
+      { "id": "notion-link-1", "databaseId": "00000000000000000000000000000000", "name": "Example database", "projectId": "project-1", "on": true, "syncedAt": "2026-01-02T09:00:00.000Z", "error": "" },
+      { "id": "notion-link-2", "databaseId": "11111111111111111111111111111111", "name": "Other database", "projectId": null }
+    ]
+  },
   "vercel": { "token": "" },
   "netlify": { "token": "" },
   "analytics": { "properties": { "project-1": "123456789" } },
