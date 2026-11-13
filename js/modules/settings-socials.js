@@ -1,9 +1,11 @@
 // Settings → X / Twitter, LinkedIn, GitHub and Instagram accounts: the accounts whose follower counts (and GitHub stars)
 // Monitoring → Socials follows, each tied to a project if wanted, and LinkedIn's signed-in session for company pages.
-import { h, icon, uid, refreshIcon } from '../ui.js';
+import { h, icon, uid, refreshIcon, copyable } from '../ui.js';
 import { pickChip } from '../inline.js';
 import { toast } from '../toast.js';
-import { runJob } from '../runners.js';
+import { runJob, runnersOnline, runnersKnown } from '../runners.js';
+import { LINKEDIN, signedIn } from '../linkedin-core.js';
+import { linkedinApp, linkedinRedirect, linkedinSignIn, linkedinSignOut } from '../linkedin.js';
 import { SOCIALS, NETWORKS, networkIcon, parseHandle, profileUrl, handleLabel, isOrganization } from '../socials.js';
 import { projectIcon, projectTree } from './projects.js';
 /** @import { Store, SocialAccount, Project, LinkedinSettings } from '../../types/data' */
@@ -149,6 +151,80 @@ function addForm(store, network) {
     status);
 }
 
+// The sign-in status line of the Publish as you card, kept across re-renders.
+const publish = { text: '', ok: true };
+
+// Settings → LinkedIn → Publish as you: the member's own developer app and its official sign-in, which posts.
+/** @param {Store} store */
+function publishCard(store) {
+  const app = linkedinApp(store);
+  const auth = store.get(LINKEDIN).auth;
+  const live = signedIn(auth);
+  const offline = runnersKnown() && !runnersOnline();
+  /** @param {string} text @param {boolean} [ok] */
+  const say = (text, ok = true) => {
+    publish.text = text;
+    publish.ok = ok;
+    store.refresh();
+  };
+  const clientId = h('input', { name: 'clientId', autocomplete: 'off', spellcheck: false, placeholder: 'Client ID', value: app.clientId ?? '', 'aria-label': 'Client ID' });
+  const clientSecret = h('input', { name: 'clientSecret', type: 'password', autocomplete: 'off', spellcheck: false, placeholder: 'Client Secret', value: app.clientSecret ?? '', 'aria-label': 'Client Secret' });
+  const ends = auth ? new Date(auth.expires).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+  return h('section', { class: 'card panel' },
+    h('header', { class: 'panel-head' },
+      h('div', null,
+        h('h2', null, 'Publish as you'),
+        h('p', { class: 'muted' }, 'Posts written in the board go out as you, through LinkedIn’s official API and a developer app of your own. Its sign-in lasts 60 days; the board reminds you a week before it ends.')),
+      h('div', { class: 'row' }, badge(live ? 'Signed in' : auth ? 'Expired' : 'Not signed in', live ? 'done' : 'plain'))),
+    h('div', { class: 'cred-body' },
+      auth ? h('div', { class: 'svc-section' },
+        h('div', { class: 'resend-name' },
+          auth.picture
+            ? h('img', { class: 'slack-team-icon slack-ws-icon', src: auth.picture, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' })
+            : h('span', { class: 'social-avatar' }, icon('linkedin')),
+          h('div', { class: 'slack-ws-name' },
+            h('strong', null, auth.name || 'LinkedIn member'),
+            h('span', { class: 'muted small' }, live ? `Signed in until ${ends}` : `The sign-in ended on ${ends}. Sign in again to post.`))),
+        h('div', { class: 'svc-actions' },
+          h('button', { type: 'button', class: 'danger', onclick: () => linkedinSignOut(store) }, icon('x'), 'Sign out'))) : null,
+      h('div', { class: 'svc-section' },
+        h('h3', null, 'Setup'),
+        h('ol', { class: 'steps' }, [
+          ['Create an app at ', link('https://www.linkedin.com/developers/apps', 'LinkedIn Developers'), ' (it asks for a company page; any page you admin will do).'],
+          'Under Products, add “Sign In with LinkedIn using OpenID Connect” and “Share on LinkedIn”.',
+          ['Under Auth → Authorized redirect URLs, add ', copyable(linkedinRedirect())],
+          'Copy the Client ID and Client Secret from Auth into the fields below, save, then sign in.',
+        ].map((s) => h('li', null, h('span', { class: 'step-text' }, s))))),
+      h('form', {
+        class: 'svc-section stack-sm',
+        onsubmit: (/** @type {SubmitEvent} */ e) => {
+          e.preventDefault();
+          store.update('settings', (d) => {
+            d.linkedin = { ...d.linkedin, clientId: clientId.value.trim(), clientSecret: clientSecret.value.trim() };
+          });
+          say('Saved.');
+        },
+      },
+        h('label', { class: 'stack-sm' }, h('span', { class: 'small' }, 'Client ID'), clientId),
+        h('label', { class: 'stack-sm' }, h('span', { class: 'small' }, 'Client Secret'), clientSecret),
+        h('p', { class: 'muted small' }, 'Saved in settings.json in your data folder. The runners on this machine send them to LinkedIn to finish the sign-in, since LinkedIn’s token endpoint does not answer a browser.'),
+        offline ? h('p', { class: 'small error', role: 'status' }, 'The runners are not running, so the sign-in cannot finish and posts cannot go out. Start the board with bun start.') : null,
+        h('div', { class: 'svc-actions' },
+          h('button', { type: 'submit' }, 'Save'),
+          h('button', {
+            type: 'button',
+            class: 'primary',
+            disabled: !app.clientId || !app.clientSecret,
+            onclick: () => {
+              say('Waiting for LinkedIn’s sign-in…');
+              linkedinSignIn(store)
+                .then((a) => say(`Signed in${a.name ? ` as ${a.name}` : ''}.`))
+                .catch((err) => say(err.message, false));
+            },
+          }, icon('linkedin'), live ? 'Sign in again' : 'Sign in with LinkedIn')),
+        publish.text ? h('p', { class: `small ${publish.ok ? 'muted' : 'error'}`, role: 'status' }, publish.text) : null)));
+}
+
 /** @param {Store} store */
 function linkedinSession(store) {
   const saved = /** @type {LinkedinSettings} */ (store.get('settings').linkedin ?? {});
@@ -157,8 +233,10 @@ function linkedinSession(store) {
   const jsession = h('input', { name: 'jsessionid', type: 'password', autocomplete: 'off', spellcheck: false, placeholder: 'ajax:123…', value: saved.jsessionid ?? '', 'aria-label': 'JSESSIONID cookie' });
   /** @param {LinkedinSettings} value */
   const save = (value) => {
+    // Keeps the app of Publish as you, which shares settings.linkedin.
     store.update('settings', (d) => {
-      d.linkedin = value;
+      const { liAt: _a, jsessionid: _j, ...app } = d.linkedin ?? {};
+      d.linkedin = { ...app, ...value };
     });
     const pages = store.get(SOCIALS).accounts.filter((a) => a.network === 'linkedin' && (isOrganization(a) || a.error)).map((a) => a.id);
     if (pages.length && value.liAt) readNow(store, pages);
@@ -221,5 +299,6 @@ export function socialsCard(store, network) {
           ? [h('li', { class: 'resend-row resend-head', 'aria-hidden': 'true' }, h('span', null, 'Account'), h('span', null, 'Project'), h('span')),
               ...accounts.map((a) => accountRow(store, a, projects))]
           : [h('li', { class: 'empty' }, `No ${NETWORKS[network]} account yet.`)])),
+    network === 'linkedin' ? publishCard(store) : null,
     network === 'linkedin' ? linkedinSession(store) : null);
 }

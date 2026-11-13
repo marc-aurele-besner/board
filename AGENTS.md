@@ -21,7 +21,7 @@ A personal command center that runs locally. It is plain HTML, CSS and JavaScrip
 
 ```
 index.html            entry point; inline script applies the saved theme before paint
-oauth.html            where Google's and Notion's sign-ins come back; hands the code to the board's tab
+oauth.html            where Google's, Notion's and LinkedIn's sign-ins come back; hands the code to the board's tab
 css/style.css         design tokens (light and dark) and all styles
 js/app.js             shell: folder connection, router, top nav, theme toggle
 js/storage.js         File System Access API wrapper; remembers the folder in IndexedDB
@@ -53,6 +53,8 @@ js/brand.js           a project's brand (images, colours, fonts, links): reads i
 js/modules/project-brand.js  the Brand block of a project's page: swatches, images, fonts, links, editing and Find with AI
 js/chart.js           SVG bar and line charts with a hover tooltip
 js/socials.js         the X, LinkedIn, GitHub and Instagram accounts, their follower (and GitHub star) history in socials.json; parsing a handle or profile link (no DOM)
+js/linkedin-core.js   linkedin.json without the DOM: the official sign-in's code trade and its expiry notice
+js/linkedin.js        LinkedIn's official sign-in popup (Settings → LinkedIn → Publish as you)
 js/modules/settings-socials.js  Settings → X / Twitter, LinkedIn, GitHub and Instagram accounts: accounts, their projects, LinkedIn’s session; Read now
 js/modules/monitoring-socials.js  Monitoring → Socials (X, LinkedIn, GitHub, Instagram): followers (and GitHub stars) now, growth over the period, a line per account, Read now
 js/modules/monitoring-ai.js  Monitoring → AI usage overview: board calls and Dev sessions by source and project, a chart and table broken down by project, source, model or feature, against the period before
