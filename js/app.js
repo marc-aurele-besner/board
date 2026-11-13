@@ -22,6 +22,7 @@ import { FX, FX_DEFAULTS, useFxStore } from './fx.js';
 import { JUMPS, openShortcuts } from './shortcuts.js';
 import { sampleFolder } from './sample.js';
 import { toast } from './toast.js';
+import { watchKeepAwake } from './wake-lock.js';
 import { markDrawn, snapshot, restore, holding, watchCommits } from './keep-fields.js';
 
 /** @import { Store, Module } from '../types/data' */
@@ -362,6 +363,7 @@ async function reconnect() {
 
 async function boot() {
   applyAppearance();
+  watchKeepAwake();
   // A link or the back button changed the route: load that section's view from the URL, then render.
   window.addEventListener('hashchange', () => {
     if (!store) return;

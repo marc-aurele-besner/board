@@ -22,6 +22,7 @@ import { socialsCard } from './settings-socials.js';
 import { notionCard } from './settings-notion.js';
 import { modelForTask } from '../models.js';
 import { logo } from './positions.js';
+import { keepAwakeOn, keepAwakeSupported, setKeepAwake } from '../wake-lock.js';
 
 /** @import { Store, IconName, AddedPosition, GithubOrgToken, UniswapSettings, PoolRow, ModelsSettings, ModelTask, GoogleSettings } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
@@ -785,7 +786,25 @@ function appearanceCard(store) {
       h('p', { class: 'muted small' }, 'Compact tightens the rows in tasks, projects and the board.'),
       h('div', { class: 'segmented app-seg' },
         choice('Comfortable', 'comfortable', density, pickDensity),
-        choice('Compact', 'compact', density, pickDensity))));
+        choice('Compact', 'compact', density, pickDensity))),
+
+    h('div', { class: 'svc-section' },
+      h('h3', null, 'Screen'),
+      h('p', { class: 'muted small' }, keepAwakeSupported()
+        ? 'Keeps the screen from dimming or sleeping while the board is open in front. Saved in this browser.'
+        : 'This browser cannot keep the screen awake. Chrome and Edge can.'),
+      h('label', { class: 'check' },
+        h('input', {
+          type: 'checkbox',
+          role: 'switch',
+          checked: keepAwakeOn(),
+          disabled: !keepAwakeSupported(),
+          onchange: (/** @type {Event} */ e) => {
+            setKeepAwake(/** @type {HTMLInputElement} */ (e.target).checked);
+            store.refresh();
+          },
+        }),
+        'Keep the screen awake')));
 }
 
 // --- Keys per organization ---
