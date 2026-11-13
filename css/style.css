@@ -2862,8 +2862,8 @@ button.sum-line:hover { background: var(--surface-2); }
    runs from the top bar to the bottom of the window and meets the grid with one border; the grid fills the rest. */
 .cal-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 0; align-items: start; }
 .view[data-section="calendar"] > .stack-lg > .cal-layout:first-child { padding-top: 0; }
-/* DeFi's tabs sit right under the top bar. */
-.view[data-section="positions"] > .stack-lg > .sub-tabs-bar:first-child { padding-top: 0; }
+/* DeFi, Monitoring, Tools and Cron: the tabs sit right under the top bar. */
+.view:is([data-section="positions"], [data-section="monitoring"], [data-section="tools"], [data-section="cron"]) > .stack-lg > :is(.sub-tabs-bar, nav.sub-tabs):first-child { padding-top: 0; }
 .cal-side { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 54px; height: calc(100dvh - 54px); overflow-y: auto; padding: 12px; background: var(--surface); border-right: 1px solid var(--border); }
 .cal-filters { display: flex; flex-direction: column; gap: 8px; }
 .cal-filters .pick-multi, .cal-filters .cal-project-pick { width: 100%; justify-content: space-between; }
