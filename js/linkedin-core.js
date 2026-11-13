@@ -249,3 +249,35 @@ export async function publishPost(store, id) {
   }
   return /** @type {LinkedinPost} */ (store.get(LINKEDIN).posts.find((p) => p.id === id));
 }
+
+// A scheduled post this late is not posted: the Mac was asleep or the runners stopped, and a post a day late may
+// no longer fit. It is marked missed, to be rescheduled by hand.
+const MISSED_AFTER = 12 * 3600000;
+
+// The runners' minute round: posts each scheduled post whose time has come, oldest first, and marks the ones far
+// past their time as missed. Each failure or miss is announced once.
+/** @param {DataStore} store @param {number} [now] */
+export async function postDuePosts(store, now = Date.now()) {
+  const due = store.get(LINKEDIN).posts
+    .filter((p) => p.status === 'scheduled' && typeof p.scheduledAt === 'number' && p.scheduledAt <= now)
+    .sort((a, b) => Number(a.scheduledAt) - Number(b.scheduledAt));
+  let posted = 0;
+  let missed = 0;
+  let failed = 0;
+  for (const p of due) {
+    const label = `“${p.text.split('\n')[0].slice(0, 60)}”`;
+    if (now - Number(p.scheduledAt) > MISSED_AFTER) {
+      setPost(store, p.id, { status: 'missed', error: null });
+      missed++;
+      notify(store, { kind: 'linkedin', text: `The LinkedIn post ${label} was not posted: it was due more than 12 hours ago. Reschedule it or post it now.`, href: '#/calendar', key: `linkedin-missed:${p.id}:${p.scheduledAt}` });
+      continue;
+    }
+    const done = await publishPost(store, p.id);
+    if (done.status === 'posted') posted++;
+    else {
+      failed++;
+      notify(store, { kind: 'linkedin', text: `The scheduled LinkedIn post ${label} failed: ${done.error ?? 'LinkedIn did not take it.'}`, href: '#/calendar', key: `linkedin-failed:${p.id}:${p.scheduledAt}` });
+    }
+  }
+  return { posted, missed, failed };
+}
