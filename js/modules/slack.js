@@ -334,11 +334,16 @@ function paint(part) {
   } else if (!old !== !fresh) m.store.refresh();
 }
 
+/** @param {Element} el @param {string} key */
+function placeScroll(el, key) {
+  const at = live.scroll.get(key);
+  el.scrollTop = at === undefined || at === null ? el.scrollHeight : at;
+}
+
 // Puts a redrawn list back where it was: at the bottom when it was there, else at the same place.
 /** @param {Element} el @param {string} key */
 function keepScroll(el, key) {
-  const at = live.scroll.get(key);
-  el.scrollTop = at === undefined || at === null ? el.scrollHeight : at;
+  placeScroll(el, key);
   el.addEventListener('scroll', () => {
     const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     live.scroll.set(key, bottom ? null : el.scrollTop);
@@ -1243,15 +1248,16 @@ function draw(root, store) {
         threadPane(store))));
 
   const side = root.querySelector('.slack-side-list');
-  if (side) side.scrollTop = live.sideScroll;
   const list = root.querySelector('.slack-messages');
   if (list) keepScroll(list, view.open);
   const thread = root.querySelector('.slack-thread-messages');
   if (thread) keepScroll(thread, `${view.open}|${view.thread}`);
-  // Lists are drawn before they are laid out; the bottom is only known after.
+  // The section is drawn into a page not yet attached, where scrollTop is ignored: the lists go back to their
+  // place once it is on screen, before it is painted.
   requestAnimationFrame(() => {
-    if (list && live.scroll.get(view.open) == null) list.scrollTop = list.scrollHeight;
-    if (thread && live.scroll.get(`${view.open}|${view.thread}`) == null) thread.scrollTop = thread.scrollHeight;
+    if (side) side.scrollTop = live.sideScroll;
+    if (list) placeScroll(list, view.open);
+    if (thread) placeScroll(thread, `${view.open}|${view.thread}`);
   });
 }
 
