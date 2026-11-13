@@ -20,7 +20,7 @@ import { openLinkedinComposer, whenText } from '../linkedin-composer.js';
 import { LINKEDIN } from '../linkedin-core.js';
 import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
-import { startClaudeSession, openSession, runnerOf } from './dev.js';
+import { startDevSession, openSession, runnerOf } from './dev.js';
 import { DEV_MODELS, DEV_MODEL_NAMES, DEV_EFFORTS } from '../dev-core.js';
 import { DONE_ASK } from '../dev-done.js';
 import { openMenu, copyItem } from '../menu.js';
@@ -859,6 +859,7 @@ function copyButton(store, item) {
 }
 
 // Hands tasks to claude in a new Dev terminal, in the folder of the first task's project that has one.
+// The terminal starts in the background: the page stays on Tasks, and the task's Dev button opens it.
 // The issues and PRs it opens come back to the tasks (task-links.js).
 // They are being worked on now, so open ones move to "In progress" (completed ones stay done).
 // Their images go along as files the runner saves, named in the prompt. claude is asked for the done signal
@@ -867,7 +868,6 @@ function copyButton(store, item) {
 async function devTasks(store, items) {
   if (!items.length) return;
   // At the runner's limit the terminal would never start: say so, and leave the tasks where they are.
-  // A runner that cannot be reached is left to Dev, which starts the terminal once it answers.
   const info = await runnerInfo(runnerOf(store)).catch(() => null);
   if (info && info.running >= info.max) {
     toast(`Not started: ${info.max} terminals are already running. Stop one in Dev, or start the board with TERMINAL_MAX set higher.`);
@@ -885,14 +885,24 @@ async function devTasks(store, items) {
   const projects = projectsOf(store);
   const list = items.map((i) => taskMarkdown(store, i, projects, images.get(i.id))).join('\n');
   const folder = items.map((i) => projects.find((p) => p.id === i.projectId)).find((p) => p?.localPath);
-  for (const i of items) view.selected.delete(i.id);
-  const moving = items.filter((i) => !['done', 'doing'].includes(statusOf(i))).map((i) => i.id);
-  if (moving.length) updateItems(store, moving, { status: 'doing' });
   const ids = items.map((i) => i.id);
   // Several tasks share one session: the first one that picked a model (or effort) sets it.
   const model = items.find((i) => i.devModel)?.devModel ?? '';
   const effort = items.find((i) => i.devEffort)?.devEffort ?? '';
-  const { id: session, worktree } = startClaudeSession({ store, prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}\n\n${DONE_ASK}`, projectId: folder?.id, taskIds: ids, title: items[0].text, model, effort });
+  let started;
+  try {
+    started = await startDevSession({ store, claude: true, prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}\n\n${DONE_ASK}`, projectId: folder?.id, taskIds: ids, title: items[0].text, model, effort });
+  } catch (err) {
+    // The runner did not answer, or refused: the tasks stay where they are.
+    toast(`Not started: ${/** @type {Error} */ (err).message}`);
+    return;
+  }
+  const { id: session, worktree } = started;
+  for (const i of items) view.selected.delete(i.id);
+  const moving = items.filter((i) => !['done', 'doing'].includes(statusOf(i))).map((i) => i.id);
+  if (moving.length) updateItems(store, moving, { status: 'doing' });
+  const name = items[0].text.length > 40 ? `${items[0].text.slice(0, 40)}…` : items[0].text;
+  toast(`Dev session started on ${items.length === 1 ? `"${name}"` : `${items.length} tasks`}`);
   // The task keeps its terminal: its Dev button shows what the terminal is doing and opens it.
   // It keeps the worktree claude makes too, removed once the task is completed (task-worktrees.js).
   const pick = new Set(ids);

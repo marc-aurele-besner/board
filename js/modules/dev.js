@@ -72,10 +72,9 @@ const SIDE_RANGE = { def: 260, min: 200, max: 560 };
 /**
  * @type {{ side: string, workspace: string, sessions: Session[], active: string, wanted: number, info: RunnerInfo | null,
  *   infoError: string, checking: boolean, pending: string | null,
- *   queued: { id: string, prompt: string, projectId: string, taskIds: string[], command: string } | null,
  *   opening: { id: string, cwd: string, taskIds: string[] } | null, restored: boolean, back: string, filesOnly: boolean }}
  */
-const view = { side: readSide(), workspace: 'board', sessions: [], active: '', wanted: 0, info: null, infoError: '', checking: false, pending: null, queued: null, opening: null, restored: false, back: '', filesOnly: false };
+const view = { side: readSide(), workspace: 'board', sessions: [], active: '', wanted: 0, info: null, infoError: '', checking: false, pending: null, opening: null, restored: false, back: '', filesOnly: false };
 // Set by draw(), before any terminal is made or used.
 /** @type {Store | null} */
 let currentStore = null;
@@ -853,26 +852,8 @@ function sessionUsage(store, s) {
   return h('span', { class: 'muted small term-usage', title: usageTitle(sum) }, icon('cpu'), usageLine(sum));
 }
 
-// Opens Dev with a new terminal that runs claude on a prompt, in the project's folder when it has one.
-// The command waits for the runner to answer, so it also works when Dev was not open yet.
-// Issue and PR links the session prints are added to the tasks in `taskIds`.
-// Returns the terminal's session id, so the tasks can find it again (openSession), and the worktree claude makes
-// ({ name, cwd }: its name and the folder of its repo), so the tasks can remove it once done; null when the command
-// makes none, or names its own. `model` and `effort` are the task's picks, added to the command when set.
-/**
- * @param {{ store: Store, prompt: string, projectId?: string, taskIds?: string[], title?: string, model?: string,
- *   effort?: string }} options
- */
-export function startClaudeSession({ store, prompt, projectId = '', taskIds = [], title = '', model = '', effort = '' }) {
-  const id = uid();
-  const { command, worktree } = claudeCommand(store, projectId, title, id, rootPath(store, view.workspace), '', { model, effort });
-  view.queued = { id, prompt, projectId, taskIds, command };
-  showDev();
-  return { id, worktree };
-}
-
-// Starts a command in a new Dev terminal and stays on the page shown, for work the board starts by itself (Cron).
-// With `claude`, `prompt` goes to claude as a task's Dev button sends it; otherwise `command` runs as typed. The
+// Starts a command in a new Dev terminal and stays on the page shown: a task's Dev button, and work the board
+// starts by itself (Cron). With `claude`, `prompt` goes to claude with the project's Dev command; otherwise `command` runs as typed. The
 // terminal opens in the project's folder, or the board's when there is none. Resolves to { id, n, worktree } once
 // the runner started it; fails when the runner cannot be reached or refuses. `devCommand` replaces the project's Dev
 // command for this one start (a preset or a command typed in Cron); `model` and `effort` are added to a claude command.
@@ -957,23 +938,6 @@ function showOpening(store) {
   }
   view.active = s.id;
   saveActive();
-}
-
-/** @param {Store} store */
-function startQueued(store) {
-  // Called once view.queued is set.
-  const { id, prompt, projectId, taskIds, command } = /** @type {NonNullable<typeof view.queued>} */ (view.queued);
-  const project = store.get('projects').projects.find((p) => p.id === projectId);
-  if (project?.localPath) {
-    view.workspace = `p:${project.id}`;
-    setRoot(filesCtx(store), rootPath(store, view.workspace));
-  }
-  view.queued = null;
-  const s = newSession(store, undefined, { id, tasks: taskIds, prompt });
-  if (!s) return;
-  // Runs once the terminal is on the page, so it starts at the size it is shown.
-  // `--` ends the options, so a flag with an optional value (--worktree [name]) cannot take the prompt.
-  requestAnimationFrame(() => run(store, s, `${command} -- ${shellQuote(prompt)}`, { remember: false }));
 }
 
 /** @param {Store} store @param {string} command */
@@ -1999,7 +1963,6 @@ function draw(root, store) {
     else if (!view.filesOnly) newSession(store);
     view.filesOnly = false;
   }
-  if (view.queued && view.info && view.restored) startQueued(store);
   if (!view.sessions.length && (view.restored || view.infoError)) newSession(store);
   const s = activeSession();
   // The page is rebuilt around the terminal; it keeps the keys if it had them.
