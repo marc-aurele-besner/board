@@ -2998,6 +2998,46 @@ button.sum-line:hover { background: var(--surface-2); }
 .diff-commit p { margin: 0; }
 .diff-commit-message { white-space: pre-wrap; font-weight: 600; margin-bottom: 4px !important; }
 
+/* Dev's pull request view: the files on the left, each file's diff as a card that folds */
+.pr { flex: 1; min-height: 0; display: flex; }
+.pr-files { flex: none; width: 240px; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); }
+.pr-files-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); font-weight: 600; }
+.pr-progress { font-weight: 400; white-space: nowrap; }
+.pr-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px; }
+.pr-list-row { width: 100%; padding: 3px 6px; gap: 6px; }
+.pr-list-row .tree-name { flex: none; max-width: 60%; }
+.pr-list-row .scm-dir { flex: 1; min-width: 0; }
+.pr-list-check { display: none; flex: none; color: var(--income); }
+.pr-list-check .icon { width: 13px; height: 13px; }
+.pr-list-row.viewed .tree-name { color: var(--muted); }
+.pr-list-row.viewed .pr-list-check { display: inline-flex; }
+.pr-main { position: relative; padding: 0 12px 16px; }
+.pr-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 0; font-family: var(--font); }
+.pr-branches { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pr-branch { padding: 2px 8px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40ch; }
+.pr-stats { display: flex; align-items: center; gap: 12px; color: var(--muted); }
+.pr-toggle, .pr-viewed { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.pr-toggle input, .pr-viewed input { margin: 0; width: auto; min-height: 0; }
+.pr-commits { flex-basis: 100%; }
+.pr-commits summary { cursor: pointer; color: var(--muted); }
+.pr-commits .tree-item { width: 100%; padding: 3px 6px; gap: 8px; }
+.pr-counts { display: inline-flex; gap: 6px; font: 600 0.75rem ui-monospace, SFMono-Regular, Menlo, monospace; }
+.pr-adds { color: var(--income); }
+.pr-dels { color: var(--danger); }
+.pr-squares { display: inline-flex; gap: 1px; }
+.pr-squares span { width: 7px; height: 7px; border-radius: 1px; background: color-mix(in srgb, var(--muted) 30%, transparent); }
+.pr-squares .add { background: var(--income); }
+.pr-squares .del { background: var(--danger); }
+.pr-file { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; background: var(--surface-2); }
+.pr-file-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 4px 8px; background: var(--surface); border-bottom: 1px solid var(--border); border-radius: 8px 8px 0 0; font-family: var(--font); }
+.pr-file.folded .pr-file-head { border-bottom: none; border-radius: 8px; }
+.pr-file.folded .pr-file-body { display: none; }
+.pr-file-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; background: none; border: none; min-height: 0; padding: 4px 0; color: var(--text); text-align: left; }
+.pr-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 0.8rem ui-monospace, SFMono-Regular, Menlo, monospace; }
+.pr-file-head .icon-btn { flex: none; }
+.pr-file-body { overflow-x: auto; }
+.pr-file-body .code { padding: 0; }
+
 @media (max-width: 760px) {
   /* Stacked on a phone: the page scrolls, and each part keeps a fixed height. */
   .dev { height: auto; min-height: 0; }
@@ -3006,6 +3046,9 @@ button.sum-line:hover { background: var(--surface-2); }
   .ide-editor, .term { flex: none; }
   .term > .term-out { flex: none; height: 60dvh; }
   .code-view { flex: none; height: 50dvh; }
+  .pr { flex-direction: column; }
+  .pr-files { width: auto; max-height: 30dvh; border-right: none; border-bottom: 1px solid var(--border); }
+  .pr-main { padding: 0 8px 12px; }
   .term-cwd { text-align: left; }
   .term-recent { justify-content: flex-start; }
 }

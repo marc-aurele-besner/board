@@ -168,6 +168,26 @@ export interface GitDiff {
   commit?: { hash: string; author: string; email: string; at: number; message: string };
 }
 
+// GET /git/pr: the branch against the default branch, from where they part.
+export interface GitPullRequest {
+  root: string;
+  // '' when detached.
+  branch: string;
+  base: string;
+  mergeBase: string;
+  // Only the commits: uncommitted and new files left out.
+  committed: boolean;
+  // Files changed in the working folder.
+  uncommitted: number;
+  // The latest commits, newest first; `count` is how many there are in all.
+  commits: { hash: string; short: string; author: string; at: number; subject: string }[];
+  count: number;
+  // One unified diff of every file.
+  diff: string;
+  // New files left out of `diff`.
+  more: number;
+}
+
 // GET /outcome.
 export interface RunnerOutcome {
   output: string;
