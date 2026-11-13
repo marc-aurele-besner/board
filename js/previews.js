@@ -9,6 +9,7 @@ import { h, icon, statusOf } from './ui.js';
 import { GITHUB, issueComments, pullBranch } from './github.js';
 import { runJob } from './runners.js';
 import { deployTokens, deploysRepo, prDeployments } from './deployments.js';
+import { openDeployPanel, stateDot, PROVIDER_NAMES, STATE_NAMES } from './deploy-panel.js';
 /** @import { DataStore, Store, CronRunStep, PrPreviews, PreviewItem } from '../types/data' */
 /** @typedef {{ repo: string, number: number }} PrRef */
 // A comment of the GitHub API, as far as it is read here.
@@ -223,12 +224,8 @@ function askMissing(store, prs) {
   runJob('previews', { prs: fresh.map((p) => ({ repo: p.repo, number: p.number })) }).then(() => store.sync()).catch(() => {});
 }
 
-/** @type {Record<string, string>} */
-const PROVIDER = { vercel: 'Vercel', netlify: 'Netlify' };
-/** @type {Record<string, string>} */
-const STATE_TEXT = { building: 'building', failed: 'failed', canceled: 'canceled' };
-
-// Links to the previews of these PRs, styled with `className` (a task's chips or a Cron run's).
+// Links to the previews of these PRs, styled with `className` (a task's chips or a Cron run's). A preview read from
+// the provider's API opens its details and build log; one read from a PR comment links to the preview.
 /**
  * @param {Store} store
  * @param {PrRef[]} prs
@@ -240,11 +237,27 @@ export function previewChips(store, prs, className) {
   const named = items.length > 1;
   return items.map((i) => {
     const label = named && i.name ? `Preview ${i.name}` : 'Preview';
-    const state = STATE_TEXT[i.state];
-    const title = `${PROVIDER[i.provider] ?? 'Preview'}${i.name ? ` · ${i.name}` : ''}${state ? ` · ${state}` : ''} · ${i.pr.repo} #${i.pr.number}${i.url ? `\n${i.url}` : ''}`;
-    const body = [icon('globe'), label, state ? h('span', { class: 'muted small' }, state) : null];
+    const state = i.state && i.state !== 'ready' ? (STATE_NAMES[i.state] ?? i.state).toLowerCase() : '';
+    const title = `${PROVIDER_NAMES[i.provider] ?? 'Preview'}${i.name ? ` · ${i.name}` : ''}${i.state ? ` · ${(STATE_NAMES[i.state] ?? i.state).toLowerCase()}` : ''} · ${i.pr.repo} #${i.pr.number}${i.error ? `\n${i.error}` : ''}${i.url ? `\n${i.url}` : ''}`;
+    const body = [i.state ? stateDot(i.state) : icon('globe'), label, state ? h('span', { class: 'muted small' }, state) : null];
+    const cls = `${className} preview-link${i.state ? ` deploy-${i.state}` : ''}`;
+    if (i.id) {
+      const find = () => previewsOf(store, [i.pr]).find((x) => x.provider === i.provider && (x.id === i.id || x.name === i.name));
+      return h('button', {
+        type: 'button',
+        class: cls,
+        title: `${title}\nOpen its details and build log`,
+        'aria-label': `Show the ${label.toLowerCase()} of ${i.pr.repo} #${i.pr.number}${state ? `, ${state}` : ''}`,
+        /** @param {MouseEvent} e */
+        onclick: (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openDeployPanel(store, i, find);
+        },
+      }, body);
+    }
     return i.url
-      ? h('a', { class: `${className} preview-link`, href: i.url, target: '_blank', rel: 'noopener noreferrer', title, 'aria-label': `Open the ${label.toLowerCase()} of ${i.pr.repo} #${i.pr.number}` }, body)
-      : h('span', { class: `${className} preview-link muted`, title }, body);
+      ? h('a', { class: cls, href: i.url, target: '_blank', rel: 'noopener noreferrer', title, 'aria-label': `Open the ${label.toLowerCase()} of ${i.pr.repo} #${i.pr.number}` }, body)
+      : h('span', { class: `${cls} muted`, title }, body);
   });
 }
