@@ -1785,14 +1785,15 @@ h1, h2, h3, .k-h1, .pp-name { font-family: var(--display); }
 kbd { font: 0.72rem var(--font); padding: 1px 6px; border-radius: 5px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); }
 
 /* Top bar: every section in one row. Labels fold away on narrower screens, and the row scrolls on phones. */
-.topbar { flex-wrap: nowrap; gap: 8px 14px; padding: 8px 16px; min-height: 54px; }
-.tabs { flex: 0 1 auto; flex-wrap: nowrap; min-width: 0; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+/* The tabs fill the bar's height and sit edge to edge, square, with no space around or between them. */
+.topbar { flex-wrap: nowrap; align-items: stretch; gap: 0 14px; padding: 0 16px 0 0; min-height: 54px; }
+.tabs { flex: 0 1 auto; flex-wrap: nowrap; min-width: 0; gap: 0; overflow-x: auto; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
-.tab { flex: none; padding: 7px 11px; border-radius: 8px; white-space: nowrap; font-weight: 500; }
+.tab { flex: none; padding: 0 12px; border-radius: 0; white-space: nowrap; font-weight: 500; }
 .tab:hover { background: var(--surface-2); color: var(--text); }
 .tab.active { background: color-mix(in srgb, var(--accent) 13%, var(--surface)); color: var(--accent); }
 .tab.active::after { display: none; }
-.topbar-end { flex: none; gap: 6px; }
+.topbar-end { flex: none; gap: 6px; align-self: center; }
 .search-btn { display: flex; align-items: center; gap: 8px; width: 220px; min-height: 36px; padding: 4px 10px; background: var(--bg); color: var(--muted); font-weight: 400; text-align: left; }
 .search-btn .icon { width: 15px; height: 15px; }
 .search-btn .grow { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1811,9 +1812,10 @@ a { color: var(--accent); }
   .tab:not(.active) .tab-pill { position: absolute; top: 2px; right: 2px; min-width: 14px; height: 14px; padding: 0 3px; font-size: 9px; line-height: 14px; }
 }
 @media (max-width: 720px) {
-  .topbar { flex-wrap: wrap; }
-  .tabs { order: 3; flex-basis: 100%; }
-  .topbar-end { margin-left: auto; width: auto; }
+  .topbar { flex-wrap: wrap; padding: 0; }
+  .tabs { order: 3; flex-basis: 100%; border-top: 1px solid var(--border); }
+  .tab { padding-block: 10px; }
+  .topbar-end { margin-left: auto; width: auto; padding: 8px 16px; }
   .search-btn { width: auto; }
   .search-btn .grow, .search-btn kbd { display: none; }
 }
