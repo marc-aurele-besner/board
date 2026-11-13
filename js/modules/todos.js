@@ -2,6 +2,7 @@
 /** @import { RunnerStatus } from '../../types/terminal' */
 /** @import { PickOption } from '../inline.js' */
 /** @import { MenuEntry } from '../menu.js' */
+/** @import { SlashItem } from '../slash-complete.js' */
 /** @typedef {{ text: string, status: string[], priority: string[], project: string[], category: string[] }} ColFilter */
 /** @typedef {{ id: string, title: string, category: string, priority: string }} TidySuggestion */
 // What this section reads of repoStats(): the counts are there when status is 'ok'.
@@ -24,7 +25,8 @@ import { startDevSession, openSession, runnerOf } from './dev.js';
 import { DEV_MODELS, DEV_MODEL_NAMES, DEV_EFFORTS } from '../dev-core.js';
 import { DONE_ASK } from '../dev-done.js';
 import { openMenu, copyItem } from '../menu.js';
-import { sessionStatus, runnerInfo } from '../terminal.js';
+import { sessionStatus, runnerInfo, listSkills } from '../terminal.js';
+import { slashComplete } from '../slash-complete.js';
 import { imagesOf, imageDrop, imageStrip, imagePathsFor, addImages } from '../task-images.js';
 import { dragsFiles, imageFiles } from '../images.js';
 import { ask, parseJson } from '../ai.js';
@@ -858,6 +860,29 @@ function copyButton(store, item) {
   }, icon('copy'));
 }
 
+// The skills a "/" in a task's description lists: those claude would have in the task's project folder (the
+// project's own first, then the user's), read through the runner and kept a moment per folder.
+const SKILLS_STALE_MS = 30000;
+/** @type {Map<string, { at: number, items: Promise<SlashItem[]> }>} */
+const skillsByFolder = new Map();
+/** @param {Store} store @param {Task} item @returns {Promise<SlashItem[]>} */
+function taskSkills(store, item) {
+  const path = store.get('projects').projects.find((p) => p.id === item.projectId)?.localPath ?? '';
+  const kept = skillsByFolder.get(path);
+  if (kept && Date.now() - kept.at < SKILLS_STALE_MS) return kept.items;
+  const base = runnerOf(store);
+  // A project folder that is gone still leaves the user's own skills.
+  const read = listSkills(base, path).catch((err) => (path ? listSkills(base, '') : Promise.reject(err)));
+  const items = read.then((data) => {
+    const project = data.project.map((s) => ({ name: s.name, description: s.description, hint: 'project' }));
+    return [...project, ...data.global.filter((s) => !project.some((p) => p.name === s.name)).map((s) => ({ name: s.name, description: s.description }))];
+  });
+  skillsByFolder.set(path, { at: Date.now(), items });
+  // A failed read (the runner is off) is asked again on the next "/".
+  items.catch(() => skillsByFolder.delete(path));
+  return items;
+}
+
 // Hands tasks to claude in a new Dev terminal, in the folder of the first task's project that has one.
 // The terminal starts in the background: the page stays on Tasks, and the task's Dev button opens it.
 // The issues and PRs it opens come back to the tasks (task-links.js).
@@ -1428,6 +1453,7 @@ function todoRow(store, item, ctx, place) {
             rich: true,
             multiline: true,
             allowEmpty: true,
+            attach: (field) => slashComplete(field, () => taskSkills(store, item)),
             onSave: (description) => updateItem(store, item.id, { description }),
           }),
           imageStrip(store, item),
@@ -1686,6 +1712,7 @@ function boardCard(store, item, projects, order, place) {
             rich: true,
             multiline: true,
             allowEmpty: true,
+            attach: (field) => slashComplete(field, () => taskSkills(store, item)),
             onSave: (description) => updateItem(store, item.id, { description }),
           }),
           imageStrip(store, item),

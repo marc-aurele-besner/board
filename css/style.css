@@ -942,6 +942,12 @@ textarea.editable-field { resize: vertical; }
 .pop-item.cursor { background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
 .pop-item.create { color: var(--accent); justify-content: flex-start; }
 .pop-item .icon { width: 14px; height: 14px; }
+/* The skills a "/" lists under the caret (slash-complete.js). */
+.slash-pop { padding: 5px; gap: 2px; max-height: min(280px, calc(100vh - 16px)); overflow-y: auto; animation-duration: 0.1s; }
+.slash-item { justify-content: flex-start; gap: 10px; font-size: 0.85rem; }
+.slash-name { font-family: var(--mono, ui-monospace, monospace); font-size: 0.8rem; white-space: nowrap; flex-shrink: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
+.slash-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.75rem; }
+.slash-hint { flex-shrink: 0; margin-left: auto; font-size: 0.7rem; }
 .pop-empty { color: var(--muted); padding: 6px; margin: 0; font-size: 0.9rem; }
 .popover.menu { padding: 5px; gap: 0; min-width: 210px; max-width: min(300px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow-y: auto; animation-duration: 0.1s; }
 .menu-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 3px 8px; border: none; border-radius: 6px; background: transparent; color: var(--text); font-size: 0.86rem; text-align: left; justify-content: flex-start; }

@@ -18,11 +18,12 @@ import { richText } from './rich.js';
 
 // Click-to-edit text. Enter saves (Ctrl/Cmd+Enter for multiline), Escape cancels, blur saves.
 // `display(text)` can draw the saved value as something other than plain text, such as a bullet list.
+// `attach(field)` is handed the field of each edit before its keys are read, to add to it (a completion list).
 /**
  * @param {{ value?: string | null, placeholder?: string, multiline?: boolean, className?: string, allowEmpty?: boolean, rich?: boolean,
- *   display?: ((text: string) => Child) | null, onSave: (text: string) => void }} options
+ *   display?: ((text: string) => Child) | null, attach?: ((field: HTMLTextAreaElement | HTMLInputElement) => void) | null, onSave: (text: string) => void }} options
  */
-export function editText({ value = '', placeholder = 'Empty', multiline = false, className = '', allowEmpty = false, rich = false, display = null, onSave }) {
+export function editText({ value = '', placeholder = 'Empty', multiline = false, className = '', allowEmpty = false, rich = false, display = null, attach = null, onSave }) {
   const current = value ?? '';
   const view = h(rich || display ? 'div' : 'span', {
     class: `editable ${className}${current ? '' : ' is-placeholder'}`.trim(),
@@ -64,6 +65,7 @@ export function editText({ value = '', placeholder = 'Empty', multiline = false,
       else field.replaceWith(shown);
     };
 
+    attach?.(field);
     /** @type {HTMLElement} */ (field).addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         e.preventDefault();
