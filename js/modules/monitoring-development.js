@@ -9,7 +9,7 @@ import { stat } from './monitoring.js';
 import { pickChip } from '../inline.js';
 import { projectIcon } from './projects.js';
 import { sortTable } from './monitoring-web.js';
-import { devProjectOf, segmented, NO_PROJECT } from './monitoring-ai.js';
+import { devProjectOf, projectLabel, segmented, NO_PROJECT } from './monitoring-ai.js';
 /** @import { DevTurn, DevUsage, Store } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 /** @import { ChartTip } from '../chart.js' */
@@ -54,7 +54,7 @@ const pct = (/** @type {number} */ n, /** @type {number} */ d) => (d ? `${Math.r
 export function developmentTab(store, w) {
   const tasks = store.get('todos').items;
   const projects = store.get('projects').projects;
-  const projectName = new Map(projects.map((p) => [p.id, p.name]));
+  const projectOf = new Map(projects.map((p) => [p.id, p]));
   const set = (/** @type {Partial<typeof developmentView>} */ patch) => {
     Object.assign(developmentView, patch);
     store.refresh();
@@ -107,7 +107,8 @@ export function developmentTab(store, w) {
     return {
       name: r.name,
       label: named.join(', ') || r.name,
-      project: project ? projectName.get(project) ?? 'Removed project' : '',
+      projectId: project,
+      project: project ? projectOf.get(project)?.name ?? 'Removed project' : '',
       turns: list.length,
       work: rw.reduce((s, v) => s + v, 0),
       median: median(rw),
@@ -157,7 +158,12 @@ export function developmentTab(store, w) {
   for (const v of works) lengths[LENGTHS.findIndex(([max]) => v < /** @type {number} */ (max))]++;
 
   const recent = [...turns].sort((a, b) => b.t.at - a.t.at).slice(0, RECENT);
-  const labelOf = new Map(rows.map((r) => [r.name, r.label]));
+  const rowOf = new Map(rows.map((r) => [r.name, r]));
+  // No swatch beside it here, so a project without an image still gets its dot.
+  const turnIcon = (/** @type {string | undefined} */ id) => {
+    const p = id ? projectOf.get(id) : null;
+    return p ? projectIcon(p, 'project-icon dev-by-icon') : null;
+  };
 
   return h('div', { class: 'stack-lg' },
     filters,
@@ -184,7 +190,7 @@ export function developmentTab(store, w) {
       h('h3', null, 'Tasks'),
       sortTable('development-tasks', [
         { label: 'Task', clip: true, value: (r) => r.label, format: (v, r) => h('span', { title: r.name }, v) },
-        { label: 'Project', clip: true, value: (r) => r.project || null },
+        { label: 'Project', clip: true, value: (r) => r.project || null, format: (_v, r) => (r.projectId ? projectLabel(projectOf.get(r.projectId)) : '—') },
         { label: 'Turns', num: true, value: (r) => r.turns },
         { label: 'Claude', num: true, value: (r) => r.work, format: fmtSpan },
         { label: 'Per turn', num: true, value: (r) => r.median, format: fmtSpan },
@@ -200,7 +206,8 @@ export function developmentTab(store, w) {
       h('h3', null, 'Recent turns'),
       h('ul', { class: 'mon-recent dev-turn-log' }, recent.map(({ t, r }) => h('li', null,
         h('span', { class: 'muted small time' }, new Date(t.at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })),
-        h('span', { class: 'grow cell-clip', title: t.text }, h('span', null, t.text || '—'), h('span', { class: 'muted small' }, ` · ${labelOf.get(r.name) ?? r.name}`)),
+        h('span', { class: 'grow cell-clip', title: t.text }, h('span', null, t.text || '—'),
+          h('span', { class: 'muted small' }, ' ·', turnIcon(rowOf.get(r.name)?.projectId), ` ${rowOf.get(r.name)?.label ?? r.name}`)),
         t.interrupted ? h('span', { class: 'pill tone-failed' }, 'Interrupted') : null,
         t.wait ? h('span', { class: 'muted small', title: 'Waiting on your answer to a question or a plan' }, `waited ${fmtSpan(t.wait)}`) : null,
         reviewOf(t) ? h('span', { class: 'muted small', title: 'Time since the previous turn ended' }, `after ${fmtSpan(reviewOf(t))}`) : null,
