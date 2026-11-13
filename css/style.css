@@ -3055,6 +3055,9 @@ button.sum-line:hover { background: var(--surface-2); }
 .slack-team-icon { width: 18px; height: 18px; border-radius: 4px; flex: none; object-fit: cover; }
 .slack-main .slack-team-icon { width: 28px; height: 28px; border-radius: 6px; }
 .slack-initials { display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--muted); font-weight: 600; font-size: 0.7rem; }
+.slack-ws-icon { width: 28px; height: 28px; border-radius: 6px; }
+.slack-ws-name { display: flex; flex-direction: column; min-width: 0; }
+.slack-ws-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slack-item { display: flex; align-items: center; border-radius: 6px; position: relative; }
 .slack-item:hover { background: var(--surface-2); }
 .slack-item.active { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); }

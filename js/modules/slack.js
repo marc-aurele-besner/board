@@ -55,6 +55,8 @@ const live = {
   // Scroll of the message list per conversation: null when it sits at the bottom.
   /** @type {Map<string, number | null>} */
   scroll: new Map(),
+  // Scroll of the sidebar's list, kept across redraws (unread counts redraw it every 20 s).
+  sideScroll: 0,
   sending: false,
   /** @type {{ root: HTMLElement, store: Store } | null} */
   mounted: null,
@@ -316,7 +318,11 @@ function paint(part) {
   if (!m || !m.root.isConnected) return;
   if (part === 'side') {
     const old = m.root.querySelector('.slack-side-list');
-    if (old) old.replaceWith(sideList(m.store));
+    if (old) {
+      const fresh = sideList(m.store);
+      old.replaceWith(fresh);
+      fresh.scrollTop = live.sideScroll;
+    }
     return;
   }
   const selector = part === 'main' ? '.slack-messages' : '.slack-thread-messages';
@@ -351,7 +357,7 @@ function openConversation(store, key) {
 // ---- small parts ------------------------------------------------------------------------------------------------
 
 /** @param {SlackWorkspace} w @param {string} [className] */
-function teamIcon(w, className = 'slack-team-icon') {
+export function teamIcon(w, className = 'slack-team-icon') {
   return w.icon
     ? h('img', { class: className, src: w.icon, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' })
     : h('span', { class: `${className} slack-initials` }, w.name.slice(0, 1).toUpperCase());
@@ -594,7 +600,7 @@ function sectionMenu(store, section) {
 }
 
 /** @param {Store} store @param {SlackWorkspace} w */
-function confirmRemove(store, w) {
+export function confirmRemove(store, w) {
   const dialog = openDialog({
     title: `Remove ${w.name}?`,
     body: h('div', { class: 'stack' },
@@ -731,7 +737,10 @@ function sideList(store) {
       folded ? null : h('div', { class: 'slack-section-items' },
         keys.length ? keys.map((k) => sideItem(store, k, s, multi)) : h('p', { class: 'muted small slack-drop-hint' }, s.kind === 'group' ? 'Drag channels here.' : live.listed.has(s.id) ? 'No conversations.' : 'Reading…')));
   }).filter(Boolean);
-  return h('div', { class: 'slack-side-list' }, list.length ? list : h('p', { class: 'muted small' }, words || view.unread ? 'Nothing matches.' : 'No conversations yet.'));
+  return h('div', {
+    class: 'slack-side-list',
+    onscroll: (/** @type {Event} */ e) => { live.sideScroll = /** @type {HTMLElement} */ (e.target).scrollTop; },
+  }, list.length ? list : h('p', { class: 'muted small' }, words || view.unread ? 'Nothing matches.' : 'No conversations yet.'));
 }
 
 /** @param {Store} store */
@@ -1099,7 +1108,7 @@ function mainPane(store) {
   if (!view.open) {
     return h('section', { class: 'slack-main slack-empty' },
       h('div', { class: 'stack slack-empty-text' },
-        icon('message'),
+        icon('slack'),
         h('p', null, 'Pick a conversation on the left.'),
         h('p', { class: 'muted small' }, 'Drag conversations to reorder them, drop them on a group, or use their ⋯ menu to mute, group or tie them to a project.')));
   }
@@ -1149,8 +1158,8 @@ function mainPane(store) {
 
 const CONSOLE = 'copy(JSON.parse(localStorage.localConfig_v2).teams)';
 
-/** @param {Store} store @param {() => void} [done] */
-function signInForm(store, done) {
+/** @param {Store} store @param {(said: string) => void} [done] called with what it says once a workspace is in */
+export function signInForm(store, done) {
   const tokens = h('textarea', { name: 'tokens', rows: 4, placeholder: '{"T0123…": {"token": "xoxc-…", …}} or xoxc-…', 'aria-label': 'Tokens' });
   const cookie = h('input', { name: 'cookie', type: 'password', autocomplete: 'off', placeholder: 'xoxd-…', 'aria-label': 'd cookie', value: data(store).workspaces[0]?.cookie ?? '' });
   const status = h('p', { class: 'small muted', role: 'status' });
@@ -1168,7 +1177,7 @@ function signInForm(store, done) {
         status.textContent = [added.length ? `Signed in to ${added.join(', ')}.` : '', ...errors].filter(Boolean).join(' ');
         if (added.length) {
           refreshCounts(store);
-          done?.();
+          done?.(status.textContent);
         }
       } catch (err) {
         status.textContent = /** @type {Error} */ (err).message;
@@ -1233,6 +1242,8 @@ function draw(root, store) {
         mainPane(store),
         threadPane(store))));
 
+  const side = root.querySelector('.slack-side-list');
+  if (side) side.scrollTop = live.sideScroll;
   const list = root.querySelector('.slack-messages');
   if (list) keepScroll(list, view.open);
   const thread = root.querySelector('.slack-thread-messages');
@@ -1247,7 +1258,7 @@ function draw(root, store) {
 export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'slack',
   title: 'Slack',
-  icon: 'message',
+  icon: 'slack',
   collection: SLACK,
   defaults: SLACK_DEFAULTS,
   render: draw,
