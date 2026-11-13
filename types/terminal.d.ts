@@ -49,17 +49,19 @@ export interface SessionWait {
 }
 
 // One prompt of a claude session: what the user said, when (ms), when claude last answered it, whether the user
-// interrupted it, and the waits on the user inside it.
+// interrupted it, the waits on the user inside it, and whether its last reply gave the done signal (js/dev-done.js).
 export interface SessionTurn {
   text: string;
   at: number;
   end: number;
   interrupted: boolean;
   waits: SessionWait[];
+  done?: boolean;
 }
 
 // GET /turns: the prompts of a terminal's claude session, oldest first, and where its last turn stands: working,
-// waiting (on a question, a plan or a permission: ask), or done. claude false when the terminal never started claude.
+// waiting (on a question, a plan or a permission: ask), or done (claude quit, or
+// its last turn gave the done signal). claude false when the terminal never started claude.
 export interface RunnerTurns {
   claude: boolean;
   state: string;

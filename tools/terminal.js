@@ -332,15 +332,18 @@ async function statusOf(id) {
 }
 
 // The prompts of the claude a terminal started, for the turns menu on Dev's bar, and where the last one stands:
-// working, waiting on its user (with what it asks), or done once claude quit or answered. Null for a terminal gone.
+// working, waiting on its user (with what it asks), or done once claude quit or gave the done
+// signal (js/dev-done.js). Null for a terminal gone.
 /** @param {string} id @returns {Promise<import('../types/terminal').RunnerTurns | null>} */
 async function turnsOf(id) {
   const status = await statusOf(id);
   if (!status) return null;
   const t = await transcriptOf(await sessionOf(id)).catch(() => null);
   if (!t) return { claude: false, state: status.state, turns: [] };
-  const state = status.state === 'working' || status.state === 'waiting' ? status.state : 'done';
   const ask = 'ask' in status ? /** @type {SessionAsk | null} */ (status.ask) : null;
+  // A claude still open that ended its last turn with the done signal, asking nothing, is done too.
+  const signalled = status.state === 'waiting' && !ask && !!t.turns.at(-1)?.done;
+  const state = (status.state === 'working' || status.state === 'waiting') && !signalled ? status.state : 'done';
   // The wait going on now, whatever it waits on (a permission too, which leaves no trace once answered). One read
   // from the screen starts when the prompt was drawn.
   const since = /** @type {{ since?: number }} */ (status).since || t.since;

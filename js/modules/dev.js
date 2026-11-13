@@ -1451,18 +1451,22 @@ function drawTurns() {
   const gapAfter = new Map(idle.gaps.map((g) => [g.after, g]));
   const label = TURN_STATES[state] ?? state;
   const ask = state === 'waiting' && data.ask?.text ? data.ask.text : '';
+  const signalled = state === 'done' && !!turns.at(-1)?.done;
   const scroll = el.querySelector('.turns-list')?.scrollTop ?? 0;
   el.replaceChildren(
     h('div', { class: 'turns-head' },
       h('div', { class: 'turns-title' },
-        h('span', { class: `term-turns-state ${state}`, role: 'img', 'aria-label': label }),
+        signalled
+          ? h('span', { class: 'term-turns-check', role: 'img', 'aria-label': label }, icon('check'))
+          : h('span', { class: `term-turns-state ${state}`, role: 'img', 'aria-label': label }),
         h('strong', null, label),
         h('span', { class: 'muted' }, `${turns.length} ${turns.length === 1 ? 'turn' : 'turns'}`)),
       turns.length ? h('div', { class: 'muted small turns-sum' },
         h('span', { class: 'turns-key work' }), `${took(worked)} working`,
         waited ? [h('span', { class: 'turns-key wait' }), `${took(waited)} waiting on you`] : null,
         idled ? [h('span', { class: 'turns-key idle' }), `${took(idled)} waiting for your next prompt`] : null) : null,
-      ask ? h('div', { class: 'small turns-ask' }, icon('alert'), h('span', null, ask)) : null),
+      ask ? h('div', { class: 'small turns-ask' }, icon('alert'), h('span', null, ask)) : null,
+      signalled ? h('div', { class: 'small turns-signal' }, icon('check'), h('span', null, 'claude said the work is done')) : null),
     rows.length
       ? h('div', { class: 'turns-list', role: 'list' }, rows.flatMap((r) => {
         const gap = gapAfter.get(r.n);
@@ -1477,9 +1481,10 @@ function drawTurns() {
     const status = r.live ? state : r.t.interrupted ? 'interrupted' : 'done';
     const now = r.live ? r.phases.at(-1) : undefined;
     const waits = r.t.waits?.length ?? 0;
+    const signal = !r.live && !!r.t.done;
     return h('button', {
       type: 'button',
-      class: `turns-row ${status}`,
+      class: `turns-row ${status}${signal ? ' signal' : ''}`,
       role: 'listitem',
       title: `${r.t.text}\n\nClick to copy the prompt`,
       onclick: () => { navigator.clipboard.writeText(r.t.text).then(() => toast('Prompt copied'), () => toast('Could not copy')); },
@@ -1487,6 +1492,7 @@ function drawTurns() {
     h('div', { class: 'turns-line' },
       h('span', { class: 'turns-icon' }, status === 'working' ? h('span', { class: 'term-dot' }) : icon(status === 'waiting' ? 'alert' : status === 'interrupted' ? 'stop' : 'check')),
       h('span', { class: 'turns-text' }, `${r.n}. ${turnLine(r.t.text)}`),
+      signal ? h('span', { class: 'turns-done', title: 'claude ended this turn with the done signal' }, 'Done') : null,
       h('span', { class: 'turns-took' }, r.total > 0 ? took(r.total) : '')),
     r.total > 0 ? h('div', { class: 'turns-bar', 'aria-hidden': 'true' }, r.phases.map((p) => h('span', {
       class: `turns-seg ${p.kind === 'work' ? 'work' : 'wait'}`,
@@ -1540,10 +1546,12 @@ function turnsButton(store, s) {
   if (!data?.claude) return null;
   const { turns, state } = data;
   const label = TURN_STATES[state] ?? state;
-  const ask = state === 'waiting' && data.ask ? `: ${data.ask.text}` : '';
+  // claude's done signal shows as a check where the state's dot would be.
+  const signalled = state === 'done' && !!turns.at(-1)?.done;
+  const ask = state === 'waiting' && data.ask ? `: ${data.ask.text}` : signalled ? ' (claude gave the done signal)' : '';
   return h('button', {
     type: 'button',
-    class: `term-turns ${state}`,
+    class: `term-turns ${state}${signalled ? ' signal' : ''}`,
     title: `${turns.length} ${turns.length === 1 ? 'turn' : 'turns'} in this claude session · ${label}${ask}\nShow each turn, with its working and waiting times`,
     'aria-label': `Turns: ${turns.length}, ${label}`,
     'aria-haspopup': 'dialog',
@@ -1553,7 +1561,9 @@ function turnsButton(store, s) {
       if (turnsPop?.s === s && turnsPop.kind === 'turns') return closeTurns();
       openTurns(/** @type {HTMLElement} */ (e.currentTarget), s);
     },
-  }, icon('message'), h('span', null, String(turns.length)), h('span', { class: 'term-turns-state', role: 'img', 'aria-label': label }));
+  }, icon('message'), h('span', null, String(turns.length)), signalled
+    ? h('span', { class: 'term-turns-check', role: 'img', 'aria-label': label }, icon('check'))
+    : h('span', { class: 'term-turns-state', role: 'img', 'aria-label': label }));
 }
 
 // The subagents the shown claude started, read with its turns: how many still work (or how many it ran, once all

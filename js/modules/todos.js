@@ -21,6 +21,7 @@ import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startClaudeSession, openSession, runnerOf } from './dev.js';
 import { DEV_MODELS, DEV_MODEL_NAMES, DEV_EFFORTS } from '../dev-core.js';
+import { DONE_ASK } from '../dev-done.js';
 import { openMenu, copyItem } from '../menu.js';
 import { sessionStatus, runnerInfo } from '../terminal.js';
 import { imagesOf, imageDrop, imageStrip, imagePathsFor, addImages } from '../task-images.js';
@@ -840,7 +841,8 @@ function copyButton(store, item) {
 // Hands tasks to claude in a new Dev terminal, in the folder of the first task's project that has one.
 // The issues and PRs it opens come back to the tasks (task-links.js).
 // They are being worked on now, so open ones move to "In progress" (completed ones stay done).
-// Their images go along as files the runner saves, named in the prompt.
+// Their images go along as files the runner saves, named in the prompt. claude is asked for the done signal
+// (dev-done.js), which Dev's turns show.
 /** @param {Store} store @param {Task[]} items */
 async function devTasks(store, items) {
   if (!items.length) return;
@@ -870,7 +872,7 @@ async function devTasks(store, items) {
   // Several tasks share one session: the first one that picked a model (or effort) sets it.
   const model = items.find((i) => i.devModel)?.devModel ?? '';
   const effort = items.find((i) => i.devEffort)?.devEffort ?? '';
-  const { id: session, worktree } = startClaudeSession({ store, prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}`, projectId: folder?.id, taskIds: ids, title: items[0].text, model, effort });
+  const { id: session, worktree } = startClaudeSession({ store, prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}\n\n${DONE_ASK}`, projectId: folder?.id, taskIds: ids, title: items[0].text, model, effort });
   // The task keeps its terminal: its Dev button shows what the terminal is doing and opens it.
   // It keeps the worktree claude makes too, removed once the task is completed (task-worktrees.js).
   const pick = new Set(ids);
