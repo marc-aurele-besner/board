@@ -471,9 +471,12 @@ function etherscanNotice(store) {
 // The Positions tab's note when Etherscan could not list the wallets' v2 pairs on some chains.
 /** @returns {DefiNotice | null} */
 function v2Notice() {
-  const errors = readOf().v2lookup ?? {};
-  return Object.keys(errors).length
-    ? { tone: 'info', text: `Etherscan could not list your wallets' Uniswap v2 pairs on ${Object.entries(errors).map(([name, text]) => `${name} (${text})`).join(', ')}. A v2 pair there is read once you add it with Add position.` }
+  // Chains that failed for the same reason, such as a plan that does not cover them, are named together.
+  /** @type {Map<string, string[]>} */
+  const byReason = new Map();
+  for (const [name, text] of Object.entries(readOf().v2lookup ?? {})) byReason.set(text, [...(byReason.get(text) ?? []), name]);
+  return byReason.size
+    ? { tone: 'info', text: `Etherscan could not list your wallets' Uniswap v2 pairs on ${[...byReason].map(([text, names]) => `${names.join(', ')} (${text})`).join('; ')}. A v2 pair there is read once you add it with Add position.` }
     : null;
 }
 /** @param {number} n */

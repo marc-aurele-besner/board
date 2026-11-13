@@ -62,6 +62,7 @@ function factsOf(r, side) {
     id: r.ref,
     pair: r.pair,
     chain: r.chain,
+    version: r.version,
     feeTierPct: r.feePct,
     status: r.inRange ? 'in range' : below ? 'out of range, price below the range' : 'out of range, price above the range',
     fullRange: r.full,

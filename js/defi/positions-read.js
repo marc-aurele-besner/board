@@ -249,6 +249,7 @@ async function readV3(chain, node, wallets, cfg) {
 // Etherscan does not cover, only the pairs added by hand are read. A failed search keeps what was found before.
 const V2_SEARCH_MS = 30 * 60000;
 const V2_PAGES = 3; // Etherscan calls per wallet, chain and search
+const V2_AT_ONCE = 6; // pairs read side by side: public nodes limit bursts
 /**
  * @param {Chain} chain @param {string} key @param {Wallet[]} wallets @param {Record<string, V2Scan>} saved
  * @returns {Promise<{ scans: Record<string, V2Scan>, error: string }>}
@@ -298,7 +299,11 @@ async function readV2(chain, node, wallets, cfg, saved, key) {
   const pairs = [...new Set([...manual, ...Object.values(scans).flatMap((s) => s.pairs)])];
   const owners = wallets.map((w) => w.address);
   const labels = new Map(wallets.map((w) => [w.address.toLowerCase(), w.label || w.address]));
-  const read = new Map((await Promise.all(pairs.map((pair) => readV2Pair(chain, node, pair, owners)))).map((r, i) => [pairs[i], r]));
+  /** @type {Map<string, Awaited<ReturnType<typeof readV2Pair>>>} */
+  const read = new Map();
+  await eachLimit(pairs, V2_AT_ONCE, async (pair) => {
+    read.set(pair, await readV2Pair(chain, node, pair, owners));
+  });
   // A token only named like a v2 pair is another exchange's: it is not asked about again.
   for (const [wallet, s] of Object.entries(scans)) {
     const not = s.pairs.filter((p) => !read.get(p));
