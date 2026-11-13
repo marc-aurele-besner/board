@@ -1,11 +1,11 @@
 // The git worktrees Dev sessions made for tasks (task.worktrees: { name, cwd, session }). Once every task that holds
 // one is completed, the runners ask the command runner to stop its session and remove it, wherever the tasks were
-// completed from.
+// completed from. The session's terminal is then closed in Dev, unless a task still open uses it.
 // git refuses a worktree with changes or untracked files: that one is kept, marked `kept` with git's answer, and
 // tried again when its tasks are reopened and completed again.
 /** @import { DataStore, Task, TaskWorktree } from '../types/data' */
 /** @typedef {{ worktree: TaskWorktree, tasks: Task[] }} WorktreeEntry */
-import { removeWorktree, TERMINAL_RUNNER } from './terminal.js';
+import { removeWorktree, closeSession, TERMINAL_RUNNER } from './terminal.js';
 import { toast } from './toast.js';
 import { statusOf } from './ui.js';
 import { rememberWorktrees } from './dev-usage.js';
@@ -46,6 +46,15 @@ function forget(store, name, patch) {
   });
 }
 
+// The terminal of a worktree whose tasks are all completed is closed with it, kept worktree or not: its claude was
+// stopped. A terminal an open task also started in stays.
+/** @param {DataStore} store @param {TaskWorktree} worktree */
+async function closeTerminal(store, { session }) {
+  if (!session) return;
+  if (store.get(COLLECTION).items.some((t) => t.devSession === session && statusOf(t) !== 'done')) return;
+  await closeSession(runnerOf(store), session).catch(() => {});
+}
+
 /** @param {DataStore} store @param {WorktreeEntry} entry @param {(message: string) => void} say */
 async function remove(store, { worktree, tasks }, say) {
   busy.add(worktree.name);
@@ -55,12 +64,14 @@ async function remove(store, { worktree, tasks }, say) {
     // removeWorktree() takes a worktree by name or by path; terminal.js does not mark `path` optional yet.
     const { removed } = await removeWorktree(runnerOf(store), /** @type {Parameters<typeof removeWorktree>[1]} */ (worktree));
     forget(store, worktree.name);
+    await closeTerminal(store, worktree);
     if (removed) say(`Worktree ${worktree.name} removed: “${tasks[0].text}” is completed`);
   } catch (err) {
     if (/reach the terminal runner/.test(/** @type {Error} */ (err).message)) unreachableAt = Date.now();
     else {
       forget(store, worktree.name, { kept: /** @type {Error} */ (err).message });
       say(`Worktree ${worktree.name} kept: ${/** @type {Error} */ (err).message}`);
+      await closeTerminal(store, worktree);
     }
   } finally {
     busy.delete(worktree.name);
