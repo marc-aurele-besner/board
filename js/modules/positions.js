@@ -2149,20 +2149,25 @@ const TABS = [['summary', 'Summary', 'activity'], ['positions', 'LP Positions', 
 /** @type {Record<string, [string, (store: Store, ui: DefiUi) => DefiTab]>} */
 const OWN_TABS = { summary: ['Summary', summaryTab], wallets: ['Wallets', walletsTab], lending: ['Lending / Borrowing', lendingTab] };
 
-/** @param {Store} store */
-function tabs(store) {
-  return h('nav', { class: 'sub-tabs lp-tabs', role: 'tablist', 'aria-label': 'DeFi view' },
-    TABS.map(([key, label, iconName]) =>
-      h('button', {
-        type: 'button',
-        role: 'tab',
-        class: view.tab === key ? 'sub-tab active' : 'sub-tab',
-        'aria-selected': String(view.tab === key),
-        onclick: () => {
-          view.tab = key;
-          store.refresh();
-        },
-      }, icon(iconName), label)));
+// The tabs, with the open tab's controls at the end of their row: the page has no header. What the open tab
+// shows, and what is being read, is in its tooltip.
+/** @param {Store} store @param {string} [subtitle] @param {Child[]} [tools] */
+function tabs(store, subtitle = '', tools = []) {
+  return h('div', { class: 'sub-tabs-bar' },
+    h('nav', { class: 'sub-tabs lp-tabs', role: 'tablist', 'aria-label': 'DeFi view' },
+      TABS.map(([key, label, iconName]) =>
+        h('button', {
+          type: 'button',
+          role: 'tab',
+          class: view.tab === key ? 'sub-tab active' : 'sub-tab',
+          'aria-selected': String(view.tab === key),
+          title: view.tab === key && subtitle ? subtitle : null,
+          onclick: () => {
+            view.tab = key;
+            store.refresh();
+          },
+        }, icon(iconName), label))),
+    tools.some(Boolean) ? h('div', { class: 'row sub-tabs-tools' }, tools) : null);
 }
 
 /** @param {HTMLElement} root @param {Store} store */
@@ -2232,13 +2237,10 @@ function drawOwnTab(root, store) {
     },
     openPosition: (ref) => openDetail(store, ref),
   };
-  const [title, drawTab] = OWN_TABS[view.tab];
+  const [, drawTab] = OWN_TABS[view.tab];
   const { subtitle, actions, body } = drawTab(store, ui);
   root.replaceChildren(h('div', { class: 'stack-lg lp' },
-    h('div', { class: 'row between lp-head' },
-      h('div', null, h('h2', null, title), h('p', { class: 'muted small' }, subtitle)),
-      h('div', { class: 'row' }, currencySwitch(store), actions)),
-    tabs(store),
+    tabs(store, subtitle, [currencySwitch(store), ...actions]),
     rateNotice(),
     body));
 }
@@ -2263,12 +2265,7 @@ function draw(root, store) {
     }
     askRate(store);
     root.replaceChildren(h('div', { class: 'stack-lg lp' },
-      h('header', { class: 'row between lp-head' },
-        h('div', null,
-          h('h2', null, 'Liquidity Pools'),
-          logged && view.tab === 'fees' ? h('p', { class: 'muted small' }, FEES_SUBTITLE) : null),
-        logged ? currencySwitch(store) : null),
-      tabs(store),
+      tabs(store, logged && view.tab === 'fees' ? FEES_SUBTITLE : '', [logged ? currencySwitch(store) : null]),
       logged ? rateNotice() : null,
       view.tab === 'fees'
         ? feesView(store)
@@ -2366,22 +2363,18 @@ function draw(root, store) {
   }
 
   root.replaceChildren(h('div', { class: 'stack-lg lp' },
-    h('div', { class: 'row between lp-head' },
-      h('div', null,
-        h('h2', null, 'Liquidity Pools'),
-        h('p', { class: 'muted small' },
-          view.tab === 'fees'
-            ? FEES_SUBTITLE
-            : `Uniswap v3 and v4 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`,
-          state.pending.length ? ` Reading ${state.pending.join(', ')}…` : state.at ? ` ${updatedText()}.` : '')),
-      h('div', { class: 'row' },
+    tabs(store,
+      (view.tab === 'fees'
+        ? FEES_SUBTITLE
+        : `Uniswap v3 and v4 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`)
+        + (state.pending.length ? ` Reading ${state.pending.join(', ')}…` : state.at ? ` ${updatedText()}.` : ''),
+      [
         currencySwitch(store),
         view.tab === 'fees' ? null : h('button', { type: 'button', class: 'btn-small', onclick: () => openAdd(store), title: 'Add a position the board did not find' }, icon('plus'), 'Add position'),
-        h('button', { type: 'button', class: 'btn-small', disabled: reading || chainCount === 0, onclick: () => load(store) },
-        refreshIcon(reading),
-          reading ? 'Reading…' : 'Refresh'))),
-
-    tabs(store),
+        h('button', { type: 'button', class: 'btn-small', disabled: reading || chainCount === 0, onclick: () => load(store), title: state.at ? updatedText() : null },
+          refreshIcon(reading),
+          reading ? 'Reading…' : 'Refresh'),
+      ]),
     rateNotice(),
     view.adding && view.tab !== 'fees' ? addForm(store) : null,
     state.shallow.length

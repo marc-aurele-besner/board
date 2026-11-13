@@ -1526,8 +1526,6 @@ button.run-chip.preview-link { min-height: 28px; padding: 3px 10px; border-radiu
 .k-photo-remove { position: absolute; top: 4px; right: 4px; background: var(--surface); border-radius: 999px; }
 
 /* LP positions: Uniswap v3 positions read from the chain */
-.lp-head { align-items: flex-start; gap: var(--gap); }
-.lp-head .money-currency { margin-bottom: 0; }
 .lp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: var(--gap); }
 .lp-stat { display: flex; flex-direction: column; gap: 4px; }
 .lp-stat strong { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
