@@ -1,9 +1,10 @@
-// Reads the follower counts of the X and LinkedIn accounts in socials.json. Neither network needs a key for a
-// public profile: X's profile page and a LinkedIn person's page carry the counts for anyone. LinkedIn shows company
-// pages only when signed in, so those go through the session saved in Settings → LinkedIn, as the site's own
-// pages do. Settings asks for a just-added account at once (POST /run/socials with its id).
+// Reads the follower counts of the X, LinkedIn and GitHub accounts in socials.json. Neither X nor LinkedIn needs a
+// key for a public profile: X's profile page and a LinkedIn person's page carry the counts for anyone. LinkedIn shows
+// company pages only when signed in, so those go through the session saved in Settings → LinkedIn, as the site's own
+// pages do. GitHub's API gives a user's or organization's followers and its repos' stars, with the token of
+// Settings → GitHub when there is one. Settings and Monitoring ask for accounts at once (POST /run/socials with ids).
 /** @import { Job } from '../../types/runner' */
-/** @import { LinkedinSettings, SocialAccount } from '../../types/data' */
+/** @import { LinkedinSettings, GithubSettings, SocialAccount } from '../../types/data' */
 import { SOCIALS, recordRead, isOrganization } from '../../js/socials.js';
 
 // The sites answer a browser's page, not a script's.
@@ -11,7 +12,7 @@ const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 // A pause between two reads of one site, so a long list does not look like a crawl.
 const PAUSE_MS = 2000;
 
-/** @typedef {{ followers: number, following?: number, name?: string, image?: string }} Read */
+/** @typedef {{ followers: number, following?: number, stars?: number, name?: string, image?: string }} Read */
 
 /** @param {string} url @param {AbortSignal} signal @param {Record<string, string>} [headers] */
 async function page(url, signal, headers = {}) {
@@ -119,6 +120,34 @@ async function readLinkedinSignedIn(a, session, signal) {
   return { followers, name: typeof title === 'string' ? title : undefined };
 }
 
+// GitHub caps a list at 100 per page; 10 pages covers 1,000 repos.
+const GITHUB_PAGES = 10;
+
+// A user's or organization's followers from its profile, and the stars of its public repos that are not forks.
+/** @param {string} login @param {GithubSettings | undefined} github @param {AbortSignal} signal @returns {Promise<Read>} */
+async function readGithub(login, github, signal) {
+  const token = github?.orgs?.find((o) => o.org?.toLowerCase() === login.toLowerCase() && o.token)?.token || github?.token || '';
+  const headers = { accept: 'application/vnd.github+json', 'user-agent': 'board', ...(token ? { authorization: `Bearer ${token}` } : {}) };
+  /** @param {string} path @returns {Promise<any>} */ // any: GitHub's JSON, read field by field below
+  const get = async (path) => {
+    const res = await fetch(`https://api.github.com${path}`, { headers, signal });
+    if (res.status === 404) throw new Error(`GitHub has no user or organization ${login}.`);
+    if (res.status === 401) throw new Error('GitHub rejected the token in Settings → GitHub.');
+    if (res.status === 403 || res.status === 429) throw new Error('GitHub’s rate limit was reached. A token in Settings → GitHub raises it.');
+    if (!res.ok) throw new Error(`GitHub answered ${res.status}.`);
+    return res.json();
+  };
+  const user = await get(`/users/${encodeURIComponent(login)}`);
+  let stars = 0;
+  for (let p = 1; p <= GITHUB_PAGES; p++) {
+    /** @type {{ stargazers_count?: number, fork?: boolean }[]} */
+    const repos = await get(`/users/${encodeURIComponent(login)}/repos?per_page=100&type=owner&page=${p}`);
+    for (const r of repos) if (!r.fork) stars += r.stargazers_count ?? 0;
+    if (repos.length < 100) break;
+  }
+  return { followers: user.followers ?? 0, following: user.following, stars, name: user.name || undefined, image: user.avatar_url || undefined };
+}
+
 /** @param {SocialAccount} a @param {LinkedinSettings | undefined} session @param {AbortSignal} signal */
 async function readLinkedin(a, session, signal) {
   if (!isOrganization(a)) {
@@ -135,8 +164,8 @@ export default /** @satisfies {Job} */ ({
   async run({ store, params, signal }) {
     const all = store.get(SOCIALS).accounts ?? [];
     const accounts = params.ids?.length ? all.filter((a) => params.ids?.includes(a.id)) : all;
-    if (!accounts.length) return { waiting: 'No X or LinkedIn account is added in Settings.' };
-    const session = store.get('settings').linkedin;
+    if (!accounts.length) return { waiting: 'No X, LinkedIn or GitHub account is added in Settings.' };
+    const { linkedin: session, github } = store.get('settings');
     /** @type {{ text: string }[]} */
     const errors = [];
     /** @type {Record<string, number>} */
@@ -146,7 +175,9 @@ export default /** @satisfies {Job} */ ({
       if (since < PAUSE_MS) await new Promise((r) => setTimeout(r, PAUSE_MS - since));
       last[a.network] = Date.now();
       try {
-        const read = a.network === 'x' ? await readX(a.handle, signal) : await readLinkedin(a, session, signal);
+        const read = a.network === 'x' ? await readX(a.handle, signal)
+          : a.network === 'github' ? await readGithub(a.handle, github, signal)
+            : await readLinkedin(a, session, signal);
         recordRead(store, a.id, read);
       } catch (err) {
         if (signal.aborted) throw err;
