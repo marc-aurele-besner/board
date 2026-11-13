@@ -13,7 +13,7 @@ const DAY = 86400000;
 // caches each transcript until it changes.
 const BATCH = 200;
 /** @type {(keyof WorktreeUsage)[]} */
-const FIELDS = ['sessions', 'billing', 'models', 'cost', 'extraCost', 'duration', 'apiDuration', 'linesAdded', 'linesRemoved', 'efforts', 'replies', 'start', 'end'];
+const FIELDS = ['sessions', 'billing', 'models', 'cost', 'extraCost', 'duration', 'apiDuration', 'linesAdded', 'linesRemoved', 'efforts', 'replies', 'start', 'end', 'skills', 'mcp'];
 
 const runnerOf = (/** @type {DataStore} */ store) => store.get('dev')?.runner || TERMINAL_RUNNER;
 export const devUsage = (/** @type {DataStore} */ store) => store.get(COLLECTION).dev ?? {};
@@ -73,8 +73,10 @@ let busy = false;
 export async function refreshDevUsage(store, read = (list) => worktreeUsage(runnerOf(store), list)) {
   if (busy) return;
   rememberWorktrees(store, heldWorktrees(store));
-  // Records saved before the cost was split into included and extra are read once more for the split.
-  const records = Object.values(devUsage(store)).filter((r) => r.cwd && (live(store, r) || r.billing === undefined));
+  // Records saved before the cost was split into included and extra, or before skills and MCP calls were counted,
+  // are read once more.
+  const stale = (/** @type {DevUsage} */ r) => r.billing === undefined || (!!r.sessions && !r.skills);
+  const records = Object.values(devUsage(store)).filter((r) => r.cwd && (live(store, r) || stale(r)));
   if (!records.length) return;
   // A record not read yet has no `end`: its `added` stands in, so a new session is read first rather than never.
   const recent = (/** @type {DevUsage} */ r) => Math.max(r.end ?? 0, Date.parse(r.added ?? '') || 0);
@@ -84,15 +86,20 @@ export async function refreshDevUsage(store, read = (list) => worktreeUsage(runn
     const asked = records.slice(0, BATCH);
     const found = await read(asked.map(({ name, cwd }) => ({ name, cwd })));
     const changed = Object.entries(found).filter(([name, u]) => FIELDS.some((k) => JSON.stringify(u[k]) !== JSON.stringify(devUsage(store)[name]?.[k])));
-    // Transcripts Claude has since deleted can't be split: marked, so they are not asked for again.
-    const gone = asked.filter((r) => r.billing === undefined && !found[r.name] && !live(store, r)).map((r) => r.name);
+    // Transcripts Claude has since deleted can't be read again: marked, so they are not asked for again.
+    const gone = asked.filter((r) => stale(r) && !found[r.name] && !live(store, r)).map((r) => r.name);
     if (!changed.length && !gone.length) return;
     store.update(COLLECTION, (d) => {
       for (const [name, u] of changed) {
         if (!d.dev?.[name]) continue;
         for (const k of FIELDS) /** @type {Partial<Record<keyof WorktreeUsage, unknown>>} */ (d.dev[name])[k] = u[k];
       }
-      for (const name of gone) if (d.dev?.[name]) d.dev[name].billing = null;
+      for (const name of gone) {
+        const r = d.dev?.[name];
+        if (!r) continue;
+        if (r.billing === undefined) r.billing = null;
+        if (r.sessions && !r.skills) Object.assign(r, { skills: {}, mcp: {} });
+      }
     });
   } finally {
     busy = false;
