@@ -4,9 +4,12 @@
 // pages do. GitHub's API gives a user's or organization's followers and its repos' stars, with the token of
 // Settings → GitHub when there is one. Instagram gives a profile's counts only in the page it shows link previews,
 // rounded above 10,000 as the site writes them (12.3K). Settings and Monitoring ask for accounts at once (POST /run/socials with ids).
-/** @import { Job } from '../../types/runner' */
-/** @import { LinkedinSettings, GithubSettings, SocialAccount } from '../../types/data' */
+/** @import { Job, NodeStore } from '../../types/runner' */
+/** @import { GithubSettings, SocialAccount } from '../../types/data' */
+/** @import { LinkedinSessionError } from '../../js/linkedin-session.js' */
 import { SOCIALS, recordRead, isOrganization } from '../../js/socials.js';
+import { sessionCookies } from '../../js/linkedin-session.js';
+import { voyager } from '../linkedin-session.js';
 
 // The sites answer a browser's page, not a script's.
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
@@ -70,19 +73,6 @@ async function readLinkedinPerson(handle, signal) {
   return null;
 }
 
-/** @param {LinkedinSettings | undefined} session */
-const sessionHeaders = (session) => {
-  const liAt = String(session?.liAt ?? '').trim().replace(/^li_at=/, '');
-  const jsession = String(session?.jsessionid ?? '').trim().replace(/^JSESSIONID=/, '').replace(/"/g, '');
-  if (!liAt || !jsession) return null;
-  return {
-    cookie: `li_at=${liAt}; JSESSIONID="${jsession}"`,
-    'csrf-token': jsession,
-    'x-restli-protocol-version': '2.0.0',
-    accept: 'application/json',
-  };
-};
-
 // The first value of `key` anywhere in a JSON answer.
 /** @param {unknown} node @param {string} key @returns {unknown} */
 function find(node, key) {
@@ -95,28 +85,29 @@ function find(node, key) {
   return undefined;
 }
 
-// LinkedIn's own API, the one its pages call, with the signed-in session.
-/** @param {SocialAccount} a @param {LinkedinSettings | undefined} session @param {AbortSignal} signal @returns {Promise<Read>} */
-async function readLinkedinSignedIn(a, session, signal) {
-  const headers = sessionHeaders(session);
-  if (!headers) {
+// Follower counts change slowly, and the session's calls are few: a read through it is kept this long.
+const SESSION_MAX_AGE = 12 * 3600000;
+
+// LinkedIn's own API, the one its pages call, through the saved session's queue (tools/linkedin-session.js).
+/** @param {NodeStore} store @param {SocialAccount} a @param {AbortSignal} signal @returns {Promise<Read>} */
+async function readLinkedinSignedIn(store, a, signal) {
+  if (!sessionCookies(store.get('settings').linkedin)) {
     throw new Error(isOrganization(a)
       ? 'LinkedIn shows company pages only when signed in. Add the session in Settings → LinkedIn.'
       : 'LinkedIn did not show this profile’s public page. Add the session in Settings → LinkedIn to read it signed in.');
   }
   const name = a.handle.replace(/^[a-z]+\//, '');
-  /** @param {string} path @returns {Promise<unknown>} */
-  const get = async (path) => {
-    const res = await fetch(`https://www.linkedin.com/voyager/api/${path}`, { headers: { 'user-agent': UA, ...headers }, signal, redirect: 'manual' });
-    if (res.status === 401 || res.status === 403 || (res.status >= 300 && res.status < 400)) {
-      throw new Error('LinkedIn did not accept the session. Copy li_at and JSESSIONID again in Settings → LinkedIn.');
+  /** @param {string} path @param {string} cacheKey @returns {Promise<unknown>} */
+  const get = async (path, cacheKey) => {
+    try {
+      return await voyager(store, { path, cacheKey, maxAge: SESSION_MAX_AGE, signal });
+    } catch (err) {
+      if (/** @type {LinkedinSessionError} */ (err).status === 404) throw new Error(`LinkedIn has no page ${a.handle}.`);
+      throw err;
     }
-    if (res.status === 404) throw new Error(`LinkedIn has no page ${a.handle}.`);
-    if (!res.ok) throw new Error(`LinkedIn answered ${res.status}.`);
-    return res.json();
   };
   if (isOrganization(a)) {
-    const data = await get(`organization/companies?decorationId=com.linkedin.voyager.deco.organization.web.WebFullCompanyMain-12&q=universalName&universalName=${encodeURIComponent(name)}`);
+    const data = await get(`organization/companies?decorationId=com.linkedin.voyager.deco.organization.web.WebFullCompanyMain-12&q=universalName&universalName=${encodeURIComponent(name)}`, `company:${name.toLowerCase()}`);
     const followers = Number(find(data, 'followerCount'));
     if (!Number.isFinite(followers)) throw new Error('LinkedIn’s answer had no follower count.');
     const title = find(data, 'name');
@@ -124,10 +115,10 @@ async function readLinkedinSignedIn(a, session, signal) {
   }
   // A person: their profile's id from the profile, then its following state, which holds the follower count.
   // (identity/profiles/…/networkinfo, read before, now answers 410 Gone.)
-  const profile = await get(`identity/dash/profiles?q=memberIdentity&memberIdentity=${encodeURIComponent(name)}`);
+  const profile = await get(`identity/dash/profiles?q=memberIdentity&memberIdentity=${encodeURIComponent(name)}`, `profile:${name.toLowerCase()}`);
   const urn = find(profile, 'entityUrn');
   if (typeof urn !== 'string' || !urn.startsWith('urn:li:fsd_profile:')) throw new Error(`LinkedIn has no profile ${a.handle}.`);
-  const state = await get(`feed/dash/followingStates/${encodeURIComponent(`urn:li:fsd_followingState:${urn}`)}`);
+  const state = await get(`feed/dash/followingStates/${encodeURIComponent(`urn:li:fsd_followingState:${urn}`)}`, `followers:${urn}`);
   const followers = Number(find(state, 'followerCount') ?? find(profile, 'followerCount'));
   if (!Number.isFinite(followers)) throw new Error('LinkedIn’s answer had no follower count.');
   const first = find(profile, 'firstName');
@@ -191,24 +182,24 @@ async function readInstagram(handle, signal) {
   };
 }
 
-/** @param {SocialAccount} a @param {LinkedinSettings | undefined} session @param {AbortSignal} signal */
-async function readLinkedin(a, session, signal) {
+/** @param {NodeStore} store @param {SocialAccount} a @param {AbortSignal} signal */
+async function readLinkedin(store, a, signal) {
   if (!isOrganization(a)) {
     const read = await readLinkedinPerson(a.handle, signal);
     if (read) return read;
   }
-  return readLinkedinSignedIn(a, session, signal);
+  return readLinkedinSignedIn(store, a, signal);
 }
 
 export default /** @satisfies {Job} */ ({
   id: 'socials',
   delay: 12000,
-  timeout: 5 * 60000,
+  timeout: 30 * 60000,
   async run({ store, params, signal }) {
     const all = store.get(SOCIALS).accounts ?? [];
     const accounts = params.ids?.length ? all.filter((a) => params.ids?.includes(a.id)) : all;
     if (!accounts.length) return { waiting: 'No X, LinkedIn, GitHub or Instagram account is added in Settings.' };
-    const { linkedin: session, github } = store.get('settings');
+    const { github } = store.get('settings');
     /** @type {{ text: string }[]} */
     const errors = [];
     /** @type {Record<string, number>} */
@@ -221,7 +212,7 @@ export default /** @satisfies {Job} */ ({
         const read = a.network === 'x' ? await readX(a.handle, signal)
           : a.network === 'github' ? await readGithub(a.handle, github, signal)
             : a.network === 'instagram' ? await readInstagram(a.handle, signal)
-              : await readLinkedin(a, session, signal);
+              : await readLinkedin(store, a, signal);
         recordRead(store, a.id, read);
       } catch (err) {
         if (signal.aborted) throw err;
