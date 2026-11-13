@@ -15,9 +15,16 @@ export const imagesOf = (item) => item.images ?? [];
 // Object URLs by path, so a re-render shows a thumbnail at once instead of reading the file again.
 /** @type {Map<string, Promise<string>>} */
 const urls = new Map();
+// The same, once read: a redraw sets the thumbnail's src as it draws it, so the one on screen keeps its picture.
+/** @type {Map<string, string>} */
+const ready = new Map();
 /** @param {Store} store @param {string} path */
 function urlOf(store, path) {
-  if (!urls.has(path)) urls.set(path, store.files.read(path).then((file) => URL.createObjectURL(file)));
+  if (!urls.has(path)) urls.set(path, store.files.read(path).then((file) => {
+    const url = URL.createObjectURL(file);
+    ready.set(path, url);
+    return url;
+  }));
   return /** @type {Promise<string>} */ (urls.get(path));
 }
 
@@ -58,6 +65,8 @@ async function removeImage(store, id, path) {
     if (item) item.images = imagesOf(item).filter((img) => img.path !== path);
   });
   urls.get(path)?.then((url) => URL.revokeObjectURL(url)).catch(() => {});
+  urls.delete(path);
+  ready.delete(path);
   urls.delete(path);
   await store.files.remove(path).catch(() => {});
 }
@@ -106,8 +115,8 @@ function showImage(store, img) {
 
 /** @param {Store} store @param {Task} item @param {TaskImage} img */
 function thumb(store, item, img) {
-  const pic = h('img', { alt: img.name });
-  urlOf(store, img.path).then((src) => (pic.src = src), () => pic.replaceWith(h('span', { class: 'muted small' }, 'Missing')));
+  const pic = h('img', { alt: img.name, src: ready.get(img.path) ?? null });
+  if (!pic.src) urlOf(store, img.path).then((src) => (pic.src = src), () => pic.replaceWith(h('span', { class: 'muted small' }, 'Missing')));
   return h('div', { class: 'task-image' },
     h('button', { type: 'button', class: 'task-image-open', title: img.name, 'aria-label': `Open ${img.name}`, onclick: () => showImage(store, img) }, pic),
     h('button', {
