@@ -25,7 +25,8 @@
         { "id": "step-9", "type": "loop", "items": "{{step2.items}}", "span": 2, "max": 20 },
         { "id": "step-10", "type": "format", "mode": "fields", "text": "{{input}}", "items": "{{input}}", "itemText": "- {{item}}", "separator": "line", "fields": [{ "id": "field-1", "name": "title", "value": "{{item.title}}" }] },
         { "id": "step-11", "type": "format", "mode": "list", "items": "{{input}}", "itemText": "- {{item.title}}", "separator": "line" },
-        { "id": "step-12", "type": "parse", "text": "{{step6.answer}}", "mode": "largest" }
+        { "id": "step-12", "type": "parse", "text": "{{step6.answer}}", "mode": "largest" },
+        { "id": "step-13", "type": "dedupe", "items": "{{step12}}", "text": "{{item.url}}", "match": "text", "scope": "flow" }
       ],
       "lastRun": "2026-01-14T08:00:00.000Z",
       "created": "2026-01-01T09:00:00.000Z",

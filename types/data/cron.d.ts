@@ -46,8 +46,8 @@ export interface CronFormatField {
   value: string;
 }
 
-// A step (makeStep()). type: 'gather', 'ai', 'stop', 'format', 'parse', 'loop', 'task', 'notify', 'profile' or
-// 'dev'; each type uses some fields.
+// A step (makeStep()). type: 'gather', 'ai', 'stop', 'format', 'parse', 'dedupe', 'loop', 'task', 'update', 'notify',
+// 'profile' or 'dev'; each type uses some fields.
 export interface CronStep {
   id: string;
   type: string;
@@ -92,7 +92,11 @@ export interface CronStep {
   // dev: 'claude', 'preset', 'custom' or 'command'. update: 'append' or 'replace'. format: 'text' (uses `text`), 'list'
   // or 'fields'. parse: which JSON value of several it keeps, 'largest', 'last', 'first' or 'all'.
   mode?: string;
-  // format 'list' and loop: the list to read, as a variable ('{{input}}', '{{step2.items}}').
+  // dedupe: `items` is the list, `text` each item's key ('{{item.url}}'). match: 'title' (a task's title is the key) or
+  // 'text' (its title or description holds it); scope: 'flow', 'project' or 'all', the tasks it compares with.
+  match?: string;
+  scope?: string;
+  // format 'list', dedupe and loop: the list to read, as a variable ('{{input}}', '{{step2.items}}').
   items?: string;
   // format 'list': each item's text, and what goes between them ('line', 'blank', 'comma' or 'space').
   itemText?: string;
