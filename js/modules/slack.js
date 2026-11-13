@@ -5,7 +5,7 @@
 import { h, icon, uid, notice, refreshIcon, codeBox, keepImages, steadyAnimations } from '../ui.js';
 import { projectTree, projectIcon } from './projects.js';
 import { pickButton, pickChip } from '../inline.js';
-import { menuButton, onContextMenu } from '../menu.js';
+import { menuButton, onContextMenu, openMenu } from '../menu.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import { runnersOnline, runnersKnown } from '../runners.js';
@@ -171,6 +171,8 @@ const live = {
   mounted: null,
   /** @type {ReturnType<typeof setInterval> | null} */
   timer: null,
+  // Whether Escape (which drops the picked conversations) is listened for.
+  keys: false,
 };
 
 const data = (/** @type {Store} */ store) => /** @type {SlackData} */ ({ ...SLACK_DEFAULTS, ...store.get(SLACK) });
@@ -634,6 +636,17 @@ function projectItems(store, current, set, inherit = null) {
   ]);
 }
 
+// Marks a conversation read up to its latest message, here and in Slack. The caller repaints.
+/** @param {Store} store @param {string} key */
+function markReadNow(store, key) {
+  const [team, channel] = splitKey(key);
+  const w = workspaceOf(store, team);
+  const n = countOf(key);
+  if (!w || !n?.latest) return;
+  markRead(w, channel, n.latest).catch((err) => toast(err.message));
+  Object.assign(n, { unread: false, mentions: 0, lastRead: n.latest });
+}
+
 // A conversation's menu, as Slack's: open and copy, read and mute, then where it sits (order, group, project).
 /** @param {Store} store @param {string} key @param {Section} section @returns {MenuEntry[]} */
 function itemMenu(store, key, section) {
@@ -656,17 +669,7 @@ function itemMenu(store, key, section) {
       w ? { label: 'Copy link', onSelect: () => copyText(link, 'link') } : null,
     ] },
     '-',
-    {
-      label: 'Mark as read',
-      icon: () => icon('check'),
-      onSelect: () => {
-        const n = countOf(key);
-        if (!(unread || mentions) || !w || !n?.latest) return;
-        markRead(w, channel, n.latest).catch((err) => toast(err.message));
-        Object.assign(n, { unread: false, mentions: 0, lastRead: n.latest });
-        paint('side');
-      },
-    },
+    { label: 'Mark as read', icon: () => icon('check'), onSelect: () => { if (unread || mentions) markReadNow(store, key); paint('side'); } },
     { label: muted ? 'Unmute conversation' : 'Mute conversation', icon: () => icon(muted ? 'bell' : 'bell-off'), onSelect: () => toggleMute(store, key) },
     '-',
     { label: 'Move', icon: () => icon('arrow-left-right'), items: [
@@ -691,6 +694,72 @@ function itemMenu(store, key, section) {
       own ? d.projects[key] : null,
       (id) => change(store, (dd) => { dd.projects[key] = id; }),
       { checked: !own, onSelect: () => change(store, (dd) => { delete dd.projects[key]; }) },
+    ) },
+  ];
+}
+
+// The menu of several conversations picked with Ctrl / Cmd or Shift: what itemMenu does, applied to each.
+/** @param {Store} store @param {string[]} keys @returns {MenuEntry[]} */
+function pickedMenu(store, keys) {
+  const d = data(store);
+  const allMuted = keys.every((k) => isMuted(store, k));
+  const groups = keys.map((k) => groupOf(d, k));
+  const owns = keys.map((k) => (k in d.projects ? d.projects[k] : null));
+  // The project they all chose, null when none chose one, undefined when they differ.
+  const same = owns.every((x) => x === owns[0]) ? owns[0] : undefined;
+  /** @param {string} k */
+  const label = (k) => {
+    const c = channelOf(store, k);
+    const name = c ? nameOf(store, splitKey(k)[0], c) : k;
+    return c?.kind === 'im' || c?.kind === 'mpim' ? name : `#${name}`;
+  };
+  /** @param {string} k */
+  const link = (k) => {
+    const [team, channel] = splitKey(k);
+    const w = workspaceOf(store, team);
+    return w ? slackLink(w, channel) : '';
+  };
+  /** @param {(dd: SlackData) => void} mutate */
+  const apply = (mutate) => { clearPicked(); change(store, mutate); };
+  return [
+    { label: `${keys.length} conversations`, hint: 'Esc clears', icon: () => icon('x'), onSelect: () => { clearPicked(); paint('side'); } },
+    '-',
+    { label: 'Copy', icon: () => icon('copy'), items: [
+      { label: 'Copy names', onSelect: () => copyText(keys.map(label).join('\n'), 'names') },
+      { label: 'Copy links', onSelect: () => copyText(keys.map(link).filter(Boolean).join('\n'), 'links') },
+    ] },
+    '-',
+    { label: 'Mark as read', icon: () => icon('check'), onSelect: () => { for (const k of keys) markReadNow(store, k); clearPicked(); paint('side'); } },
+    {
+      label: allMuted ? 'Unmute conversations' : 'Mute conversations',
+      icon: () => icon(allMuted ? 'bell' : 'bell-off'),
+      onSelect: () => apply((dd) => {
+        const rest = dd.muted.filter((k) => !keys.includes(k));
+        dd.muted = allMuted ? rest : [...rest, ...keys];
+      }),
+    },
+    '-',
+    { label: 'Move', icon: () => icon('arrow-left-right'), items: [
+      ...d.groups.map((g) => ({
+        label: g.name,
+        icon: () => icon('folder'),
+        checked: groups.every((x) => x === g),
+        onSelect: () => apply((dd) => {
+          for (const x of dd.groups) x.items = x.items.filter((k) => !keys.includes(k));
+          dd.groups.find((x) => x.id === g.id)?.items.push(...keys);
+          // At the group's end, in the order they show.
+          dd.order = [...dd.order.filter((k) => !keys.includes(k)), ...keys];
+        }),
+      })),
+      '-',
+      { label: 'New group…', icon: () => icon('plus'), onSelect: () => { clearPicked(); newGroup(store, keys); } },
+      groups.some(Boolean) ? { label: 'Take out of groups', icon: () => icon('x'), onSelect: () => apply((dd) => { for (const g of dd.groups) g.items = g.items.filter((k) => !keys.includes(k)); }) } : null,
+    ] },
+    { label: 'Project', icon: () => icon('folder'), search: 'Find a project', hint: same === null ? 'inherited' : undefined, items: projectItems(
+      store,
+      same ?? null,
+      (id) => apply((dd) => { for (const k of keys) dd.projects[k] = id; }),
+      { checked: same === null, onSelect: () => apply((dd) => { for (const k of keys) delete dd.projects[k]; }) },
     ) },
   ];
 }
@@ -775,6 +844,43 @@ export function confirmRemove(store, w) {
 // Where a drag is: the conversation being dragged.
 let dragging = '';
 
+// The conversations picked with Ctrl / Cmd (one at a time) or Shift (a range from the last one picked), whose menu
+// acts on all of them. A plain click drops them.
+/** @type {Set<string>} */
+const picked = new Set();
+let pickedFrom = '';
+const clearPicked = () => { picked.clear(); pickedFrom = ''; };
+// On a Mac, Ctrl + click is a right click: it comes as a contextmenu event with the main button.
+const IS_MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
+
+// Picks or unpicks one conversation; with `range`, every conversation shown from the last one picked to it.
+/** @param {string} key @param {boolean} range */
+function pick(key, range) {
+  // The open conversation is picked too when picking starts, as in Slack.
+  if (!picked.size && view.open && view.open !== key) { picked.add(view.open); pickedFrom = view.open; }
+  const shown = [...(live.mounted?.root.querySelectorAll('.slack-side-list .slack-item[data-key]') ?? [])]
+    .map((el) => /** @type {HTMLElement} */ (el).dataset.key ?? '');
+  const a = shown.indexOf(pickedFrom);
+  const b = shown.indexOf(key);
+  if (range && a >= 0 && b >= 0) {
+    for (const k of shown.slice(Math.min(a, b), Math.max(a, b) + 1)) picked.add(k);
+  } else {
+    if (picked.has(key)) picked.delete(key);
+    else picked.add(key);
+    pickedFrom = key;
+  }
+  paint('side');
+}
+
+// A row's menu: of every picked conversation when it is one of them, else its own (and the picks are dropped).
+/** @param {Store} store @param {string} key @param {Section} section @returns {MenuEntry[]} */
+function rowMenu(store, key, section) {
+  const keys = [...picked].filter((k) => channelOf(store, k));
+  if (picked.has(key) && keys.length > 1) return pickedMenu(store, keys);
+  if (picked.size) { clearPicked(); paint('side'); }
+  return itemMenu(store, key, section);
+}
+
 /** @param {Store} store @param {string} key @param {Section} section @param {boolean} multi */
 function sideItem(store, key, section, multi) {
   const [team] = splitKey(key);
@@ -788,7 +894,7 @@ function sideItem(store, key, section, multi) {
   const glyph = c.kind === 'im'
     ? avatar(name, person?.avatar ?? '', 'slack-item-avatar')
     : h('span', { class: 'slack-item-glyph' }, icon(c.kind === 'private' ? 'lock' : c.kind === 'mpim' ? 'users' : 'hash'));
-  const cls = ['slack-item', view.open === key && 'active', unread && 'unread', muted && 'muted'].filter(Boolean).join(' ');
+  const cls = ['slack-item', view.open === key && 'active', picked.has(key) && 'picked', unread && 'unread', muted && 'muted'].filter(Boolean).join(' ');
   const row = h('div', {
     class: cls,
     draggable: 'true',
@@ -817,7 +923,15 @@ function sideItem(store, key, section, multi) {
       type: 'button',
       class: 'slack-item-open',
       title: `${name} · ${w.name}${muted ? ' · muted' : ''}`,
-      onclick: () => openConversation(store, key),
+      onclick: (/** @type {MouseEvent} */ e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey) {
+          e.preventDefault();
+          pick(key, e.shiftKey);
+          return;
+        }
+        if (picked.size) { clearPicked(); paint('side'); }
+        openConversation(store, key);
+      },
     },
       // A workspace's own section says which workspace; groups and projects mix them.
       multi && section.kind !== 'team' ? teamIcon(w, 'slack-item-team') : null,
@@ -825,8 +939,14 @@ function sideItem(store, key, section, multi) {
       h('span', { class: 'slack-item-name' }, name),
       muted ? h('span', { class: 'slack-item-muted', title: 'Muted' }, icon('bell-off')) : null,
       mentions ? h('span', { class: muted ? 'slack-badge muted' : 'slack-badge' }, String(mentions)) : null),
-    menuButton({ title: 'More', className: 'icon-btn slack-item-menu', build: () => itemMenu(store, key, section) }));
-  return onContextMenu(row, () => itemMenu(store, key, section));
+    menuButton({ title: 'More', className: 'icon-btn slack-item-menu', build: () => rowMenu(store, key, section) }));
+  row.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (IS_MAC && e.ctrlKey && e.button === 0) pick(key, false);
+    else openMenu(rowMenu(store, key, section), { x: e.clientX, y: e.clientY });
+  });
+  return row;
 }
 
 /** @param {Store} store */
@@ -1357,6 +1477,14 @@ function draw(root, store) {
   }
   rememberOpen();
   live.mounted = { root, store };
+  if (!live.keys) {
+    live.keys = true;
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !picked.size || !live.mounted?.root.isConnected) return;
+      clearPicked();
+      paint('side');
+    });
+  }
   if (!live.timer) live.timer = setInterval(tick, 1000);
   for (const w of d.workspaces) if (!w.error) relist(store, w);
   if (view.open && !live.history.has(view.open)) queueMicrotask(() => loadHistory(store, view.open));
