@@ -29,6 +29,7 @@ js/store.js           in-memory state; debounced, serialized saves merged with w
 js/merge.js           three-way merge of a collection (last read, this tab, on disk), item by item by id
 js/keep-fields.js     keeps unsubmitted fields across re-renders; holds background re-renders while typing
 js/ui.js              h() DOM helper, icon(), ids, dates, money formatting
+js/menu.js            context menus with submenus: on a right click, or under a ⋯ button
 js/modules/index.js   registry of sections (the nav is built from this list)
 js/modules/*.js       one file per section (todos, projects, kitchen, money, tools, ...)
 js/notifications.js   the bell and its drawer
