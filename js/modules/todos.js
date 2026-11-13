@@ -19,7 +19,7 @@ import { previewChips } from '../previews.js';
 import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startClaudeSession, openSession, runnerOf } from './dev.js';
-import { DEV_MODELS, DEV_EFFORTS } from '../dev-core.js';
+import { DEV_MODELS, DEV_MODEL_NAMES, DEV_EFFORTS } from '../dev-core.js';
 import { openMenu } from '../menu.js';
 import { sessionStatus, runnerInfo } from '../terminal.js';
 import { imagesOf, imageDrop, imageStrip, imagePathsFor, addImages } from '../task-images.js';
@@ -952,11 +952,12 @@ function devOptionsButton(store, item) {
     if (value) t[field] = value;
     else delete t[field];
   });
+  const name = (/** @type {string} */ v) => DEV_MODEL_NAMES[v] ?? v[0].toUpperCase() + v.slice(1);
   /** @param {'devModel' | 'devEffort'} field @param {string[]} values @param {string} now @returns {MenuEntry[]} */
   const rows = (field, values, now) => [
     { label: 'Default', checked: !now, onSelect: () => set(field, '') },
     '-',
-    ...values.map((v) => ({ label: v[0].toUpperCase() + v.slice(1), checked: now === v, onSelect: () => set(field, v) })),
+    ...values.map((v) => ({ label: name(v), checked: now === v, onSelect: () => set(field, v) })),
   ];
   return h('button', {
     type: 'button',
@@ -967,7 +968,7 @@ function devOptionsButton(store, item) {
     onclick: (/** @type {MouseEvent} */ e) => {
       e.stopPropagation();
       openMenu([
-        { label: 'Model', hint: model || 'Default', items: rows('devModel', DEV_MODELS, model) },
+        { label: 'Model', hint: model ? name(model) : 'Default', items: rows('devModel', DEV_MODELS, model) },
         { label: 'Effort', hint: effort || 'Default', items: rows('devEffort', DEV_EFFORTS, effort) },
         '-',
         { label: 'Start a new session', icon: icon('terminal'), onSelect: () => devTasks(store, [item]) },

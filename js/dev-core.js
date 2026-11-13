@@ -38,6 +38,10 @@ function worktreeName(title, id) {
 export const DEV_MODELS = ['fable', 'opus', 'sonnet', 'haiku'];
 export const DEV_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
+// The model each alias runs today, named in the menu (claude moves an alias to a new version on its own).
+/** @type {Record<string, string>} */
+export const DEV_MODEL_NAMES = { fable: 'Fable 5.2', opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', haiku: 'Haiku 5.5' };
+
 // A command that runs claude, so --model and --effort mean something to it; another tool's preset is left as is.
 const RUNS_CLAUDE = /^\s*(\S*\/)?claude(\s|$)/;
 
