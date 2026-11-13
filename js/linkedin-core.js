@@ -1,7 +1,8 @@
 // linkedin.json without the DOM: LinkedIn's posts, comments, official sign-in and the saved session's call queue state.
 // Follower counts stay in socials.json (js/socials.js). The runners import this file.
-/** @import { LinkedinData, LinkedinAuth, DataStore } from '../types/data' */
+/** @import { LinkedinData, LinkedinAuth, LinkedinPost, DataStore } from '../types/data' */
 import { notify } from './notify-core.js';
+import { uid } from './ui.js';
 
 export const LINKEDIN = 'linkedin';
 /** @type {LinkedinData} */
@@ -56,7 +57,7 @@ export function checkLinkedinExpiry(store) {
 }
 
 // --- Weekly summary and rules: reads of posts and follower history, no DOM ---
-/** @import { LinkedinPost, LinkedinPostMetrics } from '../types/data' */
+/** @import { LinkedinPostMetrics } from '../types/data' */
 
 // A post's last read of its results, or null before the first.
 /** @param {LinkedinPost} post @returns {LinkedinPostMetrics | null} */
@@ -119,4 +120,132 @@ export function postStandout(post, posts) {
   const mid = Math.floor(earlier.length / 2);
   const median = earlier.length % 2 ? earlier[mid] : (earlier[mid - 1] + earlier[mid]) / 2;
   return { age, reactions: m.reactions ?? 0, median, compared: earlier.length };
+}
+
+// --- Posts ---
+
+export const POST_LIMIT = 3000;
+const POSTS_URL = 'https://api.linkedin.com/rest/posts';
+// LinkedIn's versioned API wants a YYYYMM version, each kept about a year: move it on when LinkedIn sunsets it.
+const API_VERSION = '202610';
+
+// LinkedIn reads a post's commentary as "little text", where these characters mark mentions, hashtags and links:
+// written plainly, they are dropped with the rest of the line. A backslash keeps them as text. `#` stays, so
+// hashtags written as #tag still become hashtags.
+/** @param {string} text */
+export const escapeLittleText = (text) => text.replace(/[\\()[\]{}<>@|~_*]/g, '\\$&');
+
+// The words of a line, without Markdown's heading marks, bold, list numbers or a trailing colon.
+/** @param {string} line */
+const bare = (line) => line.trim().replace(/^#{1,6}\s+/, '').replace(/^\d+[.)]\s*/, '').replace(/^\*\*(.*)\*\*$/, '$1').replace(/^__(.*)__$/, '$1').replace(/:$/, '').trim();
+const HEADINGS = new Set(['x', 'x post', 'x (twitter)', 'twitter', 'tweet', 'linkedin', 'linkedin post', 'instagram', 'bluesky', 'threads', 'mastodon', 'topic']);
+/** @param {string} line */
+const isHeading = (line) => /^#{1,6}\s/.test(line.trim()) || /^(\*\*|__)[^*_]+(\*\*|__):?$/.test(line.trim()) || HEADINGS.has(bare(line).toLowerCase());
+
+// The text of a post from a task's description: what follows a "LinkedIn" heading (as Cron's social post templates
+// write them) up to the next heading, else the whole description.
+/** @param {string | undefined} description */
+export function linkedinDraftOf(description) {
+  const lines = String(description ?? '').split('\n');
+  const start = lines.findIndex((l) => /^linkedin( post)?$/i.test(bare(l)));
+  if (start < 0) return lines.join('\n').trim();
+  const end = lines.findIndex((l, i) => i > start && isHeading(l));
+  return lines.slice(start + 1, end < 0 ? undefined : end).join('\n').trim();
+}
+
+/** @param {string} urn */
+export const postUrl = (urn) => `https://www.linkedin.com/feed/update/${urn}/`;
+
+/** @param {Partial<LinkedinPost>} fields @returns {LinkedinPost} */
+export function makePost(fields) {
+  return { id: uid(), taskId: null, projectId: null, text: '', link: '', status: 'draft', scheduledAt: null, createdAt: Date.now(), ...fields };
+}
+
+/** @param {DataStore} store @param {string} id @param {Partial<LinkedinPost>} patch */
+function setPost(store, id, patch) {
+  store.update(LINKEDIN, (d) => {
+    const p = d.posts.find((x) => x.id === id);
+    if (p) Object.assign(p, patch, { updatedAt: Date.now() });
+  });
+}
+
+/** @param {string} link */
+const hostOf = (link) => {
+  try {
+    return new URL(link).hostname.replace(/^www\./, '');
+  } catch {
+    return link;
+  }
+};
+
+// The request LinkedIn's Posts API takes: as the member, public, in the main feed, with the link as an article.
+/** @param {LinkedinAuth} auth @param {LinkedinPost} post */
+export function postRequest(auth, post) {
+  /** @type {Record<string, unknown>} */
+  const body = {
+    author: `urn:li:person:${auth.sub}`,
+    commentary: escapeLittleText(post.text),
+    visibility: 'PUBLIC',
+    distribution: { feedDistribution: 'MAIN_FEED', targetEntities: [], thirdPartyDistributionChannels: [] },
+    lifecycleState: 'PUBLISHED',
+    isReshareDisabledByAuthor: false,
+  };
+  if (post.link) body.content = { article: { source: post.link, title: hostOf(post.link) } };
+  return {
+    url: POSTS_URL,
+    init: {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${auth.token}`,
+        'content-type': 'application/json',
+        'linkedin-version': API_VERSION,
+        'x-restli-protocol-version': '2.0.0',
+      },
+      body: JSON.stringify(body),
+    },
+  };
+}
+
+// Posts one post as the member, from the runners (LinkedIn's API answers no browser). On success the post keeps its
+// URN and page, and its task gets the link and is done; on failure it is marked failed with LinkedIn's reason.
+/** @param {DataStore} store @param {string} id @returns {Promise<LinkedinPost>} */
+export async function publishPost(store, id) {
+  const data = store.get(LINKEDIN);
+  const post = data.posts.find((p) => p.id === id);
+  if (!post) throw new Error('This post is no longer in linkedin.json.');
+  if (post.status === 'posted') return post;
+  /** @param {string} error */
+  const fail = (error) => {
+    setPost(store, id, { status: 'failed', error });
+    return /** @type {LinkedinPost} */ (store.get(LINKEDIN).posts.find((p) => p.id === id));
+  };
+  if (!post.text.trim()) return fail('The post has no text.');
+  if (post.text.length > POST_LIMIT) return fail(`The post is longer than ${POST_LIMIT} characters.`);
+  const auth = data.auth;
+  if (!auth || !signedIn(auth)) return fail(auth ? 'LinkedIn’s sign-in has ended. Sign in again in Settings → LinkedIn.' : 'Sign in with LinkedIn in Settings → LinkedIn first.');
+  setPost(store, id, { status: 'posting', error: null });
+  const { url, init } = postRequest(auth, post);
+  let res;
+  try {
+    res = await fetch(url, { ...init, signal: AbortSignal.timeout(30000) });
+  } catch (err) {
+    return fail(`LinkedIn did not answer: ${/** @type {Error} */ (err).message}`);
+  }
+  if (!res.ok) {
+    const answer = /** @type {{ message?: string }} */ (await res.json().catch(() => ({})));
+    return fail(res.status === 401 ? 'LinkedIn refused the sign-in. Sign in again in Settings → LinkedIn.' : `LinkedIn refused the post: ${answer.message || `HTTP ${res.status}`}`);
+  }
+  const urn = res.headers.get('x-restli-id') ?? res.headers.get('x-linkedin-id') ?? '';
+  const page = urn ? postUrl(urn) : '';
+  setPost(store, id, { status: 'posted', postedAt: Date.now(), urn, url: page, error: null, scheduledAt: null });
+  if (post.taskId) {
+    store.update('todos', (d) => {
+      const task = d.items.find((t) => t.id === post.taskId);
+      if (!task) return;
+      if (page && !(task.links ?? []).some((l) => l.url === page)) task.links = [...(task.links ?? []), { url: page, title: 'LinkedIn post' }];
+      task.status = 'done';
+      delete task.done;
+    });
+  }
+  return /** @type {LinkedinPost} */ (store.get(LINKEDIN).posts.find((p) => p.id === id));
 }

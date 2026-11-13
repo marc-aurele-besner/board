@@ -1,8 +1,8 @@
-// The board's side of LinkedIn's official sign-in: the popup, and the runners' trade of its code for a token.
+// The board's side of LinkedIn: the official sign-in's popup, and asking the runners to trade its code or to post.
 // What runs without the DOM (the trade itself, posting) is in linkedin-core.js.
 import { workerCall } from './runners.js';
 import { LINKEDIN, LINKEDIN_AUTHORIZE, LINKEDIN_SCOPES } from './linkedin-core.js';
-/** @import { Store, LinkedinAuth, LinkedinSettings } from '../types/data' */
+/** @import { Store, LinkedinAuth, LinkedinPost, LinkedinSettings } from '../types/data' */
 
 const SIGN_IN_WAIT = 5 * 60000;
 // The redirect address to add to the app. oauth.html hands the code back over a BroadcastChannel.
@@ -43,6 +43,16 @@ export async function linkedinSignIn(store) {
     d.auth = auth;
   });
   return auth;
+}
+
+// Has the runners post one saved post now (LinkedIn's API answers no browser), then reads back what they wrote: the
+// post's state, and its task's link and status. The tab saves first, so the runners read the post as it is here.
+/** @param {Store} store @param {string} id @returns {Promise<LinkedinPost>} */
+export async function postNow(store, id) {
+  await store.flush();
+  const post = /** @type {LinkedinPost} */ (await workerCall('POST', '/linkedin/post', { id }, 60000));
+  await store.sync();
+  return post;
 }
 
 /** @param {Store} store */

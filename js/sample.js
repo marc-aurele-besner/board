@@ -168,6 +168,10 @@ function collections() {
         task('t6', 'Write the install guide', 'review', 'medium', 'p-docs', { due: day(3) }),
         task('t7', 'Book the plumber', 'done', 'none', 'p-reno'),
         task('t8', 'Buy oat milk', 'todo', 'low', null),
+        task('t9', 'Social posts: the new pricing page', 'todo', 'medium', 'p-atlas', {
+          auto: 'cron',
+          description: 'The new pricing page\n\n## X\nPricing is now one page, one plan. See it at example.com/pricing\n\n## LinkedIn\nWe rewrote our pricing page from scratch.\n\nThree plans became one, with every feature in it. The page is shorter, and so are the questions we get.\n\nWhat made you pick your last tool: the price, or how clear it was?',
+        }),
       ],
     },
     // The pricing task's PR, with the previews a Vercel and a Netlify token would read (js/previews.js).
@@ -299,7 +303,8 @@ function collections() {
     // Posts written in the board with their results read at 1 hour, 24 hours and 7 days: the last one does far
     // better than the ones before, for the weekly summary and the "post doing well" rule.
     linkedin: {
-      auth: null,
+      // A placeholder sign-in: it posts nothing, since sample data has no runners.
+      auth: { token: 'sample', expires: Date.now() + 40 * 86400000, sub: 'sample', name: 'Sample Person', picture: '', at: Date.now() - 20 * 86400000 },
       posts: [
         liPost('lp1', 'Three things we learned shipping the new pricing page.', 20, [[1, 6], [24, 14], [168, 22]]),
         liPost('lp2', 'Why we write the docs before the feature.', 13, [[1, 4], [24, 11], [168, 15]]),
