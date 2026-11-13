@@ -128,23 +128,25 @@ export interface NotionLink {
   databaseId: string;
   // The database's title, read when the link is added.
   name: string;
-  // null means Personal, and its tasks wait in To Organize.
-  projectId: string | null;
+  // null means Personal, and its tasks wait in To Organize; missing means its account's project.
+  projectId?: string | null;
+  // The NotionAccount that reads it.
+  account?: string;
   // Missing means on.
   on?: boolean;
   // The newest last_edited_time read, so the next sync asks only for later edits.
   syncedAt?: string;
   // The last sync's error, '' after one that worked.
   error?: string;
-  // How it is read: 'oauth' with the OAuth sign-in, 'session' with the browser session; missing with the secret.
+  // Before accounts: 'oauth' with the OAuth sign-in, 'session' with the browser session; missing with the secret.
   via?: string;
 }
 
-// A public integration's sign-in, for a workspace where no internal integration can be made.
+// A public integration, for workspaces where no internal integration can be made. Each sign-in with it is an account.
 export interface NotionOAuth {
   clientId: string;
   clientSecret: string;
-  // Empty until signed in.
+  // Before accounts, the one sign-in.
   accessToken?: string;
   refreshToken?: string;
   // The workspace the sign-in was given for.
@@ -158,12 +160,36 @@ export interface NotionSession {
   userId?: string;
 }
 
+// One way into Notion: an internal integration's secret, an OAuth sign-in or a browser session. There may be several
+// of each, one per workspace or person.
+export interface NotionAccount {
+  id: string;
+  // 'token', 'oauth' or 'session'.
+  way: string;
+  // What Notion called it when it was added: the workspace, or the person signed in.
+  name?: string;
+  // 'token': the secret (ntn_… or secret_…).
+  token?: string;
+  // 'oauth': the sign-in's tokens and workspace.
+  accessToken?: string;
+  refreshToken?: string;
+  workspace?: string;
+  workspaceId?: string;
+  // 'session': the token_v2 and notion_user_id cookies.
+  tokenV2?: string;
+  userId?: string;
+  // The project its databases feed unless they pick their own; null or missing is Personal (To Organize).
+  projectId?: string | null;
+}
+
 export interface NotionSettings {
-  // An internal integration's secret (ntn_… or secret_…).
-  token: string;
+  accounts?: NotionAccount[];
+  // The public integration's client, shared by every OAuth account.
   oauth?: NotionOAuth;
-  session?: NotionSession;
   links: NotionLink[];
+  // Before accounts: the one integration secret and the one browser session.
+  token?: string;
+  session?: NotionSession;
 }
 
 export interface AnalyticsSettings {

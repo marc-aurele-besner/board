@@ -3,7 +3,7 @@
 // check a token or a session, to finish an OAuth sign-in, and to read a database it adds.
 /** @import { Job } from '../../types/runner' */
 /** @import { NotionSettings, NotionSession } from '../../types/data' */
-import { syncNotion, hasNotion, checkNotionToken, checkSession, describeDatabase, exchangeNotionCode, parseDatabaseId } from '../../js/notion.js';
+import { syncNotion, hasNotion, checkNotionToken, checkSession, describeDatabase, exchangeNotionCode, parseDatabaseId, normalizeNotion } from '../../js/notion.js';
 
 export default /** @satisfies {Job} */ ({
   id: 'notion',
@@ -16,8 +16,8 @@ export default /** @satisfies {Job} */ ({
     return { added, updated, errors };
   },
   routes: {
-    'POST /notion/check': async (body) => ({ text: await checkNotionToken(String(body.token ?? '')) }),
-    'POST /notion/session': async (body) => ({ text: await checkSession(/** @type {NotionSession} */ (body.session ?? { tokenV2: '' })) }),
+    'POST /notion/check': async (body) => checkNotionToken(String(body.token ?? '')),
+    'POST /notion/session': async (body) => checkSession(/** @type {NotionSession} */ (body.session ?? { tokenV2: '' })),
     'POST /notion/oauth': async (body) => exchangeNotionCode({
       clientId: String(body.clientId ?? ''),
       clientSecret: String(body.clientSecret ?? ''),
@@ -27,9 +27,8 @@ export default /** @satisfies {Job} */ ({
     'POST /notion/database': async (body) => {
       const id = parseDatabaseId(String(body.databaseId ?? ''));
       if (!id) throw new Error('This is not a Notion database link or id.');
-      /** @type {NotionSettings} */
-      const cfg = { token: '', links: [], ...(body.cfg ?? {}) };
-      return { id, ...(await describeDatabase(cfg, id)) };
+      const cfg = normalizeNotion(/** @type {NotionSettings | undefined} */ (body.cfg));
+      return { id, ...(await describeDatabase(cfg, id, body.account ? String(body.account) : undefined)) };
     },
   },
 });

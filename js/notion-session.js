@@ -177,5 +177,5 @@ export async function checkSession(session) {
   const spaces = records(content?.recordMap, 'space').map((s) => s.name).filter(Boolean);
   if (!users.length) throw new Error('Notion did not recognise this session. Copy a fresh token_v2 cookie.');
   const who = users[0].name || users[0].email || 'your account';
-  return `Signed in as ${who}${spaces.length ? `, in ${spaces.join(', ')}` : ''}.`;
+  return { text: `Signed in as ${who}${spaces.length ? `, in ${spaces.join(', ')}` : ''}.`, name: users[0].email || users[0].name || '' };
 }
