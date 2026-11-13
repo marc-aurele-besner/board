@@ -835,9 +835,6 @@ function draw(root, store) {
             h('button', { type: 'button', class: 'btn-small', onclick: () => connectAndRead(store, a) }, icon('mail'), a)),
         })
       : null,
-    errors.map((err) => notice({
-      text: err.projectIds?.length ? `${err.projectIds.map(nameOfProject).join(', ')}: ${err.text}` : err.text,
-    })),
 
     hasMail || emails.length
       ? resizableSide(h('div', { class: 'inbox-layout' },
@@ -896,6 +893,7 @@ function draw(root, store) {
                     h('option', { value: 'all' }, 'Any status'),
                     statuses.map((s) => h('option', { value: s, selected: view.status === s }, statusLabel(s))))
                 : null,
+              readErrors(errors, nameOfProject),
               refreshButton)),
           h('input', {
             type: 'search',
@@ -914,6 +912,39 @@ function draw(root, store) {
           h('section', { class: 'card inbox-card' }, list),
           more)), 'inbox', { def: 230, min: 180, max: 480 })
       : null));
+}
+
+// The last reads' errors, folded into one chip beside Refresh: a key Resend refuses fails on every
+// read, and a banner per project pushed the mail down the page. The chip opens the list.
+/**
+ * @param {RunnerJobError[]} errors
+ * @param {(id: string) => string} nameOf
+ */
+function readErrors(errors, nameOf) {
+  if (!errors.length) return null;
+  const count = `${errors.length} read error${errors.length === 1 ? '' : 's'}`;
+  // A click elsewhere or Escape folds it, as a menu would.
+  const ontoggle = (/** @type {Event} */ ev) => {
+    const box = /** @type {HTMLDetailsElement} */ (ev.currentTarget);
+    if (!box.open) return;
+    const close = (/** @type {Event} */ e) => {
+      if (e instanceof KeyboardEvent ? e.key !== 'Escape' : box.contains(/** @type {Node} */ (e.target))) return;
+      box.open = false;
+      document.removeEventListener('pointerdown', close, true);
+      document.removeEventListener('keydown', close, true);
+    };
+    document.addEventListener('pointerdown', close, true);
+    document.addEventListener('keydown', close, true);
+  };
+  return h('details', { class: 'inbox-errors', ontoggle },
+    h('summary', { class: 'inbox-errors-chip', title: `${count}: some mail could not be read`, 'aria-label': count },
+      icon('alert'), h('span', null, String(errors.length))),
+    h('div', { class: 'inbox-errors-pop', role: 'status' },
+      h('p', { class: 'inbox-errors-head' }, 'Some mail could not be read'),
+      h('ul', null, errors.map((err) => h('li', null,
+        err.projectIds?.length ? h('strong', null, err.projectIds.map(nameOf).join(', ')) : null,
+        h('span', null, err.text)))),
+      h('a', { href: settingsHref('resend'), class: 'btn-small' }, 'Open Settings')));
 }
 
 // Received emails in the Inbox not opened yet, for the Home page.

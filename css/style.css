@@ -544,12 +544,18 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* Projects page, left pane: compact rows, like the Tasks list */
 .side-pane { gap: 6px; }
-.side-tools { gap: 6px; }
 .project-list { gap: 1px; }
 .project-item { padding: 4px 8px; gap: 8px; border-radius: 6px; }
 .project-item .grow { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.project-item strong { font-weight: 500; font-size: 0.92rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-item .grow > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-size: 0.78rem; }
+/* The name keeps its room: the labels and GitHub line give way first. */
+.project-item strong { flex: 0 1 auto; min-width: 4ch; font-weight: 500; font-size: 0.92rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-item .grow > div { flex: 0 1000 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-size: 0.78rem; }
+/* The grip shows on hover, as it is only needed to drag. */
+@media (hover: hover) {
+  .project-item .grip { opacity: 0; transition: opacity 0.15s ease; }
+  .project-item:hover .grip, .project-item .grip:focus-visible { opacity: 1; }
+}
+.project-item .count { flex: none; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* Project page: every field edited in place */
 .project-page { gap: 18px; }
@@ -573,16 +579,15 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .pp-stats { display: flex; gap: 22px; flex-wrap: wrap; }
 .pp-stats > div { display: flex; flex-direction: column; }
 
-/* Projects page, left pane: search, labels, quick add, then the tree */
-.side-tools { display: flex; flex-direction: column; gap: 8px; }
-.side-tools .chips { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 6px; margin: 0; padding-bottom: 2px; scrollbar-width: thin; }
-.side-tools .chip { flex: none; min-height: 26px; padding: 2px 9px; font-size: 0.8rem; }
+/* Projects page, left pane: search with New project and More on one row, the labels, then the tree */
+.side-head { display: flex; gap: 6px; align-items: center; }
+.side-head input[type="search"] { flex: 1; min-width: 0; }
+.side-head .icon-btn { flex: none; width: 34px; min-height: 34px; padding: 0; justify-content: center; }
+.side-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 2px; }
+.side-chips .chip { min-height: 24px; padding: 1px 9px; font-size: 0.78rem; }
 .quick-project { display: flex; gap: 6px; align-items: center; margin: 0; }
 .quick-project input { flex: 1; min-width: 0; }
 .primary-icon { background: var(--accent); color: var(--accent-text); border-color: var(--accent); width: 34px; min-height: 34px; padding: 0; justify-content: center; }
-.side-links { display: flex; gap: 14px; flex-wrap: wrap; }
-.linkish { background: none; border: none; padding: 0; min-height: 0; color: var(--accent); font-size: 0.85rem; }
-.linkish:hover { text-decoration: underline; background: none; }
 .project-list .root-drop { display: none; list-style: none; border: 1.5px dashed var(--accent); border-radius: 8px; padding: 8px; text-align: center; font-size: 0.85rem; color: var(--accent); margin-bottom: 6px; }
 body.project-dragging .project-list .root-drop { display: block; }
 .project-item.drop-inside { background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: inset 0 0 0 2px var(--accent); }
@@ -1298,7 +1303,6 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
 .chip { min-height: 30px; padding: 4px 10px; border-radius: 999px; font-size: 0.85rem; }
 .chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-.quick-project { margin-bottom: 8px; }
 .pill.category { color: var(--accent); border: 1px solid var(--border); background: transparent; }
 .repo-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .repo-table th, .repo-table td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border); }
@@ -2153,19 +2157,31 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .cron-layout > .card:not(.cron-list), .cron-editor > .card { border-radius: 0; border-top: none; border-left: none; border-right: none; }
 .cron-layout > .cron-editor { gap: 0; }
 .cron-flows { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
-.cron-flow-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.cron-flow-toggle { flex: none; margin-right: 6px; }
-.cron-flow-copy { flex: none; margin-right: 4px; }
+.cron-flow-row { position: relative; display: flex; align-items: center; gap: 4px; min-width: 0; }
+/* The on-schedule switch: a small track and knob drawn on the checkbox itself. */
+.cron-flow-toggle { appearance: none; flex: none; position: relative; width: 28px; height: 16px; margin: 0 8px 0 2px; border-radius: 999px; background: var(--border); cursor: pointer; transition: background-color 0.15s ease; }
+.cron-flow-toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 25%, transparent); transition: transform 0.15s ease; }
+.cron-flow-toggle:checked { background: var(--income); }
+.cron-flow-toggle:checked::after { transform: translateX(12px); }
+.cron-flow-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cron-flow-actions { display: flex; flex: none; gap: 2px; }
+.cron-flow-copy { flex: none; min-width: 28px; min-height: 28px; padding: 0; }
 .icon-btn.cron-flow-copy:hover { color: var(--accent); }
-/* Shown on hover or focus where a pointer can hover; always shown on touch. */
+/* Shown over the row's end on hover or focus where a pointer can hover; always in line on touch. */
 @media (hover: hover) {
-  .cron-flow-row:not(:hover):not(:focus-within) .cron-flow-copy { opacity: 0; }
+  .cron-flow-actions { position: absolute; right: 44px; top: 50%; transform: translateY(-50%); padding-left: 16px; background: linear-gradient(to right, transparent, var(--surface-2) 14px); border-radius: 0 8px 8px 0; }
+  .cron-flow-row:has(.cron-flow.active) .cron-flow-actions { background: linear-gradient(to right, transparent, color-mix(in srgb, var(--accent) 13%, var(--surface)) 14px); }
+  .cron-flow-row:not(:hover):not(:focus-within) .cron-flow-actions { visibility: hidden; }
 }
-.cron-list-tools { flex-wrap: nowrap; gap: 8px; }
-.cron-list .cron-project-filter { flex: 1 1 auto; min-width: 0; }
-.cron-sort { flex: none; margin-left: auto; }
+.cron-list-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cron-list-head h3 { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; margin: 0; }
+.cron-list-head > :not(h3) { flex: none; }
+.cron-list-count { padding: 0 7px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; color: var(--muted); background: var(--surface-2); }
+.cron-list .cron-project-filter { width: 100%; min-width: 0; }
+.cron-sort { display: inline-flex; align-items: center; gap: 3px; min-height: 28px; padding: 2px 6px 2px 9px; font-size: 0.8rem; color: var(--muted); }
+.cron-sort .icon { width: 13px; height: 13px; }
 .cron-flow { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; padding: 8px 10px; border: none; border-radius: 8px; background: none; text-align: left; color: var(--text); font-weight: 400; }
-.cron-flow:hover { background: var(--surface-2); }
+.cron-flow:hover, .cron-flow-row:hover .cron-flow:not(.active) { background: var(--surface-2); }
 .cron-flow.active { background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
 .cron-flow .grow { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
 .cron-flow strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2683,6 +2699,11 @@ button.json-key:hover { background: color-mix(in srgb, var(--accent) 15%, transp
 .cal-task { background: transparent; border: 1px dashed var(--border); color: var(--muted); }
 .cal-task .icon { width: 12px; height: 12px; flex: none; }
 .cal-task:hover { color: var(--text); border-color: var(--accent); }
+.cal-group { cursor: pointer; font-family: inherit; }
+.cal-group .icon { transition: transform 0.15s ease; }
+.cal-group.open .icon { transform: rotate(90deg); }
+.cal-group-count { flex: none; margin-left: auto; padding: 0 6px; border-radius: 999px; font-size: 0.72rem; font-weight: 600; background: var(--surface-2); color: var(--muted); }
+.cal-sub { margin-left: 12px !important; width: auto; }
 
 .cal-weekday { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
 
@@ -2758,6 +2779,16 @@ button.sum-line:hover { background: var(--surface-2); }
 .inbox-main > .inbox-search { width: auto; }
 .inbox-main > .inbox-card { border-radius: 0; border-left: none; border-right: none; }
 .inbox-pickers .icon-btn { flex: none; }
+.inbox-errors { position: relative; flex: none; }
+.inbox-errors-chip { list-style: none; display: inline-flex; align-items: center; gap: 4px; min-height: 30px; padding: 2px 9px; border-radius: 999px; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
+.inbox-errors-chip::-webkit-details-marker { display: none; }
+.inbox-errors-chip:hover, .inbox-errors[open] > .inbox-errors-chip { background: color-mix(in srgb, var(--danger) 16%, transparent); }
+.inbox-errors-chip .icon { width: 15px; height: 15px; }
+.inbox-errors-pop { position: absolute; z-index: 30; top: calc(100% + 6px); right: 0; width: min(380px, calc(100vw - 32px)); max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 8px 24px color-mix(in srgb, var(--text) 14%, transparent); }
+.inbox-errors-head { margin: 0; font-weight: 600; font-size: 0.9rem; }
+.inbox-errors-pop ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.inbox-errors-pop li { display: flex; flex-direction: column; gap: 1px; padding-left: 10px; border-left: 2px solid color-mix(in srgb, var(--danger) 45%, transparent); font-size: 0.85rem; overflow-wrap: anywhere; }
+.inbox-errors-pop li span { color: var(--muted); }
 .inbox-layout .inbox-folders { display: flex; flex-direction: column; gap: 2px; }
 .inbox-layout .inbox-folders .lp-chip { border-color: transparent; background: transparent; border-radius: 0 999px 999px 0; padding: 6px 12px; justify-content: flex-start; }
 .inbox-layout .inbox-folders .lp-chip:hover { background: var(--surface-2); }
