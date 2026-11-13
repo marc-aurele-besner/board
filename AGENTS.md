@@ -61,6 +61,10 @@ js/google-core.js     Google tokens without the DOM: live access tokens, googleF
 js/npm.js             a project's npm org and packages: the runners' registry reads into npm.json, and the board's asks for missing ones
 js/gmail.js           the Inbox's Gmail reads: one sign-in per account, its email list, and one email's body
 js/gcal.js            Calendar's Google reads: one sign-in per account, its calendar list; events read by the runners into calendar.json
+js/slack.js           the Slack tab's Web API calls through the runners (browser session token and d cookie): workspaces, channels, people, counts, messages, threads, reactions
+js/slack-markup.js    Slack's mrkdwn (mentions, links, code, quotes, emoji) as DOM nodes
+js/emoji.js           Slack's emoji short names for the common emoji
+js/modules/slack.js   Slack: every workspace in one sidebar with groups, order, mutes and projects; messages, threads and reactions read live
 js/runner-jobs.js     the jobs the runners do, with their labels and default intervals (shared by the worker and Settings)
 js/runners.js         the board's side of the runners: their heartbeat in runners.json, Run now, their data folder's path
 js/modules/monitoring-runners.js  Monitoring → Board runners: the static server, command runner and worker, and every job's last outcome
@@ -93,6 +97,7 @@ types/                .d.ts files: browser APIs missing from lib.dom, and the sh
 tools/start.js        one command for the board: starts serve.js, terminal.js and worker.js together
 tools/log.js          terminal lines prefixed with each runner's name
 tools/serve.js        local static server with no-cache headers; no dependencies
+tools/slack.js        POST /slack and /slack/file: Slack calls from Node, which can send the session's d cookie
 tools/terminal.js     the Dev section's runner: terminal sessions that outlive the page (output and the list of open terminals kept on disk), typed keys, read-only file reads, git for Source control, listing worktrees and removing one (a done task's, or any from Dev's Worktrees panel), ending a done claude with /exit and answering its worktree question, saving images for claude; localhost only
 tools/worker.js       the runners: one worker that runs the background jobs on a schedule and writes into the data folder; localhost API on 8420
 tools/worker/store.js the store for Node (get, update, save over node:fs), merged with what the tabs write through js/merge.js

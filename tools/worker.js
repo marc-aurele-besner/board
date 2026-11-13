@@ -16,6 +16,7 @@ import { createScheduler } from './worker/schedule.js';
 import { serve } from './worker/http.js';
 import { jobs } from './jobs/index.js';
 import { sendWire } from '../js/http-request.js';
+import { slackCall, slackFile } from './slack.js';
 
 const PORT = Number(process.env.WORKER_PORT) || 8420;
 const CONFIG = join(homedir(), '.config', 'board', 'worker.json');
@@ -116,6 +117,9 @@ serve({
     ...jobRoutes,
     // Tools → Requests: sends a request from Node, where CORS does not apply. Needs no data folder.
     'POST /http': (body) => sendWire(/** @type {import('../js/http-request.js').Wire} */ (body)),
+    // The Slack tab: Web API calls and session-only files, with the session cookie a page cannot send.
+    'POST /slack': (body) => slackCall(body),
+    'POST /slack/file': (body) => slackFile(body),
     'GET /status': () => ({ ...scheduler.status(), folder: { path: folder.path, from: folder.from, error: folder.error } }),
     'POST /run/*': (body, id) => scheduler.run(id, { params: body ?? {} }),
     'POST /config': (body) => {

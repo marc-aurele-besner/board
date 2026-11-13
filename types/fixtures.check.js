@@ -15,6 +15,7 @@ import cron from './fixtures/cron.json' with { type: 'json' };
 import notifications from './fixtures/notifications.json' with { type: 'json' };
 import google from './fixtures/google.json' with { type: 'json' };
 import calendar from './fixtures/calendar.json' with { type: 'json' };
+import slack from './fixtures/slack.json' with { type: 'json' };
 import github from './fixtures/github.json' with { type: 'json' };
 import npm from './fixtures/npm.json' with { type: 'json' };
 import webstats from './fixtures/webstats.json' with { type: 'json' };
@@ -39,6 +40,7 @@ export const fixtures = {
   notifications,
   google,
   calendar,
+  slack,
   github,
   npm,
   webstats,

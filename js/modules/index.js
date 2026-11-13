@@ -4,6 +4,7 @@
 import home from './home.js';
 import todos from './todos.js';
 import calendar from './calendar.js';
+import slack from './slack.js';
 import projects from './projects.js';
 import kitchen from './kitchen.js';
 import money from './money.js';
@@ -18,4 +19,4 @@ import search from './search.js';
 
 // Each section's default export is also checked against Module where it is defined (@satisfies).
 /** @type {Module[]} */
-export const modules = [home, todos, inbox, calendar, projects, kitchen, money, positions, monitoring, tools, dev, cron, settings, search];
+export const modules = [home, todos, inbox, calendar, slack, projects, kitchen, money, positions, monitoring, tools, dev, cron, settings, search];
