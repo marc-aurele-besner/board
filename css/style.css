@@ -606,10 +606,14 @@ body.project-dragging .project-list .root-drop { display: block; }
 .brand-chip { display: block; height: 44px; border-radius: var(--radius); border: 1px solid var(--border); }
 .brand-images { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .brand-image { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.brand-thumb { display: grid; place-items: center; height: 90px; padding: 8px; border-radius: var(--radius); border: 1px solid var(--border);
+.brand-thumb { position: relative; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; height: 110px;
+  padding: 10px; overflow: hidden; border-radius: var(--radius); border: 1px solid var(--border);
   /* A checkerboard, so transparent and white logos both show. */
   background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface) 0 50%) 0 0 / 16px 16px; }
-.brand-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.brand-thumb img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.brand-size { position: absolute; right: 4px; bottom: 4px; padding: 0 5px; border-radius: var(--radius); background: var(--surface);
+  color: var(--muted); font-size: 0.7rem; font-variant-numeric: tabular-nums; }
+.brand-size:empty { display: none; }
 .brand-thumb-none { color: var(--muted); font-size: 1.4rem; }
 .brand-addr { overflow-wrap: anywhere; }
 .brand-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
