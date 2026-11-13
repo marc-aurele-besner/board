@@ -76,6 +76,10 @@ export interface CronStep {
   due?: string;
   // The task to put it under: a task id, usually a variable such as {{step2}}; '' for none.
   parent?: string;
+  // update: the task to change, a template such as {{step2}}. Its note is `description` (added below the task's own,
+  // or in its place with mode 'replace'); an empty title, status, priority or due keeps the task's, and due 'clear'
+  // removes it.
+  taskId?: string;
   // task, profile, dev, old gather; '' follows the flow's project.
   projectId?: string;
   // stop ('nothing', 'empty', 'contains', 'lacks'); `text` is what contains/lacks look for. notify and old gather use
@@ -85,8 +89,8 @@ export interface CronStep {
   // profile: 'merge', 'replace' or 'keep'. Older steps have keepEdited instead.
   onEdited?: string;
   keepEdited?: boolean;
-  // dev: 'claude', 'preset', 'custom' or 'command'. format: 'text' (uses `text`), 'list' or 'fields'. parse: which
-  // JSON value of several it keeps, 'largest', 'last', 'first' or 'all'.
+  // dev: 'claude', 'preset', 'custom' or 'command'. update: 'append' or 'replace'. format: 'text' (uses `text`), 'list'
+  // or 'fields'. parse: which JSON value of several it keeps, 'largest', 'last', 'first' or 'all'.
   mode?: string;
   // format 'list' and loop: the list to read, as a variable ('{{input}}', '{{step2.items}}').
   items?: string;

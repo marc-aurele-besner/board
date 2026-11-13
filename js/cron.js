@@ -59,6 +59,7 @@ export const STEP_TYPES = [
   ['parse', 'Parse JSON', 'code', 'Finds the JSON in a text, such as a model’s or claude’s answer, even with prose around it or cut off, and passes it on as data.'],
   ['loop', 'Loop over items', 'repeat', 'Runs the next steps once for each item of a list, then passes on what they gave for all of them.'],
   ['task', 'Create task', 'check-square', 'Adds a task with a title and description you write, the input by default. Its output is the new task’s id, so a later step can put a task under it.'],
+  ['update', 'Update task', 'pencil', 'Adds a note to a task you name by its id, such as an earlier Create task step’s output, and can change its title, status, priority or due date. Its output is the task’s id.'],
   ['notify', 'Notify', 'bell', 'Posts the output under the bell (and Telegram if enabled).'],
   ['profile', 'Refresh project profile', 'refresh', 'Rebuilds a project’s profile from its folder, repos and website, as Projects does.'],
   ['dev', 'Run in Dev', 'terminal', 'Hands a prompt to the project’s Dev command, a preset or your own, in a new Dev terminal.'],
@@ -302,6 +303,7 @@ export function makeStep(type) {
   if (type === 'gather') return { ...base, sources: [makeSource()], append: false };
   if (type === 'ai') return { ...base, prompt: 'Summarize this in five bullet points:\n\n{{input}}', system: '', model: '' };
   if (type === 'task') return { ...base, title: '{{flow}} · {{date}}', description: '{{input}}', projectId: '', priority: 'none', status: 'todo', category: '', due: '' };
+  if (type === 'update') return { ...base, taskId: '{{input}}', description: '', mode: 'append', title: '', priority: '', status: '', due: '' };
   if (type === 'stop') return { ...base, when: 'nothing', text: '' };
   if (type === 'profile') return { ...base, projectId: '', onEdited: 'merge' };
   if (type === 'format') return { ...base, mode: 'text', text: '{{input}}', items: '{{input}}', itemText: '- {{item}}', separator: 'line', fields: [makeField()] };
@@ -1625,6 +1627,69 @@ const quoteWord = (text) => `'${String(text).replace(/'/g, `'\\''`)}'`;
 /** @param {string} text */
 const shellQuote = (text) => (/^~\//.test(text) ? `~/${quoteWord(text.slice(2))}` : quoteWord(text));
 
+// What an "Update task" step changes: an empty field keeps the task's own value.
+export const UPDATE_DUE = [
+  ['', 'Keep'],
+  ['today', 'Day of the run'],
+  ['tomorrow', 'Day after the run'],
+  ['clear', 'No deadline'],
+];
+
+/** @param {string | undefined} due */
+const dueDate = (due) => (due === 'today' ? todayISO() : due === 'tomorrow' ? new Date(Date.now() + 24 * 60 * MINUTE).toISOString().slice(0, 10) : '');
+
+// An "Update task" step: the task named by its id gets the note (added below its description, or in its place) and
+// the fields the step sets. A later "Run in Dev" step works on it, as on a task made in the run.
+/**
+ * @param {DataStore} store
+ * @param {CronStep} step
+ * @param {Vars} vars
+ * @param {RunCtx} ctx
+ */
+function updateTask(store, step, vars, ctx) {
+  const id = fill(step.taskId || '{{input}}', vars).trim();
+  if (!id) throw new Error('Enter the id of the task to update, such as {{step2}}.');
+  const note = fill(step.description ?? '', vars).trim();
+  const replace = step.mode === 'replace';
+  /** @type {Partial<Task>} */
+  const patch = {};
+  const title = fill(step.title ?? '', vars).split('\n')[0].slice(0, 200).trim();
+  if (title) patch.text = title;
+  if (step.status) patch.status = step.status;
+  if (step.priority) patch.priority = step.priority;
+  if (step.due) patch.due = dueDate(step.due);
+  const changes = [
+    note ? (replace ? 'new description' : 'a note') : '',
+    title ? `title “${title}”` : '',
+    step.status ? `status ${step.status}` : '',
+    step.priority ? `priority ${step.priority}` : '',
+    step.due ? (patch.due ? `due ${patch.due}` : 'no deadline') : '',
+  ].filter(Boolean);
+  if (!changes.length) throw new Error('Write a note or choose a field to change.');
+  const what = changes.join(', ');
+  const found = store.get('todos').items.find((t) => t.id === id);
+  ctx.data = { id, ...(note ? { note } : {}), ...patch };
+  if (ctx.dry && !ctx.live) {
+    ctx.note = `Test run: would update ${found ? `the task “${found.text}”` : 'the task'} with ${what}.`;
+    return id;
+  }
+  if (!found) throw new Error(`No task has the id “${id.slice(0, 80)}”.`);
+  store.update('todos', (d) => {
+    const t = d.items.find((x) => x.id === id);
+    if (!t) return;
+    if (note) {
+      const desc = (t.description ?? '').trim();
+      t.description = replace || !desc ? note : `${desc}\n\n${note}`;
+    }
+    Object.assign(t, patch);
+    // The status replaces an old task's done flag.
+    if (patch.status) delete t.done;
+  });
+  ctx.task = store.get('todos').items.find((t) => t.id === id) ?? null;
+  ctx.note = `${ctx.dry ? 'Test run: updated' : 'Updated'} the task “${ctx.task?.text ?? found.text}” with ${what}.`;
+  return id;
+}
+
 // The task a "Create task" step made in this run, as claude gets a task from its Dev button: a checklist line,
 // then its description indented. In a test run no task is made, so it is the title the step would give it.
 /**
@@ -2055,7 +2120,7 @@ async function runStep(store, flow, step, input, ctx) {
   }
   if (step.type === 'task') {
     const title = fill(step.title || '{{input}}', vars).split('\n')[0].slice(0, 200).trim() || flow.name;
-    const due = step.due === 'today' ? todayISO() : step.due === 'tomorrow' ? new Date(Date.now() + 24 * 60 * MINUTE).toISOString().slice(0, 10) : '';
+    const due = dueDate(step.due);
     const projectId = withFlowProject(flow, step).projectId || null;
     const description = fill(step.description ?? '{{input}}', vars).trim();
     const status = step.status || 'todo';
@@ -2090,6 +2155,7 @@ async function runStep(store, flow, step, input, ctx) {
     ctx.task = task;
     return task.id;
   }
+  if (step.type === 'update') return updateTask(store, step, vars, ctx);
   if (step.type === 'format') return formatStep(step, vars, ctx);
   if (step.type === 'parse') return parseStep(step, vars, ctx);
   if (step.type === 'loop') {
@@ -2395,7 +2461,7 @@ function stepRecord(step, result) {
   const d = made.at(-1) ?? null;
   /** @type {CronRunStep} */
   const out = { stepId: step.id, type: step.type, ok: result.ok, output: result.output.slice(0, 4000), note: result.note, ms: result.ms };
-  if (step.type === 'task' && d?.id) {
+  if ((step.type === 'task' || step.type === 'update') && d?.id) {
     out.taskId = d.id;
     const ids = [...new Set(made.map((x) => x.id).filter((id) => typeof id === 'string'))];
     if (ids.length > 1) out.taskIds = ids;
