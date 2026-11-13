@@ -2173,6 +2173,8 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .li-preview-text .btn-link-inline { margin-left: 4px; text-decoration: none; }
 .li-preview-link .share-img.thumb { width: 64px; }
 .task-actions { margin-top: 8px; gap: 6px; flex-wrap: wrap; }
+.task-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.task-tools .task-actions { margin-top: 0; }
 @media (max-width: 720px) { .li-composer-cols, .li-schedule { grid-template-columns: minmax(0, 1fr); } }
 /* A project's LinkedIn block (js/modules/project-linkedin.js) */
 .li-post-group h4 { margin: 6px 0 2px; font-weight: 600; }

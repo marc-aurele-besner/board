@@ -801,6 +801,10 @@ function postPill(store, item) {
 const taskActions = (store, item) => h('div', { class: 'row task-actions' },
   h('button', { type: 'button', class: 'btn-small', onclick: () => openLinkedinComposer(store, { taskId: item.id }) }, icon('linkedin'), 'LinkedIn post'));
 
+// An open task's images with their Add button, and its actions, on one line.
+/** @param {Store} store @param {Task} item */
+const taskTools = (store, item) => h('div', { class: 'task-tools' }, imageStrip(store, item), taskActions(store, item));
+
 /** @type {Record<string, string>} */
 const STATE_NAMES = { open: 'open', merged: 'merged', closed: 'closed', completed: 'closed as completed', not_planned: 'closed as not planned' };
 
@@ -1456,8 +1460,7 @@ function todoRow(store, item, ctx, place) {
             attach: (field) => slashComplete(field, () => taskSkills(store, item)),
             onSave: (description) => updateItem(store, item.id, { description }),
           }),
-          imageStrip(store, item),
-          taskActions(store, item),
+          taskTools(store, item),
           usageNote(store, item))
       : null);
 }
@@ -1715,8 +1718,7 @@ function boardCard(store, item, projects, order, place) {
             attach: (field) => slashComplete(field, () => taskSkills(store, item)),
             onSave: (description) => updateItem(store, item.id, { description }),
           }),
-          imageStrip(store, item),
-          taskActions(store, item),
+          taskTools(store, item),
           usageNote(store, item))
       : null);
 }
