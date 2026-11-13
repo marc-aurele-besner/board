@@ -709,6 +709,20 @@ body.project-dragging .project-list .root-drop { display: block; }
 .settings-tab:hover { background: var(--surface-2); color: var(--text); }
 .settings-tab.active { background: var(--surface-2); color: var(--text); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
 .settings-main { min-width: 0; display: flex; flex-direction: column; gap: var(--gap); }
+/* Settings uses the whole page below the top bar, like Inbox: no padding around it. The sidebar sticks under the top
+   bar and runs to the bottom of the window; the center panel's cards run to the window's edge, one border between
+   each, with no gap. */
+.view[data-section="settings"] {
+  padding: 0;
+  min-height: calc(100dvh - 54px);
+  & > .settings-shell { gap: 0; min-height: calc(100dvh - 54px); align-items: stretch; }
+  & .settings-side { top: 54px; height: calc(100dvh - 54px); overflow-y: auto; border-radius: 0; border-top: none; border-left: none; border-bottom: none; }
+  & .settings-main, & .settings-main > .stack-lg { gap: 0; }
+  & .settings-main > .card, & .settings-main > .stack-lg > .card { border-radius: 0; border-top: none; border-left: none; border-right: none; }
+  @media (max-width: 720px) {
+    & .settings-side { height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  }
+}
 .panel { display: flex; flex-direction: column; gap: 18px; padding: 20px; }
 .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px 24px; flex-wrap: wrap; }
 .panel-head h2 { margin-bottom: 4px; }
