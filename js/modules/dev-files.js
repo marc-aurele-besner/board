@@ -3,12 +3,14 @@
 // A tab can also show a diff (a changed file, or a commit) from Source Control.
 import { h, icon } from '../ui.js';
 import { toast } from '../toast.js';
+import { onContextMenu, copyItem } from '../menu.js';
 import { listFolder, readFile } from '../terminal.js';
 import { highlight, languageOf, languageLabel } from '../highlight.js';
 /** @import { DevContext } from '../../types/dev' */
 /** @import { RunnerFolder, GitDiff } from '../../types/terminal' */
 /** @import { Child } from '../../types/ui' */
 /** @import { IconName } from '../../types/data' */
+/** @import { MenuEntry } from '../menu.js' */
 
 /**
  * @typedef {{ loading?: boolean, full?: string, entries?: RunnerFolder['entries'], error?: string }} Folder
@@ -129,6 +131,43 @@ function closeFile(ctx, file) {
   ctx.refresh();
 }
 
+// A path from the explorer's root, as git and the search name it.
+const relPath = (/** @type {string} */ full) => {
+  const root = (state.folders.get(state.root)?.full ?? '').replace(/[\\/]$/, '');
+  return root && full.startsWith(`${root}/`) ? full.slice(root.length + 1) : full;
+};
+
+// The copy rows every path's menu ends with.
+/** @param {string} full @returns {MenuEntry[]} */
+export const pathCopies = (full) => {
+  const rel = relPath(full);
+  return [copyItem('Copy path', full), rel !== full ? copyItem('Copy relative path', rel) : null, copyItem('Copy name', baseName(full))];
+};
+
+/** @param {DevContext} ctx @param {string} full @param {boolean} open @returns {MenuEntry[]} */
+function folderMenu(ctx, full, open) {
+  return [
+    { label: open ? 'Collapse' : 'Expand', icon: () => icon('chevron-right'), onSelect: () => toggle(ctx, full) },
+    { label: 'Open a terminal here', icon: () => icon('terminal'), onSelect: () => ctx.openTerminal(full) },
+    open ? { label: 'Read again', icon: () => icon('refresh'), onSelect: () => load(ctx, full) } : null,
+    '-',
+    ...pathCopies(full),
+  ];
+}
+
+/** @param {DevContext} ctx @param {string} full @returns {MenuEntry[]} */
+function fileMenu(ctx, full) {
+  const tab = state.tabs.find((f) => f.path === full);
+  const dir = full.slice(0, full.length - baseName(full).length).replace(/[\\/]$/, '');
+  return [
+    { label: 'Open', icon: () => icon('file'), onSelect: () => openFile(ctx, full) },
+    tab ? { label: 'Close', icon: () => icon('x'), onSelect: () => closeFile(ctx, tab) } : null,
+    dir ? { label: 'Open a terminal in its folder', icon: () => icon('terminal'), onSelect: () => ctx.openTerminal(dir) } : null,
+    '-',
+    ...pathCopies(full),
+  ];
+}
+
 /** @param {DevContext} ctx @param {string} path @param {number} depth @returns {HTMLElement[]} */
 function treeRows(ctx, path, depth) {
   const folder = state.folders.get(path);
@@ -141,25 +180,25 @@ function treeRows(ctx, path, depth) {
     if (entry.dir) {
       const open = state.expanded.has(full);
       return [
-        h('div', { class: 'tree-row', style: { '--depth': depth } },
+        onContextMenu(h('div', { class: 'tree-row', style: { '--depth': depth } },
           h('button', { type: 'button', class: ['tree-item', ctx.decor?.(full)?.tone].filter(Boolean).join(' '), 'aria-expanded': String(open), title: full, onclick: () => toggle(ctx, full) },
             h('span', { class: open ? 'tree-chevron open' : 'tree-chevron' }, icon('chevron-right')),
             icon('folder'),
             h('span', { class: 'tree-name' }, entry.name),
             ctx.decor?.(full) ? h('span', { class: 'tree-dot', title: 'Has changes' }) : null),
-          h('button', { type: 'button', class: 'tree-action', title: `Open a terminal in ${entry.name}`, 'aria-label': `Open a terminal in ${entry.name}`, onclick: () => ctx.openTerminal(full) }, icon('terminal'))),
+          h('button', { type: 'button', class: 'tree-action', title: `Open a terminal in ${entry.name}`, 'aria-label': `Open a terminal in ${entry.name}`, onclick: () => ctx.openTerminal(full) }, icon('terminal'))), () => folderMenu(ctx, full, open)),
         ...(open ? treeRows(ctx, full, depth + 1) : []),
       ];
     }
     const active = state.active === full;
     // Git's letter for a changed file, as editors show it (M modified, U untracked, A added, D deleted, ! conflict).
     const decor = ctx.decor?.(full);
-    return [h('div', { class: active ? 'tree-row active' : 'tree-row', style: { '--depth': depth } },
+    return [onContextMenu(h('div', { class: active ? 'tree-row active' : 'tree-row', style: { '--depth': depth } },
       h('button', { type: 'button', class: ['tree-item', decor?.tone].filter(Boolean).join(' '), title: decor ? `${full} · ${decor.label}` : full, onclick: () => openFile(ctx, full) },
         h('span', { class: 'tree-chevron' }),
         icon('file'),
         h('span', { class: 'tree-name' }, entry.name),
-        decor ? h('span', { class: 'tree-letter', 'aria-hidden': 'true' }, decor.letter) : null))];
+        decor ? h('span', { class: 'tree-letter', 'aria-hidden': 'true' }, decor.letter) : null)), () => fileMenu(ctx, full))];
   });
 }
 
