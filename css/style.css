@@ -3409,3 +3409,6 @@ button.sum-line:hover { background: var(--surface-2); }
 .social-change.up { color: var(--income); }
 .social-change.down { color: var(--danger); }
 .social-error { color: var(--danger); margin: 0; }
+.social-bar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.social-head .social-name { flex: 1; }
+.social-read { flex: none; }

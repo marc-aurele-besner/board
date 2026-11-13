@@ -1,11 +1,12 @@
 // Monitoring → Socials: the followers of each X and LinkedIn account added in Settings, and how they grew over the
 // period. The runners read the counts a few times a day (tools/jobs/socials.js); each day keeps its last read.
-import { h, icon, empty, notice } from '../ui.js';
+import { h, icon, empty, notice, refreshIcon } from '../ui.js';
 import { lineChart } from '../chart.js';
 import { settingsHref } from '../integrations.js';
 import { SOCIALS, NETWORKS, dayKey, profileUrl, handleLabel } from '../socials.js';
 import { stat } from './monitoring.js';
 import { sortTable } from './monitoring-web.js';
+import { readNow, isReading } from './settings-socials.js';
 /** @import { Store, SocialAccount } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 
@@ -52,9 +53,10 @@ const changePill = (change, pct) => (change === null
   ? h('span', { class: 'muted small' }, 'No change yet')
   : h('span', { class: `social-change ${change > 0 ? 'up' : change < 0 ? 'down' : ''}` }, `${signed(change)}${pct === null ? '' : ` (${percent(pct)})`}`));
 
-/** @param {AccountRow} row @param {string[]} labels */
-function accountCard(row, labels) {
+/** @param {Store} store @param {AccountRow} row @param {string[]} labels */
+function accountCard(store, row, labels) {
   const { account: a } = row;
+  const busy = isReading(a.id);
   const points = row.values.filter((v) => v !== null).length;
   return h('section', { class: 'card stack social-card' },
     h('header', { class: 'social-head' },
@@ -64,7 +66,8 @@ function accountCard(row, labels) {
         h('span', { class: 'muted small' },
           icon(a.network === 'x' ? 'x-mark' : 'linkedin'), ' ',
           h('a', { href: profileUrl(a), target: '_blank', rel: 'noopener noreferrer' }, handleLabel(a)),
-          row.project ? ` · ${row.project}` : ''))),
+          row.project ? ` · ${row.project}` : '')),
+      h('button', { type: 'button', class: 'icon-btn social-read', title: 'Read the counts now', 'aria-label': `Read ${handleLabel(a)} now`, disabled: busy, onclick: () => readNow(store, [a.id]) }, refreshIcon(busy))),
     h('div', { class: 'social-now' },
       h('strong', null, row.now === null ? '—' : count.format(row.now)),
       h('span', { class: 'muted small' }, 'followers'),
@@ -114,16 +117,22 @@ export function socialsTab(store, w) {
   const startTotal = changed.reduce((s, r) => s + /** @type {number} */ (r.now) - /** @type {number} */ (r.change), 0);
   const byNetwork = Object.keys(NETWORKS).map((n) => [NETWORKS[n], accounts.filter((a) => a.network === n).length]).filter(([, c]) => c);
   const failed = accounts.filter((a) => a.error);
+  const busy = accounts.some((a) => isReading(a.id));
+  const lastAt = Math.max(0, ...accounts.map((a) => a.at ?? 0));
 
   return h('div', { class: 'stack-lg' },
     failed.length
       ? notice({ text: `${failed.length} account${failed.length > 1 ? 's' : ''} could not be read on the last try: ${failed.map((a) => `${handleLabel(a)} (${a.error})`).join('; ')}` })
       : null,
+    h('div', { class: 'social-bar' },
+      h('span', { class: 'muted small' }, lastAt ? `Last read ${new Date(lastAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}` : 'Not read yet'),
+      h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => readNow(store, accounts.map((a) => a.id)) },
+        refreshIcon(busy), busy ? 'Reading…' : 'Read all now')),
     h('div', { class: 'summary' },
       stat('Followers', count.format(total), `across ${read.length} of ${accounts.length} account${accounts.length === 1 ? '' : 's'}`),
       stat('Growth', changed.length ? signed(gained) : '—', changed.length ? `${percent(startTotal ? gained / startTotal : null) || 'new'} over the period` : 'Needs counts from two days'),
       stat('Accounts', String(accounts.length), byNetwork.map(([n, c]) => `${c} ${n}`).join(' · '))),
-    h('div', { class: 'social-grid' }, rows.map((r) => accountCard(r, labels))),
+    h('div', { class: 'social-grid' }, rows.map((r) => accountCard(store, r, labels))),
     h('section', { class: 'card stack' },
       h('h3', null, 'By account'),
       sortTable('socials', [

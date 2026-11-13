@@ -14,12 +14,15 @@ const badge = (text, tone) => h('span', { class: `pill tone-${tone}` }, text);
 const link = (href, text) => h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text);
 const count = new Intl.NumberFormat();
 
-// Accounts being read now, so their row shows it.
+// Accounts being read now, so their row shows it. Shared with Monitoring → Socials.
 /** @type {Set<string>} */
 const reading = new Set();
+/** @param {string} id */
+export const isReading = (id) => reading.has(id);
 
+// Asks the runners to read these accounts now (POST /run/socials), then reads socials.json again.
 /** @param {Store} store @param {string[]} ids */
-function readNow(store, ids) {
+export function readNow(store, ids) {
   for (const id of ids) reading.add(id);
   store.refresh();
   runJob('socials', { ids })
