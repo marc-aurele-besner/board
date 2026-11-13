@@ -1,0 +1,36 @@
+{
+  "workspaces": [
+    {
+      "id": "T000001",
+      "name": "Example Team",
+      "url": "https://example-team.slack.com/",
+      "icon": "https://example.com/team-icon.png",
+      "token": "xoxc-000-000-000-sample",
+      "cookie": "xoxd-sample",
+      "userId": "U000001",
+      "userName": "someone",
+      "projectId": "p-atlas",
+      "error": ""
+    }
+  ],
+  "groups": [
+    { "id": "g-launch", "name": "Launch", "projectId": "p-atlas", "items": ["T000001|C000001"] }
+  ],
+  "muted": ["T000001|C000002"],
+  "order": ["T000001|C000001", "T000001|D000001"],
+  "projects": { "T000001|C000002": "p-atlas" },
+  "collapsed": ["T000001"],
+  "channels": {
+    "T000001": [
+      { "id": "C000001", "name": "general", "kind": "channel", "topic": "Company news" },
+      { "id": "C000002", "name": "random", "kind": "private" },
+      { "id": "D000001", "name": "", "kind": "im", "user": "U000002" }
+    ]
+  },
+  "users": {
+    "T000001": {
+      "U000002": { "name": "Sample Person", "avatar": "https://example.com/avatar.png" },
+      "B000001": { "name": "Deploy bot", "avatar": "", "bot": true }
+    }
+  }
+}
