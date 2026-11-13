@@ -2601,15 +2601,14 @@ function draw(root, store) {
   const body = view.tab === 'runs' ? runsTab(store) : view.tab === 'templates' ? templatesTab(store) : flowsTab(store);
   root.replaceChildren(
     h('div', { class: 'stack-lg cron' },
-      h('header', null,
-        h('h2', null, 'Cron'),
-        h('p', { class: 'muted small' }, SUBTITLES[view.tab])),
       h('nav', { class: 'sub-tabs', role: 'tablist', 'aria-label': 'Cron sections' },
         TABS.map(([key, label]) => h('button', {
           type: 'button',
           role: 'tab',
           class: view.tab === key ? 'sub-tab active' : 'sub-tab',
           'aria-selected': String(view.tab === key),
+          // What the tab shows, now the page has no header to say it.
+          title: SUBTITLES[key],
           onclick: () => {
             view.tab = key;
             store.refresh();

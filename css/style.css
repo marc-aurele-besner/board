@@ -362,12 +362,17 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 }
 
 /* Monitoring layout: section tabs on their own row, period buttons on a second row */
-.mon-head h2 { margin: 0; }
-.mon-head p { margin: 2px 0 0; }
 .sub-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--border); overflow: visible; }
 .sub-tab { background: none; border: none; border-radius: 0; min-height: 0; padding: 8px 14px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; }
 .sub-tab:hover { background: none; color: var(--text); }
 .sub-tab.active { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+/* Tabs with controls at the end of their row (Tools): the row carries the line under the tabs. */
+/* When they do not fit, the tabs scroll sideways and the controls stay at the end. */
+.sub-tabs-bar { display: flex; align-items: flex-end; gap: 12px; border-bottom: 1px solid var(--border); }
+.sub-tabs-bar > .sub-tabs { flex: 0 1 auto; min-width: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; border-bottom: none; }
+.sub-tabs-bar .sub-tab { flex: none; margin-bottom: 0; padding-inline: 12px; white-space: nowrap; }
+.sub-tabs-bar > .sub-tabs-tools { flex: none; flex-wrap: nowrap; gap: 6px; margin-left: auto; align-self: center; padding-block: 4px; }
+.sub-tabs-tools select { field-sizing: content; width: auto; min-width: 0; min-height: 30px; padding-block: 2px; font-size: 0.85rem; }
 .period-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 /* Compact density (Settings > Appearance) */
@@ -1345,7 +1350,7 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .view:is([data-section="todos"], [data-section="inbox"], [data-section="calendar"], [data-section="projects"], [data-section="money"], [data-section="positions"], [data-section="monitoring"], [data-section="tools"], [data-section="cron"]) {
   padding: 0;
   min-height: calc(100dvh - 54px);
-  & > .stack-lg > :is(header, .row.between, nav.sub-tabs, p, .notice, .period-row, .money-controls) { padding-inline: 16px; }
+  & > .stack-lg > :is(header, .row.between, nav.sub-tabs, .sub-tabs-bar, p, .notice, .period-row, .money-controls) { padding-inline: 16px; }
   & > .stack-lg > :first-child { padding-top: 14px; }
   /* The side panel and the center panel meet: one border between them, no gap. */
   & > .split { gap: 0; }
