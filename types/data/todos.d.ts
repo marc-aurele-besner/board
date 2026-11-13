@@ -80,6 +80,9 @@ export interface Task {
   cronRun?: string;
   // The Dev session that last worked on it.
   devSession?: string;
+  // The model and effort its Dev sessions run claude with (--model, --effort); missing or '' for the default.
+  devModel?: string;
+  devEffort?: string;
   images?: TaskImage[];
   worktrees?: TaskWorktree[];
   prs?: TaskLink[];
