@@ -108,6 +108,8 @@ function render({ user = true } = {}) {
   // Unsubmitted fields are carried over within a section; a new section starts clean.
   const kept = before && mod.id === lastSection ? snapshot(before) : [];
   const main = h('main', { class: 'view' });
+  // What this render reads (and the section's own redraws until the next one) decides which disk changes redraw it.
+  store.forget();
   // Only a change of section plays the entrance animation; edits within a section re-render silently.
   const entered = mod.id !== lastSection;
   if (entered) {
@@ -171,9 +173,11 @@ const BACKGROUND_GAP_MS = 1000;
 let lastRender = 0;
 let gapTimer = 0;
 
-/** @param {{ user: boolean }} info */
-function onData({ user }) {
+/** @param {{ user: boolean, changed: Set<string> | null }} info */
+function onData({ user, changed }) {
   if (user) return render({ user });
+  // Another tab or the runners saved collections this page never read (the inbox while Dev is open): nothing to redraw.
+  if (changed && !/** @type {Store} */ (store).readAny(changed)) return;
   held = true;
   settle();
 }
