@@ -13,7 +13,7 @@ import { runJob, jobState } from './runners.js';
  */
 /**
  * An event as Google sends it, as far as it is read.
- * @typedef {{ id: string, status?: string, summary?: string, backgroundColor?: string, start?: { dateTime?: string, date?: string }, end?: { dateTime?: string, date?: string }, location?: string, description?: string, htmlLink?: string, hangoutLink?: string }} GoogleEvent
+ * @typedef {{ id: string, status?: string, summary?: string, backgroundColor?: string, start?: { dateTime?: string, date?: string }, end?: { dateTime?: string, date?: string }, location?: string, description?: string, htmlLink?: string, hangoutLink?: string, attendees?: { email?: string, displayName?: string, self?: boolean, resource?: boolean, responseStatus?: string }[] }} GoogleEvent
  */
 /** @typedef {Error & { status?: number }} CalendarError */
 
@@ -272,6 +272,13 @@ const eventOf = (account, cal, e) => ({
   description: e.description ?? '',
   link: e.htmlLink ?? '',
   meet: e.hangoutLink ?? '',
+  // Rooms and equipment are listed as guests too; they are left out.
+  attendees: (e.attendees ?? []).filter((a) => a.email && !a.resource).map((a) => ({
+    email: String(a.email).toLowerCase(),
+    ...(a.displayName ? { name: a.displayName } : {}),
+    ...(a.self ? { self: true } : {}),
+    ...(a.responseStatus ? { response: a.responseStatus } : {}),
+  })),
 });
 
 /**
