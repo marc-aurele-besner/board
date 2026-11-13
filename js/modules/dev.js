@@ -27,10 +27,10 @@ import { linkWatcher, moveToReview } from '../task-links.js';
 import { watchDevSessions } from './todos.js';
 import { recordOfSession, sumUsage, usageLine, usageTitle, byUse, mcpTool } from '../dev-usage.js';
 import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand, claudeState } from '../dev-core.js';
-import { sessionTools, fmtSpan, pct } from '../dev-turns.js';
+import { sessionTools, toolGroup, fmtSpan, pct } from '../dev-turns.js';
 import { cronRunOf, cronRunHref } from '../cron.js';
 /** @import { Store, DevSessionList, IconName } from '../../types/data' */
-/** @import { RunnerInfo, RunnerEvent, RunnerTurns, RunnerStatus, SessionTurn, SessionAgent } from '../../types/terminal' */
+/** @import { RunnerInfo, RunnerEvent, RunnerTurns, RunnerStatus, SessionTurn, SessionAgent, ToolFailure } from '../../types/terminal' */
 /** @import { DevContext } from '../../types/dev' */
 /** @import { Child } from '../../types/ui' */
 /** @import { Terminal, Line } from '../vt.js' */
@@ -1725,10 +1725,19 @@ function toolsButton(s) {
 // The tools panel, a summary of the tools the session used: the calls it and its subagents made, how many failed
 // and the time they took, the tools called most, then every tool, the most called first, with a bar of its share
 // of the calls (the failed ones in red), its failures and its time per call. A row naming several tools (an MCP
-// server's, the subagents') lists them in its tooltip.
+// server's, the subagents') lists them in its tooltip. A click on a tool with failures unfolds them, newest first:
+// when each was called, what it was given and the error it got back.
+// The tools whose failures are unfolded, by row key.
+const toolsOpen = new Set();
 /** @param {HTMLElement} el @param {RunnerTurns} data */
 function drawTools(el, data) {
   const { rows, calls, errors, ms, agents } = sessionTools(data.turns, data.agentTools);
+  /** @type {Map<string, ToolFailure[]>} */
+  const failed = new Map();
+  for (const f of data.failures ?? []) {
+    const { key } = toolGroup(f.name);
+    failed.set(key, [f, ...(failed.get(key) ?? [])]);
+  }
   const most = rows[0]?.calls ?? 0;
   // Most calls answer in well under a second.
   const perCall = (/** @type {number} */ t) => (t < 1000 ? `${Math.max(1, Math.round(t))} ms` : fmtSpan(t));
@@ -1764,7 +1773,8 @@ function drawTools(el, data) {
   /** @param {typeof rows[number]} r */
   function toolRow(r) {
     const names = r.names.map((n) => (n.startsWith('mcp__') ? mcpTool(n).tool || n : n));
-    const row = h('div', { class: 'turns-row tool-row', role: 'listitem' },
+    const unfolded = r.errors > 0 && toolsOpen.has(r.key);
+    const head = [
       h('div', { class: 'turns-line' },
         h('span', { class: 'turns-icon' }, icon(r.key.startsWith('mcp:') ? 'plug' : r.key === 'Agent' ? 'users' : r.key === 'Skill' ? 'zap' : 'wrench')),
         h('span', { class: 'turns-text' }, r.label),
@@ -1780,9 +1790,43 @@ function drawTools(el, data) {
           r.agents ? `${r.agents} by subagents` : '',
           r.ms ? `${perCall(r.ms / r.calls)} a call` : '',
           r.ms >= 1000 && r.calls > 1 ? `${fmtSpan(r.ms)} in all` : '',
-        ].filter(Boolean).join(' · '))));
-    if (names.length > 1 || names[0] !== r.label) row.title = names.join('\n');
+        ].filter(Boolean).join(' · '))),
+    ];
+    const several = names.length > 1 || names[0] !== r.label ? names.join('\n') : '';
+    // Only a tool with failures has something to unfold. Its details stay out of the button, so their text can be selected.
+    const row = h('div', { class: `turns-row tool-row${r.errors ? ' failed' : ''}`, role: 'listitem' },
+      r.errors
+        ? h('button', {
+          type: 'button',
+          class: 'tool-head',
+          'aria-expanded': String(unfolded),
+          title: [several, unfolded ? 'Click to fold' : `Click to show ${r.errors === 1 ? 'the failed call' : 'the failed calls'}`].filter(Boolean).join('\n'),
+          onclick: () => {
+            if (unfolded) toolsOpen.delete(r.key);
+            else toolsOpen.add(r.key);
+            drawTurns();
+          },
+        }, head)
+        : head,
+      unfolded ? failuresOf(r, names.length > 1) : null);
+    if (!r.errors && several) row.title = several;
     return row;
+  }
+
+  /** @param {typeof rows[number]} r @param {boolean} named whether the row adds up several tools */
+  function failuresOf(r, named) {
+    const list = failed.get(r.key) ?? [];
+    const missing = r.errors - list.length;
+    const today = new Date().toDateString();
+    const when = (/** @type {number} */ at) => (!at ? '' : new Date(at).toDateString() === today ? clock(at) : `${new Date(at).toLocaleDateString([], { month: 'short', day: 'numeric' })} ${clock(at)}`);
+    return h('div', { class: 'small tool-fails' },
+      list.map((f) => h('div', { class: 'tool-fail' },
+        h('div', { class: 'muted' }, [when(f.at), named ? (f.name.startsWith('mcp__') ? mcpTool(f.name).tool || f.name : f.name) : '', f.agent ? `by subagent ${f.agent}` : ''].filter(Boolean).join(' · ')),
+        f.detail ? h(f.command ? 'div' : 'code', { class: 'tool-fail-call' }, f.detail) : null,
+        f.command ? h('pre', { class: 'tool-fail-error' }, f.command) : null,
+        h('pre', { class: 'tool-fail-error' }, f.error || 'It gave no error text.'))),
+      !data.failures ? h('div', { class: 'muted' }, 'Restart the command runner to read what failed.')
+        : missing > 0 ? h('div', { class: 'muted' }, list.length ? `${missing} older ${missing === 1 ? 'failure is' : 'failures are'} not kept.` : 'These failures are too old to be kept.') : null);
   }
 }
 
