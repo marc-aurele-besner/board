@@ -3147,7 +3147,8 @@ button.sum-line:hover { background: var(--surface-2); }
 .slack-empty-text { align-items: center; text-align: center; max-width: 360px; }
 .slack-empty-text > .icon { width: 36px; height: 36px; color: var(--muted); }
 .slack-signin { max-width: 620px; width: 100%; }
-.slack-signin ol { padding-left: 20px; margin: 0; }
+.slack-signin ol { padding-left: 20px; margin: 0; list-style: decimal; gap: 8px; }
+.slack-signin ol li::marker { color: var(--muted); }
 .slack-signin code { overflow-wrap: anywhere; }
 .slack-messages, .slack-thread-messages { flex: 1; overflow-y: auto; padding: 8px 0; }
 .slack-loading { padding: 16px; }
