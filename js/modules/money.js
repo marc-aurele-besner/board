@@ -257,7 +257,7 @@ function retryRates(store) {
   store.refresh();
 }
 
-// The line under the header: the state of the rates, or the banner that sets them up.
+// The line under the header when the rates need attention (manual rate, loading, failed); nothing otherwise.
 /** @param {Store} store */
 function fxBanner(store) {
   const manual = manualRate();
@@ -277,7 +277,7 @@ function fxBanner(store) {
   if (fx.pending) {
     return h('p', { class: 'muted small rate-line' }, `Loading exchange rates for ${fx.pending} day${fx.pending > 1 ? 's' : ''}…`);
   }
-  return h('p', { class: 'muted small rate-line' }, 'Each amount converts with the exchange rate of its own day (European Central Bank).');
+  return null;
 }
 
 // --- Bills and screenshots ---
