@@ -866,6 +866,10 @@ textarea.editable-field { resize: vertical; }
 .menu-hint { color: var(--muted); font-size: 0.78rem; }
 .menu-item > .icon { margin-left: auto; opacity: 0.7; }
 .menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+.menu-item[hidden], .menu-sep[hidden] { display: none; }
+.menu-search { position: sticky; top: -5px; z-index: 1; width: 100%; margin: 0 0 4px; padding: 5px 8px; min-height: 30px; font-size: 16px;
+  border-radius: 6px; box-shadow: 0 -5px 0 var(--surface); }
+@media (min-width: 700px) { .menu-search { font-size: 0.86rem; } }
 /* Colour picker: a swatch button, and a popover with a palette, a hex field and the system picker. */
 .cp-button {
   width: 28px; height: 28px; min-height: 0; padding: 0; flex: none; border-radius: 50%;
