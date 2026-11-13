@@ -36,7 +36,7 @@ import { cronRunOf, cronRunHref } from '../cron.js';
  * How a command ended: stopped, lost when the runner stopped, or its exit code or signal.
  * @typedef {{ stopped?: boolean, lost?: boolean, code?: number | null, signal?: string | null, ms?: number }} Exit
  * @typedef {{ history: HTMLElement, screen: HTMLElement, from: number, theme?: string }} LinesEl
- * @typedef {LinesEl & { out: HTMLElement, top: number }} TermEl
+ * @typedef {LinesEl & { out: HTMLElement, top: number, holding?: boolean }} TermEl
  * @typedef {{ id: string, n: number, cwd: string, tasks: string[], prompt: string, running: boolean, attach: AbortController | null,
  *   replaying: boolean, pid: number, exit: Exit | null, command: string, browse: number, stick: boolean, el: TermEl | null,
  *   term: Terminal, watch?: (text: string) => void, observer?: ResizeObserver, listed: boolean, listedAt: number }} Session
@@ -442,8 +442,9 @@ function finish(store, s, e) {
 }
 
 // Drawing. A terminal's elements are made once and moved into each new page, so its output, scroll and focus
-// survive the page being rebuilt. Lines are drawn again only when they changed.
-/** @typedef {WeakMap<Line, { v: number, cx: number, theme: string, el: HTMLElement }>} LineCache */
+// survive the page being rebuilt. Lines are drawn again only when what they show changed: a program that rewrites a
+// line with the same text (the Claude CLI redraws its whole screen) keeps its element, so a selection in it survives.
+/** @typedef {WeakMap<Line, { v: number, cx: number, theme: string, sig: string, el: HTMLElement }>} LineCache */
 /** @type {LineCache} */
 const drawn = new WeakMap();
 
@@ -492,9 +493,8 @@ function lineLinks(line) {
 function lineNode(line, cursorX = -1, cache = drawn) {
   const was = cache.get(line);
   if (was && was.v === line.v && was.cx === cursorX && was.theme === currentTheme().key) return was.el;
-  const el = was?.el ?? h('div', { class: 'term-line' });
-  /** @type {(Node | string)[]} */
-  const spans = [];
+  /** @type {{ key: string, href: string | undefined, text: string, cursor: boolean }[]} */
+  const runs = [];
   const end = Math.max(line.cells.length, cursorX + 1);
   const hrefs = lineLinks(line);
   const hrefAt = (/** @type {number} */ x) => styleOf(line.cells[x]?.k ?? '').link ?? hrefs[x];
@@ -510,13 +510,24 @@ function lineNode(line, cursorX = -1, cache = drawn) {
       text += line.cells[x]?.c ?? ' ';
       x++;
     }
+    runs.push({ key, href, text, cursor });
+  }
+  const sig = JSON.stringify(runs);
+  if (was && was.sig === sig && was.theme === currentTheme().key) {
+    Object.assign(was, { v: line.v, cx: cursorX });
+    return was.el;
+  }
+  const el = was?.el ?? h('div', { class: 'term-line' });
+  /** @type {(Node | string)[]} */
+  const spans = [];
+  for (const { key, href, text, cursor } of runs) {
     const attrs = spanStyle(key);
     const node = key || cursor ? h('span', { ...attrs, class: [attrs.class, cursor && 'term-cursor'].filter(Boolean).join(' ') || null }, text) : text;
     // A link opens in a new tab.
     spans.push(href ? h('a', { class: 'term-link', href, target: '_blank', rel: 'noopener noreferrer', title: href }, node) : node);
   }
   el.replaceChildren(...spans);
-  cache.set(line, { v: line.v, cx: cursorX, theme: currentTheme().key, el });
+  cache.set(line, { v: line.v, cx: cursorX, theme: currentTheme().key, sig, el });
   return el;
 }
 
@@ -537,12 +548,20 @@ function drawLines(el, term, cursorY, cache = drawn) {
   for (let i = 0; i < drop; i++) /** @type {ChildNode} */ (history.firstChild).remove();
   if (term.trimmed > el.from) el.from = term.trimmed;
   for (let i = el.from + history.childElementCount - term.trimmed; i < term.history.length; i++) history.append(lineNode(term.history[i], -1, cache));
-  screen.replaceChildren(...term.screen.slice(0, term.used()).map((l, y) => lineNode(l, y === cursorY ? Math.min(term.x, term.cols - 1) : -1, cache)));
+  // The screen's lines are put in place one by one, not all replaced: a line left where it was keeps a selection.
+  const lines = term.screen.slice(0, term.used());
+  lines.forEach((l, y) => {
+    const node = lineNode(l, y === cursorY ? Math.min(term.x, term.cols - 1) : -1, cache);
+    const at = screen.children[y];
+    if (at !== node) screen.insertBefore(node, at ?? null);
+  });
+  while (screen.childElementCount > lines.length) /** @type {ChildNode} */ (screen.lastChild).remove();
 }
 
 /** @param {Session} s */
 function paint(s) {
-  if (!s.el) return;
+  // While the mouse is pressed in the output (selecting text, clicking a link), nothing moves under it.
+  if (!s.el || s.el.holding) return;
   const { term } = s;
   drawLines(s.el, term, s.running && term.cursor ? term.y : -1);
   const { out } = s.el;
@@ -766,6 +785,14 @@ function elementsOf(store, s) {
     },
     ondragleave: (/** @type {DragEvent} */ e) => !out.contains(/** @type {Node | null} */ (e.relatedTarget)) && out.classList.remove('dropping'),
     ondrop: (/** @type {DragEvent} */ e) => onTerminalDrop(store, s, e),
+    onmousedown: (/** @type {MouseEvent} */ e) => {
+      if (e.button !== 0) return;
+      /** @type {TermEl} */ (s.el).holding = true;
+      addEventListener('mouseup', () => {
+        if (s.el) s.el.holding = false;
+        schedulePaint();
+      }, { once: true, capture: true });
+    },
   }, history, screen);
   s.el = { out, history, screen, from: 0, top: 0 };
   s.observer = new ResizeObserver(() => fit(s));
