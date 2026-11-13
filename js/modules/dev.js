@@ -26,7 +26,7 @@ import { projectIcon } from './projects.js';
 import { linkWatcher, moveToReview } from '../task-links.js';
 import { watchDevSessions } from './todos.js';
 import { recordOfSession, sumUsage, usageLine, usageTitle, byUse, mcpTool } from '../dev-usage.js';
-import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand } from '../dev-core.js';
+import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand, claudeState } from '../dev-core.js';
 import { sessionTools, fmtSpan, pct } from '../dev-turns.js';
 import { cronRunOf, cronRunHref } from '../cron.js';
 /** @import { Store, DevSessionList, IconName } from '../../types/data' */
@@ -321,11 +321,8 @@ setInterval(() => {
 // What each terminal is doing, for its dot in the Terminals panel and on the bar: asked of the runner every few
 // seconds while Dev shows, and the dots are coloured where they stand, with no page render.
 const DOTS_MS = 4000;
-// A working claude that neither printed nor wrote to its transcript for this long is taken as not responding.
-const STALL_MS = 5 * 60000;
 /** @type {{ status: Record<string, RunnerStatus>, at: number, busy: boolean }} */
 const dots = { status: {}, at: 0, busy: false };
-const ASKS = /** @type {Record<string, string>} */ ({ question: 'claude asks you a question', plan: 'claude waits for its plan to be approved', permission: 'claude waits for your permission' });
 const RUNS_CLAUDE = /(?:^|[\s/])claude(?:\s|$)/;
 
 /** @param {Store} store */
@@ -364,18 +361,8 @@ function dotOf(s) {
     return s.exit ? { key: 'failed', label: exitText(s.exit) } : { key: 'idle', label: 'Idle' };
   }
   if (live && st.agents === undefined && !st.ask && !RUNS_CLAUDE.test(s.command.split(/\s--\s/)[0])) return { key: 'running', label: 'Running' };
-  if (st.state === 'working') {
-    return (st.quiet ?? 0) >= STALL_MS
-      ? { key: 'stalled', label: `Not responding: claude gave no sign for ${Math.round(/** @type {number} */ (st.quiet) / 60000)} min` }
-      : { key: 'working', label: 'claude is working' };
-  }
-  if (st.state === 'waiting') {
-    if (st.ask) return { key: 'asks', label: `${ASKS[st.ask.kind] ?? ASKS.permission}${st.ask.text ? `: ${st.ask.text}` : ''}` };
-    return st.signalled ? { key: 'done', label: 'Done: claude gave the done signal' } : { key: 'waiting', label: 'claude finished its turn and waits for you' };
-  }
-  if (st.state === 'done') return { key: 'done', label: 'Finished' };
-  if (st.state === 'failed') return { key: 'failed', label: exitText(s.exit) || 'Ended with an error' };
-  return st.state === 'stopped' ? { key: 'stopped', label: 'Stopped' } : { key: 'idle', label: 'Idle' };
+  if (st.state === 'failed' && s.exit) return { key: 'failed', label: exitText(s.exit) };
+  return claudeState(st);
 }
 
 // A terminal's dot, coloured again in place as its state is read.

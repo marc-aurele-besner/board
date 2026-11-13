@@ -321,7 +321,9 @@ async function statusOf(id) {
     // subagent has neither printed nor written to its transcript (one that hangs does neither).
     const signalled = state === 'waiting' && !ask && !!activity && 'turns' in activity && !!/** @type {{ done?: boolean }[]} */ (activity.turns).at(-1)?.done;
     const written = state === 'working' && !activity?.agents && s.transcript ? (await stat(s.transcript).catch(() => null))?.mtimeMs : 0;
-    return { state, cwd, ...more, ...(signalled ? { signalled } : {}), ...(written ? { quiet: Math.max(0, Date.now() - Math.max(s.lastOut ?? 0, written)) } : {}) };
+    // In whole minutes: Tasks draws again when a status changes, and a count of milliseconds changes at every read.
+    const quiet = written ? Math.floor(Math.max(0, Date.now() - Math.max(s.lastOut ?? 0, written)) / 60000) * 60000 : 0;
+    return { state, cwd, ...more, ...(signalled ? { signalled } : {}), ...(quiet ? { quiet } : {}) };
   }
   const exit = s.events.findLast((e) => e.t === 'exit');
   const where = s.events.findLast((e) => e.t === 'cwd' || e.t === 'start');

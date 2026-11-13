@@ -34,7 +34,8 @@ export interface RunnerStatus {
   artifacts?: SessionArtifact[];
   // Waiting after a turn that ended with claude's done signal.
   signalled?: boolean;
-  // Milliseconds a working claude with no subagent has neither printed nor written to its transcript.
+  // Milliseconds (in whole minutes, from one) a working claude with no subagent has neither printed nor written to
+  // its transcript.
   quiet?: number;
 }
 

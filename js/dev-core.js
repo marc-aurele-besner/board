@@ -98,3 +98,26 @@ export async function startRunnerSession({ store, claude = false, prompt = '', c
   const entry = await listSession(base, { session: id, cwd, ...(taskIds.length ? { tasks: taskIds, prompt: claude ? prompt : '' } : {}) }).catch(() => null);
   return { id, n: entry?.n ?? 0, worktree };
 }
+
+// Where the claude of a terminal stands, from the runner's status of it, as a key (the class of its dot in Dev and
+// of a task's Dev button) and the words for it: working, asks (a question, a plan, a permission), waiting after its
+// turn, done, failed, stalled (not responding), stopped or idle.
+// A working claude that neither printed nor wrote to its transcript for this long is taken as not responding.
+export const STALL_MS = 5 * 60000;
+/** @type {Record<string, string>} */
+export const ASK_LABELS = { question: 'claude asks you', plan: 'claude waits for its plan to be approved', permission: 'claude waits for your permission' };
+/** @param {import('../types/terminal').RunnerStatus} st @returns {{ key: string, label: string }} */
+export function claudeState(st) {
+  if (st.state === 'working') {
+    return (st.quiet ?? 0) >= STALL_MS
+      ? { key: 'stalled', label: `Not responding: claude gave no sign for ${Math.round(/** @type {number} */ (st.quiet) / 60000)} min` }
+      : { key: 'working', label: 'claude is working' };
+  }
+  if (st.state === 'waiting') {
+    if (st.ask) return { key: 'asks', label: `${ASK_LABELS[st.ask.kind] ?? ASK_LABELS.permission}${st.ask.text ? `: ${st.ask.text}` : ''}` };
+    return st.signalled ? { key: 'done', label: 'Done: claude gave the done signal' } : { key: 'waiting', label: 'claude finished its turn and waits for you' };
+  }
+  if (st.state === 'done') return { key: 'done', label: 'Finished' };
+  if (st.state === 'failed') return { key: 'failed', label: `Ended with an error${st.code != null ? ` (exit ${st.code})` : ''}` };
+  return st.state === 'stopped' ? { key: 'stopped', label: 'Stopped' } : { key: 'idle', label: 'Nothing running' };
+}

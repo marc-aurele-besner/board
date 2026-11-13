@@ -1257,12 +1257,17 @@ button.danger { color: var(--danger); }
 /* A task's Dev button takes the colour of what its terminal is doing. */
 .icon-btn.dev-btn { position: relative; }
 .icon-btn.dev-btn::after { content: ""; position: absolute; top: 3px; right: 2px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.icon-btn.dev-btn.dev-working { color: var(--accent); }
-.icon-btn.dev-btn.dev-working::after { animation: pulse 1.4s ease-in-out infinite; }
-.icon-btn.dev-btn.dev-waiting { color: var(--warn); }
-.icon-btn.dev-btn.dev-done { color: var(--income); }
-.icon-btn.dev-btn.dev-failed { color: var(--danger); }
-.icon-btn.dev-btn.dev-stopped, .icon-btn.dev-btn.dev-idle { color: var(--text); }
+/* The colours and flashes of a terminal's dot in Dev (.wt-dot.is-*). */
+.icon-btn.dev-btn.is-working { color: var(--accent); }
+.icon-btn.dev-btn.is-working::after { animation: pulse 1.4s ease-in-out infinite; }
+.icon-btn.dev-btn.is-asks { color: var(--ai); }
+.icon-btn.dev-btn.is-asks::after { animation: termAsk 0.9s ease-in-out infinite; }
+.icon-btn.dev-btn.is-waiting { color: var(--warn); }
+.icon-btn.dev-btn.is-waiting::after { animation: pulse 2.4s ease-in-out infinite; }
+.icon-btn.dev-btn.is-done { color: var(--income); }
+.icon-btn.dev-btn.is-failed, .icon-btn.dev-btn.is-stalled { color: var(--danger); }
+.icon-btn.dev-btn.is-stalled::after { animation: pulse 0.9s ease-in-out infinite; }
+.icon-btn.dev-btn.is-stopped, .icon-btn.dev-btn.is-idle { color: var(--text); }
 .icon-btn.dev-btn:hover { filter: brightness(1.15); }
 /* The down arrow beside it: the task's model and effort; accent once one is picked. */
 .dev-control { display: inline-flex; align-items: center; }
