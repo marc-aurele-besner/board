@@ -328,6 +328,7 @@ function collectCoverage(store) {
   /** @type {Map<string, { name: string, chainId: number, sum: number, done: number, total: number }>} */
   const chains = new Map();
   for (const r of state.rows) {
+    if (r.version === 'v2') continue; // nothing is collected from a v2 pair
     const c = chains.get(r.chain) ?? { name: r.chain, chainId: r.chainId, sum: 0, done: 0, total: 0 };
     const share = searchShare(r, d, etherscanKey(store.get('settings')));
     c.sum += share;
@@ -416,6 +417,13 @@ const cash = (n) => {
 };
 /** @param {number | null} n */
 const usdOrDash = (n) => (n === null ? '—' : cash(n));
+// How a position is named beside its pair: its number, or for v2 its pair's address, shortened.
+/** @param {{ version?: string, tokenId?: string | null }} r */
+const numberOf = (r) => (r.version === 'v2' && r.tokenId ? shortAddress(r.tokenId) : `#${r.tokenId ?? '—'}`);
+// v2 has no unclaimed fees: they are in the pair's reserves, so in the value.
+const V2_FEES = 'Uniswap v2 adds the fees to the pool as they are paid: they are part of the value, and nothing waits to be claimed.';
+/** @param {PositionRow} r */
+const unclaimed = (r) => (r.version === 'v2' ? h('span', { class: 'muted', title: V2_FEES }, 'In the pool') : usdOrDash(r.fees));
 
 // Fetches today's rate once a day when CAD is picked, then draws again.
 /** @param {Store} store */
@@ -458,6 +466,17 @@ function etherscanNotice(store) {
   const errors = /** @type {Record<string, string>} */ (store.get(COLLECTION)?.etherscanErrors ?? {});
   return Object.keys(errors).length
     ? { tone: 'info', text: `Etherscan could not be read for ${Object.entries(errors).map(([name, text]) => `${name} (${text})`).join(', ')}. Collects there come from the node only.` }
+    : null;
+}
+// The Positions tab's note when Etherscan could not list the wallets' v2 pairs on some chains.
+/** @returns {DefiNotice | null} */
+function v2Notice() {
+  // Chains that failed for the same reason, such as a plan that does not cover them, are named together.
+  /** @type {Map<string, string[]>} */
+  const byReason = new Map();
+  for (const [name, text] of Object.entries(readOf().v2lookup ?? {})) byReason.set(text, [...(byReason.get(text) ?? []), name]);
+  return byReason.size
+    ? { tone: 'info', text: `Etherscan could not list your wallets' Uniswap v2 pairs on ${[...byReason].map(([text, names]) => `${names.join(', ')} (${text})`).join('; ')}. A v2 pair there is read once you add it with Add position.` }
     : null;
 }
 /** @param {number} n */
@@ -695,7 +714,7 @@ function poolCard(r, i, collected, store) {
     rangeView(r, store),
     h('div', { class: r.closed ? 'pool-stats' : 'pool-stats four' },
       poolStat('Value', usdOrDash(r.value)),
-      poolStat('Unclaimed fees', usdOrDash(r.fees)),
+      poolStat('Unclaimed fees', unclaimed(r)),
       r.closed
         ? poolStat('Fees collected', collected.has(r.ref) ? cash(/** @type {number} */ (collected.get(r.ref))) : '—', 'The collections of this position in the fee log')
         : [poolStat(`Fee APR · ${WINDOWS[view.window][1]}`, aprText(r), aprTitle(r)),
@@ -703,7 +722,7 @@ function poolCard(r, i, collected, store) {
     distribution(r),
     h('footer', { class: 'pool-foot muted small' },
       h('span', null, r.owner),
-      h('span', null, `#${r.tokenId}`)));
+      h('span', null, numberOf(r))));
 }
 
 // Placeholders shown while the first read is running.
@@ -777,12 +796,12 @@ function poolTable(rows, store) {
         },
           h('td', null, h('div', { class: 'row' },
             h('div', { class: 'pair' }, logo(tokenLogoOf(r, r.addr0), r.sym0, 'token'), logo(tokenLogoOf(r, r.addr1), r.sym1, 'token second')),
-            h('div', null, h('button', { type: 'button', class: 'link-btn', title: 'See this position', onclick: () => openDetail(store, r.ref) }, r.pair), ' ', h('span', { class: 'version-pill', title: `Uniswap ${r.version}` }, r.version), outdatedPill(r), h('div', { class: 'muted small' }, `${r.owner} · #${r.tokenId}`)))),
+            h('div', null, h('button', { type: 'button', class: 'link-btn', title: 'See this position', onclick: () => openDetail(store, r.ref) }, r.pair), ' ', h('span', { class: 'version-pill', title: `Uniswap ${r.version}` }, r.version), outdatedPill(r), h('div', { class: 'muted small' }, `${r.owner} · ${numberOf(r)}`)))),
           h('td', null, h('span', { class: 'chain-chip' }, logo(chainOf(r.chainId)?.logo, r.chain, 'xs'), r.chain), h('div', { class: 'muted small' }, `${r.feePct}% fee`)),
           h('td', null, rangeCell(r, store)),
           h('td', null, distribution(r)),
           h('td', { class: 'num' }, usdOrDash(r.value)),
-          h('td', { class: 'num' }, usdOrDash(r.fees)),
+          h('td', { class: 'num' }, unclaimed(r)),
           h('td', { class: 'num', title: aprTitle(r) }, aprText(r)),
           h('td', { class: 'num' }, moveView(r)),
           h('td', null, r.url
@@ -837,7 +856,10 @@ function addForm(store) {
     }
     // No error means the entry was read.
     const chain = chainOf(/** @type {Entry} */ (entry).chainId)?.name ?? `Chain ${/** @type {Entry} */ (entry).chainId}`;
-    say('ok', `Added ${chain} ${/** @type {Entry} */ (entry).version} #${/** @type {Entry} */ (entry).tokenId}. It shows here once it is read.`);
+    const added = /** @type {Entry} */ (entry);
+    say('ok', added.version === 'v2'
+      ? `Added the ${chain} v2 pair ${numberOf(added)}. Each wallet that holds it shows here once it is read.`
+      : `Added ${chain} ${added.version} ${numberOf(added)}. It shows here once it is read.`);
     form.elements.position.value = '';
     form.elements.position.dispatchEvent(new Event('input'));
     form.elements.position.focus();
@@ -846,6 +868,7 @@ function addForm(store) {
   addEl = /** @type {AddForm} */ (h('form', { class: 'card panel stack lp-add', onsubmit: submit },
     h('h3', null, 'Add a position'),
     h('p', { class: 'muted small' }, 'For a position the board does not find: a v3 position held by an address not in your wallets, or a v4 position older than the node keeps. Paste its link from app.uniswap.org and the chain and version are read from it. A plain number needs both picked.'),
+    h('p', { class: 'muted small' }, 'A v2 position is a share of a pair: paste its link, or the pair\'s address with its chain picked, and it is read for every wallet. With an Etherscan key in Settings → Blockchains, the pairs your wallets hold are found by themselves.'),
     f.input,
     f.hint,
     h('div', { class: 'row' },
@@ -1020,7 +1043,8 @@ function logForm(store) {
       h('input', { name: 'usd', inputmode: 'decimal', placeholder: 'Amount in USD', autofocus: true, 'aria-label': 'Amount collected in USD' })),
     h('select', { name: 'ref', 'aria-label': 'Position' },
       h('option', { value: '' }, 'No position'),
-      rows.map((r) => h('option', { value: r.ref }, `${r.pair} · ${r.chain} · #${r.tokenId}${r.closed ? ' (closed)' : ''}`))),
+      // Nothing is collected from a v2 pair.
+      rows.filter((r) => r.version !== 'v2').map((r) => h('option', { value: r.ref }, `${r.pair} · ${r.chain} · #${r.tokenId}${r.closed ? ' (closed)' : ''}`))),
     h('input', { name: 'note', placeholder: 'Note (optional)', 'aria-label': 'Note' }),
     h('div', { class: 'row' },
       h('button', { type: 'submit', class: 'btn-small' }, 'Log'),
@@ -2003,10 +2027,12 @@ function detailHoldings(r) {
       // A value means both prices are known.
       line(r.addr0, r.sym0, r.a0, r.p0, total ? (r.a0 * /** @type {number} */ (r.p0)) / total : null),
       line(r.addr1, r.sym1, r.a1, r.p1, total ? (r.a1 * /** @type {number} */ (r.p1)) / total : null)),
-    h('div', { class: 'lp-panel-head' }, h('h3', null, 'Unclaimed fees'), h('span', { class: 'muted small' }, usdOrDash(r.fees))),
-    fees
-      ? h('ul', { class: 'lp-holdings' }, line(r.addr0, r.sym0, r.fee0, r.p0), line(r.addr1, r.sym1, r.fee1, r.p1))
-      : h('p', { class: 'muted small' }, 'Not read.'));
+    r.version === 'v2' ? null : h('div', { class: 'lp-panel-head' }, h('h3', null, 'Unclaimed fees'), h('span', { class: 'muted small' }, usdOrDash(r.fees))),
+    r.version === 'v2'
+      ? null
+      : fees
+        ? h('ul', { class: 'lp-holdings' }, line(r.addr0, r.sym0, r.fee0, r.p0), line(r.addr1, r.sym1, r.fee1, r.p1))
+        : h('p', { class: 'muted small' }, 'Not read.'));
 }
 
 // Fees earned over the last day, week and month, from the saved hours, with the yearly rate each makes.
@@ -2037,10 +2063,10 @@ function detailFacts(store, r) {
   const facts = [
     ['Chain', h('span', { class: 'chain-chip' }, logo(chainOf(r.chainId)?.logo, r.chain, 'xs'), r.chain)],
     ['Protocol', `Uniswap ${r.version} · ${r.feePct}% fee tier`],
-    ['Position', r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener' }, `#${r.tokenId}`) : `#${r.tokenId}`],
+    ['Position', r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener' }, numberOf(r)) : numberOf(r)],
     ['Owner', r.owner],
     ['Wallet', address('address', r.wallet)],
-    [r.version === 'v4' ? 'Pool ID' : 'Pool', r.pool ? (r.version === 'v4' ? copyable(r.pool, { label: `${r.pool.slice(0, 10)}…${r.pool.slice(-6)}` }) : address('address', r.pool)) : '—'],
+    [r.version === 'v4' ? 'Pool ID' : r.version === 'v2' ? 'Pair' : 'Pool', r.pool ? (r.version === 'v4' ? copyable(r.pool, { label: `${r.pool.slice(0, 10)}…${r.pool.slice(-6)}` }) : address('address', r.pool)) : '—'],
     [r.sym0, address('token', r.addr0)],
     [r.sym1, address('token', r.addr1)],
     ['Liquidity', BigInt(r.liq ?? '0').toLocaleString()],
@@ -2048,6 +2074,11 @@ function detailFacts(store, r) {
     ['Prices', r.pricesAt ? `from ${ago(r.pricesAt)}` : 'Current'],
     ['Collect search', h('span', { class: 'row lp-search', title: COVERAGE_TITLE }, h('div', { class: 'meter', role: 'presentation' }, h('span', { style: { width: `${share * 100}%` } })), coveragePct(share))],
   ];
+  // A v2 pair has no collects to search for. What it holds is its share of the pair's own token.
+  if (r.version === 'v2') {
+    const part = Number(r.supply) > 0 ? Number(r.liq) / Number(r.supply) : 0;
+    facts.splice(-1, 1, ['Share of the pair', `${(part * 100).toLocaleString(undefined, { maximumSignificantDigits: 3 })}%`]);
+  }
   return panel('Details', null,
     h('dl', { class: 'lp-facts' }, facts.map(([k, v]) => h('div', null, h('dt', { class: 'muted small' }, k), h('dd', null, v)))));
 }
@@ -2091,6 +2122,7 @@ function detailView(store, ref) {
     h('span', { class: 'muted' }, label), h('strong', null, value), hint ? h('span', { class: 'muted small' }, hint) : null);
   const earned = r ? earnedChart(store, r) : null;
   const kind = !r ? 'gone' : r.closed ? 'closed' : r.inRange ? 'in' : 'out';
+  const v2 = r?.version === 'v2';
 
   const hero = h('header', { class: `card lp-hero is-${kind}` },
     h('div', { class: 'lp-hero-main' },
@@ -2105,7 +2137,7 @@ function detailView(store, ref) {
           r ? h('span', { class: 'fee-pill' }, `${r.feePct}%`) : null,
           r ? statusPill(r) : h('span', { class: 'status-pill closed' }, h('span', { class: 'dot' }), 'Not read'),
           r ? outdatedPill(r) : null,
-          h('span', { class: 'muted small' }, `#${known.tokenId ?? '—'}${r ? ` · ${r.owner}` : ''}`)))),
+          h('span', { class: 'muted small' }, `${numberOf(r ?? known)}${r ? ` · ${r.owner}` : ''}`)))),
     h('div', { class: 'lp-hero-side' },
       r ? h('div', { class: 'lp-hero-value' }, h('span', { class: 'muted small' }, 'Value'), h('strong', null, usdOrDash(r.value))) : null,
       h('div', { class: 'row' },
@@ -2119,12 +2151,14 @@ function detailView(store, ref) {
     hero,
     !r ? notice({ tone: 'info', text: 'This position is not among those read, and no saved read has it: it was burned, or its wallet was removed before it was read. Below is what the fee log holds for it.' }) : null,
     r?.closed ? notice({ tone: 'info', text: 'Closed: this position holds no liquidity now. Its range, its last prices and its fee history are shown as read.' }) : null,
+    v2 ? notice({ tone: 'info', text: 'A Uniswap v2 position is a share of the whole pair, over the full range. Its fees are added to the pool as they are paid: they grow the value and come out with the liquidity, so there is nothing to claim or collect. Fee APR is read from the pair\'s swaps.' }) : null,
     h('div', { class: 'lp-stats' },
-      r ? stat('Unclaimed fees', usdOrDash(r.fees)) : null,
+      r && !v2 ? stat('Unclaimed fees', usdOrDash(r.fees)) : null,
+      v2 ? stat('Fees', 'In the pool', 'part of the value', V2_FEES) : null,
       r && !r.closed ? stat(`Fee APR · ${win}`, aprText(r), null, aprTitle(r)) : null,
       r && !r.closed ? stat(`Movement · ${win}`, moveView(r), r.aprPrev != null ? `from ${pct(r.aprPrev)}` : null, moveTitle(r)) : null,
-      stat('Fees collected', cash(collectedUsd), plural(collects.length, 'collection')),
-      r && r.fees != null ? stat('Total earned', cash(collectedUsd + r.fees), 'collected and unclaimed') : null),
+      v2 ? null : stat('Fees collected', cash(collectedUsd), plural(collects.length, 'collection')),
+      r && !v2 && r.fees != null ? stat('Total earned', cash(collectedUsd + r.fees), 'collected and unclaimed') : null),
     r && !r.closed
       ? h('label', { class: 'inline lp-sort', title: 'The time fee APR is read over' }, 'APR window',
           h('select', {
@@ -2142,7 +2176,7 @@ function detailView(store, ref) {
     earned
       ? panel('Fees earned per day', `${cash(earned.total)} over ${plural(earned.days, 'day')} · ${cash(earned.total / earned.days)} a day`, earned.chart)
       : null,
-    detailCollections(collects),
+    v2 ? null : detailCollections(collects),
     r ? detailFacts(store, r) : null);
 }
 
@@ -2374,7 +2408,7 @@ function draw(root, store) {
     tabs(store,
       (view.tab === 'fees'
         ? FEES_SUBTITLE
-        : `Uniswap v3 and v4 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`)
+        : `Uniswap v2, v3 and v4 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`)
         + (state.pending.length ? ` Reading ${state.pending.join(', ')}…` : state.at ? ` ${updatedText()}.` : ''),
       [
         currencySwitch(store),
@@ -2385,7 +2419,7 @@ function draw(root, store) {
       ],
       [
         rateNotice(),
-        view.tab === 'fees' ? etherscanNotice(store) : null,
+        view.tab === 'fees' ? etherscanNotice(store) : v2Notice(),
         state.shallow.length
           ? { tone: 'info', text: `The node for ${state.shallow.join(', ')} keeps only recent history, so older v4 positions there are not found. Add them with Add position, or set a node that keeps full history in Settings.` }
           : null,

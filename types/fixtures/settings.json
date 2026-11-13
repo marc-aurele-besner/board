@@ -18,6 +18,7 @@
     },
     "v3ids": [{ "chainId": 1, "tokenId": "1001" }],
     "v4ids": [{ "chainId": 8453, "tokenId": "2002" }],
+    "v2ids": [{ "chainId": 1, "tokenId": "0x0000000000000000000000000000000000000002" }],
     "node": "",
     "etherscan": ""
   },

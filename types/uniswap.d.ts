@@ -32,6 +32,8 @@ export interface Chain {
   // Uniswap v3's factory and position manager.
   factory: string;
   positions: string;
+  // Uniswap v2's factory. Missing where Uniswap has no v2.
+  v2?: string;
   // Missing where Uniswap has no v4.
   v4?: V4Deployment;
   // false where Etherscan's API does not cover the chain.
@@ -41,10 +43,11 @@ export interface Chain {
 // A number that BigInt() takes: amounts are bigints in memory and decimal strings in JSON.
 export type BigIntish = bigint | string | number;
 
-// A position as read from the chain (decodeV3 and readV4Position in js/uniswap.js). Amounts are raw bigints.
+// A position as read from the chain (readV2Pair, decodeV3 and readV4Position in js/uniswap.js). Amounts are raw bigints.
 export interface Position {
-  version: string; // 'v3' | 'v4'
+  version: string; // 'v2' | 'v3' | 'v4'
   chainId: number;
+  // v2: the pair's address, in lowercase. A v2 position is a wallet's balance of the pair's token.
   tokenId: string;
   owner: string;
   token0: string;
@@ -53,14 +56,21 @@ export interface Position {
   hooks?: string; // v4
   tickLower: number;
   tickUpper: number;
+  // v2: the balance of the pair's token.
   liquidity: bigint;
+  // v2 only: the pair's token supply, the share of each reserve the balance stands for, and the part of a swap
+  // liquidity keeps, in pips (the fee less the protocol's cut).
+  supply?: bigint;
+  amount0?: bigint;
+  amount1?: bigint;
+  lpFee?: number;
   owed0: bigint;
   owed1: bigint;
   // The fees include those earned since the last poke (a simulated collect).
   feesFull?: boolean;
 }
 
-// A pool's current price (sqrt, as a float) and tick; pool is the v3 address or the v4 pool id.
+// A pool's current price (sqrt, as a float) and tick; pool is the v2 pair or v3 pool address, or the v4 pool id.
 export interface PoolState {
   pool: string;
   sqrtPrice: number;
@@ -71,6 +81,7 @@ export interface PoolState {
 export interface Swap {
   block: number;
   tick: number;
+  // The active liquidity after it. 0 on v2, where the pair's supply stands in.
   liq: bigint;
   in0: bigint;
   in1: bigint;
