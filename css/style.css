@@ -3403,6 +3403,7 @@ button.sum-line:hover { background: var(--surface-2); }
 .social-name { display: flex; flex-direction: column; min-width: 0; }
 .social-name strong, .social-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .social-name svg { width: 12px; height: 12px; vertical-align: -1px; }
+.social-figures { display: flex; gap: 6px 20px; flex-wrap: wrap; }
 .social-now { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .social-now strong { font-size: 1.6rem; font-variant-numeric: tabular-nums; }
 .social-change { font-size: 0.85rem; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted); }

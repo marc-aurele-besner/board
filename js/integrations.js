@@ -15,6 +15,7 @@ const SECTIONS = {
   gmail: ['gmail', 'Gmail'],
   x: ['x', 'X / Twitter'],
   linkedin: ['linkedin', 'LinkedIn'],
+  githubAccounts: ['github-accounts', 'GitHub accounts'],
 };
 
 /** @import { DataStore } from '../types/data' */
