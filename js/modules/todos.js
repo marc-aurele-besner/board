@@ -16,7 +16,8 @@ import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
 import { openDialog } from '../modal.js';
 import { issuesOf, prsOf, artifactsOf, addTaskArtifacts, moveToReview } from '../task-links.js';
 import { previewChips } from '../previews.js';
-import { openLinkedinComposer } from '../linkedin-composer.js';
+import { openLinkedinComposer, whenText } from '../linkedin-composer.js';
+import { LINKEDIN } from '../linkedin-core.js';
 import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startClaudeSession, openSession, runnerOf } from './dev.js';
@@ -736,7 +737,8 @@ function linkChips(store, item) {
   const prs = prsOf(item);
   const artifacts = artifactsOf(item);
   const links = item.links ?? [];
-  if (!issues.length && !prs.length && !artifacts.length && !links.length) return null;
+  const post = postPill(store, item);
+  if (!issues.length && !prs.length && !artifacts.length && !links.length && !post) return null;
   /** @param {TaskLink} l @param {boolean} pr */
   const chip = (l, pr) => {
     const state = linkState(store, l);
@@ -749,7 +751,7 @@ function linkChips(store, item) {
     'aria-label': `Open ${pr ? 'pull request' : 'issue'} ${l.repo} #${l.number}`,
   }, icon(pr ? 'pull-request' : 'repo'), `#${l.number}`);
   };
-  return h('span', { class: 'task-link-chips' }, issues.map((l) => chip(l, false)), prs.map((l) => chip(l, true)), previewChips(store, prs, 'issue-link'), artifacts.map(artifactChip), links.map(webChip));
+  return h('span', { class: 'task-link-chips' }, issues.map((l) => chip(l, false)), prs.map((l) => chip(l, true)), previewChips(store, prs, 'issue-link'), artifacts.map(artifactChip), links.map(webChip), post);
 }
 
 // A claude.ai Artifact a Dev session published, by its title (or "Artifact"), opening in a new tab.
@@ -773,6 +775,24 @@ const webChip = (l) => h('a', {
   title: `${l.title || 'Link'} · ${l.url}`,
   'aria-label': `Open ${l.title || l.url}`,
 }, icon(/linkedin\.com/.test(l.url) ? 'linkedin' : 'link'), h('span', { class: 'artifact-link-title' }, l.title || 'Link'));
+
+// The state of the task's LinkedIn post while it is not out yet (scheduled, failed, missed); a posted one shows as
+// its link. A click opens the composer.
+/** @type {Record<string, [string, string]>} */
+const POST_PILLS = { scheduled: ['Scheduled', 'doing'], posting: ['Posting', 'doing'], failed: ['Failed', 'failed'], missed: ['Missed', 'high'] };
+/** @param {Store} store @param {Task} item */
+function postPill(store, item) {
+  const post = store.get(LINKEDIN).posts.find((p) => p.taskId === item.id && POST_PILLS[p.status]);
+  if (!post) return null;
+  const [label, tone] = POST_PILLS[post.status];
+  const at = post.status === 'scheduled' && post.scheduledAt ? whenText(post.scheduledAt) : '';
+  return h('button', {
+    type: 'button',
+    class: `pill tone-${tone} task-li-pill`,
+    title: post.error ? `LinkedIn post: ${post.error}` : `LinkedIn post${at ? `, ${at}` : ''}`,
+    onclick: () => openLinkedinComposer(store, { postId: post.id }),
+  }, icon('linkedin'), at ? `${label} ${at}` : label);
+}
 
 // The actions under an open task's description.
 /** @param {Store} store @param {Task} item */

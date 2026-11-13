@@ -18,7 +18,8 @@ import fx from './fx.js';
 import devUsage from './dev-usage.js';
 import worktrees from './worktrees.js';
 import cron from './cron.js';
+import linkedinPosts from './linkedin-posts.js';
 import defi from './defi.js';
 
 /** @type {Job[]} */
-export const jobs = [google, gmail, resend, calendar, monitoring, telegram, notion, github, previews, linkStates, npm, webstats, socials, fx, devUsage, worktrees, cron, ...defi];
+export const jobs = [google, gmail, resend, calendar, monitoring, telegram, notion, github, previews, linkStates, npm, webstats, socials, fx, devUsage, worktrees, cron, linkedinPosts, ...defi];
