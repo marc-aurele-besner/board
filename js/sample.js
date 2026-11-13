@@ -102,14 +102,15 @@ function collections() {
   // models: { id: [input, output, cache read, cache write, cost] }; the session ended `offset` days from today.
   /**
    * @param {string} name @param {string[]} taskIds @param {number} offset @param {Record<string, number[]>} models @param {string} effort
+   * @param {Record<string, number>} [skills] @param {Record<string, number>} [mcp]
    * @returns {DevUsage}
    */
-  const devRecord = (name, taskIds, offset, models, effort) => {
+  const devRecord = (name, taskIds, offset, models, effort, skills = {}, mcp = {}) => {
     const end = Date.now() + offset * 86400000 - 3600000;
     const list = Object.entries(models);
     return {
       name, cwd: '', added: at, taskIds, sessions: 1, start: end - 40 * 60000, end, duration: 38 * 60000, apiDuration: 21 * 60000,
-      linesAdded: 214, linesRemoved: 37, replies: 60, efforts: { [effort]: 60 },
+      linesAdded: 214, linesRemoved: 37, replies: 60, efforts: { [effort]: 60 }, skills, mcp,
       cost: list.reduce((sum, [, m]) => sum + m[4], 0),
       models: Object.fromEntries(list.map(([id, [input, output, cacheRead, cacheWrite, cost]]) => [id, { provider: 'Anthropic', input, output, thinking: 0, cacheRead, cacheWrite, cost }])),
     };
@@ -219,9 +220,9 @@ function collections() {
         call(9, 'task-summary', 'example/model-large', 'p-atlas', 8800, 1100, 0.066),
       ],
       dev: {
-        'ship-the-pricing-page-a1b2c3': devRecord('ship-the-pricing-page-a1b2c3', ['t1'], -1, { 'claude-opus-5-5': [820, 31200, 4100000, 160000, 2.84], 'claude-haiku-5-5': [1300, 210, 0, 0, 0.0003] }, 'high'),
-        'write-the-install-guide-d4e5f6': devRecord('write-the-install-guide-d4e5f6', ['t6'], 0, { 'claude-sonnet-5-5': [410, 18400, 1900000, 90000, 0.97] }, 'medium'),
-        'fix-the-footer-links-g7h8i9': devRecord('fix-the-footer-links-g7h8i9', ['t2'], -3, { 'claude-sonnet-5-5': [300, 9600, 1200000, 60000, 0.58] }, 'medium'),
+        'ship-the-pricing-page-a1b2c3': devRecord('ship-the-pricing-page-a1b2c3', ['t1'], -1, { 'claude-opus-5-5': [820, 31200, 4100000, 160000, 2.84], 'claude-haiku-5-5': [1300, 210, 0, 0, 0.0003] }, 'high', { 'fix-issue': 1, simplify: 2 }, { 'mcp__claude-in-chrome__navigate': 6, 'mcp__claude-in-chrome__computer': 14 }),
+        'write-the-install-guide-d4e5f6': devRecord('write-the-install-guide-d4e5f6', ['t6'], 0, { 'claude-sonnet-5-5': [410, 18400, 1900000, 90000, 0.97] }, 'medium', { 'artifact-design': 1 }, { 'mcp__claude_ai_Claude_Docs__batch': 3 }),
+        'fix-the-footer-links-g7h8i9': devRecord('fix-the-footer-links-g7h8i9', ['t2'], -3, { 'claude-sonnet-5-5': [300, 9600, 1200000, 60000, 0.58] }, 'medium', { simplify: 1 }, {}),
         'book-the-plumber-j1k2l3': devRecord('book-the-plumber-j1k2l3', ['t7'], -5, { 'claude-haiku-5-5': [900, 4200, 300000, 20000, 0.07] }, 'low'),
       },
     },
