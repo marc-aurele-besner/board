@@ -33,6 +33,7 @@ js/menu.js            context menus with submenus: on a right click, or under a 
 js/modules/index.js   registry of sections (the nav is built from this list)
 js/modules/*.js       one file per section (todos, projects, kitchen, money, tools, ...)
 js/notifications.js   the bell and its drawer
+js/attention.js       the number pills on the nav tabs: Slack mentions and Dev claude terminals waiting, read every 20 s
 js/notify-core.js     notify(), the kinds and their preferences, the deadline check; saved in notifications.json (no DOM)
 js/money-core.js      budgets gone over and recurring due dates (no DOM)
 js/projects-core.js   a project's shape, and createProject() from a #tag (no DOM)

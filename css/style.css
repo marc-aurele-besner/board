@@ -1720,7 +1720,13 @@ a { color: var(--accent); }
 .settings-link.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
 .bell-count { position: absolute; top: 0; right: -2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--danger); color: var(--surface); font: 700 10px/16px var(--font); text-align: center; }
 @media (max-width: 1500px) { .search-btn { width: 150px; } }
-@media (max-width: 1280px) { .tab:not(.active) .tab-label { display: none; } }
+.tab-pill { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--danger); color: var(--surface); font: 700 10px/16px var(--font); text-align: center; }
+.tab-pill[hidden] { display: none; }
+@media (max-width: 1280px) {
+  .tab:not(.active) .tab-label { display: none; }
+  /* With the label gone the pill sits on the icon's corner, inside the tab: the row clips what overflows. */
+  .tab:not(.active) .tab-pill { position: absolute; top: 2px; right: 2px; min-width: 14px; height: 14px; padding: 0 3px; font-size: 9px; line-height: 14px; }
+}
 @media (max-width: 720px) {
   .topbar { flex-wrap: wrap; }
   .tabs { order: 3; flex-basis: 100%; }
@@ -3209,6 +3215,7 @@ button.sum-line:hover { background: var(--surface-2); }
 .slack-section-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; background: transparent; border: none; padding: 2px 6px; min-height: 26px; font-size: 0.82rem; font-weight: 600; color: var(--muted); justify-content: flex-start; }
 .slack-section-toggle:hover { color: var(--text); }
 .slack-section-toggle .icon { width: 0.95em; height: 0.95em; }
+.slack-section-toggle .slack-badge { margin-left: auto; flex: none; }
 .slack-section-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slack-section-project { display: inline-flex; align-items: center; gap: 4px; font-weight: 400; font-size: 0.75rem; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
 .slack-section-project .project-icon { width: 12px; height: 12px; }
