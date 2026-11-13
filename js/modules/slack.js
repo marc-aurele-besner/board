@@ -55,6 +55,8 @@ const live = {
   // Scroll of the message list per conversation: null when it sits at the bottom.
   /** @type {Map<string, number | null>} */
   scroll: new Map(),
+  // Scroll of the sidebar's list, kept across redraws (unread counts redraw it every 20 s).
+  sideScroll: 0,
   sending: false,
   /** @type {{ root: HTMLElement, store: Store } | null} */
   mounted: null,
@@ -316,7 +318,11 @@ function paint(part) {
   if (!m || !m.root.isConnected) return;
   if (part === 'side') {
     const old = m.root.querySelector('.slack-side-list');
-    if (old) old.replaceWith(sideList(m.store));
+    if (old) {
+      const fresh = sideList(m.store);
+      old.replaceWith(fresh);
+      fresh.scrollTop = live.sideScroll;
+    }
     return;
   }
   const selector = part === 'main' ? '.slack-messages' : '.slack-thread-messages';
@@ -731,7 +737,10 @@ function sideList(store) {
       folded ? null : h('div', { class: 'slack-section-items' },
         keys.length ? keys.map((k) => sideItem(store, k, s, multi)) : h('p', { class: 'muted small slack-drop-hint' }, s.kind === 'group' ? 'Drag channels here.' : live.listed.has(s.id) ? 'No conversations.' : 'Reading…')));
   }).filter(Boolean);
-  return h('div', { class: 'slack-side-list' }, list.length ? list : h('p', { class: 'muted small' }, words || view.unread ? 'Nothing matches.' : 'No conversations yet.'));
+  return h('div', {
+    class: 'slack-side-list',
+    onscroll: (/** @type {Event} */ e) => { live.sideScroll = /** @type {HTMLElement} */ (e.target).scrollTop; },
+  }, list.length ? list : h('p', { class: 'muted small' }, words || view.unread ? 'Nothing matches.' : 'No conversations yet.'));
 }
 
 /** @param {Store} store */
@@ -1233,6 +1242,8 @@ function draw(root, store) {
         mainPane(store),
         threadPane(store))));
 
+  const side = root.querySelector('.slack-side-list');
+  if (side) side.scrollTop = live.sideScroll;
   const list = root.querySelector('.slack-messages');
   if (list) keepScroll(list, view.open);
   const thread = root.querySelector('.slack-thread-messages');
