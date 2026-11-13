@@ -217,7 +217,8 @@ function drawPending() {
 }
 
 function pendingImagesStrip() {
-  pendingStrip = h('div', { class: 'task-images quick-images' });
+  // Redrawn in place through this reference, so a patched redraw swaps it whole (data-own).
+  pendingStrip = h('div', { class: 'task-images quick-images', 'data-own': '' });
   drawPending();
   return pendingStrip;
 }
@@ -1789,7 +1790,8 @@ function draw(root, store) {
     const id = view.focusTask;
     view.focusTask = '';
     requestAnimationFrame(() => {
-      const el = root.querySelector(`[data-id="${CSS.escape(id)}"]`);
+      // The page on screen: a patched redraw keeps the old elements, not those of this render.
+      const el = document.querySelector(`main.view [data-id="${CSS.escape(id)}"]`);
       if (!el) return;
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
       el.classList.add('flash');
@@ -2088,6 +2090,8 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
   collection: COLLECTION,
   defaults: { items: [], categories: [] },
   render: draw,
+  // Tasks are keyed by data-id; the quick-add images strip is data-own (drawn in place through pendingStrip).
+  patch: true,
   // View state kept in the URL, so a refresh returns to the same list.
   serialize: () => ({
     view: view.layout === 'table' ? '' : view.layout,
