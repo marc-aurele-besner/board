@@ -10,8 +10,8 @@ import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import { runnersOnline, runnersKnown } from '../runners.js';
 import { markup } from '../slack-markup.js';
-import { emojiChar, QUICK_REACTIONS } from '../emoji.js';
-import { pickEmoji } from '../emoji-picker.js';
+import { emojiChar } from '../emoji.js';
+import { pickEmoji, frequentEmoji, rememberEmoji } from '../emoji-picker.js';
 import {
   SLACK, SLACK_DEFAULTS, keyOf, splitKey, addWorkspaces, listChannels, ensureUsers, readCounts, readHistory, readThread,
   postMessage, editMessage, deleteMessage, react, markRead, customEmoji, fileData, slackLink,
@@ -859,6 +859,7 @@ async function toggleReaction(store, key, m, on, name) {
   // Shown at once, then read again.
   const r = m.reactions.find((x) => x.name === name);
   if (on) {
+    rememberEmoji(name);
     if (r) { r.users.push(w.userId); r.count++; } else m.reactions.push({ name, users: [w.userId], count: 1 });
   } else if (r) {
     r.users = r.users.filter((u) => u !== w.userId);
@@ -973,7 +974,8 @@ function messageRow(store, key, m, { compact, inThread }) {
         a.image && /^https:/.test(a.image) ? h('img', { class: 'slack-attachment-image', src: a.image, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' }) : null))
     : null;
   const actions = h('div', { class: 'slack-msg-actions' },
-    QUICK_REACTIONS.slice(0, 3).map((n) => h('button', { type: 'button', class: 'icon-btn', title: `React :${n}:`, 'aria-label': `React :${n}:`, onclick: () => toggleReaction(store, key, m, !m.reactions.find((r) => r.name === n)?.users.includes(w.userId), n) }, emojiNode(team, n))),
+    // Like Slack: the three emoji I react with most, then the picker.
+    frequentEmoji(3).map((n) => h('button', { type: 'button', class: 'icon-btn', title: `React :${n}:`, 'aria-label': `React :${n}:`, onclick: () => toggleReaction(store, key, m, !m.reactions.find((r) => r.name === n)?.users.includes(w.userId), n) }, emojiNode(team, n))),
     h('button', { type: 'button', class: 'icon-btn', title: 'Add a reaction', 'aria-label': 'Add a reaction', onclick: () => pickReaction(store, key, m, w) }, icon('smile')),
     inThread ? null : h('button', { type: 'button', class: 'icon-btn', title: 'Reply in thread', 'aria-label': 'Reply in thread', onclick: () => openThread(store, m.ts) }, icon('message')),
     mine ? h('button', { type: 'button', class: 'icon-btn', title: 'Edit', 'aria-label': 'Edit', onclick: () => editDialog(store, key, m) }, icon('pencil')) : null,

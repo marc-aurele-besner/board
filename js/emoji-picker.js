@@ -31,19 +31,58 @@ function write(key, value) {
   try { localStorage.setItem(key, value); } catch { /* not kept */ }
 }
 
-/** @returns {string[]} the names picked lately, newest first */
-function recent() {
+/** @typedef {{ n: string, c: number, t: number }} Use an emoji's name, times used and last use */
+
+// Read once: the Slack tab asks for every message it draws. rememberEmoji() keeps it current.
+/** @type {Use[] | null} */
+let cache = null;
+
+/** @returns {Use[]} a copy, safe to sort and change */
+function uses() {
+  cache ??= load();
+  return cache.map((u) => ({ ...u }));
+}
+
+/** @returns {Use[]} */
+function load() {
   try {
     const list = JSON.parse(read(RECENT_KEY) ?? '[]');
-    return Array.isArray(list) ? list.filter((n) => typeof n === 'string') : [];
+    if (!Array.isArray(list)) return [];
+    // The first version kept bare names, newest first.
+    return list.map((u, i) => (typeof u === 'string' ? { n: u, c: 1, t: -i } : u))
+      .filter((u) => u && typeof u.n === 'string' && typeof u.c === 'number' && typeof u.t === 'number');
   } catch {
     return [];
   }
 }
 
+const DAY = 86_400_000;
+
+// Like Slack's frequently used: how often, worth less the longer ago it was last used.
+/** @param {Use} u @param {number} now */
+const frecency = (u, now) => u.c / (1 + Math.max(0, now - u.t) / (7 * DAY));
+
+/**
+ * The emoji used most lately, best first, filled up with Slack's usual ones.
+ * @param {number} [count]
+ */
+export function frequentEmoji(count = RECENT_MAX) {
+  const now = Date.now();
+  const mine = uses().sort((a, b) => frecency(b, now) - frecency(a, now)).map((u) => u.n);
+  return [...new Set([...mine, ...QUICK_REACTIONS])].slice(0, count);
+}
+
+// Counts a use of an emoji (a reaction added, however it was added).
 /** @param {string} name */
-function remember(name) {
-  write(RECENT_KEY, JSON.stringify([name, ...recent().filter((n) => n !== name)].slice(0, RECENT_MAX)));
+export function rememberEmoji(name) {
+  const now = Date.now();
+  const list = uses();
+  const u = list.find((x) => x.n === name);
+  if (u) { u.c++; u.t = now; } else list.push({ n: name, c: 1, t: now });
+  // Keep the best ones, so a long tail of one-offs does not grow forever.
+  list.sort((a, b) => frecency(b, now) - frecency(a, now));
+  cache = list.slice(0, 60);
+  write(RECENT_KEY, JSON.stringify(cache));
 }
 
 // How well a name matches the search: lower is better, -1 when it does not.
@@ -57,7 +96,7 @@ function score(name, q) {
 
 /**
  * Opens the picker. `render` draws one emoji by name (a character, or a custom emoji's image); `custom` lists the
- * workspace's own emoji names.
+ * workspace's own emoji names. The caller counts a pick it uses with rememberEmoji().
  * @param {{ title?: string, custom: string[], render: (name: string) => Child, onPick: (name: string) => void }} options
  */
 export function pickEmoji({ title = 'Add a reaction', custom, render, onPick }) {
@@ -66,7 +105,7 @@ export function pickEmoji({ title = 'Add a reaction', custom, render, onPick }) 
   const toned = (name) => (tone > 1 && takesSkinTone(name) ? `${name}::skin-tone-${tone}` : name);
 
   const sections = [
-    { id: 'frequent', label: 'Frequently used', names: [...new Set([...recent(), ...QUICK_REACTIONS])].slice(0, RECENT_MAX) },
+    { id: 'frequent', label: 'Frequently used', names: frequentEmoji() },
     ...EMOJI_CATEGORIES.map((c) => ({ id: c.id, label: c.label, names: c.emoji.map((e) => e.names[0]) })),
     ...(custom.length ? [{ id: 'custom', label: 'Custom', names: [...custom].sort() }] : []),
   ];
@@ -87,7 +126,6 @@ export function pickEmoji({ title = 'Add a reaction', custom, render, onPick }) 
   /** @param {string} name */
   const pick = (name) => {
     dialog.close();
-    remember(name);
     onPick(name);
   };
   /** @param {string} base */
