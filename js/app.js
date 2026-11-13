@@ -1,7 +1,7 @@
 // Shell: folder connection, hash router, and top navigation.
 import { fsSupported, pickFolder, loadHandle, hasPermission } from './storage.js';
 import { createStore } from './store.js';
-import { h, icon, uid, keepImages, steadyAnimations } from './ui.js';
+import { h, icon, uid, keepImages, steadyAnimations, patch } from './ui.js';
 import { configure } from './github.js';
 import { ensureTasks, applyAppearance } from './modules/settings.js';
 import { modules } from './modules/index.js';
@@ -118,9 +118,8 @@ function render({ user = true } = {}) {
   }
   mod.render(main, store);
   syncUrl(mod);
-  if (before && !entered) keepImages(before, main);
-  // replaceChildren would print a null as text, so the parts that may be absent are filtered out.
-  app.replaceChildren(.../** @type {HTMLElement[]} */ ([
+  // Null parts (the sample bar) are filtered out.
+  const parts = /** @type {HTMLElement[]} */ ([
     h('header', { class: entered ? 'topbar enter' : 'topbar' },
       h('nav', { class: 'tabs' },
         modules.filter((m) => !m.hidden).map((m) =>
@@ -157,12 +156,20 @@ function render({ user = true } = {}) {
             : h('span', { class: 'muted small' }, 'Open the board in Chrome or Edge to keep your own data.'))
       : null,
     main,
-  ].filter(Boolean)));
-  markDrawn(main);
+  ].filter(Boolean));
+  // A section that opts in has its redraws patched into the page on screen, which keeps hover, scroll, focus,
+  // images and animations; the others, and any change of section, swap the new page in.
+  const shown = before && !entered && mod.patch ? before : main;
+  if (shown === before) patch(app, h('div', null, parts));
+  else {
+    if (before && !entered) keepImages(before, main);
+    app.replaceChildren(...parts);
+  }
+  markDrawn(shown);
   steadyAnimations(app);
   // Within a section the page keeps its place: focusing a field near the top would scroll back up to it.
-  if (user) /** @type {HTMLElement | null} */ (main.querySelector('[data-autofocus]'))?.focus({ preventScroll: !entered });
-  restore(main, kept);
+  if (user) /** @type {HTMLElement | null} */ (shown.querySelector('[data-autofocus]'))?.focus({ preventScroll: !entered });
+  restore(shown, kept);
 }
 
 // The user's own saves render at once. Saves from timers and loads (a pools search reports every block range it

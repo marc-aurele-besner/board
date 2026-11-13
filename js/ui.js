@@ -5,6 +5,10 @@ export const CURRENCY = 'USD'; // change to your currency code, e.g. 'CAD' or 'E
 
 /** @template {string} T @typedef {T extends keyof HTMLElementTagNameMap ? HTMLElementTagNameMap[T] : HTMLElement} ElementOf */
 
+// The handlers h() attached to each element, by event name.
+/** @type {WeakMap<Element, [string, EventListener][]>} */
+const handlers = new WeakMap();
+
 // Build an element: h('button', { class: 'primary', onclick: fn }, 'Save')
 // Attributes with null/undefined/false are skipped. `value` and `checked` are set after children exist.
 /**
@@ -31,7 +35,11 @@ export function h(tag, attrs, ...children) {
         else style[prop] = val;
       }
     }
-    else if (key.startsWith('on')) el.addEventListener(key.slice(2), value);
+    else if (key.startsWith('on')) {
+      el.addEventListener(key.slice(2), value);
+      // Kept, so patch() can hand an element on screen the handlers of the one that replaces it.
+      handlers.set(el, [...(handlers.get(el) ?? []), [key.slice(2), value]]);
+    }
     else if (key === 'value' || key === 'checked') props.push([key, value]);
     else el.setAttribute(key, value === true ? '' : value);
   }
@@ -71,6 +79,78 @@ export function keepImages(before, after) {
 export function steadyAnimations(root) {
   for (const a of root.getAnimations({ subtree: true })) {
     if (a.effect?.getTiming().iterations === Infinity && a.startTime !== 0) a.startTime = 0;
+  }
+}
+
+// Makes the children of an element on screen match those of a freshly drawn one, changing only what differs, so a
+// redraw keeps what a rebuild would lose: hover, scroll, focus, a caret, loaded images and running animations.
+// Children are matched by data-key or data-id when they have one (a task, an email), else by tag and class in
+// order; one with no match is moved over from the fresh tree. A matched element takes the fresh one's attributes,
+// form values (unless it has focus) and h() handlers. An element marked data-own is a section's own, redrawn in
+// place later through a reference the section keeps, so it is swapped whole: the section keeps a live reference.
+/** @param {Element} old @param {Element} fresh */
+export function patch(old, fresh) {
+  const left = [...old.childNodes];
+  /** @type {Map<string, Element>} */
+  const keyed = new Map();
+  for (const n of left) {
+    const k = keyOf(n);
+    if (k) keyed.set(k, /** @type {Element} */ (n));
+  }
+  /** @type {Set<ChildNode>} */
+  const used = new Set();
+  let cursor = 0; // the first unkeyed old child not yet used
+  const free = (/** @type {ChildNode} */ o) => !used.has(o) && !keyOf(o);
+  /** @type {ChildNode[]} */
+  const wanted = [];
+  for (const n of [...fresh.childNodes]) {
+    const k = keyOf(n);
+    while (cursor < left.length && !free(left[cursor])) cursor++;
+    /** @type {ChildNode | undefined} */
+    let match = k ? keyed.get(k) : undefined;
+    if (!k) {
+      // The same tag and class further on (a row added above it), else the next free child if it has the tag.
+      for (let i = cursor; i < Math.min(left.length, cursor + 20) && !match; i++) if (free(left[i]) && sameClass(left[i], n)) match = left[i];
+      if (!match && left[cursor]?.nodeName === n.nodeName) match = left[cursor];
+    }
+    if (match && (match.nodeName !== n.nodeName || used.has(match))) match = undefined;
+    if (!match || (n instanceof Element && n.hasAttribute('data-own'))) {
+      wanted.push(n);
+      continue;
+    }
+    used.add(match);
+    if (n instanceof Element) patchElement(/** @type {Element} */ (match), n);
+    else if (match.nodeValue !== n.nodeValue) match.nodeValue = n.nodeValue;
+    wanted.push(match);
+  }
+  for (const o of left) if (!used.has(o)) o.remove();
+  // In order, moving only what is out of place: moving an element resets its scroll and restarts its animations.
+  wanted.forEach((n, i) => {
+    if (old.childNodes[i] !== n) old.insertBefore(n, old.childNodes[i] ?? null);
+  });
+}
+
+/** @param {Node} n */
+const keyOf = (n) => (n instanceof Element ? n.getAttribute('data-key') ?? n.getAttribute('data-id') ?? '' : '');
+/** @param {Node} a @param {Node} b */
+const sameClass = (a, b) => a.nodeName === b.nodeName && (!(a instanceof Element) || a.getAttribute('class') === /** @type {Element} */ (b).getAttribute('class'));
+
+/** @param {Element} old @param {Element} fresh */
+function patchElement(old, fresh) {
+  for (const { name } of [...old.attributes]) if (!fresh.hasAttribute(name)) old.removeAttribute(name);
+  for (const { name, value } of [...fresh.attributes]) if (old.getAttribute(name) !== value) old.setAttribute(name, value);
+  for (const [type, fn] of handlers.get(old) ?? []) old.removeEventListener(type, fn);
+  const on = handlers.get(fresh) ?? [];
+  for (const [type, fn] of on) old.addEventListener(type, fn);
+  handlers.set(old, on);
+  const isField = old instanceof HTMLInputElement || old instanceof HTMLTextAreaElement || old instanceof HTMLSelectElement;
+  // A select's value needs its options first.
+  if (!(old instanceof HTMLTextAreaElement)) patch(old, fresh);
+  if (isField && old !== document.activeElement) {
+    const f = /** @type {HTMLInputElement} */ (fresh);
+    const o = /** @type {HTMLInputElement} */ (old);
+    if (o.value !== f.value) o.value = f.value;
+    if (o instanceof HTMLInputElement && o.checked !== f.checked) o.checked = f.checked;
   }
 }
 

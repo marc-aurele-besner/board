@@ -109,4 +109,7 @@ export interface Module {
   restore?(params?: Record<string, string>): void;
   // Redraw when a runner job's outcome changes; 'all' also when only run times did.
   readonly readsRunners?: boolean | 'all';
+  // Redraws within the section are patched into the page on screen (ui.js patch()) instead of swapping it, so
+  // nothing may keep an element of a render to change later unless it is marked data-own.
+  patch?: boolean;
 }
