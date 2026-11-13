@@ -201,6 +201,51 @@ export function notice({ tone = 'error', text, actions = [] }) {
       actions.length ? h('div', { class: 'notice-actions' }, actions) : null));
 }
 
+// Notices folded into pills for a toolbar, one per tone with its count, as the Inbox does with its read errors:
+// banners pushed the page down. A pill opens the full notices, with their actions, under it. Which pills are
+// open is kept by key, so a redraw (a chain landing) does not fold them; a click elsewhere or Escape does.
+/** @typedef {{ tone?: 'error' | 'ok' | 'info', text: Child, actions?: Child[] }} NoticeOptions */
+/** @type {[NonNullable<NoticeOptions['tone']>, IconName, string, string][]} */
+const PILL_TONES = [['error', 'alert', 'alert', 'Alerts'], ['info', 'info', 'note', 'Notes'], ['ok', 'check', 'update', 'Updates']];
+/** @type {Set<string>} */
+const openPills = new Set();
+let pillsWatched = false;
+/** @param {string} key @param {(NoticeOptions | null | false | undefined)[]} list */
+export function noticePills(key, list) {
+  const items = /** @type {NoticeOptions[]} */ (list.filter(Boolean));
+  if (!items.length) return null;
+  if (!pillsWatched) {
+    pillsWatched = true;
+    const close = (/** @type {Event} */ e) => {
+      for (const box of document.querySelectorAll('details.notice-pill[open]')) {
+        if (e instanceof KeyboardEvent ? e.key === 'Escape' : !box.contains(/** @type {Node} */ (e.target))) /** @type {HTMLDetailsElement} */ (box).open = false;
+      }
+    };
+    document.addEventListener('pointerdown', close, true);
+    document.addEventListener('keydown', close, true);
+  }
+  return PILL_TONES.map(([tone, iconName, noun, head]) => {
+    const mine = items.filter((n) => (n.tone ?? 'error') === tone);
+    if (!mine.length) return null;
+    const id = `${key}:${tone}`;
+    const count = `${mine.length} ${noun}${mine.length === 1 ? '' : 's'}`;
+    return h('details', {
+      class: `notice-pill ${tone}`,
+      open: openPills.has(id),
+      ontoggle: (/** @type {Event} */ ev) => {
+        if (/** @type {HTMLDetailsElement} */ (ev.currentTarget).open) openPills.add(id);
+        else openPills.delete(id);
+      },
+    },
+      h('summary', { title: count, 'aria-label': count }, icon(iconName), h('span', null, String(mine.length))),
+      h('div', { class: 'notice-pill-pop', role: tone === 'error' ? 'alert' : 'status' },
+        h('p', { class: 'notice-pill-head' }, head),
+        h('ul', null, mine.map((n) => h('li', null,
+          h('p', null, n.text),
+          n.actions?.length ? h('div', { class: 'notice-actions' }, n.actions) : null)))));
+  });
+}
+
 // Todo status replaced the old `done` flag. Items saved before that fall back to `done`.
 /** @param {{ status?: string, done?: boolean }} item */
 export const statusOf = (item) => item.status ?? (item.done ? 'done' : 'todo');
