@@ -58,7 +58,7 @@ export const STEP_TYPES = [
   ['format', 'Format', 'align-left', 'Reshapes the input into cleaner text, a list with one line per item, or named JSON fields.'],
   ['parse', 'Parse JSON', 'code', 'Finds the JSON in a text, such as a model’s or claude’s answer, even with prose around it or cut off, and passes it on as data.'],
   ['loop', 'Loop over items', 'repeat', 'Runs the next steps once for each item of a list, then passes on what they gave for all of them.'],
-  ['task', 'Create task', 'check-square', 'Adds a task with a title and description you write, the output by default.'],
+  ['task', 'Create task', 'check-square', 'Adds a task with a title and description you write, the input by default. Its output is the new task’s id, so a later step can put a task under it.'],
   ['notify', 'Notify', 'bell', 'Posts the output under the bell (and Telegram if enabled).'],
   ['profile', 'Refresh project profile', 'refresh', 'Rebuilds a project’s profile from its folder, repos and website, as Projects does.'],
   ['dev', 'Run in Dev', 'terminal', 'Hands a prompt to the project’s Dev command, a preset or your own, in a new Dev terminal.'],
@@ -2060,12 +2060,15 @@ async function runStep(store, flow, step, input, ctx) {
     const description = fill(step.description ?? '{{input}}', vars).trim();
     const status = step.status || 'todo';
     const category = step.category || '';
-    ctx.data = { title, description, projectId, priority: step.priority || 'none', status, category, due };
+    // The task to go under: an id, most often an earlier Create task step's output ({{step2}}).
+    const parentId = fill(step.parent ?? '', vars).trim();
+    ctx.data = { title, description, projectId, priority: step.priority || 'none', status, category, due, ...(parentId ? { parentId } : {}) };
     // A test of the whole flow makes the task for real, so the Dev step after it can work on it.
     if (ctx.dry && !ctx.live) {
-      ctx.note = `Test run: would create the task “${title}”${due ? ` due ${due}` : ''}.`;
-      return input;
+      ctx.note = `Test run: would create the task “${title}”${due ? ` due ${due}` : ''}${parentId ? ' under another task' : ''}.`;
+      return '';
     }
+    if (parentId && !store.get('todos').items.some((t) => t.id === parentId)) throw new Error(`No task has the id “${parentId.slice(0, 80)}” to put this one under.`);
     const task = makeTask({
       text: title,
       description,
@@ -2076,6 +2079,7 @@ async function runStep(store, flow, step, input, ctx) {
       due,
       auto: 'cron',
       autoRef: flow.id,
+      ...(parentId ? { parentId } : {}),
     });
     // The run that made it, so the task can open it (Tasks shows a Cron button).
     if (ctx.runId) task.cronRun = ctx.runId;
@@ -2084,7 +2088,7 @@ async function runStep(store, flow, step, input, ctx) {
     if (ctx.dry) ctx.note = `Test run: created the task “${title}”${due ? ` due ${due}` : ''}.`;
     // A "Run in Dev" step later in the run works on this task.
     ctx.task = task;
-    return input;
+    return task.id;
   }
   if (step.type === 'format') return formatStep(step, vars, ctx);
   if (step.type === 'parse') return parseStep(step, vars, ctx);

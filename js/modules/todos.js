@@ -59,7 +59,7 @@ const isDefaultSort = (s) => s.key === DEFAULT_SORT.key && s.dir === DEFAULT_SOR
 // sort: { key, dir }. colFilter: the title filter, and a list of picked values per column. Empty means "any".
 // query: the search box, read by taskMatcher (words plus #project, !priority, is:status, cat:, due: tokens).
 /**
- * @type {{ layout: string, query: string, filter: string, status: string[], category: string[], expanded: Set<string>,
+ * @type {{ layout: string, query: string, filter: string, status: string[], category: string[], expanded: Set<string>, collapsed: Set<string>,
  *   selected: Set<string>, lastPicked: string | null, dragId: string | null, dragStatus: string | null, creatingProject: boolean,
  *   showProject: boolean, sort: { key: string, dir: string }, colFilter: ColFilter,
  *   tidy: { status: string, items: TidySuggestion[], error?: string }, focusTask: string }}
@@ -71,6 +71,8 @@ const view = {
   status: ['open'],
   category: [],
   expanded: new Set(),
+  // Tasks whose subtasks are folded away. Not saved: a reload shows every subtask.
+  collapsed: new Set(),
   // Ticked tasks, for the batch actions. Not saved: a reload starts with nothing selected.
   selected: new Set(),
   // The task last ticked, so Shift+click can tick everything between it and the next one.
@@ -373,9 +375,10 @@ const toggleExpanded = (store, id) => {
 const moveToProject = (store, id, projectId) => updateItem(store, id, { projectId });
 
 // Move `id` next to `targetId` (before it, or after it when `after` is true).
-// The stored array order is the display order, so this is the reorder.
-/** @param {Store} store @param {string} id @param {string} targetId @param {boolean} after */
-function moveItem(store, id, targetId, after) {
+// The stored array order is the display order, so this is the reorder. It also takes the target's place in the
+// tree: `parentId` is the task the target shows under ('' for none), so dropping next to a subtask makes a sibling.
+/** @param {Store} store @param {string} id @param {string} targetId @param {boolean} after @param {string} parentId @param {Partial<Task>} [patch] */
+function moveItem(store, id, targetId, after, parentId, patch = {}) {
   if (id === targetId) return;
   store.update(COLLECTION, (d) => {
     const from = d.items.findIndex((i) => i.id === id);
@@ -384,18 +387,130 @@ function moveItem(store, id, targetId, after) {
     let to = d.items.findIndex((i) => i.id === targetId);
     if (to < 0) to = from;
     d.items.splice(after ? to + 1 : to, 0, item);
+    // Next to one of its own subtasks, a task only moves: it cannot go under itself.
+    if (!parentId) delete item.parentId;
+    else if (!wouldLoop(d.items, id, parentId)) item.parentId = parentId;
+    Object.assign(item, patch);
+    if ('status' in patch) delete item.done;
   });
 }
 
-// Drop indicator: above or below the row depending on pointer position.
-/** @param {DragEvent & { currentTarget: HTMLElement }} e */
-function dropSide(e) {
+// --- Subtasks: a task with a parentId shows under that task while both are in the same list ---
+
+// Whether putting `id` under `parentId` would put it under itself, at any depth.
+/** @param {Task[]} items @param {string} id @param {string} parentId */
+function wouldLoop(items, id, parentId) {
+  const byId = new Map(items.map((i) => [i.id, i]));
+  for (let at = parentId, n = 0; at && n <= items.length; at = byId.get(at)?.parentId ?? '', n++) if (at === id) return true;
+  return false;
+}
+
+// Puts `id` under `parentId`, after the subtasks it already has. `patch` adds changes, such as a board column's status.
+/** @param {Store} store @param {string} id @param {string} parentId @param {Partial<Task>} [patch] */
+function nestUnder(store, id, parentId, patch = {}) {
+  if (id === parentId) return;
+  if (wouldLoop(store.get(COLLECTION).items, id, parentId)) {
+    toast('A task cannot go under one of its own subtasks');
+    return;
+  }
+  store.update(COLLECTION, (d) => {
+    const from = d.items.findIndex((i) => i.id === id);
+    if (from < 0 || !d.items.some((i) => i.id === parentId)) return;
+    const [item] = d.items.splice(from, 1);
+    const under = new Set([parentId]);
+    let to = -1;
+    d.items.forEach((i, n) => {
+      if (under.has(i.id) || (i.parentId && under.has(i.parentId))) {
+        under.add(i.id);
+        to = n;
+      }
+    });
+    d.items.splice(to + 1, 0, item);
+    item.parentId = parentId;
+    Object.assign(item, patch);
+    if ('status' in patch) delete item.done;
+  });
+}
+
+/**
+ * Where a task sits in the list on screen: how deep, the task it shows under, and how many tasks are under it.
+ * @typedef {{ depth: number, parentId: string, count: number, collapsed: boolean }} Place
+ */
+
+// Lays a list out as a tree, in the list's order: each task is followed by its subtasks, unless it is folded.
+// A subtask whose parent is not in the list (filtered out, in another column, deleted) shows at the top level.
+// `shown` collects the ids on screen, in screen order, for Shift+click ranges and the selection.
+/** @template N @param {Task[]} list @param {(item: Task, place: Place) => N} render @param {string[]} shown @returns {N[]} */
+function nestedRows(list, render, shown) {
+  const ids = new Set(list.map((i) => i.id));
+  const byId = new Map(list.map((i) => [i.id, i]));
+  // A parent chain that comes back to the task (bad data) would hide it; such a task stays at the top.
+  /** @param {Task} item */
+  const nests = (item) => {
+    for (let at = item.parentId, n = 0; at && ids.has(at); at = byId.get(at)?.parentId, n++) if (at === item.id || n > list.length) return false;
+    return Boolean(item.parentId && ids.has(item.parentId));
+  };
+  /** @type {Map<string, Task[]>} */
+  const kids = new Map();
+  /** @type {Task[]} */
+  const tops = [];
+  for (const item of list) {
+    const parent = item.parentId ?? '';
+    if (!nests(item)) tops.push(item);
+    else kids.set(parent, [...(kids.get(parent) ?? []), item]);
+  }
+  /** @param {string} id @returns {number} */
+  const countUnder = (id) => (kids.get(id) ?? []).reduce((n, k) => n + 1 + countUnder(k.id), 0);
+  /** @type {N[]} */
+  const out = [];
+  /** @param {Task} item @param {number} depth @param {string} parentId */
+  const visit = (item, depth, parentId) => {
+    const collapsed = view.collapsed.has(item.id);
+    shown.push(item.id);
+    out.push(render(item, { depth, parentId, count: countUnder(item.id), collapsed }));
+    if (!collapsed) for (const k of kids.get(item.id) ?? []) visit(k, depth + 1, item.id);
+  };
+  for (const item of tops) visit(item, 0, '');
+  return out;
+}
+
+// The arrow that folds a task's subtasks, with how many there are, so a folded task still says what it holds.
+/** @param {Store} store @param {Task} item @param {Place} place */
+function subtaskToggle(store, item, place) {
+  if (!place.count) return null;
+  const what = `${place.count} subtask${place.count === 1 ? '' : 's'}`;
+  return h('button', {
+    type: 'button',
+    class: place.collapsed ? 'subtask-toggle collapsed' : 'subtask-toggle',
+    title: place.collapsed ? `Show ${what}` : `Hide ${what}`,
+    'aria-label': place.collapsed ? `Show ${what}` : `Hide ${what}`,
+    'aria-expanded': String(!place.collapsed),
+    onclick: () => {
+      if (place.collapsed) view.collapsed.delete(item.id);
+      else view.collapsed.add(item.id);
+      store.refresh();
+    },
+  }, icon('chevron-down'), h('span', { class: 'count' }, String(place.count)));
+}
+
+// Drop indicator: above or below the row depending on pointer position, or, with `inside`, on its middle to put
+// the dragged task under it.
+/** @param {DragEvent & { currentTarget: HTMLElement }} e @param {boolean} [inside] */
+function dropSide(e, inside = false) {
   const r = e.currentTarget.getBoundingClientRect();
-  return e.clientY > r.top + r.height / 2 ? 'after' : 'before';
+  const y = (e.clientY - r.top) / r.height;
+  if (inside && y > 0.25 && y < 0.75) return 'inside';
+  return y > 0.5 ? 'after' : 'before';
 }
 /** @param {HTMLElement} el */
 function clearDropMarks(el) {
-  el.classList.remove('drop-before', 'drop-after');
+  el.classList.remove('drop-before', 'drop-after', 'drop-inside');
+}
+/** @param {HTMLElement} el @param {string} side */
+function markDrop(el, side) {
+  el.classList.toggle('drop-before', side === 'before');
+  el.classList.toggle('drop-after', side === 'after');
+  el.classList.toggle('drop-inside', side === 'inside');
 }
 
 // The project currently being dragged in the sidebar (a task drag uses view.dragId).
@@ -935,9 +1050,13 @@ function selectAllBox(store, visible) {
 }
 
 // One todo row. Title, description, and the pickers all edit in place.
-/** @param {Store} store @param {Task} item @param {{ store: Store, projects: Project[], projectLabel: string, order: string[], showDue: boolean }} ctx */
+/**
+ * @param {Store} store @param {Task} item
+ * @param {{ store: Store, projects: Project[], projectLabel: string, order: string[], showDue: boolean }} ctx
+ * @param {Place} place
+ */
 // ctx: { store, projects, projectLabel, order, showDue }. Without a deadline column, its button sits with the actions.
-function todoRow(store, item, ctx) {
+function todoRow(store, item, ctx, place) {
   const expanded = view.expanded.has(item.id);
   const status = statusOf(item);
   const priority = item.priority ?? 'none';
@@ -951,10 +1070,10 @@ function todoRow(store, item, ctx) {
   const drop = imageDrop(store, item);
 
   return h('li', {
-    class: ['todo-item', status === 'done' ? 'done' : '', view.selected.has(item.id) ? 'selected' : ''].filter(Boolean).join(' '),
+    class: ['todo-item', status === 'done' ? 'done' : '', view.selected.has(item.id) ? 'selected' : '', place.depth ? 'subtask' : ''].filter(Boolean).join(' '),
     'data-id': item.id,
+    style: place.depth ? { '--depth': String(place.depth) } : null,
     ondragstart: (/** @type {DragEvent & { currentTarget: HTMLElement, dataTransfer: DataTransfer }} */ e) => {
-      if (!reorderEnabled()) return e.preventDefault();
       view.dragId = item.id;
       view.dragStatus = statusOf(item);
       e.dataTransfer.effectAllowed = 'move';
@@ -966,13 +1085,14 @@ function todoRow(store, item, ctx) {
       e.currentTarget.draggable = false;
       e.currentTarget.classList.remove('dragging');
     },
+    // The middle of a row puts the dragged task under it; its top and bottom edges reorder.
     ondragover: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
       if (dragsFiles(e)) return drop.ondragover(e);
-      if (!reorderEnabled() || !view.dragId || view.dragId === item.id || !canDropOn(item)) return;
+      if (!view.dragId || view.dragId === item.id) return;
+      const side = dropSide(e, true);
+      if (side !== 'inside' && !(reorderEnabled() && canDropOn(item))) return clearDropMarks(e.currentTarget);
       e.preventDefault();
-      const side = dropSide(e);
-      e.currentTarget.classList.toggle('drop-before', side === 'before');
-      e.currentTarget.classList.toggle('drop-after', side === 'after');
+      markDrop(e.currentTarget, side);
     },
     ondragleave: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
       clearDropMarks(e.currentTarget);
@@ -980,11 +1100,13 @@ function todoRow(store, item, ctx) {
     },
     ondrop: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
       if (dragsFiles(e)) return drop.ondrop(e);
-      if (!reorderEnabled() || !view.dragId || !canDropOn(item)) return;
+      if (!view.dragId) return;
+      const side = dropSide(e, true);
+      if (side !== 'inside' && !(reorderEnabled() && canDropOn(item))) return;
       e.preventDefault();
-      const after = dropSide(e) === 'after';
       clearDropMarks(e.currentTarget);
-      moveItem(store, view.dragId, item.id, after);
+      if (side === 'inside') nestUnder(store, view.dragId, item.id);
+      else moveItem(store, view.dragId, item.id, side === 'after', place.parentId);
       view.dragId = null;
     },
   },
@@ -996,15 +1118,16 @@ function todoRow(store, item, ctx) {
     },
       h('span', {
         class: 'grip',
-        title: reorderEnabled() ? 'Drag to reorder' : 'Clear the sort to reorder',
+        title: reorderEnabled() ? 'Drag to reorder, or onto a task to put it under that task' : 'Drag onto a task to put it under that task (clear the sort to reorder)',
         'aria-label': 'Drag to reorder',
         // Only the grip makes the row draggable, so text stays selectable.
         onpointerdown: (/** @type {PointerEvent & { currentTarget: HTMLElement }} */ e) => {
-          if (reorderEnabled()) /** @type {HTMLLIElement} */ (e.currentTarget.closest('li')).draggable = true;
+          /** @type {HTMLLIElement} */ (e.currentTarget.closest('li')).draggable = true;
         },
       }, icon('grip')),
       selectBox(store, item, ctx.order),
       h('div', { class: 'todo-title-cell' },
+        subtaskToggle(store, item, place),
         editText({
           value: item.text,
           placeholder: 'Untitled',
@@ -1129,15 +1252,16 @@ function imageCount(item) {
 
 // --- Board: one column per status; dragging a card to a column changes its status ---
 
-/** @param {Store} store @param {Task} item @param {Project[]} projects @param {string[]} order */
-function boardCard(store, item, projects, order) {
+/** @param {Store} store @param {Task} item @param {Project[]} projects @param {string[]} order @param {Place} place */
+function boardCard(store, item, projects, order, place) {
   const p = projects.find((x) => x.id === item.projectId);
   const priority = item.priority ?? 'none';
   const expanded = view.expanded.has(item.id);
-  const { onpaste, ...dropProps } = imageDrop(store, item);
+  const images = imageDrop(store, item);
   return h('article', {
-    class: view.selected.has(item.id) ? 'kanban-card selected' : 'kanban-card',
+    class: ['kanban-card', view.selected.has(item.id) ? 'selected' : '', place.depth ? 'subtask' : ''].filter(Boolean).join(' '),
     'data-id': item.id,
+    style: place.depth ? { '--depth': String(Math.min(place.depth, 3)) } : null,
     draggable: 'true',
     ondragstart: (/** @type {DragEvent & { currentTarget: HTMLElement, dataTransfer: DataTransfer }} */ e) => {
       view.dragId = item.id;
@@ -1149,10 +1273,35 @@ function boardCard(store, item, projects, order) {
       view.dragId = null;
       e.currentTarget.classList.remove('dragging');
     },
-    ...dropProps,
+    // A card's middle puts the dragged task under it; its edges place it before or after, beside it in the tree.
+    // Both take the column's status, as a drop on the column does.
+    ondragover: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
+      if (dragsFiles(e)) return images.ondragover(e);
+      if (!view.dragId || view.dragId === item.id) return;
+      e.preventDefault();
+      markDrop(e.currentTarget, dropSide(e, true));
+    },
+    ondragleave: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
+      clearDropMarks(e.currentTarget);
+      images.ondragleave(e);
+    },
+    ondrop: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
+      if (dragsFiles(e)) return images.ondrop(e);
+      if (!view.dragId || view.dragId === item.id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      clearDropMarks(e.currentTarget);
+      e.currentTarget.closest('.kanban-col')?.classList.remove('drop-target');
+      const side = dropSide(e, true);
+      const patch = { status: statusOf(item) };
+      if (side === 'inside') nestUnder(store, view.dragId, item.id, patch);
+      else moveItem(store, view.dragId, item.id, side === 'after', place.parentId, patch);
+      view.dragId = null;
+    },
   },
     h('div', { class: 'row kanban-title' },
       selectBox(store, item, order),
+      subtaskToggle(store, item, place),
       editText({ value: item.text, placeholder: 'Untitled', className: 'todo-title', onSave: (text) => updateItem(store, item.id, { text }) })),
     h('div', { class: 'row kanban-meta' },
       p ? h('span', { class: 'row small' }, projectIcon(p), p.name) : h('span', { class: 'muted small' }, 'Personal'),
@@ -1186,7 +1335,7 @@ function boardCard(store, item, projects, order) {
         h('button', { type: 'button', class: 'icon-btn', title: 'Delete', 'aria-label': `Delete "${item.text}"`, onclick: () => removeItem(store, item.id) }, icon('x')))),
     // The same details as a table row, so a card never needs the table to be edited.
     expanded
-      ? h('div', { class: 'kanban-details', tabindex: '-1', onpaste: imageDrop(store, item).onpaste },
+      ? h('div', { class: 'kanban-details', tabindex: '-1', onpaste: images.onpaste },
           h('label', { class: 'row small muted' }, 'Deadline',
             h('input', {
               type: 'date',
@@ -1208,6 +1357,7 @@ function boardCard(store, item, projects, order) {
       : null);
 }
 
+// `order` is filled with the cards on screen, column by column.
 /** @param {Store} store @param {Task[]} items @param {Project[]} projects @param {string[]} order */
 function boardView(store, items, projects, order) {
   // A status hidden in Settings → Labels keeps its column only while a task shown is in it.
@@ -1231,7 +1381,7 @@ function boardView(store, items, projects, order) {
       },
     },
       h('h3', { class: 'row between' }, pill(s.name, statusLook(s)), h('span', { class: 'count' }, String(cards.length))),
-      cards.length ? cards.map((item) => boardCard(store, item, projects, order)) : h('p', { class: 'muted small' }, 'Drop a task here'));
+      cards.length ? nestedRows(cards, (item, place) => boardCard(store, item, projects, order, place), order) : h('p', { class: 'muted small' }, 'Drop a task here'));
   }));
 }
 
@@ -1600,19 +1750,20 @@ function draw(root, store) {
   );
   const columnsActive = Object.values(view.colFilter).some((v) => v.length);
 
-  // The selection only holds tasks on screen, so a batch never touches one hidden by a filter or deleted elsewhere.
-  const order = visible.map((i) => i.id);
-  for (const id of view.selected) if (!order.includes(id)) view.selected.delete(id);
+  // The ids on screen in screen order, filled as the rows are drawn (a folded task's subtasks are not on screen).
+  /** @type {string[]} */
+  const order = [];
   // A deadline column with nothing in it only takes room, so it shows once a task on screen has one.
   const showDue = visible.some((i) => i.due);
-  /** @param {Task} item */
-  const rowOf = (item) => todoRow(store, item, { store, projects, order, showDue, projectLabel: view.filter === 'all' ? projectName(item.projectId) : '' });
+  /** @param {Task[]} rows */
+  const rowsOf = (rows) => nestedRows(rows, (item, place) =>
+    todoRow(store, item, { store, projects, order, showDue, projectLabel: view.filter === 'all' ? projectName(item.projectId) : '' }, place), order);
   /** @param {[string, Task[]][]} groups */
   const grouped = (groups) => h('div', { class: 'todo-groups' },
     groups.filter(([, rows]) => rows.length).map(([name, rows]) =>
       h('section', { class: 'todo-group' },
         h('h3', { class: 'row' }, name, h('span', { class: 'count' }, String(rows.length))),
-        h('ul', { class: 'todo-list' }, rows.map(rowOf)))));
+        h('ul', { class: 'todo-list' }, rowsOf(rows)))));
   let listBody;
   if (!visible.length) {
     listBody = h('p', { class: 'empty' }, matchesQuery.active
@@ -1625,8 +1776,12 @@ function draw(root, store) {
   } else if (view.layout === 'status') {
     listBody = grouped(STATUS_GROUP_ORDER.map((key) => [statusName(store, key), visible.filter((i) => statusOf(i) === key)]));
   } else {
-    listBody = h('ul', { class: 'todo-list' }, visible.map(rowOf));
+    listBody = h('ul', { class: 'todo-list' }, rowsOf(visible));
   }
+  // The selection only holds tasks on screen, so a batch never touches one hidden by a filter or a folded parent, or
+  // deleted elsewhere.
+  for (const id of view.selected) if (!order.includes(id)) view.selected.delete(id);
+  const onScreen = visible.filter((i) => order.includes(i.id));
 
   root.replaceChildren(
     h('div', { class: 'split' },
@@ -1781,7 +1936,7 @@ function draw(root, store) {
         tidyPanel(store),
 
         // While tasks are ticked, their actions take the place of the add field, so the list below stays put.
-        batchBar(store, visible, projects, categories, { aligned: view.layout === 'table', showDue }) ?? h('form', {
+        batchBar(store, onScreen, projects, categories, { aligned: view.layout === 'table', showDue }) ?? h('form', {
           class: 'quick',
           onsubmit: (/** @type {SubmitEvent & { currentTarget: HTMLFormElement }} */ e) => {
             e.preventDefault();
@@ -1810,7 +1965,7 @@ function draw(root, store) {
 
         h('div', { class: ['todo-table', view.layout === 'table' ? '' : 'no-columns', showDue ? '' : 'no-due'].filter(Boolean).join(' ') },
           h('div', { class: 'todo-row todo-head' },
-            h('span'), selectAllBox(store, visible),
+            h('span'), selectAllBox(store, onScreen),
             columnHeader(store, 'text', 'Task'),
             columnHeader(store, 'status', 'Status'),
             columnHeader(store, 'priority', 'Priority'),

@@ -29,6 +29,7 @@
       "auto": "cron",
       "autoRef": "flow-1",
       "cronRun": "run-1",
+      "parentId": "task-1",
       "inbox": true,
       "email": { "id": "email-1", "dir": "in" }
     },

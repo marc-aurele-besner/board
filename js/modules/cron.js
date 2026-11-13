@@ -1436,7 +1436,9 @@ function stepForm(store, flow, step) {
         field('Due', select(step.due, [['', 'No deadline'], ['today', 'Day of the run'], ['tomorrow', 'Day after the run']], (due) => set({ due })))),
       h('div', { class: 'row cron-fields' },
         field('Status', select(step.status || 'todo', statusOptions(store, step.status || 'todo').map((o) => [o.value, o.label]), (status) => set({ status }))),
-        field('Category', select(step.category ?? '', taskCategoryOptions(store, step.category), (category) => set({ category })))));
+        field('Category', select(step.category ?? '', taskCategoryOptions(store, step.category), (category) => set({ category })))),
+      varField('Parent task (optional)', h('input', { value: step.parent ?? '', autocomplete: 'off', placeholder: '{{step2}}', onchange: (/** @type {FieldEvent} */ e) => set({ parent: e.target.value.trim() }) }), key('parent'), names,
+        'Puts the new task under another one: the id an earlier Create task step gives as its output, such as {{step2}}. This step’s own output is the new task’s id.'));
   }
   if (step.type === 'stop') {
     const needsText = step.when === 'contains' || step.when === 'lacks';
