@@ -68,6 +68,25 @@ export interface RunnerTurns {
   // The skills it ran and the MCP tools it called, with how many times (as in DevUsage).
   skills?: Record<string, number>;
   mcp?: Record<string, number>;
+  // Its subagents, newest first.
+  agents?: SessionAgent[];
+}
+
+// A subagent of a claude session, from its transcript and .meta.json in <session>/subagents. state: working, done,
+// or stopped (its transcript ended mid-turn, or went quiet too long). tool: its last tool call and what it worked
+// on; tools: how many calls it made. task: the prompt it was given; said: its last text (its answer once done).
+export interface SessionAgent {
+  id: string;
+  type: string;
+  description: string;
+  background: boolean;
+  state: string;
+  start: number;
+  end: number;
+  tool: { name: string; detail: string; at: number } | null;
+  tools: number;
+  said: string;
+  task: string;
 }
 
 // A claude.ai Artifact link; title '' when none was given.
