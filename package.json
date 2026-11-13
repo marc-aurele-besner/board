@@ -5,7 +5,7 @@
   "description": "Scripts only: the board has no runtime dependencies and no build step. TypeScript only checks the JSDoc.",
   "scripts": {
     "start": "bun tools/start.js",
-    "dev": "bun --watch --no-clear-screen tools/start.js",
+    "dev": "bun tools/dev.js",
     "serve": "bun tools/serve.js",
     "terminal": "bun tools/terminal.js",
     "typecheck": "node tools/typecheck.js",

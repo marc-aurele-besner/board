@@ -54,7 +54,7 @@ This starts the board's static server, the Dev section's command runner and the 
 
 `tools/serve.js` has no dependencies and marks every file `no-cache`, so the browser always runs the code you just edited. Any other static server works too, but `python3 -m http.server` sends no cache headers, so Chrome reuses the modules it cached earlier and keeps running the old code after a reload: with that server, hard reload the page (Cmd+Shift+R) after every change.
 
-While working on the board itself, run `bun dev` instead of `bun start`: it starts the same services and restarts them all when a file under `tools/` changes. The page's own files (`index.html`, `js/`, `css/`) need no restart, as the server reads them fresh on every request; reload the page to run them. `bun start` never restarts.
+While working on the board itself, run `bun dev` instead of `bun start`: it starts the same services and restarts the static server and the runners when a file under `tools/` changes. The terminal runner is never restarted, so a pull that changes `tools/` leaves Dev's terminals and their claude sessions running; restart `bun dev` yourself after changing `tools/terminal.js`. The page's own files (`index.html`, `js/`, `css/`) need no restart, as the server reads them fresh on every request; reload the page to run them. `bun start` never restarts.
 
 On first launch, choose a data folder. Pick a folder **outside this repo** (for example `~/Documents/board-data`). The app writes `todos.json`, `recipes.json` and `finance.json` there. On later visits, click **Reconnect** once to re-grant permission.
 
