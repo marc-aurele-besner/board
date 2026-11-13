@@ -2020,6 +2020,11 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .copy-chip:hover .copy-mark { color: var(--accent); }
 .copy-chip.copied { border-color: var(--income); }
 .copy-chip.copied .copy-mark { color: var(--income); }
+/* A snippet in a block of its own, with a Copy button on its right. */
+.code-box { display: flex; align-items: flex-start; gap: 8px; margin: 6px 0 2px; padding: 6px 6px 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.code-box pre { flex: 1; min-width: 0; margin: 0; padding: 3px 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; line-height: 1.5; user-select: all; }
+.code-box-copy { flex: none; display: inline-flex; align-items: center; gap: 4px; }
+.code-box-copy.copied { color: var(--income); border-color: var(--income); }
 
 /* Keyboard shortcut sheet */
 .shortcut-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }

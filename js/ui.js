@@ -224,6 +224,35 @@ export function copyable(text, { label = text } = {}) {
   return btn;
 }
 
+// A snippet to paste elsewhere (a console line, a command), in a block of its own with a Copy button.
+/** @param {string} text @param {{ label?: string }} [options] */
+export function codeBox(text, { label = 'the code' } = {}) {
+  const code = h('code', null, text);
+  /** @type {HTMLButtonElement & { timer?: number }} */
+  const btn = h('button', {
+    type: 'button',
+    class: 'btn-small code-box-copy',
+    'aria-label': `Copy ${label}`,
+    onclick: async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        // Clipboard blocked: select the text so Cmd/Ctrl+C still works.
+        getSelection()?.selectAllChildren(code);
+        return;
+      }
+      btn.classList.add('copied');
+      btn.replaceChildren(icon('check'), 'Copied');
+      clearTimeout(btn.timer);
+      btn.timer = setTimeout(() => {
+        btn.classList.remove('copied');
+        btn.replaceChildren(icon('copy'), 'Copy');
+      }, 1500);
+    },
+  }, icon('copy'), 'Copy');
+  return h('div', { class: 'code-box' }, h('pre', null, code), btn);
+}
+
 /** @typedef {keyof typeof ICON_PATHS} IconName */
 
 /** @param {IconName} name */

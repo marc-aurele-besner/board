@@ -2,7 +2,7 @@
 // Channels can be dragged into any order, gathered into groups, and tied to projects (one by one, by group, or a whole
 // workspace). A muted channel stays where it is, dimmed and never counted as unread. Messages, threads and reactions
 // are read live through the runners: the open conversation every few seconds, unread counts every 20 s.
-import { h, icon, uid, notice, refreshIcon } from '../ui.js';
+import { h, icon, uid, notice, refreshIcon, codeBox } from '../ui.js';
 import { projectTree, projectIcon } from './projects.js';
 import { pickButton, pickChip } from '../inline.js';
 import { openDialog } from '../modal.js';
@@ -1195,8 +1195,10 @@ export function signInForm(store, done) {
     h('p', { class: 'small muted' }, 'The board signs in as you, with the session of Slack’s web client, so it works in any workspace you can open in the browser, without installing an app. All your workspaces show side by side.'),
     h('ol', { class: 'small stack-sm' },
       h('li', null, 'Open ', h('a', { href: 'https://app.slack.com/client', target: '_blank', rel: 'noopener noreferrer' }, 'app.slack.com'), ' in Chrome and sign in to every workspace you want here.'),
-      h('li', null, 'Open the developer tools (⌥⌘J), paste ', h('code', null, CONSOLE), ' into the Console and press Enter. It copies every workspace’s token. Paste it under Tokens.'),
-      h('li', null, 'In the developer tools, open Application → Cookies → https://app.slack.com, and copy the value of the cookie named ', h('code', null, 'd'), '. Paste it under d cookie.')),
+      h('li', null, 'Open the developer tools (⌥⌘J on a Mac, Ctrl+Shift+J elsewhere). In the Console, paste this line and press Enter:',
+        codeBox(CONSOLE, { label: 'the Console line' }),
+        h('span', { class: 'muted' }, 'It copies every workspace’s token to the clipboard. Paste it under Tokens. If Chrome refuses the paste, type ', h('code', null, 'allow pasting'), ', press Enter and paste again.')),
+      h('li', null, 'In the developer tools, open Application → Cookies → https://app.slack.com, and copy the value of the cookie named ', h('code', null, 'd'), ' (it starts with ', h('code', null, 'xoxd-'), '). Paste it under d cookie.')),
     h('label', { class: 'stack-sm' }, h('span', { class: 'small' }, 'Tokens'), tokens),
     h('label', { class: 'stack-sm' }, h('span', { class: 'small' }, 'd cookie'), cookie),
     h('p', { class: 'small muted' }, 'They are saved in slack.json in your data folder and sent only to Slack, through the runners. Anyone who can read that folder can read your Slack. Signing out of Slack in the browser ends the session here too.'),
