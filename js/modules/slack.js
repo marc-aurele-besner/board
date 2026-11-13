@@ -56,6 +56,91 @@ function lastOpen() {
   }
 }
 
+// The sidebar's and the thread's widths, dragged by the dividers beside them and kept in this browser.
+const WIDTHS_KEY = 'board:slack-widths';
+const SIDE_W = { def: 240, min: 180, max: 480 };
+const THREAD_W = { def: 380, min: 280, max: 900 };
+// The conversation keeps at least this much room when the thread grows.
+const MAIN_MIN = 320;
+const widths = savedWidths();
+
+/** @returns {{ side: number, thread: number }} */
+function savedWidths() {
+  /** @type {{ side?: unknown, thread?: unknown }} */
+  let saved = {};
+  try {
+    saved = JSON.parse(localStorage.getItem(WIDTHS_KEY) ?? '{}') ?? {};
+  } catch {}
+  /** @param {unknown} v @param {{ def: number, min: number, max: number }} r */
+  const pick = (v, r) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(r.max, Math.max(r.min, Math.round(v))) : r.def);
+  return { side: pick(saved.side, SIDE_W), thread: pick(saved.thread, THREAD_W) };
+}
+
+function rememberWidths() {
+  try {
+    localStorage.setItem(WIDTHS_KEY, JSON.stringify(widths));
+  } catch {}
+}
+
+/** @param {HTMLElement} layout */
+function applyWidths(layout) {
+  layout.style.setProperty('--slack-side-w', `${widths.side}px`);
+  layout.style.setProperty('--slack-thread-w', `${widths.thread}px`);
+}
+
+/**
+ * A divider that drags one pane's width; a double click puts it back to its default.
+ * @param {'side' | 'thread'} which
+ */
+function resizer(which) {
+  const range = which === 'side' ? SIDE_W : THREAD_W;
+  const handle = h('div', {
+    class: `slack-resize slack-resize-${which}`,
+    role: 'separator',
+    'aria-orientation': 'vertical',
+    'aria-label': which === 'side' ? 'Resize the sidebar' : 'Resize the thread',
+    title: 'Drag to resize, double-click to reset',
+    ondblclick: () => {
+      widths[which] = range.def;
+      const layout = /** @type {HTMLElement | null} */ (handle.parentElement);
+      if (layout) applyWidths(layout);
+      rememberWidths();
+    },
+    onpointerdown: (/** @type {PointerEvent} */ e) => {
+      if (e.button !== 0) return;
+      const layout = /** @type {HTMLElement | null} */ (handle.parentElement);
+      if (!layout) return;
+      e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      const startX = e.clientX;
+      const start = widths[which];
+      const total = layout.clientWidth;
+      layout.classList.add('resizing');
+      /** @param {PointerEvent} m */
+      const move = (m) => {
+        const dx = m.clientX - startX;
+        // The thread sits on the right, so dragging its divider left widens it.
+        const want = which === 'side' ? start + dx : start - dx;
+        const other = which === 'side' ? (layout.classList.contains('with-thread') ? widths.thread : 0) : widths.side;
+        const max = Math.min(range.max, total - other - MAIN_MIN);
+        widths[which] = Math.round(Math.max(range.min, Math.min(max, want)));
+        applyWidths(layout);
+      };
+      const up = () => {
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', up);
+        handle.removeEventListener('pointercancel', up);
+        layout.classList.remove('resizing');
+        rememberWidths();
+      };
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', up);
+      handle.addEventListener('pointercancel', up);
+    },
+  });
+  return handle;
+}
+
 // What is read live. history and threads by "<team>|<channel>" and "<team>|<channel>|<ts>".
 /**
  * @typedef {{ list: Message[], next: string, at: number, busy: boolean, error: string }} Feed
@@ -1290,7 +1375,11 @@ function draw(root, store) {
       h('div', { class: !d.workspaces.length ? 'slack-layout alone' : view.thread && view.open ? 'slack-layout with-thread' : 'slack-layout' },
         d.workspaces.length ? sidebar(store) : null,
         mainPane(store),
-        threadPane(store))));
+        threadPane(store),
+        d.workspaces.length ? resizer('side') : null,
+        d.workspaces.length && view.thread && view.open ? resizer('thread') : null)));
+  const layout = /** @type {HTMLElement | null} */ (root.querySelector('.slack-layout'));
+  if (layout) applyWidths(layout);
 
   const side = root.querySelector('.slack-side-list');
   const list = root.querySelector('.slack-messages');
