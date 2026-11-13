@@ -749,6 +749,17 @@ body.project-dragging .project-list .root-drop { display: block; }
 .cred-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 24px; }
 .cred-body .svc-section { gap: 10px; }
 .cred-body h3 { font-size: 0.95rem; margin: 0; }
+.notion-intro { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px 24px; align-items: start; }
+.notion-intro-text { display: flex; flex-direction: column; gap: 8px; }
+.notion-intro-text p { margin: 0; }
+@media (max-width: 860px) { .notion-intro { grid-template-columns: minmax(0, 1fr); } }
+.notion-ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+.notion-way { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; min-width: 0; }
+.notion-way h3 { font-size: 0.95rem; margin: 0; }
+.notion-way > p { margin: 0; }
+.notion-way .steps { margin: 0; }
+.notion-way-fields { display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding-top: 4px; }
+.notion-way-fields .test-result { margin: 0; }
 .default-model { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .default-model .pill, .default-model .chip-pick { max-width: 100%; }
 .task-list { display: flex; flex-direction: column; }
