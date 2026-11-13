@@ -1420,6 +1420,12 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .issue-link.gh-merged, .issue-link.gh-completed { color: var(--gh-merged); border-color: color-mix(in srgb, var(--gh-merged) 45%, var(--border)); }
 .issue-link.gh-closed, .issue-link.gh-not_planned { color: var(--gh-closed); border-color: color-mix(in srgb, var(--gh-closed) 45%, var(--border)); }
 .issue-link[class*="gh-"]:hover { border-color: currentColor; }
+.artifact-link-title { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; }
+/* claude waits for its user: louder when it asks something than when its turn simply ended. */
+button.dev-wait-badge { display: inline-flex; align-items: center; gap: 4px; min-height: 0; padding: 1px 8px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--border)); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); font-size: 0.8rem; font-weight: 600; white-space: nowrap; cursor: pointer; }
+button.dev-wait-badge .icon { width: 12px; height: 12px; }
+button.dev-wait-badge:hover { border-color: var(--warn); }
+button.dev-wait-badge.asks { background: var(--warn); border-color: var(--warn); color: var(--bg); animation: pulse 1.4s ease-in-out infinite; }
 
 /* Preview deployments (js/previews.js, js/deploy-panel.js): a dot for the state, and the panel with its build log. */
 button.preview-link { font: inherit; cursor: pointer; }

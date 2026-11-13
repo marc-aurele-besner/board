@@ -5,7 +5,7 @@
 // is removed, so both places are read.
 // CLAUDE_CONFIG_DIR moves Claude's folder, as it does for Claude itself.
 /** @import { DevModelUsage } from '../types/data' */
-/** @import { WorktreeUsage } from '../types/terminal' */
+/** @import { SessionArtifact, SessionAsk, WorktreeUsage } from '../types/terminal' */
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -19,14 +19,16 @@ const cache = new Map();
 // The parts of a transcript line that are read. Lines are Claude's JSON, so every field may be missing.
 /** @typedef {{ input_tokens?: number, output_tokens?: number, cache_read_input_tokens?: number, cache_creation_input_tokens?: number, output_tokens_details?: { thinking_tokens?: number } }} ReplyUsage */
 /** @typedef {ReplyUsage & { inputTokens?: number, outputTokens?: number, thinkingTokens?: number, cacheReadInputTokens?: number, cacheCreationInputTokens?: number, costUSD?: number }} ModelTokens */
-/** @typedef {{ id?: string, model?: string, usage?: ReplyUsage, stop_reason?: string | null, content?: string | { type?: string, text: string, name?: string, input?: { file_path?: unknown, notebook_path?: unknown } }[] }} ReplyMessage */
+/** @typedef {{ file_path?: unknown, notebook_path?: unknown, action?: unknown, asset?: unknown, title?: unknown, type_url?: unknown, from_url?: unknown, questions?: { question?: unknown }[], command?: unknown, plan?: unknown }} ToolInput */
+/** @typedef {{ type?: string, text: string, id?: string, name?: string, input?: ToolInput, tool_use_id?: string, is_error?: boolean, content?: unknown }} ContentBlock */
+/** @typedef {{ id?: string, model?: string, usage?: ReplyUsage, stop_reason?: string | null, content?: string | ContentBlock[] }} ReplyMessage */
 /** @typedef {{ isUsingOverage?: boolean, resetsAt?: number }} Quota */
 /** @typedef {{ startTime?: string, totalCostUSD?: number, totalDuration?: number, totalAPIDuration?: number, totalLinesAdded?: number, totalLinesRemoved?: number, modelUsage?: Record<string, ModelTokens> }} CostState */
 /**
  * @typedef {CostState & { type?: string, uuid?: string, timestamp?: string, isSidechain?: boolean, effort?: string,
  *   isMeta?: boolean, isCompactSummary?: boolean, isVisibleInTranscriptOnly?: boolean,
  *   worktreeSession?: { worktreeName?: string }, quotaLimits?: Quota, apiErrorParams?: { rate_limit_info?: Quota },
- *   message?: ReplyMessage }} TranscriptLine
+ *   message?: ReplyMessage, toolUseResult?: { url?: unknown, title?: unknown } }} TranscriptLine
  */
 /** @typedef {ReturnType<typeof parse>} Transcript */
 /** @typedef {{ all: number, extra: number }} ReplyWeights */
@@ -132,6 +134,14 @@ function parse(text, billing) {
   let replyId;
   /** @type {Set<string>} */
   const written = new Set();
+  // Tool calls still waiting for their result, by id: the last one is what claude waits on when the terminal is quiet.
+  /** @type {Map<string, { name: string, input: ToolInput }>} */
+  const pending = new Map();
+  // The Artifacts it published (claude.ai links) with their titles, and the publish calls awaiting their result.
+  /** @type {Map<string, string>} */
+  const artifacts = new Map();
+  /** @type {Map<string, ToolInput>} */
+  const publishing = new Map();
   for (const line of text.split('\n')) {
     if (!line) continue;
     /** @type {TranscriptLine} */
@@ -142,6 +152,8 @@ function parse(text, billing) {
       continue;
     }
     open = turnOpen(o, open);
+    if (!open) pending.clear();
+    readArtifacts(o, publishing, artifacts);
     if (!o.isSidechain) {
       const c = o.message?.content;
       if (o.type === 'user' && !prompt && !o.isMeta) {
@@ -156,12 +168,15 @@ function parse(text, billing) {
           replyId = id;
         }
         for (const b of c) {
+          if (b.type === 'tool_use' && b.id) pending.set(b.id, { name: b.name ?? '', input: b.input ?? {} });
           const path = b.type === 'tool_use' && WRITES.includes(b.name ?? '') ? b.input?.file_path ?? b.input?.notebook_path : null;
           if (typeof path === 'string' && path) {
             written.delete(path);
             written.add(path);
           }
         }
+      } else if (o.type === 'user' && Array.isArray(c)) {
+        for (const b of c) if (b.type === 'tool_result' && b.tool_use_id) pending.delete(b.tool_use_id);
       }
     }
     const quota = o.quotaLimits ?? o.apiErrorParams?.rate_limit_info;
@@ -212,7 +227,53 @@ function parse(text, billing) {
   }
   if (!counted.length) for (const m of replies.values()) addModel(models, m.model, tokensOf(m.usage), null);
   const extraCost = cost === null ? null : Object.values(models).reduce((s, m) => s + (m.extraCost ?? 0), 0);
-  return { worktrees: [...worktrees], models, cost, extraCost, billing, duration, apiDuration, linesAdded, linesRemoved, efforts, replies: replies.size, start, end, open, prompt, reply, written: [...written] };
+  const last = open ? [...pending.values()].at(-1) : undefined;
+  return {
+    worktrees: [...worktrees], models, cost, extraCost, billing, duration, apiDuration, linesAdded, linesRemoved, efforts,
+    replies: replies.size, start, end, open, prompt, reply, written: [...written],
+    ask: last ? askOf(last) : null,
+    artifacts: [...artifacts].map(([url, title]) => ({ url, title })),
+  };
+}
+
+// The Artifacts a session published: a publish call (no action, or 'publish'; not an asset upload) and the claude.ai
+// link its result names. The type it started from, or another artifact it copied from, is not one of them.
+const ARTIFACT_URL = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[\w-]+/g;
+/** @param {TranscriptLine} o @param {Map<string, ToolInput>} publishing @param {Map<string, string>} artifacts */
+function readArtifacts(o, publishing, artifacts) {
+  const c = o.message?.content;
+  if (!Array.isArray(c)) return;
+  for (const b of c) {
+    if (o.type === 'assistant' && b.type === 'tool_use' && b.name === 'Artifact' && b.id) {
+      const action = b.input?.action ?? 'publish';
+      if (action === 'publish' && !b.input?.asset) publishing.set(b.id, b.input ?? {});
+    } else if (o.type === 'user' && b.type === 'tool_result' && b.tool_use_id && publishing.has(b.tool_use_id)) {
+      const input = /** @type {ToolInput} */ (publishing.get(b.tool_use_id));
+      publishing.delete(b.tool_use_id);
+      if (b.is_error) continue;
+      const result = o.toolUseResult;
+      const text = typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '');
+      const url = typeof result?.url === 'string' && result.url
+        ? result.url
+        : [...text.matchAll(ARTIFACT_URL)].map((m) => m[0]).find((u) => u !== input.type_url && u !== input.from_url);
+      if (!url) continue;
+      const title = typeof result?.title === 'string' && result.title ? result.title : typeof input.title === 'string' ? input.title : '';
+      artifacts.set(url, title || artifacts.get(url) || '');
+    }
+  }
+}
+
+// What claude waits on when its turn stopped at a tool call and the terminal went quiet: a question it asked, its
+// plan to approve, or a tool to allow.
+/** @param {{ name: string, input: ToolInput }} call @returns {SessionAsk} */
+function askOf({ name, input }) {
+  if (name === 'AskUserQuestion') {
+    const questions = (Array.isArray(input.questions) ? input.questions : []).map((q) => String(q?.question ?? '')).filter(Boolean);
+    return { kind: 'question', text: questions.length > 1 ? `${questions[0]} (+${questions.length - 1} more)` : questions[0] ?? '' };
+  }
+  if (name === 'ExitPlanMode') return { kind: 'plan', text: 'Approve the plan' };
+  const detail = typeof input.command === 'string' ? input.command : typeof input.file_path === 'string' ? input.file_path : '';
+  return { kind: 'permission', text: detail ? `${name}: ${detail.slice(0, 200)}` : name };
 }
 
 // Whether a turn is still going after transcript line `o`. A reply that stopped for anything but a tool call ends
@@ -337,7 +398,7 @@ async function activityOf({ name, cwd }) {
   }
   if (!latest) return null;
   const agents = await agentsOf(latest.file, billing);
-  return { busy: latest.t.open || agents > 0, agents };
+  return { busy: latest.t.open || agents > 0, agents, ask: latest.t.ask, artifacts: latest.t.artifacts };
 }
 
 // How many of a session's subagents are still working. Claude keeps them beside it, in <session>/subagents.
@@ -357,7 +418,7 @@ async function agentsOf(file, billing) {
 // [{ name, cwd }] → { [name]: { busy, agents } }; worktrees with no transcript are left out.
 /** @param {unknown} list [{ name, cwd }], checked here */
 export async function worktreeActivity(list) {
-  /** @type {Record<string, { busy: boolean, agents: number }>} */
+  /** @type {Record<string, { busy: boolean, agents: number, ask: SessionAsk | null, artifacts: SessionArtifact[] }>} */
   const out = {};
   for (const w of Array.isArray(list) ? list.slice(0, 50) : []) {
     if (!WORKTREE_NAME.test(w?.name ?? '') || typeof w.cwd !== 'string' || !w.cwd) continue;
@@ -396,5 +457,5 @@ export async function sessionTranscript({ cwd, at, prompt = '', worktree = '', k
   const t = file ? await readTranscript(file, billing) : null;
   if (!t) return null;
   const agents = await agentsOf(file, billing);
-  return { file, busy: t.open || agents > 0, agents, reply: t.reply, written: t.written };
+  return { file, busy: t.open || agents > 0, agents, reply: t.reply, written: t.written, ask: t.ask, artifacts: t.artifacts };
 }

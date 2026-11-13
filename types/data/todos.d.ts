@@ -12,6 +12,12 @@ export interface TaskLink {
   title: string;
 }
 
+// A claude.ai Artifact a Dev session on the task published (js/task-links.js); title '' when it had none.
+export interface TaskArtifact {
+  url: string;
+  title: string;
+}
+
 // An image pasted or dropped on a task, kept in the data folder (js/task-images.js).
 export interface TaskImage {
   path: string; // relative to the data folder, e.g. tasks/<task id>-<id>.png
@@ -66,6 +72,7 @@ export interface Task {
   worktrees?: TaskWorktree[];
   prs?: TaskLink[];
   issues?: TaskLink[];
+  artifacts?: TaskArtifact[];
   // Old: a single issue, before several were allowed.
   issue?: TaskLink;
   email?: TaskEmail;
