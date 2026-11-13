@@ -3,6 +3,9 @@ import { toast } from '../toast.js';
 import { redirectUri } from '../google.js';
 import { manualRate, setManualRate, clearCachedRates, PROVIDERS, providerId, setProvider, fallbackOn, setFallback, testProvider, lastSource } from '../fx.js';
 import { configure, checkGithubToken, orgAvatar } from '../github.js';
+import { checkVercel, checkNetlify } from '../deployments.js';
+import { trackedPrs } from '../previews.js';
+import { runJob } from '../runners.js';
 import { editText } from '../inline.js';
 import { modelChip } from '../model-picker.js';
 import { isAddress, CHAINS, parsePosition, addPosition, addedPositions, addedListOf, tokenLogos } from '../uniswap.js';
@@ -69,6 +72,8 @@ const SECTION_GROUPS = [
       ['analytics', 'Google Analytics', 'activity'],
       ['search', 'Search consoles', 'search'],
       ['resend', 'Resend', 'mail'],
+      ['vercel', 'Vercel', 'triangle'],
+      ['netlify', 'Netlify', 'rocket'],
       ['exchange', 'Exchange rates', 'coins'],
     ],
   },
@@ -140,7 +145,7 @@ function statusBadge(saved, result) {
 // A key card: setup steps on the left, the key field and its actions on the right.
 /**
  * @param {Store} store
- * @param {{ id: 'github' | 'openrouter', field: string, title: string, fieldLabel?: string, intro: string, steps: Child[], placeholder: string,
+ * @param {{ id: 'github' | 'openrouter' | 'vercel' | 'netlify', field: string, title: string, fieldLabel?: string, intro: string, steps: Child[], placeholder: string,
  *   check: (key: string) => Promise<string>, note: string, docs?: string }} cfg
  */
 function credentialCard(store, cfg) {
@@ -156,6 +161,10 @@ function credentialCard(store, cfg) {
       /** @type {Record<string, object>} */ (/** @type {unknown} */ (d))[id] = { ...d[id], [field]: value };
     });
     if (id === 'github') configure(store.get(COLLECTION).github);
+    // The previews already read stay as they were until their next read, which may be 20 minutes off.
+    if ((id === 'vercel' || id === 'netlify') && value) {
+      runJob('previews', { prs: trackedPrs(store).slice(0, 30) }).then(() => store.sync()).catch(() => {});
+    }
     view.results[id] = null;
     store.refresh();
   };
@@ -969,7 +978,43 @@ function draw(root, store) {
     note: 'If the key is ever exposed, revoke it on openrouter.ai/keys.',
   });
 
+  const deployNote = 'The runners read the deployments of the PRs on open tasks and recent Cron runs: state, commit, timings and errors. A task’s preview then opens its details and build log.';
+  const vercelCard = () => credentialCard(store, {
+    id: 'vercel',
+    field: 'token',
+    title: 'Vercel',
+    fieldLabel: 'Access token',
+    docs: 'https://vercel.com/account/settings/tokens',
+    intro: `Shows each PR’s Vercel preview as it builds, on the task. ${deployNote}`,
+    steps: [
+      ['Open ', link('https://vercel.com/account/settings/tokens', 'Account settings → Tokens'), ' on Vercel.'],
+      'Create a token. Scope: the team your projects are in, or Full Account to reach every team.',
+      'Choose an expiration, create it and copy the token.',
+    ],
+    placeholder: 'Paste the Vercel token',
+    check: checkVercel,
+    note: 'Vercel tokens cannot be made read-only, so keep this one to your own machine. Revoke it on the same page if it is ever exposed.',
+  });
+  const netlifyCard = () => credentialCard(store, {
+    id: 'netlify',
+    field: 'token',
+    title: 'Netlify',
+    fieldLabel: 'Personal access token',
+    docs: 'https://app.netlify.com/user/applications#personal-access-tokens',
+    intro: `Shows each PR’s Netlify deploy preview as it builds, on the task. ${deployNote}`,
+    steps: [
+      ['Open ', link('https://app.netlify.com/user/applications#personal-access-tokens', 'User settings → Applications'), ' on Netlify.'],
+      'Under Personal access tokens, create a new token and give it a name.',
+      'Choose an expiration, generate it and copy the token. It starts with nfp_.',
+    ],
+    placeholder: 'nfp_…',
+    check: checkNetlify,
+    note: 'The build log streams over a WebSocket, so the runners read it: start them with bun start (or Node 22). Revoke the token on Netlify if it is ever exposed.',
+  });
+
   const content = view.section === 'openrouter' ? openrouter
+    : view.section === 'vercel' ? vercelCard()
+    : view.section === 'netlify' ? netlifyCard()
     : view.section === 'models' ? modelsPanel(store)
       : view.section === 'prompts' ? promptsCard(store)
       : view.section === 'google' ? googleCard(store)

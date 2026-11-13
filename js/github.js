@@ -301,6 +301,14 @@ export async function issueState(repo, number) {
   return { state, state_reason, pull_request };
 }
 
+// A PR's head branch, which Vercel and Netlify deploy it from.
+/** @param {string} repo @param {number | string} number */
+export async function pullBranch(repo, number) {
+  const res = await fetch(`${API}/repos/${repo}/pulls/${number}`, { headers: headers(repo) });
+  if (!res.ok) throw new Error(explain(res.status));
+  return String((await res.json()).head?.ref ?? '');
+}
+
 // The comments of an issue or a PR's conversation: the first 100, and the last 100 when there are more pages.
 /** A comment as GitHub returns it; only the fields read. @typedef {{ body?: string | null, updated_at?: string, user?: { login?: string } | null }} IssueComment */
 /** @param {string} repo @param {number | string} number @returns {Promise<IssueComment[]>} */

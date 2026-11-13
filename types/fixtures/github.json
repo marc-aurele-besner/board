@@ -22,10 +22,13 @@
   },
   "previews": {
     "example-org/example-app#12": {
-      "items": [{ "provider": "vercel", "name": "example-app", "url": "https://example-app-git-pricing.example.com", "state": "ready" }],
+      "items": [{ "provider": "vercel", "name": "example-app", "url": "https://example-app-git-pricing.example.com", "state": "ready" },
+        { "provider": "netlify", "name": "example-site", "url": "https://deploy-preview-12--example-site.example.com", "state": "failed", "id": "000000000000000000000001", "site": "site-1", "inspect": "https://app.example.com/sites/example-site/deploys/000000000000000000000001", "error": "Build script returned non-zero exit code: 2", "sha": "0123456789abcdef0123456789abcdef01234567", "created": 1762896300000 },
+        { "provider": "vercel", "name": "example-docs", "url": "https://example-docs-abc123.example.com", "state": "building", "id": "dpl_example", "team": "team_example", "inspect": "https://vercel.example.com/example-org/example-docs/abc123", "created": 1762896350000, "ready": 1762896390000 }],
       "error": null,
       "at": 1762896400000,
-      "first": 1762800000000
+      "first": 1762800000000,
+      "branch": "feat/pricing"
     },
     "example-org/example-app#13": {
       "error": "GitHub error 500",
