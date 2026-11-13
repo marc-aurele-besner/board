@@ -1,6 +1,6 @@
 // The Dev section's calls to the command runner on this machine (tools/terminal.js, started by `bun start`).
 /** @import { RunnerInfo, RunnerSessionList, RunnerStatus, RunnerFolder, RunnerFile, RunnerEvent, RunnerRun, RunnerRemoved, RunnerClaudeExit, RunnerWorktrees, RunnerSkills, RunnerOutcome, WorktreeUsage, GitStatus, GitDiff, RunnerSearch } from '../types/terminal' */
-/** @import { DevSessionList } from '../types/data' */
+/** @import { DevSession, DevSessionList } from '../types/data' */
 export const TERMINAL_RUNNER = 'http://127.0.0.1:8419';
 
 const unreachable = (/** @type {string} */ base) => new Error(`Could not reach the terminal runner at ${base}. In the board folder, run bun start (or bun dev) and keep it open.`);
@@ -34,7 +34,13 @@ export const runnerInfo = async (base) => (await call(base, '/info')).json();
 // tasks?, prompt? }] }, sessions being null before any were saved.
 /** @type {(base: string) => Promise<RunnerSessionList>} */
 export const listSessions = async (base) => (await call(base, '/sessions')).json();
+// Replaces the whole list: only to move a list this browser kept before the runner did.
 export const saveSessionList = (/** @type {string} */ base, /** @type {DevSessionList} */ list) => call(base, '/sessions', post(list));
+// Lists a terminal and answers its entry, with the number the runner gave it (the one it had, when already listed).
+/** @type {(base: string, entry: { session: string, cwd: string, tasks?: string[], prompt?: string }) => Promise<DevSession>} */
+export const listSession = async (base, entry) => (await call(base, '/sessions/add', post(entry))).json();
+// A listed terminal's new folder.
+export const moveSession = (/** @type {string} */ base, /** @type {string} */ session, /** @type {string} */ cwd) => call(base, '/sessions/update', post({ session, cwd }));
 
 // What sessions are doing, by id: { state, code?, cwd }, state being working, waiting (running but quiet: the
 // program waits for its user), done, failed, stopped or idle. Sessions the runner no longer has are left out.
@@ -53,7 +59,7 @@ export const readFile = async (base, path) => (await call(base, `/file?path=${en
 // a host, and a stream per terminal used them up, so a third or fourth terminal's command never reached the runner.
 // The page attaches and detaches sessions on its stream; each event names its session as `s`.
 /**
- * @typedef {{ onEvent: (event: RunnerEvent) => void, started: boolean, done: () => void }} Sub
+ * @typedef {{ onEvent: (event: RunnerEvent) => void, started: boolean, done: (closed?: boolean) => void }} Sub
  * @typedef {{ client: string, ctl: AbortController, subs: Map<string, Sub>, queue: Promise<unknown>, ready?: Promise<Response> }} Hub
  */
 /** @type {Map<string, Hub>} */
@@ -90,7 +96,7 @@ async function readStream(hub, res) {
       if (!sub) continue;
       // Events from before this attach (a detach the runner had not read yet) are skipped until its replay starts.
       if (event.t === 'session') sub.started = true;
-      if (event.t === 'closed') sub.done();
+      if (event.t === 'closed') sub.done(true);
       else if (sub.started) sub.onEvent(event);
     }
   }
@@ -116,28 +122,28 @@ function control(base, hub, path, session) {
 
 // Attaches to a terminal session and calls onEvent for each of its events: `session` (known: whether the runner had
 // it), the events so far (start, out, err, size, cwd, exit), `live`, then new events as they come. Resolves when
-// `signal` is aborted, the session is closed, or the runner stops.
+// `signal` is aborted, the session is closed (with true: closed here or in another browser), or the runner stops.
 /**
  * @param {string} base
  * @param {{ session: string, signal?: AbortSignal, onEvent: (event: RunnerEvent) => void }} options
- * @returns {Promise<void>}
+ * @returns {Promise<boolean>}
  */
 export function attachSession(base, { session, signal, onEvent }) {
   return new Promise((resolve) => {
-    if (signal?.aborted) return resolve();
+    if (signal?.aborted) return resolve(false);
     const hub = hubOf(base);
     // done is set below, before the sub is listed.
     const sub = /** @type {Sub} */ ({ onEvent, started: false });
     const onAbort = () => {
-      if (hub.subs.get(session) !== sub) return resolve();
+      if (hub.subs.get(session) !== sub) return resolve(false);
       sub.done();
       if (hub.subs.size) control(base, hub, '/detach', session);
       else endStream(base, hub);
     };
-    sub.done = () => {
+    sub.done = (closed = false) => {
       if (hub.subs.get(session) === sub) hub.subs.delete(session);
       signal?.removeEventListener('abort', onAbort);
-      resolve();
+      resolve(closed);
     };
     signal?.addEventListener('abort', onAbort);
     hub.subs.get(session)?.done();
