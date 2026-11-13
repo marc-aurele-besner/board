@@ -6,6 +6,8 @@ import { barChart, legend } from '../chart.js';
 import { usageRecords, modelName, tokensOf } from '../dev-usage.js';
 import { stat, costOf, usdPrecise, fmtTokens } from './monitoring.js';
 import { sortTable } from './monitoring-web.js';
+import { projectIcon } from './projects.js';
+import { pickChip } from '../inline.js';
 /** @import { DevUsage, Store, Task, UsageEntry } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 /** @import { ChartTip } from '../chart.js' */
@@ -210,10 +212,18 @@ export function aiOverview(store, w) {
       segmented(/** @type {[string, string][]} */ (SOURCES), aiView.source, 'Source', (source) => set({ source })),
       h('label', { class: 'row ai-project' },
         h('span', { class: 'muted small' }, 'Project'),
-        h('select', { onchange: (/** @type {Event} */ e) => set({ project: /** @type {HTMLSelectElement} */ (e.target).value }) },
-          h('option', { value: '', selected: !aiView.project }, 'All projects'),
-          h('option', { value: NO_PROJECT, selected: aiView.project === NO_PROJECT }, 'No project'),
-          projectChoices.map((p) => h('option', { value: p.id, selected: aiView.project === p.id }, p.name)))),
+        // Searchable, with each project's icon: a board with many projects makes a plain dropdown long.
+        pickChip({
+          value: aiView.project || null,
+          options: [
+            { value: NO_PROJECT, label: 'No project' },
+            ...projectChoices.map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) })),
+          ],
+          nullable: true,
+          nullLabel: 'All projects',
+          className: 'field-pick project-field-pick',
+          onPick: (v) => set({ project: v ?? '' }),
+        })),
       aiView.source !== 'all' || aiView.project
         ? h('button', { type: 'button', class: 'btn-small', onclick: () => set({ source: 'all', project: '' }) }, 'Clear filters')
         : null),
