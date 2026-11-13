@@ -2362,6 +2362,8 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .kind-profile { --c: var(--ai); }
 .kind-format { --c: var(--info); }
 .kind-loop { --c: var(--expense); }
+.kind-linkedin-company, .kind-linkedin-people, .kind-linkedin-profile { --c: var(--accent); }
+.kind-save-contacts { --c: var(--income); }
 .flow-node-text { display: flex; flex-direction: column; min-width: 0; }
 .flow-node-kind { font-weight: 600; font-size: 0.9rem; }
 .flow-node-sub { color: var(--muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2372,7 +2374,8 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .flow-add:hover { color: var(--accent); border-color: var(--accent); }
 .flow-add .icon { width: 13px; height: 13px; }
 .flow-palette { display: flex; flex-direction: column; gap: 6px; }
-.flow-palette-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.flow-palette-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.flow-palette-group { font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.72rem; margin-right: 2px; }
 .flow-palette-item { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; border-radius: 10px; font-weight: 500; font-size: 0.85rem; cursor: grab; }
 .flow-palette-item:hover { border-color: var(--accent); }
 .flow-palette-item .flow-node-icon { width: 26px; height: 26px; border-radius: 7px; }

@@ -60,6 +60,7 @@ js/linkedin-core.js   linkedin.json without the DOM: the official sign-in's code
 js/linkedin.js        LinkedIn's official sign-in popup (Settings → LinkedIn → Publish as you), and Post now through the runners
 js/linkedin-composer.js  the LinkedIn post composer: text, link, a feed preview, Save draft, Schedule and Post now
 js/linkedin-reads.js  the session reads of posts (UNVERIFIED voyager paths and their defensive parsing): when each post's results are due (1 h, 24 h, 7 d), and its comments
+js/linkedin-search.js  Cron's LinkedIn reads through the session (UNVERIFIED voyager paths, defensive parsing): a company by name, its people, a profile
 js/linkedin-session.js  linkedinCall(store, req): the one entry point for any LinkedIn read through the saved session (contract at its top); the runners run the queue, a tab asks them (no DOM)
 js/modules/settings-socials.js  Settings → X / Twitter, LinkedIn, GitHub and Instagram accounts: accounts, their projects, LinkedIn’s session, its state, calls today and daily limit; Read now
 js/modules/monitoring-socials.js  Monitoring → Socials (X, LinkedIn, GitHub, Instagram): followers (and GitHub stars) now, growth over the period, a line per account, Read now

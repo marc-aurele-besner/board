@@ -14,7 +14,10 @@ import {
   makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, templateFromFlow, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
   testStep, testsOf, isTesting, clearTests, resumeDevTests, useDevStarter, varsTree, fillParts, pathTo, parseData, INPUT_NONE, reorderSteps, projectVars, runState, devWaits, DEV_WAIT_MINUTES, devJsonOffered, devJson, DEV_JSON_PROMPT,
   FORMAT_MODES, PARSE_MODES, DEDUPE_MATCH, DEDUPE_SCOPE, AI_FILTER_MODES, AI_FILTER_BATCH, AI_FILTER_MAX, aiFilterTop, SEPARATOR_OPTIONS, LOOP_LIMIT, makeField, loopSpan, loopOf, loopMax, valueOf, listOf, withItem, linkedinDays, meetingHours,
+  LINKEDIN_STEPS, LINKEDIN_COMPANY_MODES, companyTop, peopleCount, linkedinCalls,
 } from '../cron.js';
+import { sessionState } from '../linkedin-session.js';
+import { PEOPLE_MAX, COMPANY_TOP_MAX } from '../linkedin-search.js';
 import { modelForTask } from '../models.js';
 import { PROMPTS } from '../prompts.js';
 import { DEV_MODELS, DEV_MODEL_NAMES, DEV_EFFORTS } from '../dev-core.js';
@@ -63,7 +66,7 @@ const SUBTITLES = {
 
 /**
  * @param {string} type
- * @returns {[string, string, IconName, string]}
+ * @returns {[string, string, IconName, string, string?]}
  */
 const typeOf = (type) => STEP_TYPES.find(([t]) => t === type) ?? [type, type, 'info', ''];
 /** @param {string | undefined} at */
@@ -680,6 +683,16 @@ function stepSummary(store, flow, step) {
     const what = String(step.criterion ?? '').split('\n').find((l) => l.trim())?.trim() || 'Describe what to keep';
     return step.mode === 'rank' ? `Top ${aiFilterTop(step)}: ${what}` : what;
   }
+  if (step.type === 'linkedin-company') return `${step.mode === 'top' ? `Top ${companyTop(step)}` : 'Best match'}: ${step.text || '{{input}}'}`;
+  if (step.type === 'linkedin-people') {
+    const kw = String(step.keywords ?? '').trim();
+    return `${peopleCount(step)} at ${step.company || '{{input}}'}${kw ? ` · “${kw}”` : ''}`;
+  }
+  if (step.type === 'linkedin-profile') return step.text || '{{input}}';
+  if (step.type === 'save-contacts') {
+    const id = withFlowProject(flow, step).projectId;
+    return `${step.items || '{{input}}'} → ${id && !id.includes('{{') ? projectName(store, id) : id || 'Contacts'}`;
+  }
   if (step.type === 'loop') {
     const n = loopSpan(flow, flow.steps.indexOf(step));
     return n ? `Each of ${step.items || '{{input}}'} · next ${n === 1 ? 'step' : `${n} steps`}` : 'Add the steps to repeat after it';
@@ -792,8 +805,9 @@ function nodePalette(store, flow) {
   const selected = flow.steps.findIndex((s) => s.id === view.node);
   return h('div', { class: 'flow-palette' },
     h('span', { class: 'muted small' }, 'Nodes · click one to add it after the selected node, or drag it onto a +'),
-    h('div', { class: 'flow-palette-list', role: 'list', 'aria-label': 'Nodes you can add' },
-      STEP_TYPES.map(([type, label, iconName, about]) => h('button', {
+    stepGroups().map(([group, types]) => h('div', { class: 'flow-palette-list', role: 'list', 'aria-label': group ? `${group} nodes you can add` : 'Nodes you can add' },
+      group ? h('span', { class: 'flow-palette-group muted small' }, group) : null,
+      types.map(([type, label, iconName, about]) => h('button', {
         type: 'button',
         class: 'flow-palette-item',
         role: 'listitem',
@@ -802,8 +816,16 @@ function nodePalette(store, flow) {
         ondragstart: (/** @type {NodeDrag} */ e) => startDrag(e, `new:${type}`),
         ondragend: endDrag,
         onclick: () => addStepAt(store, flow, selected + 1, type),
-      }, h('span', { class: `flow-node-icon kind-${type}` }, icon(iconName)), label))));
+      }, h('span', { class: `flow-node-icon kind-${type}` }, icon(iconName)), label)))));
 }
+
+// The step types by palette group, in order: the general ones first ('' group), then LinkedIn's.
+const stepGroups = () => {
+  /** @type {Map<string, typeof STEP_TYPES>} */
+  const groups = new Map();
+  for (const t of STEP_TYPES) groups.set(t[4] ?? '', [...(groups.get(t[4] ?? '') ?? []), t]);
+  return [...groups.entries()];
+};
 
 // What a step reads as {{input}}: the step before it, any earlier step, or nothing.
 /**
@@ -850,17 +872,20 @@ function pipeLabel(flow, step) {
 function insertStep(store, flow, index) {
   const dialog = openDialog({
     title: 'Add a step',
-    body: h('div', { class: 'cron-templates' }, STEP_TYPES.map(([type, label, iconName, about]) =>
-      h('button', {
-        type: 'button',
-        class: 'cron-template row',
-        onclick: () => {
-          dialog.close();
-          addStepAt(store, flow, index, type);
+    body: h('div', { class: 'cron-templates' }, stepGroups().map(([group, types]) => [
+      group ? h('span', { class: 'flow-palette-group muted small' }, group) : null,
+      types.map(([type, label, iconName, about]) =>
+        h('button', {
+          type: 'button',
+          class: 'cron-template row',
+          onclick: () => {
+            dialog.close();
+            addStepAt(store, flow, index, type);
+          },
         },
-      },
-        h('span', { class: `flow-node-icon kind-${type}` }, icon(iconName)),
-        h('span', { class: 'grow' }, h('strong', null, label), h('span', { class: 'muted small' }, about))))),
+          h('span', { class: `flow-node-icon kind-${type}` }, icon(iconName)),
+          h('span', { class: 'grow' }, h('strong', null, label), h('span', { class: 'muted small' }, about)))),
+    ])),
   });
 }
 
@@ -1656,6 +1681,8 @@ function stepForm(store, flow, step) {
   if (step.type === 'parse') return parseForm(store, flow, step, set);
   if (step.type === 'dedupe') return dedupeForm(store, flow, step, set);
   if (step.type === 'ai-filter') return aiFilterForm(store, flow, step, set);
+  if (LINKEDIN_STEPS.includes(step.type)) return linkedinForm(store, flow, step, set);
+  if (step.type === 'save-contacts') return saveContactsForm(store, flow, step, set);
   if (step.type === 'loop') return loopForm(store, flow, step, set);
   if (step.type === 'profile') {
     const own = withFlowProject(flow, step).projectId;
@@ -1918,6 +1945,119 @@ function aiFilterForm(store, flow, step, set) {
       `Sends the items ${AI_FILTER_BATCH} at a time, one model call after the other, and keeps ${rank ? 'the best scores' : 'those that match, in their order'}. `,
       `Its output is the kept items as they were, each JSON item with the model’s _reason and _score: {{step${n}[0].name}}, or {{item._reason}} in a Loop after it. `,
       `At most ${AI_FILTER_MAX} items are sent. A call that fails is tried once more, then the step fails. An empty result lets a “Stop if” on “The data step found nothing” end the run. The system prompt is in Settings → Prompts.`));
+}
+
+// What a LinkedIn step costs, and why it may not run: the session's state and today's calls, with a link to Settings.
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ */
+function linkedinCost(store, flow, step) {
+  const s = sessionState(store);
+  const { calls, extra } = linkedinCalls(step);
+  const looped = loopOf(flow, flow.steps.indexOf(step)) >= 0;
+  const settings = h('a', { href: '#/settings?section=linkedin', class: 'btn-link' }, 'Settings → LinkedIn');
+  return h('div', { class: 'stack' },
+    h('p', { class: 'muted small' },
+      `Uses the saved LinkedIn session: up to ${calls} call${calls === 1 ? '' : 's'}${extra ? ` (${extra})` : ''}${looped ? ' per item of the loop' : ''}, `,
+      `of today’s limit (${s.today} of ${s.limit} used). Calls wait their turn, 20 to 40 s apart, so a step can take minutes. `,
+      'Answers are kept for a week: running or testing the step again with the same inputs spends no call.'),
+    !s.saved
+      ? notice({ tone: 'info', text: 'No LinkedIn session is saved, so this step will fail.', actions: [settings] })
+      : s.expiredAt
+        ? notice({ tone: 'error', text: 'LinkedIn signed the session out: save li_at and JSESSIONID again.', actions: [settings] })
+        : s.today >= s.limit
+          ? notice({ tone: 'info', text: 'Today’s limit is reached: the step fails until tomorrow, unless its answers are cached.', actions: [settings] })
+          : null);
+}
+
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {(patch: Partial<CronStep>) => void} set
+ */
+function linkedinForm(store, flow, step, set) {
+  const index = flow.steps.indexOf(step);
+  const n = String(index + 1);
+  const names = varNames(flow, index);
+  const vars = () => previewVars(store, flow, step);
+  /** @param {string} name */
+  const key = (name) => `${step.id}:${name}`;
+  /** @param {string} name @param {string} value @param {string} placeholder */
+  const input = (name, value, placeholder) => h('input', {
+    value, class: 'mono-text', autocomplete: 'off', spellcheck: false, placeholder,
+    onchange: (/** @type {FieldEvent} */ e) => set({ [name]: e.target.value.trim() }),
+  });
+  if (step.type === 'linkedin-company') {
+    const top = step.mode === 'top';
+    return h('div', { class: 'stack' },
+      varField('Company name', input('text', step.text ?? '{{input}}', 'Example Inc'), key('text'), names, 'A name, or a variable such as {{item.company}} or {{step1.company}}.', vars),
+      h('div', { class: 'row cron-fields' },
+        field('Give', select(step.mode || 'best', LINKEDIN_COMPANY_MODES, (mode) => set({ mode }))),
+        top
+          ? field('N', h('input', {
+              type: 'number', min: 1, max: COMPANY_TOP_MAX, value: String(companyTop(step)),
+              onchange: (/** @type {FieldEvent} */ e) => set({ top: Math.min(COMPANY_TOP_MAX, Math.max(1, Math.round(Number(e.target.value) || 1))) }),
+            }))
+          : null),
+      h('p', { class: 'muted small' },
+        'Its output is a list of companies, each with name, handle (company/<name>), url, urn, id, industry, size, followers, website and headquarters; ',
+        top ? 'the top matches carry only what the search gives (name, handle, id). ' : 'the best match is a one-item list with its page’s details. ',
+        `A later step reads {{step${n}[0].id}}, as “LinkedIn: company people” does. No match fails the step.`),
+      linkedinCost(store, flow, step));
+  }
+  if (step.type === 'linkedin-people') {
+    return h('div', { class: 'stack' },
+      varField('Company', input('company', step.company ?? '{{input}}', '{{step2[0].id}}'), key('company'), names,
+        'The id a “LinkedIn: find company” step gives ({{step2[0].id}}, or the whole {{step2}}), a company page link, or a name, which is looked up first.', vars),
+      varField('Title keywords (optional)', input('keywords', step.keywords ?? '', 'engineering manager'), key('keywords'), names, 'Searched as LinkedIn’s search box would.', vars),
+      varField('Location (optional)', input('location', step.location ?? '', 'Berlin'), key('location'), names,
+        'Keeps the people whose location holds this text; it does not narrow LinkedIn’s search, so it costs no fewer calls.', vars),
+      h('div', { class: 'row cron-fields' },
+        field('How many', h('input', {
+          type: 'number', min: 1, max: PEOPLE_MAX, value: String(peopleCount(step)),
+          onchange: (/** @type {FieldEvent} */ e) => set({ count: Math.min(PEOPLE_MAX, Math.max(1, Math.round(Number(e.target.value) || 1))) }),
+        }), `10 per call, at most ${PEOPLE_MAX}. It stops at the first page with fewer than 10.`),
+        h('label', { class: 'check' },
+          h('input', { type: 'checkbox', checked: step.skipHidden !== false, onchange: (/** @type {FieldEvent} */ e) => set({ skipHidden: e.target.checked }) }),
+          ' Skip hidden members')),
+      h('p', { class: 'muted small' },
+        'Its output is a list of people: name, headline, location, url, handle, degree (1st, 2nd, 3rd), image, company and hidden. ',
+        'Members outside your network often come back as “LinkedIn Member” with no profile link; kept, they have hidden: true. ',
+        'LinkedIn caps people searches for free accounts each month (the commercial use limit), and every page here counts as one.'),
+      linkedinCost(store, flow, step));
+  }
+  return h('div', { class: 'stack' },
+    varField('Profile', input('text', step.text ?? '{{input}}', 'in/jane-doe'), key('text'), names,
+      'A handle (in/<name>) or profile link; in a Loop, {{item.handle}}. A person item from an earlier step works too.', vars),
+    h('p', { class: 'muted small' },
+      `Its output is the profile: name, headline, location, about, currentTitle, currentCompany, experience (up to 5 lines), url and handle, read as {{step${n}.currentTitle}}.`),
+    linkedinCost(store, flow, step));
+}
+
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {(patch: Partial<CronStep>) => void} set
+ */
+function saveContactsForm(store, flow, step, set) {
+  const index = flow.steps.indexOf(step);
+  const vars = () => previewVars(store, flow, step);
+  return h('div', { class: 'stack' },
+    varField('People', h('input', { value: step.items ?? '{{input}}', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (/** @type {FieldEvent} */ e) => set({ items: e.target.value.trim() }) }),
+      `${step.id}:items`, varNames(flow, index), ITEMS_HINT, vars),
+    varField('Company', h('input', { value: step.company ?? '{{item.company}}', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (/** @type {FieldEvent} */ e) => set({ company: e.target.value }) }),
+      `${step.id}:company`, varNames(flow, index, loopOf(flow, index) >= 0 ? [] : DEDUPE_NAMES),
+      'Each contact’s company: {{item.company}} (what “LinkedIn: company people” sets), or a name or variable such as {{step1.company}}.', vars),
+    h('div', { class: 'row cron-fields' },
+      field('Project', stepProjectPick(store, flow, step.projectId, (projectId) => set({ projectId }), { none: 'No project' }))),
+    h('p', { class: 'muted small' },
+      'Each item gives a contact: name, headline, location, image, email and its LinkedIn handle (from handle or url). ',
+      'One already in Contacts with the same handle or address is merged: its empty fields filled, the project added. Hidden members with no profile are skipped. ',
+      'Its output is { added, updated, contacts }. A test of this step only says what it would save; “Test run” of the flow saves them. It makes no LinkedIn call.'));
 }
 
 /**
