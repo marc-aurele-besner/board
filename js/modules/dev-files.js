@@ -4,7 +4,7 @@
 import { h, icon } from '../ui.js';
 import { toast } from '../toast.js';
 import { onContextMenu, copyItem } from '../menu.js';
-import { listFolder, readFile } from '../terminal.js';
+import { listFolder, readFile, revealPath } from '../terminal.js';
 import { highlight, languageOf, languageLabel } from '../highlight.js';
 /** @import { DevContext } from '../../types/dev' */
 /** @import { RunnerFolder, GitDiff } from '../../types/terminal' */
@@ -144,11 +144,22 @@ export const pathCopies = (full) => {
   return [copyItem('Copy path', full), rel !== full ? copyItem('Copy relative path', rel) : null, copyItem('Copy name', baseName(full))];
 };
 
+// The file manager is named as the system names it.
+const fileManager = () => (/Mac/i.test(navigator.platform) ? 'Finder' : /Win/i.test(navigator.platform) ? 'Explorer' : 'file manager');
+
+/** @param {DevContext} ctx @param {string} full @returns {MenuEntry} */
+const revealItem = (ctx, full) => ({
+  label: `Show in ${fileManager()}`,
+  icon: () => icon('folder'),
+  onSelect: () => void revealPath(ctx.base(), full).catch((err) => toast(/** @type {Error} */ (err).message)),
+});
+
 /** @param {DevContext} ctx @param {string} full @param {boolean} open @returns {MenuEntry[]} */
 function folderMenu(ctx, full, open) {
   return [
     { label: open ? 'Collapse' : 'Expand', icon: () => icon('chevron-right'), onSelect: () => toggle(ctx, full) },
     { label: 'Open a terminal here', icon: () => icon('terminal'), onSelect: () => ctx.openTerminal(full) },
+    revealItem(ctx, full),
     open ? { label: 'Read again', icon: () => icon('refresh'), onSelect: () => load(ctx, full) } : null,
     '-',
     ...pathCopies(full),
@@ -163,6 +174,7 @@ function fileMenu(ctx, full) {
     { label: 'Open', icon: () => icon('file'), onSelect: () => openFile(ctx, full) },
     tab ? { label: 'Close', icon: () => icon('x'), onSelect: () => closeFile(ctx, tab) } : null,
     dir ? { label: 'Open a terminal in its folder', icon: () => icon('terminal'), onSelect: () => ctx.openTerminal(dir) } : null,
+    revealItem(ctx, full),
     '-',
     ...pathCopies(full),
   ];
