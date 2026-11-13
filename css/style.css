@@ -2994,14 +2994,19 @@ button.cal-agenda-name:hover { color: var(--accent); }
 .term > * { flex: none; }
 .term > p { margin: 0; padding: 12px; }
 .term-head { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 4px 0 2px; border-bottom: 1px solid var(--border); }
-/* Tabs stay on one line and scroll sideways, so the bar never grows a second row. */
-.term-tabs { flex: 1 1 auto; display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
-.term-tabs::-webkit-scrollbar { display: none; }
-.term-tab { flex: none; white-space: nowrap; }
-.term-tab { display: inline-flex; align-items: center; border-radius: 6px; color: var(--muted); }
-.term-tab.active { background: var(--surface-2); color: var(--text); }
-.term-tab > button[role="tab"] { background: none; border: none; min-height: 0; padding: 4px 2px 4px 8px; display: inline-flex; align-items: center; gap: 6px; color: inherit; font-size: 0.82rem; font-weight: 500; }
-.term-tab > button[role="tab"] .icon { width: 13px; height: 13px; }
+.term-title { flex: 1 1 auto; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.term-name { min-width: 0; min-height: 0; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: none; border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: 0.82rem; font-weight: 500; white-space: nowrap; }
+.term-name > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.term-name .icon { width: 13px; height: 13px; flex: none; }
+.term-name .term-dot { flex: none; }
+/* The turns of the shown claude: a count and a dot for where the last one stands. */
+.term-turns { flex: none; min-height: 0; display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border: none; border-radius: 6px; background: none; color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.term-turns:hover { background: var(--surface-2); color: var(--text); }
+.term-turns .icon { width: 14px; height: 14px; flex: none; }
+.term-turns-state { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.term-turns.working .term-turns-state { background: var(--income); animation: pulse 1.4s ease-in-out infinite; }
+.term-turns.waiting .term-turns-state { background: var(--accent); }
+.term-turns.waiting { color: var(--text); }
 .term-close { background: none; border: none; min-height: 0; padding: 4px; border-radius: 6px; color: var(--muted); opacity: 0.6; }
 .term-close:hover { opacity: 1; background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
 .term-close .icon { width: 12px; height: 12px; }

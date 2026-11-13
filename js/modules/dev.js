@@ -11,7 +11,7 @@ import { h, icon, notice, uid } from '../ui.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
 import { onContextMenu, copyItem, openMenu } from '../menu.js';
-import { TERMINAL_RUNNER, runnerInfo, listFolder, listSessions, saveSessionList, listSession, moveSession, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput, saveImage } from '../terminal.js';
+import { TERMINAL_RUNNER, runnerInfo, listFolder, listSessions, saveSessionList, listSession, moveSession, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput, saveImage, sessionTurns } from '../terminal.js';
 import { imageFiles, dragsFiles } from '../images.js';
 import { createTerminal, styleOf, colorOf } from '../vt.js';
 import { readTheme, themedColors } from '../term-colors.js';
@@ -29,7 +29,7 @@ import { recordOfSession, sumUsage, usageLine, usageTitle } from '../dev-usage.j
 import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand } from '../dev-core.js';
 import { cronRunOf, cronRunHref } from '../cron.js';
 /** @import { Store, DevSessionList, IconName } from '../../types/data' */
-/** @import { RunnerInfo, RunnerEvent } from '../../types/terminal' */
+/** @import { RunnerInfo, RunnerEvent, RunnerTurns } from '../../types/terminal' */
 /** @import { DevContext } from '../../types/dev' */
 /** @import { Child } from '../../types/ui' */
 /** @import { Terminal, Line } from '../vt.js' */
@@ -1286,35 +1286,24 @@ function terminalsPanel(store, picker, switcher) {
       : h('p', { class: 'muted small' }, 'No terminals open.'));
 }
 
-/** @param {Store} store */
-function sessionTabs(store) {
+// The bar names the terminal shown; the Terminals panel lists them all, so a click on the name opens it.
+/** @param {Store} store @param {Session} s */
+function sessionTitle(store, s) {
   const full = view.sessions.length >= maxSessions();
-  return h('nav', { class: 'term-tabs', role: 'tablist', 'aria-label': 'Terminals' },
-    view.sessions.map((s) => {
-      const active = s.id === activeSession()?.id;
-      return onContextMenu(h('div', { class: active ? 'term-tab active' : 'term-tab' },
-        h('button', {
-          type: 'button',
-          role: 'tab',
-          'aria-selected': String(active),
-          title: s.cwd,
-          onclick: () => {
-            view.active = s.id;
-            saveActive();
-            store.refresh();
-          },
-        }, s.running ? h('span', { class: 'term-dot', title: 'Running' }) : icon('terminal'), `${numberOf(s)} · ${s.cwd ? baseName(s.cwd) : 'board'}`),
-        h('button', {
-          type: 'button',
-          class: 'term-close',
-          title: s.running ? 'Stop and close this terminal' : 'Close this terminal',
-          'aria-label': `Close terminal ${numberOf(s)}`,
-          onclick: () => {
-            closeSession(s);
-            store.refresh();
-          },
-        }, icon('x'))), () => sessionMenu(store, s));
-    }),
+  return h('div', { class: 'term-title' },
+    onContextMenu(h('button', {
+      type: 'button',
+      class: 'term-name',
+      title: `${s.cwd || 'board'}\nShow every terminal in the side panel`,
+      onclick: () => {
+        view.side = 'terminals';
+        try {
+          localStorage.setItem(SIDE_KEY, view.side);
+        } catch {}
+        store.refresh();
+      },
+    }, s.running ? h('span', { class: 'term-dot', title: 'Running' }) : icon('terminal'), h('span', null, `${numberOf(s)} · ${s.cwd ? baseName(s.cwd) : 'board'}`)), () => sessionMenu(store, s)),
+    turnsButton(store, s),
     h('button', {
       type: 'button',
       class: 'term-new',
@@ -1326,6 +1315,82 @@ function sessionTabs(store) {
         store.refresh();
       },
     }, icon('plus')));
+}
+
+// The turns of the claude the shown terminal runs, read from its transcript through the runner: again every few
+// seconds while it runs, and once after it ended. A change redraws the page.
+const TURNS_MS = 4000;
+/** @type {{ id: string, at: number, busy: boolean, data: RunnerTurns | null, timer: number }} */
+const turnsView = { id: '', at: 0, busy: false, data: null, timer: 0 };
+/** @param {Store} store @param {Session} s */
+function refreshTurns(store, s) {
+  if (turnsView.id !== s.id) Object.assign(turnsView, { id: s.id, at: 0, data: null });
+  clearTimeout(turnsView.timer);
+  if (turnsView.busy || !view.info) return;
+  const due = turnsView.at + TURNS_MS - Date.now();
+  // An ended claude no longer changes: read once more, then wait for the next command.
+  if (turnsView.data && !s.running && turnsView.data.state === 'done') return;
+  if (due > 0) {
+    turnsView.timer = window.setTimeout(() => {
+      if (document.querySelector('.dev') && activeSession() === s) refreshTurns(store, s);
+    }, due);
+    return;
+  }
+  turnsView.busy = true;
+  sessionTurns(runnerOf(store), s.id).then((data) => {
+    if (turnsView.id !== s.id) return;
+    const changed = JSON.stringify(data) !== JSON.stringify(turnsView.data);
+    turnsView.data = data;
+    if (changed && document.querySelector('.dev')) store.refresh();
+  }, () => {}).finally(() => {
+    turnsView.busy = false;
+    turnsView.at = Date.now();
+    if (turnsView.id === s.id && document.querySelector('.dev') && activeSession() === s) refreshTurns(store, s);
+  });
+}
+
+const TURN_STATES = /** @type {Record<string, string>} */ ({ working: 'Working', waiting: 'Waiting for you', done: 'Done' });
+// A prompt on one line, short enough for a menu row.
+const turnLine = (/** @type {string} */ text) => {
+  const line = oneLine(text);
+  return line.length > 70 ? `${line.slice(0, 69)}…` : line;
+};
+const clock = (/** @type {number} */ at) => (at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
+const took = (/** @type {number} */ ms) => (ms < 60000 ? `${Math.max(1, Math.round(ms / 1000))} s` : `${Math.round(ms / 60000)} min`);
+
+// How many turns the shown claude took, and where the last one stands; the menu lists them, newest first, and a
+// click copies a prompt.
+/** @param {Store} store @param {Session} s */
+function turnsButton(store, s) {
+  refreshTurns(store, s);
+  const data = turnsView.id === s.id ? turnsView.data : null;
+  if (!data?.claude) return null;
+  const { turns, state } = data;
+  const label = TURN_STATES[state] ?? state;
+  const ask = state === 'waiting' && data.ask ? `: ${data.ask.text}` : '';
+  return h('button', {
+    type: 'button',
+    class: `term-turns ${state}`,
+    title: `${turns.length} ${turns.length === 1 ? 'turn' : 'turns'} in this claude session · ${label}${ask}`,
+    'aria-label': `Turns: ${turns.length}, ${label}`,
+    'aria-haspopup': 'menu',
+    onclick: (/** @type {MouseEvent} */ e) => {
+      e.stopPropagation();
+      const at = /** @type {HTMLElement} */ (e.currentTarget);
+      /** @type {MenuEntry[]} */
+      const rows = [...turns].reverse().map((t, i) => {
+        const last = i === 0;
+        const status = last ? state : t.interrupted ? 'interrupted' : 'done';
+        return {
+          label: `${turns.length - i}. ${turnLine(t.text)}`,
+          hint: last && state !== 'done' ? TURN_STATES[state] : `${clock(t.at)}${t.end > t.at ? ` · ${took(t.end - t.at)}` : ''}`,
+          icon: () => status === 'working' ? h('span', { class: 'term-dot' }) : icon(status === 'waiting' ? 'alert' : status === 'interrupted' ? 'stop' : 'check'),
+          onSelect: () => { navigator.clipboard.writeText(t.text).then(() => toast('Prompt copied'), () => toast('Could not copy')); },
+        };
+      });
+      openMenu(rows.length ? rows : [{ label: 'No prompt yet' }], at);
+    },
+  }, icon('message'), h('span', null, String(turns.length)), h('span', { class: 'term-turns-state', role: 'img', 'aria-label': label }));
 }
 
 /** @param {Store} store @param {Session} s */
@@ -1404,7 +1469,7 @@ function terminal(store, s) {
   return h('section', { class: 'card term' },
     h('div', { class: 'term-head' },
       backButton(),
-      sessionTabs(store),
+      sessionTitle(store, s),
       sessionUsage(store, s),
       s.cwd
         ? h('button', {
@@ -1547,10 +1612,6 @@ function draw(root, store) {
     if (focused) /** @type {TermEl} */ (s.el).out.focus({ preventScroll: true });
     fit(s);
     paint(s);
-    // The tabs scroll sideways on one line, so the active one is brought into view.
-    const tab = /** @type {HTMLElement | null} */ (document.querySelector('.term-tab.active'));
-    const strip = tab?.parentElement;
-    if (tab && strip) strip.scrollLeft = Math.max(Math.min(strip.scrollLeft, tab.offsetLeft - strip.offsetLeft), tab.offsetLeft - strip.offsetLeft + tab.offsetWidth - strip.clientWidth);
   });
 }
 
