@@ -3248,9 +3248,33 @@ button.sum-line:hover { background: var(--surface-2); }
 .slack-composer-row .small { font-size: 0.72rem; }
 .slack-send { min-height: 28px; min-width: 32px; padding: 0 8px; border: none; border-radius: 6px; background: var(--accent); color: var(--accent-text); }
 .slack-send .icon { width: 14px; height: 14px; }
-.slack-emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 4px; max-height: 300px; overflow-y: auto; }
-.slack-emoji-choice { min-height: 40px; font-size: 1.3rem; background: transparent; border: 1px solid transparent; }
-.slack-emoji-choice:hover { border-color: var(--border); background: var(--surface-2); }
+.emoji-picker { display: flex; flex-direction: column; gap: 8px; }
+.emoji-picker-search-row { position: relative; }
+.emoji-picker-search-row > .icon { position: absolute; left: 10px; top: 50%; translate: 0 -50%; width: 16px; height: 16px; color: var(--muted); pointer-events: none; }
+.emoji-picker-search { width: 100%; padding-left: 34px; font-size: 16px; }
+.emoji-picker-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.emoji-picker-tabs[hidden] { display: none; }
+.emoji-picker-tab { flex: 1 0 32px; min-height: 34px; padding: 0; background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted); }
+.emoji-picker-tab:hover { color: var(--text); }
+.emoji-picker-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.emoji-picker-tab .icon { width: 17px; height: 17px; }
+.emoji-picker-scroll { position: relative; height: min(340px, 50vh); overflow-y: auto; overscroll-behavior: contain; }
+.emoji-picker-head { position: sticky; top: 0; z-index: 1; margin: 0; padding: 6px 2px; font-size: 0.78rem; font-weight: 600; color: var(--muted); background: var(--surface); }
+.emoji-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(36px, 1fr)); gap: 2px; padding-bottom: 6px; }
+.emoji-picker-choice { min-height: 36px; padding: 0; font-size: 1.4rem; line-height: 1; background: transparent; border: none; border-radius: 6px; }
+.emoji-picker-choice:hover, .emoji-picker-choice:focus-visible { background: var(--surface-2); }
+.emoji-picker-choice .slack-emoji { font-size: inherit; }
+.emoji-picker-choice .slack-emoji-img { width: 24px; height: 24px; vertical-align: middle; }
+.emoji-picker-empty { padding: 24px 4px; text-align: center; }
+.emoji-picker-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); min-height: 44px; }
+.emoji-picker-preview { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.emoji-picker-preview-char { font-size: 1.9rem; line-height: 1; }
+.emoji-picker-preview-char .slack-emoji { font-size: inherit; }
+.emoji-picker-preview-char .slack-emoji-img { width: 32px; height: 32px; vertical-align: middle; }
+.emoji-picker-preview-name { font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.emoji-picker-tones { display: flex; gap: 1px; flex-shrink: 0; }
+.emoji-picker-tone { min-height: 28px; min-width: 28px; padding: 0; font-size: 1.05rem; line-height: 1; background: transparent; border: 1px solid transparent; border-radius: 6px; }
+.emoji-picker-tone[aria-pressed="true"] { border-color: var(--accent); background: var(--surface-2); }
 @media (max-width: 1100px) {
   .slack-layout.with-thread { grid-template-columns: 240px minmax(0, 1fr); }
   .slack-layout.with-thread .slack-main { display: none; }
