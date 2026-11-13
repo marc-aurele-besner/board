@@ -152,15 +152,15 @@ function categoriesFor(store, projectId) {
 }
 // "buy milk #home" files the item under project "home" (created if missing).
 // Extra lines from a multi-line paste arrive as the description.
-// Images pasted or dropped on the add field go to the task it adds.
-/** @param {Store} store @param {string} raw @param {string} [description] */
+// Images pasted or dropped on the add field go to the task it adds. Returns whether a task was added.
+/** @param {Store} store @param {string} raw @param {string} [description] @returns {boolean} */
 function addItem(store, raw, description = '') {
   let text = raw.trim();
   const tag = text.match(/(?:^|\s)#([\w-]+)/);
   if (tag) text = text.replace(tag[0], ' ').replace(/\s+/g, ' ').trim();
   if (!text) {
     if (pending.length) toast('Give the task a title, then add it with its images');
-    return;
+    return false;
   }
 
   let projectId = isProjectFilter(view.filter) ? view.filter : null;
@@ -175,6 +175,7 @@ function addItem(store, raw, description = '') {
     addImages(store, task.id, pending.map((p) => p.file));
     clearPending();
   }
+  return true;
 }
 
 // --- Images waiting on the add field, shown under it until the task is added ---
@@ -2047,7 +2048,8 @@ function draw(root, store) {
           onsubmit: (/** @type {SubmitEvent & { currentTarget: HTMLFormElement }} */ e) => {
             e.preventDefault();
             const input = /** @type {HTMLInputElement} */ (e.currentTarget.querySelector('input[name="todo"]'));
-            addItem(store, input.value);
+            // The section patches in place and keeps the field, so empty it here or a second Enter adds the task again.
+            if (addItem(store, input.value)) input.value = '';
           },
         },
           h('input', {
