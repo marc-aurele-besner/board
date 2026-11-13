@@ -422,7 +422,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .rs-dot.live::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: inherit; animation: ping 1.8s ease-out infinite; }
 
 .rs-hero { display: flex; align-items: center; gap: 24px; padding: 20px; border-left: 4px solid var(--c); background: linear-gradient(110deg, color-mix(in srgb, var(--c) 9%, var(--surface)), var(--surface) 60%); }
-.rs-ring { flex: none; width: 128px; height: 128px; border-radius: 50%; background: var(--ring); display: grid; place-items: center; animation: rsRing 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.rs-ring { flex: none; width: 128px; height: 128px; border-radius: 50%; background: var(--ring); display: grid; place-items: center; }
+.rs.enter .rs-ring { animation: rsRing 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 .rs-ring-hole { width: 96px; height: 96px; border-radius: 50%; background: var(--surface); display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .rs-ring-hole strong { font-family: var(--display); font-size: 1.9rem; line-height: 1; font-variant-numeric: tabular-nums; }
 .rs-ring-hole strong span { font-size: 1rem; color: var(--muted); font-weight: 500; }
@@ -445,13 +446,16 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .rs-proc-icon .icon { width: 20px; height: 20px; }
 .rs-proc-metric { display: block; font-family: var(--display); font-size: 1.1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .rs-status { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 0.78rem; font-weight: 600; color: var(--c); }
+/* The entrance animations play when the runners view opens; the heartbeat's redraws (every few seconds) leave them still. */
 .rs-meter, .rs-track, .rs-bar { display: block; position: relative; height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
-.rs-meter > span, .rs-bar > span { position: absolute; inset: 0; border-radius: inherit; background: var(--c, var(--accent)); transform-origin: left center; transform: scaleX(var(--p)); animation: rsGrow 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.rs-meter > span, .rs-bar > span { position: absolute; inset: 0; border-radius: inherit; background: var(--c, var(--accent)); transform-origin: left center; transform: scaleX(var(--p)); }
+.rs.enter :is(.rs-meter, .rs-bar) > span { animation: rsGrow 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 @keyframes rsGrow { from { transform: scaleX(0); } to { transform: scaleX(var(--p)); } }
 .rs-proc .rs-meter > span { background: var(--accent); }
 
 .rs-jobs { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 10px; }
-.rs-job { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px 12px 10px; border: 1px solid var(--border); border-left: 3px solid var(--c); border-radius: 10px; background: color-mix(in srgb, var(--c) 4%, var(--surface)); animation: fadeUp 0.35s ease both; animation-delay: calc(var(--i, 0) * 30ms); transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.rs-job { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px 12px 10px; border: 1px solid var(--border); border-left: 3px solid var(--c); border-radius: 10px; background: color-mix(in srgb, var(--c) 4%, var(--surface)); transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.rs.enter .rs-job { animation: fadeUp 0.35s ease both; animation-delay: calc(var(--i, 0) * 30ms); }
 .rs-job:hover { transform: translateY(-1px); box-shadow: 0 4px 14px color-mix(in srgb, var(--text) 8%, transparent); }
 .rs-job.rs-off { opacity: 0.6; }
 .rs-job.rs-failed { background: color-mix(in srgb, var(--c) 8%, var(--surface)); }
@@ -480,7 +484,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .rs-lanes { display: flex; flex-direction: column; gap: 6px; }
 .rs-lane { grid-template-columns: minmax(80px, 34%) 1fr; }
 .rs-lane-track { position: relative; height: 12px; border-radius: 999px; background: linear-gradient(90deg, var(--surface-2), var(--surface-2)) center / 100% 2px no-repeat; }
-.rs-lane-track i { position: absolute; top: 50%; left: var(--x); width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 2px var(--surface); animation: fadeIn 0.4s ease both; }
+.rs-lane-track i { position: absolute; top: 50%; left: var(--x); width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 2px var(--surface); }
+.rs.enter .rs-lane-track i { animation: fadeIn 0.4s ease both; }
 .rs-lane-track.dense i { width: 3px; height: 10px; margin: -5px 0 0 -1.5px; border-radius: 2px; box-shadow: none; }
 .rs-axis .rs-lane-track { height: 16px; background: none; }
 .rs-axis b { position: absolute; left: var(--x); top: 0; transform: translateX(-50%); font-size: 0.7rem; font-weight: 500; color: var(--muted); white-space: nowrap; }
