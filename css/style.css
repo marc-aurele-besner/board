@@ -2778,9 +2778,11 @@ button.sum-line:hover { background: var(--surface-2); }
 .inbox-main > :first-child { margin-top: 10px; }
 .inbox-main > .inbox-search { width: auto; }
 .inbox-main > .inbox-card { border-radius: 0; border-left: none; border-right: none; }
+.inbox-pickers { gap: 4px; }
 .inbox-pickers .icon-btn { flex: none; }
-.inbox-errors { position: relative; flex: none; }
-.inbox-errors-chip { list-style: none; display: inline-flex; align-items: center; gap: 4px; min-height: 30px; padding: 2px 9px; border-radius: 999px; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
+/* Flex, so the chip sits centred on the pickers' row with no line box below it. */
+.inbox-errors { position: relative; flex: none; display: flex; }
+.inbox-errors-chip { list-style: none; display: inline-flex; align-items: center; gap: 4px; min-height: 38px; padding: 4px 10px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
 .inbox-errors-chip::-webkit-details-marker { display: none; }
 .inbox-errors-chip:hover, .inbox-errors[open] > .inbox-errors-chip { background: color-mix(in srgb, var(--danger) 16%, transparent); }
 .inbox-errors-chip .icon { width: 15px; height: 15px; }
