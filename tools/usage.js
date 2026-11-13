@@ -9,6 +9,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { saysDone } from '../js/dev-done.js';
 
 const PROJECTS = join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'projects');
 const WORKTREE_NAME = /^[\w.-]{1,64}$/;
@@ -203,6 +204,10 @@ function parse(text, billing) {
           reply = id === replyId ? `${reply}\n\n${text}` : text;
           replyId = id;
         }
+        // The turn is done once a reply ends with the done signal, and stops being so if claude works on after it.
+        const turn = turns.at(-1);
+        const working = c.some((b) => b.type === 'tool_use');
+        if (turn && (text || working)) turn.done = !working && saysDone(reply);
         for (const b of c) {
           if (b.type === 'tool_use' && b.id) pending.set(b.id, { name: b.name ?? '', input: b.input ?? {}, at });
           const path = b.type === 'tool_use' && WRITES.includes(b.name ?? '') ? b.input?.file_path ?? b.input?.notebook_path : null;
