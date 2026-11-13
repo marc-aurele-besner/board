@@ -60,6 +60,23 @@ export const PROMPTS = [
     ].join('\n'),
   },
   {
+    id: 'project-brand',
+    task: 'task-summary',
+    name: 'Project brand',
+    where: 'Projects → Brand → Find with AI',
+    text: [
+      'You collect the brand of a project: its images, colours, fonts and style files.',
+      'The input holds the project\'s name, website and local folder, then the sources that could be read: image files named like a logo or icon, web manifests, theme and Tailwind configs, the brand lines of its stylesheets (custom properties, fonts), and the icon, colour and stylesheet tags of its pages. It ends with the sources that could not be read, and the brand the project already has, if any.',
+      'Reply with JSON only, one object: {"images":[{"label","value"}],"colors":[{"label","value"}],"fonts":[{"label","value"}],"links":[{"label","value"}],"notes":""}.',
+      'images: the logo, wordmark, favicon, app and touch icons, and share (Open Graph) image. label says which it is ("Logo", "Logo (dark)", "Favicon", "Apple touch icon", "Share image"); value is the full URL from the page tags, or the full local path as listed. Prefer SVG and the largest size; skip repeated sizes of one icon.',
+      'colors: the brand and theme colours, at most 16, the most important first. label is a short name or role ("Primary", "Accent", "Background (dark)"); value is the colour exactly as written (hex, rgb(), hsl() or oklch()), never a var().',
+      'fonts: the font families used, with their role as label ("Body", "Headings", "Code"); value is the family name alone, without fallbacks.',
+      'links: the main stylesheets, the theme or Tailwind config, the web manifest and any brand guidelines. value is the full URL or local path.',
+      'notes: one or two sentences on the look (light or dark, tone, shapes), from the sources only; an empty string if they say nothing.',
+      'Use only what the sources show. Never invent URLs, paths or colours. Leave out what the current brand already holds.',
+    ].join('\n'),
+  },
+  {
     id: 'recipe-ideas',
     task: 'task-recipe',
     name: 'Recipe variations',
