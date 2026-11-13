@@ -983,7 +983,7 @@ function providerCard(store, pr) {
         h('span', { class: `status-dot tone-${s?.indicator ? tone : 'plain'}`, 'aria-hidden': 'true' }),
         h('div', null,
           h('strong', null, pr.name),
-          h('div', null, h('a', { href: pr.url, target: '_blank', rel: 'noopener', class: 'small' }, new URL(pr.url).hostname)))),
+          h('div', null, h('a', { href: pr.url, target: '_blank', rel: 'noopener', class: 'small' }, pr.url.includes('/appsstatus/dashboard/') ? 'Google Workspace status' : new URL(pr.url).hostname)))),
       busy ? pillOf('Reading…', 'plain') : pillOf(label, tone)),
     s?.description ? h('p', { class: 'provider-state' }, s.description) : null,
     parts?.total
@@ -1021,7 +1021,7 @@ function providerCard(store, pr) {
       : null,
     s?.error ? h('p', { class: 'muted small' }, `${s.indicator ? 'Last read failed' : 'Could not read'}: ${s.error}`) : null,
     h('div', { class: 'row between provider-foot' },
-      h('span', { class: 'muted small' }, `Read ${timeOf(s?.at)}${s?.kind === 'datadog' ? ' · Datadog page' : s?.kind === 'google' ? ' · Google Workspace dashboard' : ''}`),
+      h('span', { class: 'muted small' }, `Read ${timeOf(s?.at)}${s?.kind === 'datadog' ? ' · Datadog page' : ''}`),
       h('div', { class: 'row' },
         h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Read again', 'aria-label': `Read ${pr.name} again`, onclick: () => run(store, pr.id, () => checkProviders(store, [pr.id])) }, refreshIcon(busy)),
         h('button', { type: 'button', class: 'icon-btn', title: 'Stop following', 'aria-label': `Stop following ${pr.name}`, onclick: () => unfollow(store, pr) }, icon('x')))));
