@@ -57,7 +57,7 @@ const matches = (/** @type {RunnerSkill} */ s) => {
 
 /** @param {DevContext} ctx @param {RunnerSkill} s @returns {MenuEntry[]} */
 const skillMenu = (ctx, s) => [
-  { label: `Type /${s.name} in the terminal`, icon: () => icon('terminal'), onSelect: () => ctx.typeInTerminal(`/${s.name} `) },
+  { label: 'Type in the terminal', icon: () => icon('terminal'), onSelect: () => ctx.typeInTerminal(`/${s.name} `) },
   { label: 'Open its SKILL.md', icon: () => icon('file'), onSelect: () => openFile(ctx, s.path) },
   '-',
   copyItem('Copy command', `/${s.name}`),
