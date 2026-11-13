@@ -10,6 +10,7 @@ import { runnersTab } from './monitoring-runners.js';
 import { socialsTab } from './monitoring-socials.js';
 import { contractsActivityTab, contractsActivitySerialize, contractsActivityRestore } from './monitoring-contracts.js';
 import { usageRecords, sumUsage, modelName, modelsByUse, fmtDuration, tokensOf } from '../dev-usage.js';
+import { aiOverview, aiView, devProjectOf, projectShown, sourceShown, SOURCES, BREAKDOWNS, MEASURES } from './monitoring-ai.js';
 import { sessionStatus } from '../terminal.js';
 import { runnerOf } from '../dev-core.js';
 /** @import { AiCallMeta, AiMessage, DevUsage, Store, UsageEntry } from '../../types/data' */
@@ -103,12 +104,12 @@ export function stat(label, value, hint) {
 // --- AI usage ---
 
 const usd = (/** @type {number} */ n) => money(n, 'USD');
-const usdPrecise = (/** @type {number} */ n) => (n < 0.01 ? `$${n.toFixed(4)}` : usd(n));
-const fmtTokens = (/** @type {number} */ n) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
+export const usdPrecise = (/** @type {number} */ n) => (n < 0.01 ? `$${n.toFixed(4)}` : usd(n));
+export const fmtTokens = (/** @type {number} */ n) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
 
 // A call's cost: the reported one, or an estimate from the model's price. Null when neither is known.
 /** @param {UsageEntry} e @returns {{ value: number, estimated: boolean } | null} */
-function costOf(e) {
+export function costOf(e) {
   if (e.cost !== null && e.cost !== undefined) return { value: e.cost, estimated: false };
   const p = prices.map.get(e.model);
   if (!p) return null;
@@ -129,43 +130,6 @@ function loadPrices(store) {
       prices.status = 'error';
     })
     .finally(() => store.refresh());
-}
-
-/** @param {string} title @param {CallGroup[]} rows @param {string} label */
-function groupTable(title, rows, label) {
-  return h('section', { class: 'card stack' },
-    h('h3', null, title),
-    rows.length
-      ? sortTable(`ai-${label}`, [
-          { label, value: (r) => r.label },
-          { label: 'Calls', num: true, value: (r) => r.calls },
-          { label: 'Tokens', num: true, value: (r) => r.tokens, format: fmtTokens },
-          { label: 'Cost', num: true, value: (r) => r.cost, format: (v, r) => (v === null ? '—' : `${r.estimated ? '≈ ' : ''}${usdPrecise(v)}`) },
-        ], rows)
-      : empty('No calls in this period.'));
-}
-
-/** @typedef {{ label: string, calls: number, tokens: number, cost: number | null, priced: number, estimated: boolean }} CallGroup */
-/** @param {UsageEntry[]} entries @param {(e: UsageEntry) => string} keyOf @param {(e: UsageEntry) => string} labelOf @returns {CallGroup[]} */
-function groupCalls(entries, keyOf, labelOf) {
-  /** @type {Map<string, { label: string, calls: number, tokens: number, cost: number, priced: number, estimated: boolean }>} */
-  const map = new Map();
-  for (const e of entries) {
-    const key = keyOf(e);
-    const row = map.get(key) ?? { label: labelOf(e), calls: 0, tokens: 0, cost: 0, priced: 0, estimated: false };
-    row.calls += 1;
-    row.tokens += e.promptTokens + e.completionTokens;
-    const c = costOf(e);
-    if (c) {
-      row.cost += c.value;
-      row.priced += 1;
-      row.estimated = row.estimated || c.estimated;
-    }
-    map.set(key, row);
-  }
-  return [...map.values()]
-    .map((r) => ({ ...r, cost: r.priced ? r.cost : null }))
-    .sort((a, b) => (b.cost ?? 0) - (a.cost ?? 0) || b.calls - a.calls);
 }
 
 // Features send their data as compact JSON; indent it so it can be read.
@@ -253,48 +217,18 @@ function showCall(e, task) {
 
 /** @param {Store} store @param {PeriodWindow} w */
 function aiTab(store, w) {
-  const all = store.get(COLLECTION).entries;
-  const entries = all.filter((e) => inWindow(parseTime(e.at), w));
   const tasks = new Map((store.get('settings').models?.tasks ?? []).map((t) => [t.id, t.name]));
   const taskName = (/** @type {string} */ id) => tasks.get(id) ?? id;
-
-  const costs = w.items.map(() => 0);
-  const calls = w.items.map(() => 0);
-  let total = 0;
-  let tokens = 0;
-  let unpriced = 0;
-  let estimated = false;
-  for (const e of entries) {
-    const b = bucketOf(parseTime(e.at), w);
-    const c = costOf(e);
-    tokens += e.promptTokens + e.completionTokens;
-    if (c) {
-      total += c.value;
-      estimated = estimated || c.estimated;
-      if (b >= 0) costs[b] += c.value;
-    } else unpriced += 1;
-    if (b >= 0) calls[b] += 1;
-  }
-  const series = [{ name: 'Cost (USD)', color: 'var(--accent)', values: costs.map((v) => Number(v.toFixed(4))) }];
+  const entries = sourceShown('board') ? store.get(COLLECTION).entries.filter((e) => inWindow(parseTime(e.at), w) && projectShown(e.projectId ?? '')) : [];
   const recent = [...entries].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 15);
 
   return h('div', { class: 'stack-lg' },
     prices.status === 'error'
       ? notice({ tone: 'info', text: 'Model prices could not be loaded, so calls without a reported cost are not priced.' })
       : null,
-    h('div', { class: 'summary' },
-      stat('Cost', `${estimated ? '≈ ' : ''}${usdPrecise(total)}`, unpriced ? `${unpriced} call${unpriced === 1 ? '' : 's'} without a price` : 'USD'),
-      stat('Calls', String(entries.length), 'in this period'),
-      stat('Tokens', fmtTokens(tokens), 'input + output')),
-    h('section', { class: 'card stack' },
-      h('h3', null, 'Cost over time'),
-      entries.length ? barChart(w.items.map((b) => b.label), series, { format: usdPrecise }) : empty('No AI calls in this period.'),
-      entries.length ? legend(series) : null),
-    h('div', { class: 'split-2' },
-      groupTable('By model', groupCalls(entries, (e) => e.model, (e) => e.model), 'Model'),
-      groupTable('By task', groupCalls(entries, (e) => e.task, (e) => taskName(e.task)), 'Task')),
-    devSessions(store, w),
-    h('section', { class: 'card stack' },
+    aiOverview(store, w),
+    sourceShown('dev') ? devSessions(store, w) : null,
+    sourceShown('board') ? h('section', { class: 'card stack' },
       h('h3', null, 'Recent calls'),
       recent.length
         ? h('ul', { class: 'mon-recent mon-calls' }, recent.map((e) => {
@@ -307,8 +241,8 @@ function aiTab(store, w) {
                 h('span', { class: 'muted small' }, `${fmtTokens(e.promptTokens + e.completionTokens)} tokens`),
                 h('span', { class: 'num' }, c ? `${c.estimated ? '≈ ' : ''}${usdPrecise(c.value)}` : '—')));
           }))
-        : empty('No AI calls yet. Calls appear here after you use a feature such as Tidy with AI or reading a bill.'),
-      recent.length ? h('p', { class: 'muted small' }, 'Select a call to see what was sent, the full reply and its details.') : null));
+        : empty(aiView.project ? 'No board AI calls for this project in this period.' : 'No AI calls yet. Calls appear here after you use a feature such as Tidy with AI or reading a bill.'),
+      recent.length ? h('p', { class: 'muted small' }, 'Select a call to see what was sent, the full reply and its details.') : null) : null);
 }
 
 // --- Dev sessions: what claude used for tasks, from its transcripts (dev-usage.js) ---
@@ -348,8 +282,8 @@ function pollLive(store, ids) {
 // A session counts in the period its last reply falls in.
 /** @param {Store} store @param {PeriodWindow} w */
 function devSessions(store, w) {
-  const records = usageRecords(store).filter((r) => inWindow(r.end ?? null, w));
   const tasks = store.get('todos').items;
+  const records = usageRecords(store).filter((r) => inWindow(r.end ?? null, w) && projectShown(devProjectOf(tasks, r)));
   const sum = sumUsage(records);
   const included = w.items.map(() => 0);
   const extra = w.items.map(() => 0);
@@ -695,6 +629,10 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
       site: web ? view.site : '',
       engine: view.tab === 'search' && view.engine === 'bing' ? 'bing' : '',
       contract: view.tab === 'contracts' ? contractsActivitySerialize() : '',
+      source: view.tab === 'ai' && aiView.source !== 'all' ? aiView.source : '',
+      project: view.tab === 'ai' ? aiView.project : '',
+      by: view.tab === 'ai' && aiView.by !== 'project' ? aiView.by : '',
+      measure: view.tab === 'ai' && aiView.measure !== 'cost' ? aiView.measure : '',
     };
   },
   restore: (/** @type {Record<string, string>} */ p = {}) => {
@@ -703,5 +641,10 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
     view.engine = p.engine === 'bing' ? 'bing' : 'google';
     view.period = PERIODS.some(([k]) => k === p.period) ? p.period : '7';
     contractsActivityRestore(p.contract);
+    const pick = (/** @type {string[][]} */ list, /** @type {string} */ v, /** @type {string} */ fallback) => (list.some(([k]) => k === v) ? v : fallback);
+    aiView.source = pick(SOURCES, p.source, 'all');
+    aiView.project = p.project || '';
+    aiView.by = pick(BREAKDOWNS, p.by, 'project');
+    aiView.measure = pick(MEASURES, p.measure, 'cost');
   },
 });
