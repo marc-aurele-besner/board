@@ -1,7 +1,7 @@
 // Monitoring → Socials: the followers of each X, LinkedIn, GitHub and Instagram account added in Settings (and a GitHub account's
 // stars), and how they grew over the period. The runners read the counts a few times a day (tools/jobs/socials.js);
 // each day keeps its last read.
-import { h, icon, empty, notice, refreshIcon } from '../ui.js';
+import { h, icon, empty, notice, noticePills, refreshIcon } from '../ui.js';
 import { lineChart } from '../chart.js';
 import { settingsHref } from '../integrations.js';
 import { SOCIALS, NETWORKS, networkIcon, dayKey, profileUrl, handleLabel } from '../socials.js';
@@ -12,6 +12,9 @@ import { readNow, isReading } from './settings-socials.js';
 /** @import { PeriodWindow } from '../../types/monitoring' */
 
 const DAY = 86400000;
+// The Settings section of each network's accounts.
+/** @type {Record<string, import('../integrations.js').SetupKey>} */
+const SETTINGS_KEY = { x: 'x', linkedin: 'linkedin', github: 'githubAccounts', instagram: 'instagram' };
 // A day's period still draws a week, since the counts are read once or a few times a day.
 const MIN_DAYS = 7;
 const count = new Intl.NumberFormat();
@@ -140,10 +143,12 @@ export function socialsTab(store, w) {
   const lastAt = Math.max(0, ...accounts.map((a) => a.at ?? 0));
 
   return h('div', { class: 'stack-lg' },
-    failed.length
-      ? notice({ text: `${failed.length} account${failed.length > 1 ? 's' : ''} could not be read on the last try: ${failed.map((a) => `${handleLabel(a)} (${a.error})`).join('; ')}` })
-      : null,
     h('div', { class: 'social-bar' },
+      // An account that could not be read folds into a pill, as the Inbox does, instead of a banner across the page.
+      noticePills('socials', failed.map((a) => ({
+        text: `${handleLabel(a)} (${NETWORKS[a.network] ?? a.network}): ${a.error}`,
+        actions: [h('a', { href: settingsHref(SETTINGS_KEY[a.network] ?? 'linkedin'), class: 'btn-small primary-link' }, 'Open Settings')],
+      }))),
       h('span', { class: 'muted small' }, lastAt ? `Last read ${new Date(lastAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}` : 'Not read yet'),
       h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => readNow(store, accounts.map((a) => a.id)) },
         refreshIcon(busy), busy ? 'Reading…' : 'Read all now')),
