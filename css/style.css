@@ -3052,6 +3052,17 @@ button.cal-agenda-name:hover { color: var(--accent); }
 .term-turns:hover, .term-tool:hover { background: var(--surface-2); color: var(--text); }
 .term-turns .icon, .term-tool .icon { width: 14px; height: 14px; flex: none; }
 .term-tool.none { opacity: 0.55; }
+.term-tool.agents.working { color: var(--text); }
+.term-tool.agents .term-dot { width: 6px; height: 6px; }
+.agents-pop .turns-title .icon { width: 14px; height: 14px; color: var(--muted); }
+.agents-empty { margin: 0; padding: 12px; }
+.agent-now { display: flex; align-items: flex-start; gap: 5px; min-width: 0; }
+.agent-now .icon { width: 12px; height: 12px; flex: none; margin-top: 2px; }
+.agent-now > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-row { flex: none; }
+.agent-row.working .agent-now { color: var(--text); }
+.agent-more { display: flex; flex-direction: column; gap: 3px; margin-left: 21px; }
+.agent-more p { margin: 0 0 4px; max-height: 12em; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .term-turns-state { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .term-turns.working .term-turns-state { background: var(--income); animation: pulse 1.4s ease-in-out infinite; }
 .term-turns.waiting .term-turns-state { background: var(--accent); }

@@ -29,7 +29,7 @@ import { recordOfSession, sumUsage, usageLine, usageTitle, byUse, mcpTool } from
 import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand } from '../dev-core.js';
 import { cronRunOf, cronRunHref } from '../cron.js';
 /** @import { Store, DevSessionList, IconName } from '../../types/data' */
-/** @import { RunnerInfo, RunnerEvent, RunnerTurns, SessionTurn } from '../../types/terminal' */
+/** @import { RunnerInfo, RunnerEvent, RunnerTurns, SessionTurn, SessionAgent } from '../../types/terminal' */
 /** @import { DevContext } from '../../types/dev' */
 /** @import { Child } from '../../types/ui' */
 /** @import { Terminal, Line } from '../vt.js' */
@@ -1304,6 +1304,7 @@ function sessionTitle(store, s) {
       },
     }, s.running ? h('span', { class: 'term-dot', title: 'Running' }) : icon('terminal'), h('span', null, `${numberOf(s)} · ${s.cwd ? baseName(s.cwd) : 'board'}`)), () => sessionMenu(store, s)),
     turnsButton(store, s),
+    agentsButton(s),
     toolButtons(store, s),
     h('button', {
       type: 'button',
@@ -1385,8 +1386,9 @@ function phasesOf(t, live, now) {
 }
 
 // The turns panel, open under the turns button: each turn with its prompt, a bar of its working and waiting
-// stretches, and their times. It follows the data while open, and the clock for the turn still going.
-/** @type {{ el: HTMLElement, s: Session, timer: number } | null} */
+// stretches, and their times. It follows the data while open, and the clock for the turn still going. The
+// subagents panel opens in its place, under the subagents button (kind 'agents').
+/** @type {{ el: HTMLElement, s: Session, timer: number, kind: 'turns' | 'agents' } | null} */
 let turnsPop = null;
 
 function closeTurns() {
@@ -1402,7 +1404,7 @@ function closeTurns() {
 /** @param {PointerEvent} e */
 function onTurnsOutside(e) {
   const target = /** @type {Element} */ (e.target);
-  if (turnsPop?.el.contains(target) || target.closest?.('.term-turns')) return;
+  if (turnsPop?.el.contains(target) || target.closest?.('.term-turns, .term-tool.agents')) return;
   closeTurns();
 }
 /** @param {KeyboardEvent} e */
@@ -1412,13 +1414,13 @@ function onTurnsKey(e) {
   closeTurns();
 }
 
-/** @param {HTMLElement} anchor @param {Session} s */
-function openTurns(anchor, s) {
+/** @param {HTMLElement} anchor @param {Session} s @param {'turns' | 'agents'} [kind] */
+function openTurns(anchor, s, kind = 'turns') {
   closeMenu();
   closeTurns();
-  const el = h('div', { class: 'popover turns-pop', role: 'dialog', 'aria-label': 'Claude turns' });
+  const el = h('div', { class: `popover turns-pop ${kind}-pop`, role: 'dialog', 'aria-label': kind === 'agents' ? 'Claude subagents' : 'Claude turns' });
   document.body.append(el);
-  turnsPop = { el, s, timer: window.setInterval(() => drawTurns(), 1000) };
+  turnsPop = { el, s, kind, timer: window.setInterval(() => drawTurns(), 1000) };
   drawTurns();
   const r = anchor.getBoundingClientRect();
   const x = Math.max(8, Math.min(r.left, window.innerWidth - el.offsetWidth - 8));
@@ -1434,6 +1436,7 @@ function drawTurns() {
   const { el, s } = turnsPop;
   const data = turnsView.id === s.id ? turnsView.data : null;
   if (!data || activeSession() !== s || !el.isConnected) return closeTurns();
+  if (turnsPop.kind === 'agents') return drawAgents(el, data.agents ?? []);
   const { turns, state } = data;
   const now = Date.now();
   const idle = idleOf(data, now);
@@ -1544,13 +1547,94 @@ function turnsButton(store, s) {
     title: `${turns.length} ${turns.length === 1 ? 'turn' : 'turns'} in this claude session · ${label}${ask}\nShow each turn, with its working and waiting times`,
     'aria-label': `Turns: ${turns.length}, ${label}`,
     'aria-haspopup': 'dialog',
-    'aria-expanded': String(turnsPop?.s === s),
+    'aria-expanded': String(turnsPop?.s === s && turnsPop.kind === 'turns'),
     onclick: (/** @type {MouseEvent} */ e) => {
       e.stopPropagation();
-      if (turnsPop?.s === s) return closeTurns();
+      if (turnsPop?.s === s && turnsPop.kind === 'turns') return closeTurns();
       openTurns(/** @type {HTMLElement} */ (e.currentTarget), s);
     },
   }, icon('message'), h('span', null, String(turns.length)), h('span', { class: 'term-turns-state', role: 'img', 'aria-label': label }));
+}
+
+// The subagents the shown claude started, read with its turns: how many still work (or how many it ran, once all
+// are done). A click opens the subagents panel.
+/** @param {Session} s */
+function agentsButton(s) {
+  const data = turnsView.id === s.id ? turnsView.data : null;
+  if (!data?.claude) return null;
+  const agents = data.agents ?? [];
+  const working = agents.filter((a) => a.state === 'working').length;
+  const open = turnsPop?.s === s && turnsPop.kind === 'agents';
+  const title = `${agents.length} ${agents.length === 1 ? 'subagent' : 'subagents'} in this claude session${working ? ` · ${working} working` : ''}\nShow what each one is doing`;
+  return h('button', {
+    type: 'button',
+    class: `term-tool agents${working ? ' working' : agents.length ? '' : ' none'}`,
+    title,
+    'aria-label': title.split('\n')[0],
+    'aria-haspopup': 'dialog',
+    'aria-expanded': String(open),
+    onclick: (/** @type {MouseEvent} */ e) => {
+      e.stopPropagation();
+      if (open) return closeTurns();
+      openTurns(/** @type {HTMLElement} */ (e.currentTarget), s, 'agents');
+    },
+  }, icon('users'), h('span', null, working ? `${working}/${agents.length}` : String(agents.length)), working ? h('span', { class: 'term-dot' }) : null);
+}
+
+const AGENT_STATES = /** @type {Record<string, string>} */ ({ working: 'Working', done: 'Done', stopped: 'Stopped' });
+// The subagents whose rows are unfolded to show their task and last text, by id.
+const agentsOpen = new Set();
+
+// The subagents panel: each subagent, newest first, with its task, how long it ran, and what it does now (its last
+// tool call) or what it answered once done. A click unfolds its full task and last text.
+/** @param {HTMLElement} el @param {SessionAgent[]} agents */
+function drawAgents(el, agents) {
+  const now = Date.now();
+  const working = agents.filter((a) => a.state === 'working').length;
+  const scroll = el.querySelector('.turns-list')?.scrollTop ?? 0;
+  el.replaceChildren(
+    h('div', { class: 'turns-head' },
+      h('div', { class: 'turns-title' },
+        icon('users'),
+        h('strong', null, 'Subagents'),
+        h('span', { class: 'muted' }, working ? `${working} working · ${agents.length} in all` : `${agents.length} in all`))),
+    agents.length
+      ? h('div', { class: 'turns-list', role: 'list' }, agents.map(agentRow))
+      : h('p', { class: 'muted small agents-empty' }, 'No subagent started yet.'));
+  const list = el.querySelector('.turns-list');
+  if (list) list.scrollTop = scroll;
+
+  /** @param {SessionAgent} a */
+  function agentRow(a) {
+    const live = a.state === 'working';
+    const unfolded = agentsOpen.has(a.id);
+    const ran = (live ? now : a.end) - a.start;
+    const kind = [a.type, a.background ? 'background' : ''].filter(Boolean).join(' · ');
+    const answer = a.said.replace(/\s+/g, ' ');
+    return h('button', {
+      type: 'button',
+      class: `turns-row agent-row ${a.state}`,
+      role: 'listitem',
+      'aria-expanded': String(unfolded),
+      title: unfolded ? 'Click to fold' : 'Click to show its task and last text',
+      onclick: () => {
+        if (unfolded) agentsOpen.delete(a.id);
+        else agentsOpen.add(a.id);
+        drawTurns();
+      },
+    },
+    h('div', { class: 'turns-line' },
+      h('span', { class: 'turns-icon' }, live ? h('span', { class: 'term-dot' }) : icon(a.state === 'stopped' ? 'stop' : 'check')),
+      h('span', { class: 'turns-text' }, a.description || turnLine(a.task) || a.id),
+      h('span', { class: 'turns-took' }, a.start && ran > 0 ? took(ran) : '')),
+    h('div', { class: 'muted small turns-meta' },
+      h('span', null, [AGENT_STATES[a.state] ?? a.state, kind, a.start ? `started ${clock(a.start)}` : '', `${a.tools} tool ${a.tools === 1 ? 'call' : 'calls'}`].filter(Boolean).join(' · ')),
+      live && a.tool ? h('span', { class: 'agent-now' }, icon('terminal'), h('span', null, `${a.tool.name}${a.tool.detail ? `: ${a.tool.detail}` : ''}`)) : null,
+      !live && answer && !unfolded ? h('span', { class: 'agent-now' }, icon('message'), h('span', null, answer)) : null),
+    unfolded ? h('div', { class: 'small agent-more' },
+      a.task ? [h('div', { class: 'muted' }, 'Task'), h('p', null, a.task)] : null,
+      a.said ? [h('div', { class: 'muted' }, live ? 'Last said' : 'Answer'), h('p', null, a.said)] : null) : null);
+  }
 }
 
 // The skills and the MCP tools the shown claude used, read with its turns: a button each, with its own count. A click
