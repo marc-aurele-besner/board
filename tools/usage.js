@@ -5,7 +5,7 @@
 // is removed, so both places are read.
 // CLAUDE_CONFIG_DIR moves Claude's folder, as it does for Claude itself.
 /** @import { DevModelUsage } from '../types/data' */
-/** @import { SessionArtifact, SessionAsk, WorktreeUsage } from '../types/terminal' */
+/** @import { SessionArtifact, SessionAsk, SessionTurn, WorktreeUsage } from '../types/terminal' */
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -142,6 +142,9 @@ function parse(text, billing) {
   const artifacts = new Map();
   /** @type {Map<string, ToolInput>} */
   const publishing = new Map();
+  // The user's prompts, each a turn: when it was sent, when claude last answered it, and whether it was interrupted.
+  /** @type {SessionTurn[]} */
+  const turns = [];
   for (const line of text.split('\n')) {
     if (!line) continue;
     /** @type {TranscriptLine} */
@@ -156,6 +159,17 @@ function parse(text, billing) {
     readArtifacts(o, publishing, artifacts);
     if (!o.isSidechain) {
       const c = o.message?.content;
+      const at = Date.parse(/** @type {string} */ (o.timestamp)) || 0;
+      if (o.type === 'user' && !o.isMeta && !o.isCompactSummary && !o.isVisibleInTranscriptOnly) {
+        const said = turnText(c);
+        const last = turns.at(-1);
+        if (said === INTERRUPTED) {
+          if (last) last.interrupted = true;
+        } else if (said) {
+          turns.push({ text: said.slice(0, PROMPT_KEPT), at, end: at, interrupted: false });
+          if (turns.length > TURNS_KEPT) turns.shift();
+        }
+      } else if (o.type === 'assistant' && at && turns.length) turns[turns.length - 1].end = at;
       if (o.type === 'user' && !prompt && !o.isMeta) {
         const text = typeof c === 'string' ? c : Array.isArray(c) && c[0]?.type === 'text' ? c[0].text : '';
         if (text) prompt = { text: text.slice(0, PROMPT_KEPT), at: Date.parse(/** @type {string} */ (o.timestamp)) || 0 };
@@ -230,7 +244,7 @@ function parse(text, billing) {
   const last = open ? [...pending.values()].at(-1) : undefined;
   return {
     worktrees: [...worktrees], models, cost, extraCost, billing, duration, apiDuration, linesAdded, linesRemoved, efforts,
-    replies: replies.size, start, end, open, prompt, reply, written: [...written],
+    replies: replies.size, start, end, open, prompt, reply, written: [...written], turns,
     ask: last ? askOf(last) : null,
     artifacts: [...artifacts].map(([url, title]) => ({ url, title })),
   };
@@ -310,6 +324,23 @@ function carries(next, prev) {
 }
 
 const PROMPT_KEPT = 400;
+const TURNS_KEPT = 200;
+const INTERRUPTED = '\0interrupted';
+
+// What the user said in a prompt line, as a turn reads: the text, a slash command as typed (`/name args`), a shell
+// command as `! command`. Tool results, the board's notes and claude's own (a task notification, a local command's
+// output) are no turn, so ''. An interruption answers INTERRUPTED.
+/** @param {ReplyMessage['content']} c */
+function turnText(c) {
+  const text = (typeof c === 'string' ? c : Array.isArray(c) ? c.find((b) => b.type === 'text')?.text ?? '' : '').trim();
+  if (!text) return '';
+  if (/^\[Request interrupted/.test(text)) return INTERRUPTED;
+  const name = /<command-name>([^<]*)<\/command-name>/.exec(text)?.[1];
+  if (name) return `${name.trim()} ${/<command-args>([^<]*)<\/command-args>/.exec(text)?.[1] ?? ''}`.trim();
+  const bash = /^<bash-input>([\s\S]*)<\/bash-input>/.exec(text)?.[1];
+  if (bash) return `! ${bash.trim()}`;
+  return text.startsWith('<') ? '' : text;
+}
 // The tools that write a file, and where they name it.
 const WRITES = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'];
 
@@ -457,5 +488,5 @@ export async function sessionTranscript({ cwd, at, prompt = '', worktree = '', k
   const t = file ? await readTranscript(file, billing) : null;
   if (!t) return null;
   const agents = await agentsOf(file, billing);
-  return { file, busy: t.open || agents > 0, agents, reply: t.reply, written: t.written, ask: t.ask, artifacts: t.artifacts };
+  return { file, busy: t.open || agents > 0, agents, reply: t.reply, written: t.written, ask: t.ask, artifacts: t.artifacts, turns: t.turns };
 }

@@ -1,5 +1,5 @@
 // The Dev section's calls to the command runner on this machine (tools/terminal.js, started by `bun start`).
-/** @import { RunnerInfo, RunnerSessionList, RunnerStatus, RunnerFolder, RunnerFile, RunnerEvent, RunnerRun, RunnerRemoved, RunnerClaudeExit, RunnerWorktrees, RunnerSkills, RunnerOutcome, WorktreeUsage, GitStatus, GitDiff, GitPullRequest, RunnerSearch } from '../types/terminal' */
+/** @import { RunnerInfo, RunnerSessionList, RunnerStatus, RunnerFolder, RunnerFile, RunnerEvent, RunnerRun, RunnerRemoved, RunnerClaudeExit, RunnerWorktrees, RunnerSkills, RunnerOutcome, RunnerTurns, WorktreeUsage, GitStatus, GitDiff, GitPullRequest, RunnerSearch } from '../types/terminal' */
 /** @import { DevSession, DevSessionList } from '../types/data' */
 export const TERMINAL_RUNNER = 'http://127.0.0.1:8419';
 
@@ -46,6 +46,10 @@ export const moveSession = (/** @type {string} */ base, /** @type {string} */ se
 // program waits for its user), done, failed, stopped or idle. Sessions the runner no longer has are left out.
 /** @type {(base: string, ids: string[]) => Promise<Record<string, RunnerStatus>>} */
 export const sessionStatus = async (base, ids) => (ids.length ? (await call(base, `/status?sessions=${ids.map(encodeURIComponent).join(',')}`)).json() : {});
+
+// The prompts of the claude a terminal started, and where its last turn stands.
+/** @type {(base: string, id: string, signal?: AbortSignal) => Promise<RunnerTurns>} */
+export const sessionTurns = async (base, id, signal) => (await call(base, `/turns?session=${encodeURIComponent(id)}`, { signal })).json();
 
 // A folder's entries ({ name, dir }), folders first.
 /** @type {(base: string, path: string) => Promise<RunnerFolder>} */

@@ -305,6 +305,18 @@ async function statusOf(id) {
   return { state: exit.stopped ? 'stopped' : exit.code === 0 ? 'done' : 'failed', code: exit.code, cwd, ...(s.artifacts ? { artifacts: s.artifacts } : {}) };
 }
 
+// The prompts of the claude a terminal started, for the turns menu on Dev's bar, and where the last one stands:
+// working, waiting on its user (with what it asks), or done once claude quit or answered. Null for a terminal gone.
+/** @param {string} id @returns {Promise<import('../types/terminal').RunnerTurns | null>} */
+async function turnsOf(id) {
+  const status = await statusOf(id);
+  if (!status) return null;
+  const t = await transcriptOf(await sessionOf(id)).catch(() => null);
+  if (!t) return { claude: false, state: status.state, turns: [] };
+  const state = status.state === 'working' || status.state === 'waiting' ? status.state : 'done';
+  return { claude: true, state, ask: 'ask' in status ? status.ask : null, turns: t.turns };
+}
+
 // Each page reads every terminal through one stream: a browser opens only six connections to a host, so a stream
 // per terminal used them all up after a few terminals and the next command never reached the runner. Events carry
 // their session's id as `s`. Streams by the page's client id.
@@ -1429,6 +1441,13 @@ createServer(async (req, res) => {
       if (status) out[id] = status;
     }
     res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(out));
+    return;
+  }
+  if (req.method === 'GET' && path === '/turns') {
+    const id = new URL(/** @type {string} */ (req.url), 'http://terminal').searchParams.get('session') ?? '';
+    const body = SESSION_ID.test(id) ? await turnsOf(id) : null;
+    if (!body) res.writeHead(404, cors).end('No such terminal.');
+    else res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(body));
     return;
   }
   if (req.method === 'GET' && (path === '/files' || path === '/file')) {

@@ -38,6 +38,24 @@ export interface SessionAsk {
   text: string;
 }
 
+// One prompt of a claude session: what the user said, when (ms), when claude last answered it, and whether the
+// user interrupted it.
+export interface SessionTurn {
+  text: string;
+  at: number;
+  end: number;
+  interrupted: boolean;
+}
+
+// GET /turns: the prompts of a terminal's claude session, oldest first, and where its last turn stands: working,
+// waiting (on a question, a plan or a permission: ask), or done. claude false when the terminal never started claude.
+export interface RunnerTurns {
+  claude: boolean;
+  state: string;
+  ask?: SessionAsk | null;
+  turns: SessionTurn[];
+}
+
 // A claude.ai Artifact link; title '' when none was given.
 export interface SessionArtifact {
   url: string;
