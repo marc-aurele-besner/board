@@ -1108,7 +1108,7 @@ function mainPane(store) {
   if (!view.open) {
     return h('section', { class: 'slack-main slack-empty' },
       h('div', { class: 'stack slack-empty-text' },
-        icon('message'),
+        icon('slack'),
         h('p', null, 'Pick a conversation on the left.'),
         h('p', { class: 'muted small' }, 'Drag conversations to reorder them, drop them on a group, or use their ⋯ menu to mute, group or tie them to a project.')));
   }
@@ -1258,7 +1258,7 @@ function draw(root, store) {
 export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'slack',
   title: 'Slack',
-  icon: 'message',
+  icon: 'slack',
   collection: SLACK,
   defaults: SLACK_DEFAULTS,
   render: draw,
