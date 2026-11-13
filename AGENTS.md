@@ -13,7 +13,7 @@ A personal command center that runs locally. It is plain HTML, CSS and JavaScrip
 - Run `bun install` once after cloning. It installs TypeScript as a dev-only tool (it never ships to the browser) and turns on `.githooks/pre-commit`.
 - Syntax check every module before committing:
   `for f in js/*.js js/modules/*.js tools/*.js tools/*/*.js; do node --experimental-default-type=module --check "$f" || echo "FAIL $f"; done`
-- Type check with `bun run typecheck`. `tools/typecheck.js` runs `tsc` over the JSDoc with two configs: `jsconfig.json` for the browser code (`js/`, `types/`) and `tools/jsconfig.json` for the Node runner, which sees neither `window` nor `document`. The runner's modules from `js/` are checked by the browser config, so only errors in `tools/` count in the second run. Every `.js` file is checked in strict mode, with no opt-in: a new file is checked as soon as it exists. `bun run check` runs the syntax loop, the import and merge checks and the type check together; the pre-commit hook runs it.
+- Type check with `bun run typecheck`. `tools/typecheck.js` runs `tsc` over the JSDoc with two configs: `jsconfig.json` for the browser code (`js/`, `types/`) and `tools/jsconfig.json` for the Node runner, which sees neither `window` nor `document`. The runner's modules from `js/` are checked by the browser config, so only errors in `tools/` count in the second run. Every `.js` file is checked in strict mode, with no opt-in: a new file is checked as soon as it exists. `bun run check` runs the syntax loop, the import, merge and LinkedIn queue checks and the type check together; the pre-commit hook runs it.
 - The worker imports modules from `js/` under Node, so those must not touch `document`, `window`, `localStorage` or `location` when they load, nor import a module that does. `node tools/check-imports.js` loads every job and catches both a missing import and a DOM call at load time. `node tools/check-merge.js` checks that the worker's writes and a tab's merge without losing either.
 - Test real behavior in the browser when you can. Folder picking needs a user click, so ask the user to drive that step if you cannot.
 
@@ -57,7 +57,8 @@ js/chart.js           SVG bar and line charts with a hover tooltip
 js/socials.js         the X, LinkedIn, GitHub and Instagram accounts, their follower (and GitHub star) history in socials.json; parsing a handle or profile link (no DOM)
 js/linkedin-core.js   linkedin.json without the DOM: the official sign-in's code trade and its expiry notice
 js/linkedin.js        LinkedIn's official sign-in popup (Settings → LinkedIn → Publish as you)
-js/modules/settings-socials.js  Settings → X / Twitter, LinkedIn, GitHub and Instagram accounts: accounts, their projects, LinkedIn’s session; Read now
+js/linkedin-session.js  linkedinCall(store, req): the one entry point for any LinkedIn read through the saved session (contract at its top); the runners run the queue, a tab asks them (no DOM)
+js/modules/settings-socials.js  Settings → X / Twitter, LinkedIn, GitHub and Instagram accounts: accounts, their projects, LinkedIn’s session, its state, calls today and daily limit; Read now
 js/modules/monitoring-socials.js  Monitoring → Socials (X, LinkedIn, GitHub, Instagram): followers (and GitHub stars) now, growth over the period, a line per account, Read now
 js/modules/monitoring-ai.js  Monitoring → AI usage overview: board calls and Dev sessions by source and project, a chart and table broken down by project, source, model or feature, against the period before
 js/modules/monitoring-dev.js  Monitoring → AI usage → Dev sessions: a chart and table by project, model, effort or billing, in cost, tokens, time or sessions
@@ -138,6 +139,8 @@ tools/jobs/previews.js  reads the preview links of open tasks' and recent Cron r
 tools/jobs/google.js  renews Google access tokens; a tab that finds one expired asks it through POST /run/google
 tools/check-imports.js  loads every worker module under plain Node, to catch a missing import or a DOM call at load time
 tools/check-merge.js  the worker and a tab change two fields of one file; both must survive
+tools/linkedin-session.js  the LinkedIn session's queue (runners only): 20–40 s gap, daily limit, cache in linkedin.json, stop on sign-out; POST /linkedin/voyager runs it for a tab
+tools/check-linkedin.js  the LinkedIn queue against a stubbed fetch: gap, limit, cache, sign-out
 tools/usage.js        reads Claude Code's transcripts for the runner: a task worktree's models, tokens, cost and effort
 ```
 
@@ -151,6 +154,7 @@ tools/usage.js        reads Claude Code's transcripts for the runner: a task wor
 - **New tasks.** Create a task with `makeTask()` from `js/capture.js`, so every task has the same fields. A task the board makes by itself sets `auto` and `autoRef`.
 - **AI prompts.** A new AI feature adds its system prompt to `PROMPTS` in `js/prompts.js` and reads it with `systemPrompt(store, id, vars)`, so it can be edited in Settings.
 - **Outside services.** A new lookup that leaves the browser is listed in the README under "Outside services", with what it sends.
+- **LinkedIn's session.** Every call with the saved `li_at` / `JSESSIONID` goes through `linkedinCall()` in `js/linkedin-session.js` (or `voyager()` in `tools/linkedin-session.js` from a job), never a `fetch` of its own: the queue keeps the pace, the daily limit and the stop after a sign-out. Give each repeatable read a `cacheKey`. Never test with the real session; stub `fetch` as `tools/check-linkedin.js` does.
 - **Cross-section data.** A section may read another section's collection through the store (todos read projects). Write to the other collection with its own `store.update` call.
 - **Typed data.** Each JSON file's shape is in `types/data/<name>.d.ts`, collected in `Collections` in `types/data.d.ts`, so `store.get('todos')` is typed in every file. To add a field: add it to the interface (optional, `field?: T`, since older files lack it), add it to the matching `types/fixtures/<name>.json`, then run `bun run typecheck`; every file that is checked and misuses the field fails. A new collection needs its own `.d.ts`, an entry in `Collections` (and `WorkerCollections` if only the runners write it), a fixture and a line in `types/fixtures.check.js`. Stored enum-like fields stay `string`; narrow them in code.
 - **JSDoc types.** Annotate exported functions and their parameters, and let inference do the rest. Import shared shapes with `/** @import { Task, Store } from '../types/data' */`. No `@ts-ignore`; an `any` or `@ts-expect-error` carries its reason on the same line (`// any: <reason>`). Fix a real bug the checker finds in its own commit; do not change code only to please the checker.
