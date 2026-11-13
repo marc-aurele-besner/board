@@ -57,6 +57,7 @@ export const STEP_TYPES = [
   ['stop', 'Stop if', 'filter', 'Ends the run early, for example when there is nothing to report. In a loop, skips the item.'],
   ['format', 'Format', 'align-left', 'Reshapes the input into cleaner text, a list with one line per item, or named JSON fields.'],
   ['parse', 'Parse JSON', 'code', 'Finds the JSON in a text, such as a model’s or claude’s answer, even with prose around it or cut off, and passes it on as data.'],
+  ['dedupe', 'Filter duplicates', 'copy', 'Drops the items of a list that already have a task, done ones too, such as the jobs an earlier run found, so a loop after it only makes the new ones.'],
   ['loop', 'Loop over items', 'repeat', 'Runs the next steps once for each item of a list, then passes on what they gave for all of them.'],
   ['task', 'Create task', 'check-square', 'Adds a task with a title and description you write, the input by default. Its output is the new task’s id, so a later step can put a task under it.'],
   ['update', 'Update task', 'pencil', 'Adds a note to a task you name by its id, such as an earlier Create task step’s output, and can change its title, status, priority or due date. Its output is the task’s id.'],
@@ -309,6 +310,7 @@ export function makeStep(type) {
   if (type === 'format') return { ...base, mode: 'text', text: '{{input}}', items: '{{input}}', itemText: '- {{item}}', separator: 'line', fields: [makeField()] };
   if (type === 'parse') return { ...base, text: '{{input}}', mode: 'largest' };
   if (type === 'loop') return { ...base, items: '{{input}}', span: 1, max: LOOP_MAX };
+  if (type === 'dedupe') return { ...base, items: '{{input}}', text: '{{item}}', match: 'title', scope: 'flow' };
   if (type === 'dev') return { ...base, mode: 'claude', preset: '', devCommand: '', projectId: '', prompt: '{{input}}', command: '', waitMinutes: DEV_WAIT_MINUTES };
   return { ...base, text: '{{flow}}: {{input}}' };
 }
@@ -1516,6 +1518,81 @@ function parseStep(step, vars, ctx) {
   return JSON.stringify(value, null, 2);
 }
 
+// --- Filter duplicates ---
+// A Filter duplicates step keeps the items of a list that no task matches yet, so a flow that finds the same things
+// each day (job posts, articles, issues) makes a task only for the new ones. Each item gives a key from a template
+// ({{item.url}}); a task matches when its title is that key, or its title or description holds it. Done tasks count,
+// so an item reviewed and closed is not made again. Two items with the same key keep the first.
+
+export const DEDUPE_MATCH = [
+  ['title', 'The task’s title is the key'],
+  ['text', 'The task’s title or description holds the key'],
+];
+export const DEDUPE_SCOPE = [
+  ['flow', 'Tasks this flow made'],
+  ['project', 'Tasks of the flow’s project'],
+  ['all', 'Every task'],
+];
+
+// Keys compare without case and with runs of spaces as one, so "Senior  Dev" matches "senior dev".
+/** @param {unknown} text */
+const dedupeKey = (text) => String(text ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+/**
+ * @param {DataStore} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {Vars} vars
+ * @param {RunCtx} ctx
+ */
+function dedupeStep(store, flow, step, vars, ctx) {
+  const items = itemsOf(step.items, vars);
+  const scope = step.scope || 'flow';
+  const projectId = flowProjectId(flow) || null;
+  const tasks = store.get('todos').items.filter((t) =>
+    scope === 'all' ? true : scope === 'project' ? (t.projectId ?? null) === projectId : t.auto === 'cron' && t.autoRef === flow.id);
+  const byText = step.match === 'text';
+  const titles = new Set(tasks.map((t) => dedupeKey(t.text)));
+  const texts = byText ? tasks.map((t) => dedupeKey(`${t.text}\n${t.description ?? ''}`)) : [];
+  /** @type {Set<string>} */
+  const seen = new Set();
+  /** @type {unknown[]} */
+  const kept = [];
+  let known = 0;
+  let repeated = 0;
+  let blank = 0;
+  for (const [index, item] of items.entries()) {
+    const key = dedupeKey(fill(step.text || '{{item}}', withItem(vars, { item, index, count: items.length })));
+    // An item with no key cannot be told apart, so it is kept: better a task too many than one lost.
+    if (!key) {
+      blank++;
+      kept.push(item);
+      continue;
+    }
+    if (seen.has(key)) {
+      repeated++;
+      continue;
+    }
+    seen.add(key);
+    if (byText ? texts.some((t) => t.includes(key)) : titles.has(key)) {
+      known++;
+      continue;
+    }
+    kept.push(item);
+  }
+  const plural = (/** @type {number} */ n, /** @type {string} */ one, /** @type {string} */ many) => `${n} ${n === 1 ? one : many}`;
+  ctx.data = kept;
+  // An empty list counts as nothing found, so a "Stop if" after it can end the run quietly.
+  ctx.nothing = !kept.length;
+  ctx.note = [
+    `Kept ${kept.length} of ${plural(items.length, 'item', 'items')}.`,
+    known ? `${plural(known, 'item already has a task', 'items already have a task')}.` : '',
+    repeated ? `${plural(repeated, 'repeat', 'repeats')} in the list.` : '',
+    blank ? `${plural(blank, 'item', 'items')} had an empty key and ${blank === 1 ? 'was' : 'were'} kept.` : '',
+  ].filter(Boolean).join(' ');
+  return JSON.stringify(kept, null, 2);
+}
+
 /** @param {CronStep} step */
 export const loopMax = (step) => Math.min(LOOP_LIMIT, Math.max(1, Math.round(Number(step.max) || LOOP_MAX)));
 
@@ -2158,6 +2235,7 @@ async function runStep(store, flow, step, input, ctx) {
   if (step.type === 'update') return updateTask(store, step, vars, ctx);
   if (step.type === 'format') return formatStep(step, vars, ctx);
   if (step.type === 'parse') return parseStep(step, vars, ctx);
+  if (step.type === 'dedupe') return dedupeStep(store, flow, step, vars, ctx);
   if (step.type === 'loop') {
     const all = itemsOf(step.items, vars);
     const items = all.slice(0, loopMax(step));
