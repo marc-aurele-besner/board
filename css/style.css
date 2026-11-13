@@ -2169,6 +2169,7 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .kind-gather { --c: var(--accent); }
 .kind-ai { --c: var(--ai); }
 .kind-task { --c: var(--income); }
+.kind-update { --c: var(--income); }
 .kind-notify { --c: var(--danger); }
 .kind-stop { --c: var(--muted); }
 .kind-dev { --c: var(--text); }
