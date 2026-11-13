@@ -5,6 +5,8 @@
 import { voyager, clock } from './linkedin-session.js';
 import { linkedinCall, useLinkedinSession } from '../js/linkedin-session.js';
 import { todayISO } from '../js/ui.js';
+import { dueStep, parsePostCounts } from '../js/linkedin-reads.js';
+import linkedinMetrics from './jobs/linkedin-metrics.js';
 
 let failed = 0;
 /** @param {string} name @param {boolean} ok */
@@ -52,6 +54,16 @@ globalThis.fetch = async (/** @type {string | URL | Request} */ url, /** @type {
 
 /** @param {Promise<unknown>} p */
 const codeOf = (p) => p.then(() => 'none', (/** @type {{ code?: string }} */ err) => err.code ?? 'plain');
+// What fn throws, or null.
+/** @param {() => unknown} fn @returns {unknown} */
+const thrown = (fn) => {
+  try {
+    fn();
+    return null;
+  } catch (err) {
+    return err;
+  }
+};
 
 // Pace: the first call waits out the last one's gap (from linkedin.json, as after a restart), the next 20 to 40 s.
 {
@@ -130,6 +142,47 @@ for (const [name, res] of /** @type {[string, () => Response][]} */ ([
   answer = () => new Response('{"ok":1}', { status: 200 });
   const { store } = makeStore();
   check('linkedinCall goes through the queue in the runners', JSON.stringify(await linkedinCall(store, { path: 'k' })) === '{"ok":1}');
+}
+
+// Post results (tools/jobs/linkedin-metrics.js): which read is due, how an answer is read, and a run's calls.
+{
+  const H = 3600000;
+  const at = Date.now();
+  /** @param {number} hoursAgo @param {number[]} [reads] hours after posting */
+  const post = (hoursAgo, reads = []) => ({
+    id: `p${hoursAgo}`, text: 'First line\nmore', status: 'posted', createdAt: 0, urn: `urn:li:share:${hoursAgo}`, postedAt: at - hoursAgo * H,
+    metrics: reads.map((r) => ({ at: at - hoursAgo * H + r * H, reactions: 1 })),
+  });
+  check('no read before an hour', dueStep(post(0.5), at) === null);
+  check('the 1-hour read is due', dueStep(post(2), at) === '1h');
+  check('a step read once is not read again', dueStep(post(3, [1.2]), at) === null);
+  check('the 24-hour read is due', dueStep(post(30, [1.2]), at) === '24h');
+  check('after a sleep only the latest step is read', dueStep(post(240), at) === '7d');
+  check('a 7-day read ends the reads', dueStep(post(400, [1, 24, 170]), at) === null);
+  check('an old post is not read on schedule', dueStep(post(40 * 24), at) === null);
+  check('a draft is not read', dueStep({ ...post(2), status: 'draft' }, at) === null);
+
+  const m = parsePostCounts({ data: { totalSocialActivityCounts: { numLikes: 5, numComments: 2, numShares: 1, numImpressions: 300 } } }, at);
+  check('counts are read from a nested answer', m.reactions === 5 && m.comments === 2 && m.reposts === 1 && m.impressions === 300);
+  const sum = parsePostCounts({ reactionTypeCounts: [{ count: 3 }, { count: 4 }], numComments: 0 }, at);
+  check('reactions add up from their types', sum.reactions === 7 && sum.comments === 0 && sum.impressions === undefined);
+  check('an answer without counts is a readable error', /no reaction, comment or repost count/.test(String(/** @type {Error} */ (thrown(() => parsePostCounts({ elements: [] }))).message)));
+
+  calls = [];
+  answer = () => new Response('{"numLikes":9,"numComments":1,"numShares":0}', { status: 200 });
+  const { store, data } = makeStore();
+  data.linkedin.posts = [post(2), post(30, [1]), post(200), post(250), post(300), post(0.2)];
+  const ctx = /** @type {any} */ ({ store, params: {}, signal: new AbortController().signal, force: false }); // any: a stand-in for the job's context
+  const result = await linkedinMetrics.run(ctx);
+  check('a run reads at most 4 posts', calls.length === 4 && result.read === 4);
+  check('each read is added to its post', data.linkedin.posts[0].metrics.length === 1 && data.linkedin.posts[0].metrics[0].reactions === 9);
+  check('the next run reads what is left, then nothing', (await linkedinMetrics.run(ctx)).read === 1 && (await linkedinMetrics.run(ctx)).read === 0 && calls.length === 5);
+
+  calls = [];
+  const limited = makeStore({ dailyLimit: 0 });
+  limited.data.linkedin.posts = [post(2)];
+  const out = await linkedinMetrics.run(/** @type {any} */ ({ ...ctx, store: limited.store })); // any: as above
+  check('the daily limit stops a run without a call or an error', calls.length === 0 && Boolean(out.waiting) && !limited.data.linkedin.posts[0].metrics.length);
 }
 
 process.exit(failed ? 1 : 0);

@@ -87,12 +87,13 @@ export function barChart(labels, series, { grouped = false, format = (v) => v.to
 // Lines per label, for running totals and rates. A null value leaves a gap; `dashed` draws a series as a
 // dashed line (an estimate), and `area` shades under it. Hover works as on the bar chart, one point per label.
 // `fit` scales the axis to the values instead of starting at 0, so a small change on a large number shows.
+// `marks` are label indices flagged with a tick on the baseline (posts on a follower line); tip() says what they are.
 /**
  * @param {string[]} labels
  * @param {LineSeries[]} series
- * @param {{ format?: (v: number) => string, tip?: ChartTip | null, fit?: boolean }} [options]
+ * @param {{ format?: (v: number) => string, tip?: ChartTip | null, fit?: boolean, marks?: number[] }} [options]
  */
-export function lineChart(labels, series, { format = (v) => v.toLocaleString(), tip = null, fit = false } = {}) {
+export function lineChart(labels, series, { format = (v) => v.toLocaleString(), tip = null, fit = false, marks = [] } = {}) {
   const MIN_W = 360;
   const H = 200;
   const PAD = 24;
@@ -119,6 +120,11 @@ export function lineChart(labels, series, { format = (v) => v.toLocaleString(), 
     // A light grid at the top value and its half, labelled, since a line has no bar height to compare.
     let body = [max, (max + min) / 2].map((v) => `<line x1="0" x2="${W}" y1="${yOf(v).toFixed(1)}" y2="${yOf(v).toFixed(1)}" class="grid"/>`
       + `<text x="2" y="${(yOf(v) - 4).toFixed(1)}" class="axis">${esc(format(v))}</text>`).join('');
+    for (const i of marks) {
+      if (i < 0 || i >= labels.length) continue;
+      body += `<line class="mark-line" x1="${xOf(i).toFixed(1)}" x2="${xOf(i).toFixed(1)}" y1="${TOP}" y2="${H - PAD}"/>`
+        + `<circle class="mark" cx="${xOf(i).toFixed(1)}" cy="${H - PAD}" r="4"/>`;
+    }
     for (const sr of series) {
       // Runs of points without a gap, each drawn as its own path.
       /** @type {[number, number][][]} */

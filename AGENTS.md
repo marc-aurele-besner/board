@@ -58,9 +58,11 @@ js/socials.js         the X, LinkedIn, GitHub and Instagram accounts, their foll
 js/linkedin-core.js   linkedin.json without the DOM: the official sign-in's code trade and expiry notice, a task's draft, posting through the API
 js/linkedin.js        LinkedIn's official sign-in popup (Settings → LinkedIn → Publish as you), and Post now through the runners
 js/linkedin-composer.js  the LinkedIn post composer: text, link, a feed preview, Save draft, Schedule and Post now
+js/linkedin-reads.js  the session reads of posts (UNVERIFIED voyager paths and their defensive parsing): when each post's results are due (1 h, 24 h, 7 d)
 js/linkedin-session.js  linkedinCall(store, req): the one entry point for any LinkedIn read through the saved session (contract at its top); the runners run the queue, a tab asks them (no DOM)
 js/modules/settings-socials.js  Settings → X / Twitter, LinkedIn, GitHub and Instagram accounts: accounts, their projects, LinkedIn’s session, its state, calls today and daily limit; Read now
 js/modules/monitoring-socials.js  Monitoring → Socials (X, LinkedIn, GitHub, Instagram): followers (and GitHub stars) now, growth over the period, a line per account, Read now
+js/modules/monitoring-linkedin-posts.js  Monitoring → Socials, LinkedIn: post marks on an account's follower line and the posts table with their results, Read results now
 js/modules/monitoring-ai.js  Monitoring → AI usage overview: board calls and Dev sessions by source and project, a chart and table broken down by project, source, model or feature, against the period before
 js/modules/monitoring-dev.js  Monitoring → AI usage → Dev sessions: a chart and table by project, model, effort or billing, in cost, tokens, time or sessions
 js/modules/monitoring-tools.js  Monitoring → AI usage → Skills and MCP: the skills Dev sessions ran and the MCP tools they called, each counted on its own
@@ -133,6 +135,7 @@ tools/jobs/monitoring.js  deadlines, budgets, site checks, status pages and the 
 tools/jobs/telegram.js  long-polls the bot and turns messages into tasks (a `loop` job: it starts again at once)
 tools/jobs/github.js, npm.js, webstats.js, fx.js  GitHub counts (github.json), npm packages (npm.json), Bing data (webstats.json), exchange rates (fx.json)
 tools/jobs/socials.js  reads X and LinkedIn follower counts from the profile pages (LinkedIn company pages with the saved session), GitHub followers and stars from its API, Instagram's from the link-preview page
+tools/jobs/linkedin-metrics.js  reads posts' results (reactions, comments, reposts, impressions) at 1 h, 24 h and 7 d through the session queue, a few calls a run
 tools/jobs/dev-usage.js, worktrees.js  what claude sessions used; removing done tasks' worktrees through the command runner
 tools/jobs/defi.js    the DeFi jobs (positions, fee history, wallets, lending, hourly snapshots), run one at a time
 tools/jobs/cron.js    starts due Cron flows every minute, and one flow on Run now

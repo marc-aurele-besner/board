@@ -8,6 +8,7 @@ import { SOCIALS, NETWORKS, networkIcon, dayKey, profileUrl, handleLabel } from 
 import { stat } from './monitoring.js';
 import { sortTable } from './monitoring-web.js';
 import { readNow, isReading } from './settings-socials.js';
+import { postMarks, postsCard } from './monitoring-linkedin-posts.js';
 /** @import { Store, SocialAccount } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 
@@ -58,9 +59,12 @@ const changePill = (change, pct) => (change === null
   ? h('span', { class: 'muted small' }, 'No change yet')
   : h('span', { class: `social-change ${change > 0 ? 'up' : change < 0 ? 'down' : ''}` }, `${signed(change)}${pct === null ? '' : ` (${percent(pct)})`}`));
 
-/** @param {Store} store @param {AccountRow} row @param {string[]} labels */
-function accountCard(store, row, labels) {
+/** @param {Store} store @param {AccountRow} row @param {string[]} labels @param {string[]} days */
+function accountCard(store, row, labels, days) {
   const { account: a } = row;
+  const fmt = (/** @type {number} */ v) => count.format(Math.round(v));
+  // A LinkedIn account's posts, marked on its line.
+  const posts = postMarks(store, a, days, labels, row.values, fmt);
   const busy = isReading(a.id);
   const points = row.values.filter((v) => v !== null).length;
   return h('section', { class: 'card stack social-card' },
@@ -86,7 +90,7 @@ function accountCard(store, row, labels) {
         : null),
     a.error ? h('p', { class: 'small social-error', role: 'status' }, a.error) : null,
     points > 1
-      ? lineChart(labels, [{ name: 'Followers', color: 'var(--accent)', values: row.values, area: true }], { fit: true, format: (v) => count.format(Math.round(v)) })
+      ? lineChart(labels, [{ name: 'Followers', color: 'var(--accent)', values: row.values, area: true }], { fit: true, format: fmt, marks: posts.marks, tip: posts.tip })
       : h('p', { class: 'muted small' }, points ? 'The line starts once a second day is read.' : 'Not read yet. The runners read the counts every few hours.'),
     // Stars get their own line: an account's stars and followers are often far apart.
     row.stars && row.stars.values.filter((v) => v !== null).length > 1
@@ -159,7 +163,8 @@ export function socialsTab(store, w) {
         ? stat('GitHub stars', count.format(starsNow), starsChanged.length ? `${signed(starsGained)}${starsStart ? ` (${percent(starsGained / starsStart)})` : ''} over the period` : 'Needs counts from two days')
         : null,
       stat('Accounts', String(accounts.length), byNetwork.map(([n, c]) => `${c} ${n}`).join(' · '))),
-    h('div', { class: 'social-grid' }, rows.map((r) => accountCard(store, r, labels))),
+    h('div', { class: 'social-grid' }, rows.map((r) => accountCard(store, r, labels, days))),
+    postsCard(store, w),
     h('section', { class: 'card stack' },
       h('h3', null, 'By account'),
       sortTable('socials', [
