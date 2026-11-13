@@ -358,7 +358,7 @@ async function turnsOf(id) {
   const turns = state === 'waiting' && last && since >= last.at
     ? [...t.turns.slice(0, -1), { ...last, waits: [...last.waits, { kind: ask?.kind ?? 'permission', at: since, end: 0 }] }]
     : t.turns;
-  return { claude: true, state, ask, turns, skills: t.skills, mcp: t.mcp, agents: t.subagents, agentTools: t.agentTools };
+  return { claude: true, state, ask, turns, skills: t.skills, mcp: t.mcp, agents: t.subagents, agentTools: t.agentTools, failures: t.failures };
 }
 
 // Each page reads every terminal through one stream: a browser opens only six connections to a host, so a stream

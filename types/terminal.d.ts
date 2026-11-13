@@ -83,6 +83,21 @@ export interface RunnerTurns {
   agents?: SessionAgent[];
   // What all its subagents called, by tool (as a turn's tools). Missing from a runner started before it was read.
   agentTools?: Record<string, DevToolUse>;
+  // Its failed tool calls and its subagents', oldest first, the latest ones only. Missing from a runner started
+  // before they were read.
+  failures?: ToolFailure[];
+}
+
+// A tool call that failed: the tool, what it was given (a command's description, a file, a pattern), the command
+// itself when `detail` is its description, when it was called (ms), the error it got back (its start), and the
+// subagent that made it, when one did.
+export interface ToolFailure {
+  name: string;
+  detail: string;
+  command?: string;
+  at: number;
+  error: string;
+  agent?: string;
 }
 
 // A subagent of a claude session, from its transcript and .meta.json in <session>/subagents. state: working, done,

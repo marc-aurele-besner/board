@@ -5,7 +5,7 @@
 // is removed, so both places are read.
 // CLAUDE_CONFIG_DIR moves Claude's folder, as it does for Claude itself.
 /** @import { DevModelUsage, DevToolUse, DevTurn } from '../types/data' */
-/** @import { SessionAgent, SessionArtifact, SessionAsk, SessionTurn, WorktreeUsage } from '../types/terminal' */
+/** @import { SessionAgent, SessionArtifact, SessionAsk, SessionTurn, ToolFailure, WorktreeUsage } from '../types/terminal' */
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -166,8 +166,11 @@ function parse(text, billing) {
   // of the session holds. The calls still waiting for their result, by id.
   /** @type {Record<string, DevToolUse>} */
   const tools = {};
-  /** @type {Map<string, { name: string, at: number }>} */
+  /** @type {Map<string, { name: string, detail: string, at: number, command?: string }>} */
   const called = new Map();
+  // The calls that failed, oldest first: what each was given and the error it got back.
+  /** @type {ToolFailure[]} */
+  const failures = [];
   for (const line of text.split('\n')) {
     if (!line) continue;
     /** @type {TranscriptLine} */
@@ -187,7 +190,9 @@ function parse(text, billing) {
           toolCalls++;
           lastTool = { name: b.name, detail: toolDetail(b.input ?? {}), at: Date.parse(/** @type {string} */ (o.timestamp)) || 0 };
           (tools[b.name] ??= { calls: 0 }).calls++;
-          if (b.id) called.set(b.id, lastTool);
+          // A command comes with a description, which is what `detail` reads: a failure shows the command too.
+          const command = typeof b.input?.command === 'string' && typeof b.input.description === 'string' ? b.input.command.trim().slice(0, ERROR_KEPT) : '';
+          if (b.id) called.set(b.id, command ? { ...lastTool, command } : lastTool);
         } else if (b.type === 'text' && b.text?.trim()) said = b.text.trim().slice(0, PROMPT_KEPT);
       }
     } else if (o.type === 'user' && !task && !o.isMeta) task = turnText(o.message?.content).slice(0, PROMPT_KEPT);
@@ -197,7 +202,11 @@ function parse(text, billing) {
         const call = b.type === 'tool_result' && b.tool_use_id ? called.get(b.tool_use_id) : undefined;
         if (!call || !b.tool_use_id) continue;
         const use = tools[call.name];
-        if (b.is_error) use.errors = (use.errors ?? 0) + 1;
+        if (b.is_error) {
+          use.errors = (use.errors ?? 0) + 1;
+          failures.push({ name: call.name, detail: call.detail, ...(call.command ? { command: call.command } : {}), at: call.at, error: resultText(b.content).slice(0, ERROR_KEPT) });
+          if (failures.length > FAILURES_KEPT) failures.shift();
+        }
         if (!ASKS[call.name] && at > call.at) use.ms = (use.ms ?? 0) + at - call.at;
         called.delete(b.tool_use_id);
       }
@@ -318,8 +327,18 @@ function parse(text, billing) {
     since: last?.at || 0,
     artifacts: [...artifacts].map(([url, title]) => ({ url, title })),
     skills, mcp,
-    lastTool, toolCalls, tools, said, task,
+    lastTool, toolCalls, tools, failures, said, task,
   };
+}
+
+// The text of a tool's result: a string, or blocks of which the text ones are read, without claude's error tag.
+const FAILURES_KEPT = 60;
+const ERROR_KEPT = 1200;
+/** @param {unknown} content */
+function resultText(content) {
+  const text = typeof content === 'string' ? content
+    : Array.isArray(content) ? content.map((b) => (b?.type === 'text' && typeof b.text === 'string' ? b.text : '')).filter(Boolean).join('\n') : '';
+  return text.replace(/^\s*<tool_use_error>|<\/tool_use_error>\s*$/g, '').trim();
 }
 
 // What a tool call works on, in a few words: the command, file, pattern, address or task it was given.
@@ -574,9 +593,9 @@ async function activityOf({ name, cwd }) {
 
 // A session's subagents, newest first, and how many are still working. Claude keeps them beside it, in
 // <session>/subagents: a transcript each, and a .meta.json with its type and the task it was given. `tools` is
-// what they all called.
+// what they all called, `failures` their failed calls, each with the subagent that made it.
 const AGENTS_KEPT = 30;
-/** @param {string} file @param {string} billing @returns {Promise<{ running: number, list: SessionAgent[], tools: Record<string, DevToolUse> }>} */
+/** @param {string} file @param {string} billing @returns {Promise<{ running: number, list: SessionAgent[], tools: Record<string, DevToolUse>, failures: ToolFailure[] }>} */
 async function agentsOf(file, billing) {
   const folder = join(file.slice(0, -'.jsonl'.length), 'subagents');
   /** @type {SessionAgent[]} */
@@ -584,6 +603,8 @@ async function agentsOf(file, billing) {
   // What all of them called, by tool: those past the ones kept count too.
   /** @type {Record<string, DevToolUse>} */
   const tools = {};
+  /** @type {ToolFailure[]} */
+  const failures = [];
   for (const n of await readdir(folder).catch(() => [])) {
     if (!n.endsWith('.jsonl')) continue;
     const path = join(folder, n);
@@ -598,10 +619,13 @@ async function agentsOf(file, billing) {
       if (u.errors) use.errors = (use.errors ?? 0) + u.errors;
       if (u.ms) use.ms = (use.ms ?? 0) + u.ms;
     }
+    const type = typeof meta.agentType === 'string' ? meta.agentType : '';
+    const description = typeof meta.description === 'string' ? meta.description : '';
+    for (const f of t.failures) failures.push({ ...f, agent: description || type || 'subagent' });
     list.push({
       id: n.slice(0, -'.jsonl'.length).replace(/^agent-/, ''),
-      type: typeof meta.agentType === 'string' ? meta.agentType : '',
-      description: typeof meta.description === 'string' ? meta.description : '',
+      type,
+      description,
       background: meta.requestShape === 'background',
       state: running ? 'working' : t.open && !meta.finished ? 'stopped' : 'done',
       start: t.start ?? Math.round(info.birthtimeMs),
@@ -613,7 +637,7 @@ async function agentsOf(file, billing) {
     });
   }
   list.sort((a, b) => b.start - a.start);
-  return { running: list.filter((a) => a.state === 'working').length, list: list.slice(0, AGENTS_KEPT), tools };
+  return { running: list.filter((a) => a.state === 'working').length, list: list.slice(0, AGENTS_KEPT), tools, failures };
 }
 
 // A subagent's .meta.json, cached by its time; {} when there is none (an older claude).
@@ -676,6 +700,7 @@ export async function sessionTranscript({ cwd, at, prompt = '', worktree = '', k
   }
   const t = file ? await readTranscript(file, billing) : null;
   if (!t) return null;
-  const { running: agents, list: subagents, tools: agentTools } = await agentsOf(file, billing);
-  return { file, busy: t.open || agents > 0, agents, subagents, reply: t.reply, written: t.written, ask: t.ask, since: t.since, artifacts: t.artifacts, turns: t.turns, skills: t.skills, mcp: t.mcp, agentTools };
+  const { running: agents, list: subagents, tools: agentTools, failures: agentFailures } = await agentsOf(file, billing);
+  const failures = [...t.failures, ...agentFailures].sort((a, b) => a.at - b.at).slice(-FAILURES_KEPT);
+  return { file, busy: t.open || agents > 0, agents, subagents, reply: t.reply, written: t.written, ask: t.ask, since: t.since, artifacts: t.artifacts, turns: t.turns, skills: t.skills, mcp: t.mcp, agentTools, failures };
 }
