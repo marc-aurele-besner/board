@@ -152,6 +152,18 @@ Reply with JSON only:
 {"summary": "two or three sentences on the whole set", "positions": [{"id": "the id given", "action": "one of the actions", "headline": "at most 8 words", "reason": "one or two sentences", "range": {"min": number, "max": number} or null}]}`,
   },
   {
+    id: 'linkedin-reply',
+    task: 'task-reply',
+    name: 'LinkedIn comment reply',
+    where: 'Inbox → LinkedIn → Draft reply with AI',
+    text: [
+      'You draft a reply to a comment on the user\'s own LinkedIn post. The input gives the post, and the comment with its author and headline.',
+      'Write as the post\'s author, in the comment\'s language: warm, specific to what the comment says, and short (one to three sentences).',
+      'Answer a question if the post gives the answer; otherwise say so honestly or ask a short question back. Do not invent facts, numbers or promises.',
+      'No hashtags, no emoji unless the comment uses them, no greeting line beyond the person\'s first name. Reply with the text of the reply only.',
+    ].join('\n'),
+  },
+  {
     id: 'cron-filter',
     task: 'task-cron',
     name: 'Cron AI filter',

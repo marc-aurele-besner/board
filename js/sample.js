@@ -316,8 +316,10 @@ function collections() {
         { id: 'lp7', taskId: 't10', projectId: 'p-docs', text: 'Atlas Docs now has an install guide for every platform.', link: 'https://docs.example.com', status: 'scheduled', scheduledAt: new Date(new Date(Date.now() + 86400000).setHours(9, 0, 0, 0)).getTime(), createdAt: Date.now() - 3600000 },
       ],
       comments: [
-        { id: 'lc1', postId: 'lp4', postUrn: 'urn:li:share:4', author: 'Sam Rivera', text: 'We tried the same, it worked.', at: Date.now() - 86400000, read: false },
-        { id: 'lc2', postId: 'lp4', postUrn: 'urn:li:share:4', author: 'Alex Kim', text: 'How did you handle urgent questions?', at: Date.now() - 20 * 3600000, read: true },
+        { id: 'lc1', postId: 'lp4', postUrn: 'urn:li:share:lp4', author: 'Sam Rivera', authorHeadline: 'Head of Growth at Example Labs', authorUrl: 'https://www.linkedin.com/in/sam-rivera-example/', text: 'We tried the same, it worked.', at: Date.now() - 86400000, read: false, taskId: null },
+        { id: 'lc2', postId: 'lp4', postUrn: 'urn:li:share:lp4', author: 'Alex Kim', authorHeadline: 'Technical writer', text: 'How did you handle urgent questions?', at: Date.now() - 20 * 3600000, read: true, taskId: null },
+        { id: 'lc3', postId: 'lp4', postUrn: 'urn:li:share:lp4', author: 'Jordan Lee', authorHeadline: 'Engineering manager', text: 'Did the team keep the no-meeting week after that? Curious how long it lasted.', at: Date.now() - 3 * 3600000, read: false, taskId: null },
+        { id: 'lc4', postId: 'lp3', postUrn: 'urn:li:share:lp3', author: 'Riley Chen', authorHeadline: 'Support lead', text: 'Which change was it exactly? The welcome email or the checklist?', at: Date.now() - 5 * 86400000, read: false, taskId: null },
       ],
       cache: {},
       session: { calls: {} },
