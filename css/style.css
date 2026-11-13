@@ -848,6 +848,20 @@ textarea.editable-field { resize: vertical; }
 .pop-item.create { color: var(--accent); justify-content: flex-start; }
 .pop-item .icon { width: 14px; height: 14px; }
 .pop-empty { color: var(--muted); padding: 6px; margin: 0; font-size: 0.9rem; }
+.popover.menu { padding: 5px; gap: 0; min-width: 210px; max-width: min(300px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow-y: auto; animation-duration: 0.1s; }
+.menu-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 3px 8px; border: none; border-radius: 6px; background: transparent; color: var(--text); font-size: 0.86rem; text-align: left; justify-content: flex-start; }
+.menu-item:hover, .menu-item:focus-visible, .menu-item.open, .menu-item:focus { background: var(--accent); color: var(--accent-text); outline: none; }
+.menu-item:hover .menu-hint, .menu-item:focus .menu-hint, .menu-item.open .menu-hint { color: inherit; }
+.menu-item.danger { color: var(--danger); }
+.menu-item.danger:hover, .menu-item.danger:focus { background: var(--danger); color: var(--surface); }
+.menu-item[disabled] { opacity: 0.45; }
+.menu-lead { display: inline-flex; width: 16px; flex: none; justify-content: center; }
+.menu-lead .icon, .menu-item > .icon { width: 14px; height: 14px; }
+.menu-lead .project-icon { width: 14px; height: 14px; }
+.menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-hint { color: var(--muted); font-size: 0.78rem; }
+.menu-item > .icon { margin-left: auto; opacity: 0.7; }
+.menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
 /* Colour picker: a swatch button, and a popover with a palette, a hex field and the system picker. */
 .cp-button {
   width: 28px; height: 28px; min-height: 0; padding: 0; flex: none; border-radius: 50%;
@@ -3138,9 +3152,9 @@ button.sum-line:hover { background: var(--surface-2); }
 .slack-item-muted .icon { width: 0.85em; height: 0.85em; }
 .slack-item-menu { min-height: 26px; min-width: 26px; padding: 0 4px; opacity: 0; }
 .slack-item:hover .slack-item-menu, .slack-item:focus-within .slack-item-menu, .slack-section-head:hover .slack-item-menu, .slack-item-menu:focus-visible { opacity: 1; }
-/* pickButton draws a chevron; the menu shows ⋯ instead */
-.slack-item-menu .icon, .slack-side-row .pick-btn .icon { display: none; }
-.slack-item-menu::before { content: '⋯'; font-size: 1rem; line-height: 1; }
+.slack-item-menu .icon { width: 15px; height: 15px; }
+/* pickButton draws a chevron; the add button shows + instead */
+.slack-side-row .pick-btn .icon { display: none; }
 .slack-side-row .pick-btn::before { content: '+'; font-size: 1.1rem; line-height: 1; }
 .slack-badge { background: var(--danger); color: var(--surface); border-radius: 999px; font-size: 0.7rem; font-weight: 700; padding: 0 6px; min-width: 18px; text-align: center; line-height: 18px; }
 .slack-badge.muted { background: var(--surface-2); color: var(--muted); }
