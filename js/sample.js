@@ -246,6 +246,37 @@ function collections() {
         mail('m7', 'received', 200, 'Newsletter <news@example.org>', 'This month in web design', { archived: true }),
       ],
     },
+    contacts: {
+      contacts: [
+        { id: 'c-sam', name: 'Sam Rivera', headline: 'Head of Growth', company: 'Example Labs', linkedin: 'in/sam-rivera-example', emails: ['sam@example.net'], projectIds: ['p-atlas'], notes: 'Met at the spring meetup. Interested in the pricing page.', source: 'manual', createdAt: Date.now() - 20 * 86400000 },
+        { id: 'c-alex', name: 'Alex Kim', headline: 'Technical writer', linkedin: 'in/alex-kim-example', emails: ['alex@example.net'], projectIds: ['p-docs'], source: 'manual', createdAt: Date.now() - 10 * 86400000 },
+      ],
+    },
+    // One calendar, read by the "runners", with a call with guests within the hour (Calendar's guests, Cron's Meeting prep).
+    settings: {
+      gcal: { accounts: [{ email: 'me@example.com', projectId: 'p-atlas', calendars: [{ id: 'primary', name: 'Work', color: '#3b6ea8', on: true, projectId: null, labelId: null }] }] },
+    },
+    calendar: {
+      calendars: {
+        'me@example.com|primary': [{
+          from: Date.now() - 60 * 86400000,
+          to: Date.now() + 120 * 86400000,
+          at: Date.now(),
+          events: [
+            {
+              key: 'me@example.com|primary|e-pricing', account: 'me@example.com', calendarId: 'primary', calendar: 'Work', color: '#3b6ea8', projectId: 'p-atlas', labelId: null,
+              title: 'Pricing page review', start: new Date(Date.now() + 45 * 60000).toISOString(), end: new Date(Date.now() + 75 * 60000).toISOString(), allDay: false,
+              location: '', description: 'Walk through the new pricing page.', link: '', meet: '',
+              attendees: [
+                { email: 'me@example.com', self: true, response: 'accepted' },
+                { email: 'sam@example.net', name: 'Sam Rivera', response: 'accepted' },
+                { email: 'jordan@example.org', name: 'Jordan Lee', response: 'needsAction' },
+              ],
+            },
+          ],
+        }],
+      },
+    },
     // Four accounts with three months of follower counts (and stars for GitHub), so Monitoring → Socials has lines to draw.
     socials: {
       accounts: [
