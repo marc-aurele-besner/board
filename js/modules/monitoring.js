@@ -28,7 +28,7 @@ const SUBTITLES = {
   github: 'Commits, pull requests and issues across the repos linked to your projects.',
   analytics: 'Visitors and page views for each project website, from Google Analytics.',
   search: 'How each project website shows up in Google and Bing search.',
-  socials: 'Followers of the X and LinkedIn accounts added in Settings, and how they grew.',
+  socials: 'Followers of the X, LinkedIn and GitHub accounts added in Settings, GitHub stars, and how they grew.',
   contracts: 'Transactions and events on the smart contracts saved in Settings.',
   runners: 'The processes bun start runs on this computer, and how each background job of the worker is doing.',
 };

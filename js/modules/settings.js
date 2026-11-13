@@ -69,6 +69,7 @@ const SECTION_GROUPS = [
       ['slack', 'Slack', 'slack'],
       ['x', 'X / Twitter', 'x-mark'],
       ['linkedin', 'LinkedIn', 'linkedin'],
+      ['github-accounts', 'GitHub accounts', 'github'],
       ['wallets', 'Wallets', 'wallet'],
       ['blockchains', 'Blockchains', 'cube'],
       ['contracts', 'Smart contracts', 'code'],
@@ -1038,6 +1039,7 @@ function draw(root, store) {
         : view.section === 'slack' ? slackCard(store)
         : view.section === 'x' ? socialsCard(store, 'x')
         : view.section === 'linkedin' ? socialsCard(store, 'linkedin')
+        : view.section === 'github-accounts' ? socialsCard(store, 'github')
         : view.section === 'notifications' ? notificationsCard(store)
         : view.section === 'automations' ? automationsCard(store)
         : view.section === 'dev' ? devEnvironmentCard(store)

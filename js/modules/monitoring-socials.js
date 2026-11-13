@@ -1,11 +1,13 @@
-// Monitoring → Socials: the followers of each X and LinkedIn account added in Settings, and how they grew over the
-// period. The runners read the counts a few times a day (tools/jobs/socials.js); each day keeps its last read.
-import { h, icon, empty, notice } from '../ui.js';
+// Monitoring → Socials: the followers of each X, LinkedIn and GitHub account added in Settings (and a GitHub account's
+// stars), and how they grew over the period. The runners read the counts a few times a day (tools/jobs/socials.js);
+// each day keeps its last read.
+import { h, icon, empty, notice, refreshIcon } from '../ui.js';
 import { lineChart } from '../chart.js';
 import { settingsHref } from '../integrations.js';
-import { SOCIALS, NETWORKS, dayKey, profileUrl, handleLabel } from '../socials.js';
+import { SOCIALS, NETWORKS, networkIcon, dayKey, profileUrl, handleLabel } from '../socials.js';
 import { stat } from './monitoring.js';
 import { sortTable } from './monitoring-web.js';
+import { readNow, isReading } from './settings-socials.js';
 /** @import { Store, SocialAccount } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 
@@ -16,7 +18,8 @@ const count = new Intl.NumberFormat();
 const signed = (/** @type {number} */ n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${count.format(Math.abs(n))}`;
 const percent = (/** @type {number | null} */ p) => (p === null ? '' : `${p > 0 ? '+' : p < 0 ? '−' : ''}${Math.abs(p * 100).toFixed(Math.abs(p) < 0.1 ? 1 : 0)}%`);
 
-/** @typedef {{ account: SocialAccount, now: number | null, change: number | null, pct: number | null, values: (number | null)[], project: string }} AccountRow */
+/** @typedef {{ now: number | null, change: number | null, pct: number | null, values: (number | null)[] }} Series */
+/** @typedef {Series & { account: SocialAccount, project: string, stars: Series | null }} AccountRow */
 
 // The days from `start` to `end` (ms), both included, as history keys.
 /** @param {number} start @param {number} end */
@@ -44,7 +47,7 @@ function changeOver(hist, first, last) {
 function avatar(a) {
   return a.image
     ? h('img', { class: 'social-pic', src: a.image, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' })
-    : h('span', { class: 'social-avatar' }, icon(a.network === 'x' ? 'x-mark' : 'linkedin'));
+    : h('span', { class: 'social-avatar' }, icon(networkIcon(a.network)));
 }
 
 /** @param {number | null} change @param {number | null} pct */
@@ -52,9 +55,10 @@ const changePill = (change, pct) => (change === null
   ? h('span', { class: 'muted small' }, 'No change yet')
   : h('span', { class: `social-change ${change > 0 ? 'up' : change < 0 ? 'down' : ''}` }, `${signed(change)}${pct === null ? '' : ` (${percent(pct)})`}`));
 
-/** @param {AccountRow} row @param {string[]} labels */
-function accountCard(row, labels) {
+/** @param {Store} store @param {AccountRow} row @param {string[]} labels */
+function accountCard(store, row, labels) {
   const { account: a } = row;
+  const busy = isReading(a.id);
   const points = row.values.filter((v) => v !== null).length;
   return h('section', { class: 'card stack social-card' },
     h('header', { class: 'social-head' },
@@ -62,30 +66,43 @@ function accountCard(row, labels) {
       h('div', { class: 'social-name' },
         h('strong', null, a.name || handleLabel(a)),
         h('span', { class: 'muted small' },
-          icon(a.network === 'x' ? 'x-mark' : 'linkedin'), ' ',
+          icon(networkIcon(a.network)), ' ',
           h('a', { href: profileUrl(a), target: '_blank', rel: 'noopener noreferrer' }, handleLabel(a)),
-          row.project ? ` · ${row.project}` : ''))),
-    h('div', { class: 'social-now' },
-      h('strong', null, row.now === null ? '—' : count.format(row.now)),
-      h('span', { class: 'muted small' }, 'followers'),
-      changePill(row.change, row.pct)),
+          row.project ? ` · ${row.project}` : '')),
+      h('button', { type: 'button', class: 'icon-btn social-read', title: 'Read the counts now', 'aria-label': `Read ${handleLabel(a)} now`, disabled: busy, onclick: () => readNow(store, [a.id]) }, refreshIcon(busy))),
+    h('div', { class: 'social-figures' },
+      h('div', { class: 'social-now' },
+        h('strong', null, row.now === null ? '—' : count.format(row.now)),
+        h('span', { class: 'muted small' }, 'followers'),
+        changePill(row.change, row.pct)),
+      row.stars
+        ? h('div', { class: 'social-now' },
+            h('strong', null, row.stars.now === null ? '—' : count.format(row.stars.now)),
+            h('span', { class: 'muted small' }, 'stars'),
+            changePill(row.stars.change, row.stars.pct))
+        : null),
     a.error ? h('p', { class: 'small social-error', role: 'status' }, a.error) : null,
     points > 1
       ? lineChart(labels, [{ name: 'Followers', color: 'var(--accent)', values: row.values, area: true }], { fit: true, format: (v) => count.format(Math.round(v)) })
       : h('p', { class: 'muted small' }, points ? 'The line starts once a second day is read.' : 'Not read yet. The runners read the counts every few hours.'),
+    // Stars get their own line: an account's stars and followers are often far apart.
+    row.stars && row.stars.values.filter((v) => v !== null).length > 1
+      ? lineChart(labels, [{ name: 'Stars', color: 'var(--warn)', values: row.stars.values, area: true }], { fit: true, format: (v) => count.format(Math.round(v)) })
+      : null,
     a.at ? h('p', { class: 'muted small' }, `Read ${new Date(a.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`) : null);
 }
 
 /** @param {Store} store @param {PeriodWindow} w */
 export function socialsTab(store, w) {
-  const { accounts, history } = store.get(SOCIALS);
+  const { accounts, history, stars } = store.get(SOCIALS);
   if (!accounts.length) {
     return notice({
       tone: 'info',
-      text: 'No account followed yet. Add your X and LinkedIn accounts in Settings, and their followers show here over time.',
+      text: 'No account followed yet. Add your X, LinkedIn and GitHub accounts in Settings, and their followers show here over time.',
       actions: [
         h('a', { href: settingsHref('x'), class: 'btn-small primary-link' }, 'Add X accounts'),
         h('a', { href: settingsHref('linkedin'), class: 'btn-small primary-link' }, 'Add LinkedIn accounts'),
+        h('a', { href: settingsHref('githubAccounts'), class: 'btn-small primary-link' }, 'Add GitHub accounts'),
       ],
     });
   }
@@ -97,15 +114,14 @@ export function socialsTab(store, w) {
   const projects = new Map(store.get('projects').projects.map((p) => [p.id, p.name]));
 
   /** @type {AccountRow[]} */
-  const rows = accounts.map((a) => {
-    const hist = history?.[a.id] ?? {};
-    return {
-      account: a,
-      ...changeOver(hist, first, last),
-      values: days.map((k) => hist[k] ?? null),
-      project: (a.projectId && projects.get(a.projectId)) || '',
-    };
-  });
+  /** @param {Record<string, number>} hist @returns {Series} */
+  const series = (hist) => ({ ...changeOver(hist, first, last), values: days.map((k) => hist[k] ?? null) });
+  const rows = accounts.map((a) => ({
+    account: a,
+    ...series(history?.[a.id] ?? {}),
+    stars: a.network === 'github' ? series(stars?.[a.id] ?? {}) : null,
+    project: (a.projectId && projects.get(a.projectId)) || '',
+  }));
 
   const read = rows.filter((r) => r.now !== null);
   const total = read.reduce((s, r) => s + /** @type {number} */ (r.now), 0);
@@ -114,16 +130,30 @@ export function socialsTab(store, w) {
   const startTotal = changed.reduce((s, r) => s + /** @type {number} */ (r.now) - /** @type {number} */ (r.change), 0);
   const byNetwork = Object.keys(NETWORKS).map((n) => [NETWORKS[n], accounts.filter((a) => a.network === n).length]).filter(([, c]) => c);
   const failed = accounts.filter((a) => a.error);
+  const starRows = rows.flatMap((r) => (r.stars ? [r.stars] : []));
+  const starsNow = starRows.reduce((s, r) => s + (r.now ?? 0), 0);
+  const starsChanged = starRows.filter((r) => r.change !== null);
+  const starsGained = starsChanged.reduce((s, r) => s + /** @type {number} */ (r.change), 0);
+  const starsStart = starsChanged.reduce((s, r) => s + /** @type {number} */ (r.now) - /** @type {number} */ (r.change), 0);
+  const busy = accounts.some((a) => isReading(a.id));
+  const lastAt = Math.max(0, ...accounts.map((a) => a.at ?? 0));
 
   return h('div', { class: 'stack-lg' },
     failed.length
       ? notice({ text: `${failed.length} account${failed.length > 1 ? 's' : ''} could not be read on the last try: ${failed.map((a) => `${handleLabel(a)} (${a.error})`).join('; ')}` })
       : null,
+    h('div', { class: 'social-bar' },
+      h('span', { class: 'muted small' }, lastAt ? `Last read ${new Date(lastAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}` : 'Not read yet'),
+      h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => readNow(store, accounts.map((a) => a.id)) },
+        refreshIcon(busy), busy ? 'Reading…' : 'Read all now')),
     h('div', { class: 'summary' },
       stat('Followers', count.format(total), `across ${read.length} of ${accounts.length} account${accounts.length === 1 ? '' : 's'}`),
       stat('Growth', changed.length ? signed(gained) : '—', changed.length ? `${percent(startTotal ? gained / startTotal : null) || 'new'} over the period` : 'Needs counts from two days'),
+      starRows.length
+        ? stat('GitHub stars', count.format(starsNow), starsChanged.length ? `${signed(starsGained)}${starsStart ? ` (${percent(starsGained / starsStart)})` : ''} over the period` : 'Needs counts from two days')
+        : null,
       stat('Accounts', String(accounts.length), byNetwork.map(([n, c]) => `${c} ${n}`).join(' · '))),
-    h('div', { class: 'social-grid' }, rows.map((r) => accountCard(r, labels))),
+    h('div', { class: 'social-grid' }, rows.map((r) => accountCard(store, r, labels))),
     h('section', { class: 'card stack' },
       h('h3', null, 'By account'),
       sortTable('socials', [
@@ -133,6 +163,10 @@ export function socialsTab(store, w) {
         { label: 'Followers', num: true, value: (r) => r.now ?? -1, format: (v) => (v < 0 ? '—' : count.format(v)) },
         { label: 'Change', num: true, value: (r) => r.change ?? 0, format: (v, r) => (r.change === null ? '—' : signed(v)) },
         { label: 'Change %', num: true, value: (r) => r.pct ?? 0, format: (v, r) => (r.pct === null ? '—' : percent(v)) },
+        ...(starRows.length ? [
+          { label: 'Stars', num: true, value: (/** @type {AccountRow} */ r) => r.stars?.now ?? -1, format: (/** @type {number} */ v) => (v < 0 ? '—' : count.format(v)) },
+          { label: 'Stars change', num: true, value: (/** @type {AccountRow} */ r) => r.stars?.change ?? 0, format: (/** @type {number} */ v, /** @type {AccountRow} */ r) => (r.stars?.change == null ? '—' : signed(v)) },
+        ] : []),
       ], rows)),
     rows.some((r) => r.now !== null) ? null : empty('The runners read the counts every few hours. Start them with bun start.'));
 }

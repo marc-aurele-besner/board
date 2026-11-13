@@ -1,10 +1,10 @@
-// Settings → X / Twitter and Settings → LinkedIn: the accounts whose follower counts Monitoring → Socials follows,
-// each tied to a project if wanted, and LinkedIn's signed-in session for company pages.
+// Settings → X / Twitter, LinkedIn and GitHub accounts: the accounts whose follower counts (and GitHub stars)
+// Monitoring → Socials follows, each tied to a project if wanted, and LinkedIn's signed-in session for company pages.
 import { h, icon, uid, refreshIcon } from '../ui.js';
 import { pickChip } from '../inline.js';
 import { toast } from '../toast.js';
 import { runJob } from '../runners.js';
-import { SOCIALS, NETWORKS, parseHandle, profileUrl, handleLabel, isOrganization } from '../socials.js';
+import { SOCIALS, NETWORKS, networkIcon, parseHandle, profileUrl, handleLabel, isOrganization } from '../socials.js';
 import { projectIcon, projectTree } from './projects.js';
 /** @import { Store, SocialAccount, Project, LinkedinSettings } from '../../types/data' */
 
@@ -14,12 +14,15 @@ const badge = (text, tone) => h('span', { class: `pill tone-${tone}` }, text);
 const link = (href, text) => h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text);
 const count = new Intl.NumberFormat();
 
-// Accounts being read now, so their row shows it.
+// Accounts being read now, so their row shows it. Shared with Monitoring → Socials.
 /** @type {Set<string>} */
 const reading = new Set();
+/** @param {string} id */
+export const isReading = (id) => reading.has(id);
 
+// Asks the runners to read these accounts now (POST /run/socials), then reads socials.json again.
 /** @param {Store} store @param {string[]} ids */
-function readNow(store, ids) {
+export function readNow(store, ids) {
   for (const id of ids) reading.add(id);
   store.refresh();
   runJob('socials', { ids })
@@ -34,14 +37,14 @@ function readNow(store, ids) {
 function avatar(a) {
   return a.image
     ? h('img', { class: 'slack-team-icon slack-ws-icon', src: a.image, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' })
-    : h('span', { class: 'social-avatar' }, icon(a.network === 'x' ? 'x-mark' : 'linkedin'));
+    : h('span', { class: 'social-avatar' }, icon(networkIcon(a.network)));
 }
 
 /** @param {Store} store @param {SocialAccount} a @param {Project[]} projects */
 function accountRow(store, a, projects) {
   const busy = reading.has(a.id);
   const counts = typeof a.followers === 'number'
-    ? `${count.format(a.followers)} followers${typeof a.following === 'number' ? ` · ${count.format(a.following)} following` : ''}`
+    ? `${count.format(a.followers)} followers${typeof a.following === 'number' ? ` · ${count.format(a.following)} following` : ''}${typeof a.stars === 'number' ? ` · ${count.format(a.stars)} stars` : ''}`
     : '';
   return h('li', { class: 'resend-row has-key' },
     h('div', { class: 'resend-name' },
@@ -96,8 +99,10 @@ function addForm(store, network) {
     name: 'handle',
     autocomplete: 'off',
     spellcheck: false,
-    placeholder: network === 'x' ? '@name or https://x.com/name' : 'https://www.linkedin.com/in/name or /company/name',
-    'aria-label': network === 'x' ? 'X handle or profile link' : 'LinkedIn profile or page link',
+    placeholder: network === 'x' ? '@name or https://x.com/name'
+      : network === 'github' ? 'name or https://github.com/name'
+        : 'https://www.linkedin.com/in/name or /company/name',
+    'aria-label': network === 'x' ? 'X handle or profile link' : network === 'github' ? 'GitHub user or organization' : 'LinkedIn profile or page link',
   });
   const status = h('p', { class: 'small muted', role: 'status' });
   return h('form', {
@@ -106,7 +111,9 @@ function addForm(store, network) {
       e.preventDefault();
       const handle = parseHandle(network, input.value);
       if (!handle) {
-        status.textContent = network === 'x' ? 'That is not an X handle: up to 15 letters, digits or _.' : 'Paste a linkedin.com/in/… or linkedin.com/company/… link.';
+        status.textContent = network === 'x' ? 'That is not an X handle: up to 15 letters, digits or _.'
+          : network === 'github' ? 'That is not a GitHub login: up to 39 letters, digits or -.'
+            : 'Paste a linkedin.com/in/… or linkedin.com/company/… link.';
         return;
       }
       const have = store.get(SOCIALS).accounts.find((a) => a.network === network && a.handle.toLowerCase() === handle.toLowerCase());
@@ -182,14 +189,16 @@ function linkedinSession(store) {
           set ? h('button', { type: 'button', class: 'danger', onclick: () => save({}) }, icon('x'), 'Clear') : null))));
 }
 
-/** @param {Store} store @param {'x' | 'linkedin'} network */
+/** @param {Store} store @param {'x' | 'linkedin' | 'github'} network */
 export function socialsCard(store, network) {
   const projects = projectTree(store.get('projects').projects).map(({ project }) => project);
   const accounts = store.get(SOCIALS).accounts.filter((a) => a.network === network);
-  const name = network === 'x' ? 'X / Twitter' : NETWORKS[network];
+  const name = network === 'x' ? 'X / Twitter' : network === 'github' ? 'GitHub accounts' : NETWORKS[network];
   const intro = network === 'x'
     ? 'Monitoring → Socials follows the followers of each account here over time. X shows the counts of a public profile to anyone, so no key or sign-in is needed: the runners read each profile’s page every few hours.'
-    : 'Monitoring → Socials follows the followers of each profile and company page here over time. The runners read them every few hours.';
+    : network === 'github'
+      ? 'Monitoring → Socials follows the followers of each GitHub user or organization here over time, and the stars of its public repos (forks left out). The runners read them from GitHub’s API every few hours, with the token of Settings → GitHub when one is set.'
+      : 'Monitoring → Socials follows the followers of each profile and company page here over time. The runners read them every few hours.';
   return h('div', { class: 'stack-lg' },
     h('section', { class: 'card panel' },
       h('header', { class: 'panel-head' },
