@@ -2683,6 +2683,11 @@ button.json-key:hover { background: color-mix(in srgb, var(--accent) 15%, transp
 .cal-task { background: transparent; border: 1px dashed var(--border); color: var(--muted); }
 .cal-task .icon { width: 12px; height: 12px; flex: none; }
 .cal-task:hover { color: var(--text); border-color: var(--accent); }
+.cal-group { cursor: pointer; font-family: inherit; }
+.cal-group .icon { transition: transform 0.15s ease; }
+.cal-group.open .icon { transform: rotate(90deg); }
+.cal-group-count { flex: none; margin-left: auto; padding: 0 6px; border-radius: 999px; font-size: 0.72rem; font-weight: 600; background: var(--surface-2); color: var(--muted); }
+.cal-sub { margin-left: 12px !important; width: auto; }
 
 .cal-weekday { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
 

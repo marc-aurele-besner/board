@@ -243,11 +243,60 @@ const taskChip = (t) =>
   h('a', { class: 'cal-chip cal-task', href: `#/todos?filter=${t.projectId ?? 'personal'}`, title: `Task due: ${t.text}` },
     icon('check-square'), h('span', { class: 'cal-chip-text' }, t.text));
 
+// Subtask groups unfolded, by parent id and day; folded otherwise.
+/** @type {Set<string>} */
+const openGroups = new Set();
+
+// One day's due tasks, with subtasks folded under their parent: a parent with many children due at once
+// filled the day with near-identical chips. A lone subtask stays a chip, unless its parent is due too.
+/**
+ * @param {Store} store
+ * @param {Task[]} tasks
+ * @param {string} day
+ * @returns {HTMLElement[]}
+ */
+function taskChips(store, tasks, day) {
+  /** @type {Map<string, Task[]>} */
+  const kids = new Map();
+  for (const t of tasks) if (t.parentId) kids.set(t.parentId, [...(kids.get(t.parentId) ?? []), t]);
+  const ids = new Set(tasks.map((t) => t.id));
+  /** @param {string} id */
+  const grouped = (id) => (kids.get(id)?.length ?? 0) >= (ids.has(id) ? 1 : 2);
+  /** @type {HTMLElement[]} */
+  const out = [];
+  const seen = new Set();
+  for (const t of tasks) {
+    const g = t.parentId && grouped(t.parentId) ? t.parentId : grouped(t.id) ? t.id : null;
+    if (!g) { out.push(taskChip(t)); continue; }
+    if (seen.has(g)) continue;
+    seen.add(g);
+    const parent = store.get('todos').items.find((x) => x.id === g);
+    const children = /** @type {Task[]} */ (kids.get(g));
+    const key = `${g}|${day}`;
+    const open = openGroups.has(key);
+    out.push(h('button', {
+      type: 'button',
+      class: open ? 'cal-chip cal-task cal-group open' : 'cal-chip cal-task cal-group',
+      'aria-expanded': String(open),
+      title: `${open ? 'Fold' : 'Show'} ${children.length} subtask${children.length === 1 ? '' : 's'} of ${parent?.text ?? 'a task'}`,
+      onclick: () => {
+        open ? openGroups.delete(key) : openGroups.add(key);
+        store.refresh();
+      },
+    },
+      icon('chevron-right'),
+      h('span', { class: 'cal-chip-text' }, parent?.text ?? 'Subtasks'),
+      h('span', { class: 'cal-group-count' }, String(children.length))));
+    if (open) for (const c of children) out.push(Object.assign(taskChip(c), { className: 'cal-chip cal-task cal-sub' }));
+  }
+  return out;
+}
+
 /**
  * @param {Store} store
  * @param {Date} d
  */
-const openDay = (store, d) => () => {
+const openDay =(store, d) => () => {
   view.mode = 'day';
   view.date = isoOf(d);
   store.refresh();
@@ -372,12 +421,10 @@ function gridView(store, from, days, events, tasks) {
       onclick: () => openEvent(store, e),
     }, h('span', { class: 'cal-chip-text' }, e.title));
   });
-  const due = tasks.map((t) => {
-    const chip = taskChip(t);
-    // Only tasks with a deadline are passed in.
-    chip.style.gridColumn = String(dayIndex(from, eventDate(/** @type {string} */ (t.due))) + 1);
+  const due = dates.flatMap((d, i) => taskChips(store, tasks.filter((t) => t.due === isoOf(d)), isoOf(d)).map((chip) => {
+    chip.style.gridColumn = String(i + 1);
     return chip;
-  });
+  }));
   const timed = events.filter((e) => !isLong(e));
   const nowHours = today.getHours() + today.getMinutes() / 60;
 
@@ -450,7 +497,7 @@ function monthView(store, from, to, month, events, tasks) {
       days.map((d) => {
         const list = events.filter((e) => onDay(e, d));
         const due = tasks.filter((t) => t.due === isoOf(d));
-        const items = [...list.map((e) => eventChip(store, e, { time: false })), ...due.map(taskChip)];
+        const items = [...list.map((e) => eventChip(store, e, { time: false })), ...taskChips(store, due, isoOf(d))];
         const today = d.toDateString() === new Date().toDateString();
         return h('div', { class: ['cal-cell', d.getMonth() === month ? '' : 'outside', today ? 'today' : ''].filter(Boolean).join(' ') },
           h('button', { type: 'button', class: 'cal-cell-date', onclick: openDay(store, d), 'aria-label': d.toLocaleDateString([], { dateStyle: 'full' }) }, d.getDate()),
@@ -566,12 +613,12 @@ function agenda(store, byProject) {
     overdue.length
       ? h('div', { class: 'cal-agenda-day' },
           h('span', { class: 'cal-agenda-name overdue' }, 'Overdue'),
-          overdue.map(taskChip))
+          taskChips(store, overdue, 'overdue'))
       : null,
     days.map(({ d, list, due }) => h('div', { class: 'cal-agenda-day' },
       h('button', { type: 'button', class: 'cal-agenda-name', title: 'Show this day', onclick: openDay(store, d) }, dayName(d)),
       list.map((e) => eventChip(store, e)),
-      due.map(taskChip))),
+      taskChips(store, due, isoOf(d)))),
     !overdue.length && !days.length ? h('p', { class: 'muted small' }, 'Nothing planned.') : null);
 }
 
