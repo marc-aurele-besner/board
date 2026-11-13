@@ -18,11 +18,11 @@ import { jobs } from './jobs/index.js';
 import { sendWire } from '../js/http-request.js';
 import { slackCall, slackFile } from './slack.js';
 import { voyager, queueState } from './linkedin-session.js';
-import { exchangeLinkedinCode } from '../js/linkedin-core.js';
 import { useLinkedinSession } from '../js/linkedin-session.js';
 
 // Shared code (Cron steps) calls linkedinCall(); here it runs the session's queue itself.
 useLinkedinSession(voyager);
+import { exchangeLinkedinCode, publishPost } from '../js/linkedin-core.js';
 
 const PORT = Number(process.env.WORKER_PORT) || 8420;
 const CONFIG = join(homedir(), '.config', 'board', 'worker.json');
@@ -154,6 +154,14 @@ serve({
       }
     },
     'GET /linkedin/queue': () => queueState(),
+    // A task's or project's LinkedIn post, now: its answer is the post as saved, written to disk before it returns.
+    'POST /linkedin/post': async (body) => {
+      const store = scheduler.store();
+      if (!store) throw new Error('The runners have no data folder. Set it in Settings → Runners.');
+      const post = await publishPost(store, String(body.id ?? ''));
+      store.flush();
+      return post;
+    },
     'GET /status': () => ({ ...scheduler.status(), folder: { path: folder.path, from: folder.from, error: folder.error } }),
     'POST /run/*': (body, id) => scheduler.run(id, { params: body ?? {} }),
     'POST /config': (body) => {

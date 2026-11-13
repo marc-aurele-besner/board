@@ -18,6 +18,12 @@ export interface TaskArtifact {
   title: string;
 }
 
+// A page a task led to, by its title.
+export interface TaskWebLink {
+  url: string;
+  title: string;
+}
+
 // An image pasted or dropped on a task, kept in the data folder (js/task-images.js).
 export interface TaskImage {
   path: string; // relative to the data folder, e.g. tasks/<task id>-<id>.png
@@ -88,6 +94,8 @@ export interface Task {
   prs?: TaskLink[];
   issues?: TaskLink[];
   artifacts?: TaskArtifact[];
+  // Other pages the task led to, such as the LinkedIn post written from it (js/linkedin-core.js).
+  links?: TaskWebLink[];
   // Old: a single issue, before several were allowed.
   issue?: TaskLink;
   email?: TaskEmail;
