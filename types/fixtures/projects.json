@@ -21,6 +21,15 @@
         "edited": false,
         "usageId": "usage-1"
       },
+      "brand": {
+        "images": [{ "label": "Logo", "value": "https://example.com/logo.svg" }, { "label": "Favicon", "value": "~/example/project/public/favicon.ico" }],
+        "colors": [{ "label": "Primary", "value": "#3b6ea8" }],
+        "fonts": [{ "label": "Headings", "value": "Example Sans" }],
+        "links": [{ "label": "Stylesheet", "value": "https://example.com/style.css" }],
+        "notes": "Calm and plain.",
+        "updated": "2026-01-03T09:00:00.000Z",
+        "usageId": "usage-1"
+      },
       "created": "2026-01-01T09:00:00.000Z"
     },
     {

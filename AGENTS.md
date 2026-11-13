@@ -45,6 +45,8 @@ js/telegram.js        tasks from Telegram messages, read by the runners; setup's
 js/ai.js              the one OpenRouter call; logs each call's input, output and details to usage.json
 js/prompts.js         the system prompt of every AI feature; Settings → Prompts overrides them
 js/profile.js         a project's saved profile: reads its folder, commits, repos and pages, asks the model once, saves it on the project
+js/brand.js           a project's brand (images, colours, fonts, links): reads its folder and site's head tags, asks the model, adds what is new
+js/modules/project-brand.js  the Brand block of a project's page: swatches, images, fonts, links, editing and Find with AI
 js/chart.js           SVG bar charts with a hover tooltip
 js/chains.js          every chain the board reads: the built-in ones and those added in Settings → Blockchains
 js/abi.js             Solidity ABI encoding and decoding: calls, answers and event logs
