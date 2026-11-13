@@ -27,7 +27,11 @@
         { "id": "step-11", "type": "format", "mode": "list", "items": "{{input}}", "itemText": "- {{item.title}}", "separator": "line" },
         { "id": "step-12", "type": "parse", "text": "{{step6.answer}}", "mode": "largest" },
         { "id": "step-13", "type": "dedupe", "items": "{{step12}}", "text": "{{item.url}}", "match": "text", "scope": "flow" },
-        { "id": "step-14", "type": "ai-filter", "items": "{{step13}}", "criterion": "People who decide on engineering hires", "mode": "rank", "top": 5, "text": "{{item.name}} · {{item.headline}}", "model": "" }
+        { "id": "step-14", "type": "ai-filter", "items": "{{step13}}", "criterion": "People who decide on engineering hires", "mode": "rank", "top": 5, "text": "{{item.name}} · {{item.headline}}", "model": "" },
+        { "id": "step-15", "type": "linkedin-company", "text": "{{step10.company}}", "mode": "best", "top": 5 },
+        { "id": "step-16", "type": "linkedin-people", "company": "{{step15[0].id}}", "keywords": "engineering", "location": "", "count": 20, "skipHidden": true },
+        { "id": "step-17", "type": "linkedin-profile", "text": "{{item.handle}}" },
+        { "id": "step-18", "type": "save-contacts", "items": "{{step16}}", "company": "{{item.company}}", "projectId": "" }
       ],
       "lastRun": "2026-01-14T08:00:00.000Z",
       "created": "2026-01-01T09:00:00.000Z",

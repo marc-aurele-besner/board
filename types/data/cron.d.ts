@@ -48,7 +48,7 @@ export interface CronFormatField {
 }
 
 // A step (makeStep()). type: 'gather', 'ai', 'stop', 'format', 'parse', 'dedupe', 'ai-filter', 'loop', 'task', 'update', 'notify',
-// 'profile' or 'dev'; each type uses some fields.
+// 'profile', 'dev', 'linkedin-company', 'linkedin-people', 'linkedin-profile' or 'save-contacts'; each type uses some fields.
 export interface CronStep {
   id: string;
   type: string;
@@ -105,6 +105,15 @@ export interface CronStep {
   // best by score). `text` is each item as the model reads it ('' for the item as JSON); `model` '' is Cron's default.
   criterion?: string;
   top?: number;
+  // linkedin-company: `text` is the company's name, mode 'best' (one item with its page's details) or 'top' (the
+  // `top` first matches). linkedin-people: `company` (an id, urn, page link or name; takes variables), title
+  // `keywords`, `location` text matched on each result, `count` (at most 100) and `skipHidden` (missing means true).
+  // linkedin-profile: `text` is the handle or link. save-contacts: `items`, `company` (each contact's company, a
+  // template such as '{{item.company}}') and `projectId` ('' for the flow's).
+  company?: string;
+  keywords?: string;
+  location?: string;
+  skipHidden?: boolean;
   // format 'list': each item's text, and what goes between them ('line', 'blank', 'comma' or 'space').
   itemText?: string;
   separator?: string;

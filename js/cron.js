@@ -18,6 +18,8 @@ import { findJson } from './json-extract.js';
 import { LINKEDIN, latestMetrics, engagement, postsBetween, followerChange } from './linkedin-core.js';
 import { SOCIALS, handleLabel } from './socials.js';
 import { upcomingMeetings } from './meetings.js';
+import { findCompanies, companyByHandle, companyPeople, companyRef, readProfile, PEOPLE_PAGE, PEOPLE_MAX, COMPANY_TOP_MAX } from './linkedin-search.js';
+import { addContacts, findByLinkedin, findByEmail, linkedinHandle } from './contacts-core.js';
 /** @import { DataStore, Store, CronStep, CronSource, CronFlow, CronSchedule, CronTemplate, CronRun, CronRunStep, CronRunCurrent, CronTest, CronPr, CronFormatField, LinkedinPost, Project, Task, DevPreset, SiteLogEntry, TaskLink, IconName } from '../types/data' */
 // The variables a step's templates read; $data holds what a name reads into with a path.
 /** @typedef {{ [name: string]: unknown, $data?: Record<string, unknown> }} Vars */
@@ -53,8 +55,8 @@ export const AI_TASK = 'task-cron';
 const MAX_RUNS = 60;
 const MINUTE = 60000;
 
-// [type, label, icon, short description]
-/** @type {[string, string, IconName, string][]} */
+// [type, label, icon, short description, palette group]
+/** @type {[string, string, IconName, string, string?][]} */
 export const STEP_TYPES = [
   ['gather', 'Gather data', 'list', 'Reads tasks, projects, money, calendar, web pages and more; several sources at once.'],
   ['ai', 'AI generate', 'cpu', 'Sends a prompt to a model through OpenRouter.'],
@@ -69,6 +71,10 @@ export const STEP_TYPES = [
   ['notify', 'Notify', 'bell', 'Posts the output under the bell (and Telegram if enabled).'],
   ['profile', 'Refresh project profile', 'refresh', 'Rebuilds a project’s profile from its folder, repos and website, as Projects does.'],
   ['dev', 'Run in Dev', 'terminal', 'Hands a prompt to the project’s Dev command, a preset or your own, in a new Dev terminal.'],
+  ['linkedin-company', 'LinkedIn: find company', 'building', 'Finds a company on LinkedIn by name, through the saved session: its id, page, industry, size and followers.', 'LinkedIn'],
+  ['linkedin-people', 'LinkedIn: company people', 'users', 'Lists the people who work at a company, optionally by title keywords and location, through the saved session.', 'LinkedIn'],
+  ['linkedin-profile', 'LinkedIn: profile', 'linkedin', 'Reads one member’s profile (headline, about, current role, recent experience) through the saved session.', 'LinkedIn'],
+  ['save-contacts', 'Save contacts', 'save', 'Saves the people of a list to Contacts in the flow’s project, merged with those already there by LinkedIn handle or address.', 'LinkedIn'],
 ];
 
 // What a "Run in Dev" step starts: the project's Dev command ('claude'), a preset from Settings → Dev environment
@@ -328,6 +334,10 @@ export function makeStep(type) {
   if (type === 'loop') return { ...base, items: '{{input}}', span: 1, max: LOOP_MAX };
   if (type === 'ai-filter') return { ...base, items: '{{input}}', criterion: '', mode: 'keep', top: 10, text: '', model: '' };
   if (type === 'dedupe') return { ...base, items: '{{input}}', text: '{{item}}', match: 'title', scope: 'flow' };
+  if (type === 'linkedin-company') return { ...base, text: '{{input}}', mode: 'best', top: 5 };
+  if (type === 'linkedin-people') return { ...base, company: '{{input}}', keywords: '', location: '', count: PEOPLE_DEFAULT, skipHidden: true };
+  if (type === 'linkedin-profile') return { ...base, text: '{{input}}' };
+  if (type === 'save-contacts') return { ...base, items: '{{input}}', company: '{{item.company}}', projectId: '' };
   if (type === 'dev') return { ...base, mode: 'claude', preset: '', devCommand: '', projectId: '', prompt: '{{input}}', command: '', waitMinutes: DEV_WAIT_MINUTES };
   return { ...base, text: '{{flow}}: {{input}}' };
 }
@@ -581,6 +591,30 @@ export const TEMPLATES = [
       { type: 'task', title: '{{item.label}}', description: '{{input}}', projectId: '{{item.projectId}}', due: 'today', priority: 'medium' },
     ],
   },
+  {
+    name: 'Find people at a company',
+    about: 'Uses the saved LinkedIn session (about 5 calls, fewer when cached; see Settings → LinkedIn). Finds a company, lists its people by title keywords, keeps those an AI filter says fit the roles you want, saves them to Contacts in the flow’s project (merged with those already there) and adds a task “People at …” listing them. Fill in the first step, choose the flow’s project, then Run now.',
+    schedule: { every: 'weekly', time: '09:00', weekday: 1 },
+    steps: [
+      {
+        type: 'format',
+        mode: 'fields',
+        fields: [
+          { name: 'company', value: 'Example Inc' },
+          { name: 'keywords', value: 'engineering' },
+          { name: 'roles', value: 'people who lead engineering or decide on engineering hires (CTO, VP or head of engineering, engineering managers)' },
+        ],
+      },
+      { type: 'linkedin-company', text: '{{step1.company}}', mode: 'best' },
+      { type: 'linkedin-people', company: '{{step2[0].id}}', keywords: '{{step1.keywords}}', count: 30, skipHidden: true },
+      { type: 'ai-filter', items: '{{step3}}', criterion: '{{step1.roles}}', mode: 'keep', text: '{{item.name}} — {{item.headline}} ({{item.location}})' },
+      { type: 'stop', when: 'nothing' },
+      // Contacts merge by LinkedIn handle, so a person found again is updated, not added twice.
+      { type: 'save-contacts', items: '{{step4}}', company: '{{step2[0].name}}' },
+      { type: 'format', mode: 'list', items: '{{step4}}', itemText: '- [{{item.name}}]({{item.url}}) — {{item.headline}} ({{item._reason}})' },
+      { type: 'task', title: 'People at {{step2[0].name}}', description: '{{input}}' },
+    ],
+  },
 ];
 
 // Built-in templates write a data step's single source on the step itself, which reads shorter. A saved template
@@ -590,7 +624,8 @@ export const TEMPLATES = [
  * @returns {CronStep}
  */
 function templateStep(s) {
-  if (s.type !== 'gather') return { ...makeStep(s.type), ...s };
+  // Format fields get their ids here too, so the editor can tell them apart.
+  if (s.type !== 'gather') return { ...makeStep(s.type), ...s, ...(s.fields ? { fields: s.fields.map((f) => makeField({ ...f, id: uid() })) } : {}) };
   if (s.sources) return { ...makeStep(s.type), ...s, sources: s.sources.map((x) => ({ ...makeSource(x.source), ...x, id: uid() })) };
   const { type, source, append, ...fields } = s;
   return { ...makeStep(type), sources: [makeSource(source, fields)], append: Boolean(append) };
@@ -1873,6 +1908,194 @@ async function aiFilterStep(store, flow, step, vars, ctx) {
   return JSON.stringify(kept, null, 2);
 }
 
+// --- LinkedIn ---
+// The LinkedIn steps read through the saved session (js/linkedin-search.js, over the queue of js/linkedin-session.js):
+// each call waits its turn, 20 to 40 s apart, and counts against the daily limit. Answers are cached for a week, so a
+// re-run or a re-test of the same step spends no call. "Save contacts" writes Contacts and calls nothing.
+
+export const LINKEDIN_STEPS = ['linkedin-company', 'linkedin-people', 'linkedin-profile'];
+export const LINKEDIN_COMPANY_MODES = [
+  ['best', 'Best match, with its page’s details'],
+  ['top', 'The top N matches'],
+];
+export const PEOPLE_DEFAULT = 20;
+
+/** @param {CronStep} step */
+export const companyTop = (step) => Math.min(COMPANY_TOP_MAX, Math.max(1, Math.round(Number(step.top) || 5)));
+/** @param {CronStep} step */
+export const peopleCount = (step) => Math.min(PEOPLE_MAX, Math.max(1, Math.round(Number(step.count) || PEOPLE_DEFAULT)));
+
+// The most calls one run of a LinkedIn step makes (a loop multiplies them), and what may add one.
+/** @param {CronStep} step @returns {{ calls: number, extra: string }} */
+export function linkedinCalls(step) {
+  if (step.type === 'linkedin-company') return { calls: step.mode === 'top' ? 1 : 2, extra: '' };
+  if (step.type === 'linkedin-people') return { calls: Math.ceil(peopleCount(step) / PEOPLE_PAGE), extra: 'one more when the company is a name or a page link rather than an id' };
+  if (step.type === 'linkedin-profile') return { calls: 1, extra: '' };
+  return { calls: 0, extra: '' };
+}
+
+/** @param {{ calls: number, cached: number }} tally */
+const tallyNote = (tally) => {
+  const cached = `${tally.cached} answer${tally.cached === 1 ? '' : 's'} from the cache`;
+  if (!tally.calls) return tally.cached ? `No LinkedIn call: ${cached}.` : '';
+  return `${tally.calls} LinkedIn call${tally.calls === 1 ? '' : 's'}${tally.cached ? `, ${cached}` : ''}.`;
+};
+
+/** @param {unknown} v @returns {v is Record<string, any>} */ // any: an earlier step's item, read field by field
+const isRecord = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+
+// A field's value: what its single variable holds, kept whole, else the filled text. Undefined fails the step.
+/** @param {string | undefined} template @param {Vars} vars */
+function fieldValue(template, vars) {
+  const t = String(template ?? '').trim() || '{{input}}';
+  const v = valueOf(t, vars);
+  if (v === undefined) throw new Error(`${t} has no value here.`);
+  return v;
+}
+
+/**
+ * @param {DataStore} store
+ * @param {CronStep} step
+ * @param {Vars} vars
+ * @param {RunCtx} ctx
+ */
+async function linkedinCompanyStep(store, step, vars, ctx) {
+  let name = fieldValue(step.text, vars);
+  if (Array.isArray(name)) name = name[0];
+  if (isRecord(name)) name = name.company ?? name.name ?? '';
+  const tally = { calls: 0, cached: 0 };
+  const best = step.mode !== 'top';
+  const found = await findCompanies(store, String(name ?? ''), { mode: best ? 'best' : 'top', top: companyTop(step), tally });
+  ctx.data = found;
+  ctx.note = [
+    best ? `Best match: ${found[0].name}${found[0].id ? ` (id ${found[0].id})` : ''}.` : `${found.length} compan${found.length === 1 ? 'y' : 'ies'}.`,
+    tallyNote(tally),
+  ].join(' ');
+  return JSON.stringify(found, null, 2);
+}
+
+/**
+ * @param {DataStore} store
+ * @param {CronStep} step
+ * @param {Vars} vars
+ * @param {RunCtx} ctx
+ */
+async function linkedinPeopleStep(store, step, vars, ctx) {
+  const ref = companyRef(fieldValue(step.company, vars));
+  const tally = { calls: 0, cached: 0 };
+  let { id, name } = ref;
+  if (!id && ref.handle) {
+    const c = await companyByHandle(store, ref.handle, { tally });
+    if (!c?.id) throw new Error(`LinkedIn’s page ${ref.handle} gave no company id.`);
+    ({ id, name } = c);
+  } else if (!id && ref.name) {
+    const [c] = await findCompanies(store, ref.name, { mode: 'top', top: 1, tally });
+    if (!c.id) throw new Error(`LinkedIn found “${c.name}” but gave no company id.`);
+    ({ id, name } = c);
+  }
+  if (!id) throw new Error('Name the company: the id a “LinkedIn: find company” step gives ({{step2[0].id}}), its page link, or its name.');
+  const { people, hidden, elsewhere, pages } = await companyPeople(store, {
+    companyId: id,
+    keywords: fill(step.keywords ?? '', vars).trim(),
+    location: fill(step.location ?? '', vars).trim(),
+    count: peopleCount(step),
+    skipHidden: step.skipHidden !== false,
+    company: name,
+    tally,
+  });
+  ctx.data = people;
+  ctx.nothing = !people.length;
+  ctx.note = [
+    `${people.length} ${people.length === 1 ? 'person' : 'people'}${name ? ` at ${name}` : ''} from ${pages} page${pages === 1 ? '' : 's'}.`,
+    hidden ? `${hidden} hidden “LinkedIn Member” result${hidden === 1 ? '' : 's'} skipped.` : '',
+    elsewhere ? `${elsewhere} outside the location left out.` : '',
+    tallyNote(tally),
+  ].filter(Boolean).join(' ');
+  return JSON.stringify(people, null, 2);
+}
+
+/**
+ * @param {DataStore} store
+ * @param {CronStep} step
+ * @param {Vars} vars
+ * @param {RunCtx} ctx
+ */
+async function linkedinProfileStep(store, step, vars, ctx) {
+  let v = fieldValue(step.text, vars);
+  if (Array.isArray(v)) v = v[0];
+  if (isRecord(v)) v = v.handle || v.url || v.linkedin || '';
+  const tally = { calls: 0, cached: 0 };
+  const profile = await readProfile(store, String(v ?? ''), { tally });
+  ctx.data = profile;
+  ctx.note = `${profile.name || profile.handle}. ${tallyNote(tally)}`;
+  return JSON.stringify(profile, null, 2);
+}
+
+// One item of a list as a contact: a person from a LinkedIn step, any object with the same names, or a line of text
+// (a profile link, an address or a name). Null for a hidden member, who has nothing to tell them apart.
+/** @param {unknown} item @param {string} company @returns {import('./contacts-core.js').ContactInput | null} */
+function contactFrom(item, company) {
+  if (!isRecord(item)) {
+    const text = String(item ?? '').trim();
+    if (!text) return null;
+    if (/linkedin\.com\/in\/|^in\//i.test(text)) return { linkedin: linkedinHandle(text), company };
+    if (/^\S+@\S+\.\S+$/.test(text)) return { email: text, company };
+    return { name: text, company };
+  }
+  const linkedin = String(item.handle || item.linkedin || item.url || '');
+  if (item.hidden && !linkedin) return null;
+  /** @param {unknown} x */
+  const str = (x) => (typeof x === 'string' ? x : '');
+  return {
+    name: str(item.name),
+    headline: str(item.headline),
+    company,
+    linkedin,
+    email: str(item.email),
+    location: str(item.location),
+    image: str(item.image),
+  };
+}
+
+/**
+ * @param {DataStore} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {Vars} vars
+ * @param {RunCtx} ctx
+ */
+function saveContactsStep(store, flow, step, vars, ctx) {
+  const items = itemsOf(step.items, vars);
+  /** @type {import('./contacts-core.js').ContactInput[]} */
+  const inputs = [];
+  let skipped = 0;
+  for (const [index, item] of items.entries()) {
+    const filled = fill(step.company ?? '{{item.company}}', withItem(vars, { item, index, count: items.length })).trim();
+    // A variable with no value stays as written; the item's own company is the fallback.
+    const company = filled.includes('{{') ? String(isRecord(item) ? item.company ?? '' : '') : filled;
+    const c = contactFrom(item, company);
+    if (c && (c.name || c.linkedin || c.email)) inputs.push(c);
+    else skipped += 1;
+  }
+  const projectId = taskProjectId(store, flow, step, vars);
+  /** @param {import('./contacts-core.js').ContactInput} c */
+  const known = (c) => (c.linkedin ? findByLinkedin(store, c.linkedin) : null) ?? (c.email ? findByEmail(store, c.email) : null);
+  const skippedNote = skipped ? ` ${skipped} item${skipped === 1 ? '' : 's'} with no name, profile or address skipped.` : '';
+  ctx.nothing = !inputs.length;
+  if (ctx.dry && !ctx.live) {
+    const existing = inputs.filter(known).length;
+    ctx.data = { added: inputs.length - existing, updated: existing, contacts: inputs };
+    ctx.note = `Test run: would save ${inputs.length} contact${inputs.length === 1 ? '' : 's'}: ${inputs.length - existing} new, ${existing} already in Contacts (merged).${skippedNote}`;
+    return JSON.stringify(ctx.data, null, 2);
+  }
+  const { added, updated } = addContacts(store, inputs, { projectId, source: 'cron' });
+  const contacts = inputs.map(known).filter((c) => c !== null);
+  ctx.data = { added: added.length, updated: updated.length, contacts };
+  const same = Math.max(0, contacts.length - added.length - updated.length);
+  ctx.note = `${ctx.dry ? 'Test run: saved' : 'Saved'} ${added.length} new contact${added.length === 1 ? '' : 's'}, ${updated.length} updated${same ? `, ${same} unchanged` : ''}.${skippedNote}`;
+  return JSON.stringify(ctx.data, null, 2);
+}
+
 /** @param {CronStep} step */
 export const loopMax = (step) => Math.min(LOOP_LIMIT, Math.max(1, Math.round(Number(step.max) || LOOP_MAX)));
 
@@ -2542,6 +2765,10 @@ async function runStep(store, flow, step, input, ctx) {
   if (step.type === 'parse') return parseStep(step, vars, ctx);
   if (step.type === 'dedupe') return dedupeStep(store, flow, step, vars, ctx);
   if (step.type === 'ai-filter') return aiFilterStep(store, flow, step, vars, ctx);
+  if (step.type === 'linkedin-company') return linkedinCompanyStep(store, step, vars, ctx);
+  if (step.type === 'linkedin-people') return linkedinPeopleStep(store, step, vars, ctx);
+  if (step.type === 'linkedin-profile') return linkedinProfileStep(store, step, vars, ctx);
+  if (step.type === 'save-contacts') return saveContactsStep(store, flow, step, vars, ctx);
   if (step.type === 'loop') {
     const all = itemsOf(step.items, vars);
     const items = all.slice(0, loopMax(step));
