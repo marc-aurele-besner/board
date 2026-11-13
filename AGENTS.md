@@ -99,7 +99,7 @@ js/deployments.js     a PR's deployments from the Vercel and Netlify APIs (with 
 js/deploy-panel.js    a preview's panel: state, commit, timings, error, links and its build log, reloaded while it builds
 js/images.js          which pasted or dropped files are images claude reads
 js/task-images.js     a task's images: kept in the data folder, shown on the task, saved through the runner for claude
-js/task-worktrees.js  the worktrees Dev sessions made for tasks; removed through the runner once their tasks are done
+js/task-worktrees.js  the worktrees Dev sessions made for tasks; removed through the runner once their tasks are done, their terminals closed
 js/modules/dev-worktrees.js  Dev's Worktrees panel: the repo's worktrees, whether each is in use, and removing them
 js/modules/dev-pr.js   Dev's pull request view: the branch against the default branch, file list, diffs as cards that fold, Viewed marks
 js/dev-usage.js       what a task's claude session used (model, effort, tokens, cost), kept in usage.json `dev`
