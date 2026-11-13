@@ -2,6 +2,7 @@
 // Each step gets the previous step's output as {{input}}. The runners (tools/jobs/cron.js) run due flows, whether or not the board is open.
 import { uid, now, todayISO, statusOf } from './ui.js';
 import { ask } from './ai.js';
+import { systemPrompt } from './prompts.js';
 import { makeTask } from './capture.js';
 import { notify } from './notify-core.js';
 import { calendarEvents, calendarAccounts, eventDate } from './gcal.js';
@@ -59,6 +60,7 @@ export const STEP_TYPES = [
   ['stop', 'Stop if', 'filter', 'Ends the run early, for example when there is nothing to report. In a loop, skips the item.'],
   ['format', 'Format', 'align-left', 'Reshapes the input into cleaner text, a list with one line per item, or named JSON fields.'],
   ['parse', 'Parse JSON', 'code', 'Finds the JSON in a text, such as a model’s or claude’s answer, even with prose around it or cut off, and passes it on as data.'],
+  ['ai-filter', 'AI filter', 'sparkle', 'Asks a model which items of a list match what you describe, or ranks them, and keeps those, each with the model’s reason and score.'],
   ['dedupe', 'Filter duplicates', 'copy', 'Drops the items of a list that already have a task, done ones too, such as the jobs an earlier run found, so a loop after it only makes the new ones.'],
   ['loop', 'Loop over items', 'repeat', 'Runs the next steps once for each item of a list, then passes on what they gave for all of them.'],
   ['task', 'Create task', 'check-square', 'Adds a task with a title and description you write, the input by default. Its output is the new task’s id, so a later step can put a task under it.'],
@@ -320,6 +322,7 @@ export function makeStep(type) {
   if (type === 'format') return { ...base, mode: 'text', text: '{{input}}', items: '{{input}}', itemText: '- {{item}}', separator: 'line', fields: [makeField()] };
   if (type === 'parse') return { ...base, text: '{{input}}', mode: 'largest' };
   if (type === 'loop') return { ...base, items: '{{input}}', span: 1, max: LOOP_MAX };
+  if (type === 'ai-filter') return { ...base, items: '{{input}}', criterion: '', mode: 'keep', top: 10, text: '', model: '' };
   if (type === 'dedupe') return { ...base, items: '{{input}}', text: '{{item}}', match: 'title', scope: 'flow' };
   if (type === 'dev') return { ...base, mode: 'claude', preset: '', devCommand: '', projectId: '', prompt: '{{input}}', command: '', waitMinutes: DEV_WAIT_MINUTES };
   return { ...base, text: '{{flow}}: {{input}}' };
@@ -1706,6 +1709,142 @@ function dedupeStep(store, flow, step, vars, ctx) {
   return JSON.stringify(kept, null, 2);
 }
 
+// --- AI filter ---
+// An AI filter step asks a model which items of a list match a criterion written in words ("people who decide on
+// engineering hires"), or ranks them and keeps the best N. The items go in batches, one call each and one after the
+// other, so a long list neither overflows a prompt nor starts many calls at once. The model answers with JSON, one
+// verdict per item; the step keeps the original items, each object with the model's `_reason` and `_score` added.
+// A batch whose call fails or whose answer holds no verdicts is tried once more; if it fails again the step fails,
+// as an AI generate step does, rather than pass on a list that quietly lacks a batch.
+
+export const AI_FILTER_MODES = [
+  ['keep', 'Keep the matching items'],
+  ['rank', 'Rank them and keep the top N'],
+];
+export const AI_FILTER_BATCH = 20;
+// The most items one step sends, as for a loop: a longer list is cut, and the note says so.
+export const AI_FILTER_MAX = LOOP_LIMIT;
+// How much of one item the model sees, so a long page or email cannot fill the prompt.
+const AI_FILTER_ITEM_CHARS = 2000;
+
+/** @param {CronStep} step */
+export const aiFilterTop = (step) => Math.min(AI_FILTER_MAX, Math.max(1, Math.round(Number(step.top) || 10)));
+
+// One item as the model reads it, on one line: the step's template, or the item itself (compact JSON for an object).
+/**
+ * @param {CronStep} step
+ * @param {Vars} vars
+ * @param {unknown} item
+ * @param {number} index
+ * @param {number} count
+ */
+function aiFilterItemText(step, vars, item, index, count) {
+  const text = String(step.text ?? '').trim()
+    ? fill(step.text, withItem(vars, { item, index, count }))
+    : typeof item === 'string' ? item : JSON.stringify(item);
+  const one = text.replace(/\s+/g, ' ').trim();
+  return one.length > AI_FILTER_ITEM_CHARS ? `${one.slice(0, AI_FILTER_ITEM_CHARS)}…` : one;
+}
+
+// The verdicts in a model's answer, by item number (from 1 within the batch). The answer may be a list, or an object
+// holding one ({"items": [...]}); a verdict without a number takes its place in the list.
+/**
+ * @param {string} reply
+ * @param {number} size
+ * @returns {Map<number, { keep: boolean, score: number, reason: string }>}
+ */
+export function aiFilterVerdicts(reply, size) {
+  /** @type {unknown[] | null} */
+  let list = null;
+  for (const f of findJson(reply)) {
+    const v = f.value;
+    const found = Array.isArray(v) ? v : v && typeof v === 'object' ? Object.values(v).find(Array.isArray) : null;
+    if (found && (!list || found.length > list.length)) list = found;
+  }
+  /** @type {Map<number, { keep: boolean, score: number, reason: string }>} */
+  const out = new Map();
+  for (const [i, raw] of (list ?? []).entries()) {
+    if (!raw || typeof raw !== 'object') continue;
+    const v = /** @type {Record<string, unknown>} */ (raw);
+    const num = Number(v.index ?? v.i ?? i + 1);
+    const n = Number.isFinite(num) ? Math.round(num) : i + 1;
+    if (n < 1 || n > size || out.has(n)) continue;
+    const scoreNum = Number(v.score);
+    const score = v.score != null && Number.isFinite(scoreNum) ? Math.min(100, Math.max(0, Math.round(scoreNum))) : 0;
+    const k = v.keep ?? v.match;
+    const keep = typeof k === 'string' ? /^(true|yes|keep|1)$/i.test(k.trim()) : k == null ? score >= 50 : Boolean(k);
+    out.set(n, { keep, score, reason: String(v.reason ?? '').trim() });
+  }
+  return out;
+}
+
+/**
+ * @param {DataStore} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {Vars} vars
+ * @param {RunCtx} ctx
+ */
+async function aiFilterStep(store, flow, step, vars, ctx) {
+  const criterion = fill(step.criterion ?? '', vars).trim();
+  if (!criterion) throw new Error('Describe which items to keep.');
+  const all = itemsOf(step.items, vars);
+  const items = all.slice(0, AI_FILTER_MAX);
+  const rank = step.mode === 'rank';
+  const top = aiFilterTop(step);
+  const projectId = withFlowProject(flow, step).projectId || '';
+  const system = systemPrompt(store, 'cron-filter');
+  /** @type {{ item: unknown, index: number, keep: boolean, score: number, reason: string, answered: boolean }[]} */
+  const judged = [];
+  let retried = 0;
+  for (let start = 0; start < items.length; start += AI_FILTER_BATCH) {
+    const batch = items.slice(start, start + AI_FILTER_BATCH);
+    const lines = batch.map((item, i) => `[${i + 1}] ${aiFilterItemText(step, vars, item, start + i, items.length)}`);
+    const user = [
+      `Criterion: ${criterion}`,
+      rank ? 'Score every item by how well it fits the criterion; the best ones will be kept.' : 'Keep only the items that fit the criterion.',
+      `Items (${batch.length}):\n${lines.join('\n')}`,
+    ].join('\n\n');
+    /** @type {Map<number, { keep: boolean, score: number, reason: string }>} */
+    let verdicts = new Map();
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const reply = await ask(store, AI_TASK, [{ role: 'system', content: system }, { role: 'user', content: user }], { model: step.model || '', projectId });
+        verdicts = aiFilterVerdicts(reply, batch.length);
+        if (!verdicts.size) throw new Error('The model gave no verdicts as JSON.');
+        break;
+      } catch (err) {
+        if (attempt >= 1) throw new Error(`Items ${start + 1} to ${start + batch.length}: ${/** @type {Error} */ (err).message}`);
+        retried++;
+      }
+    }
+    ctx.beat?.();
+    batch.forEach((item, i) => {
+      const v = verdicts.get(i + 1);
+      judged.push({ item, index: start + i, keep: v?.keep ?? false, score: v?.score ?? 0, reason: v?.reason ?? '', answered: Boolean(v) });
+    });
+  }
+  const picked = rank
+    ? [...judged].sort((a, b) => b.score - a.score || a.index - b.index).slice(0, top)
+    : judged.filter((j) => j.keep);
+  // Only an object can carry the reason and score; a text item is passed on as it is.
+  const kept = picked.map((j) => (j.item && typeof j.item === 'object' && !Array.isArray(j.item) ? { ...j.item, _reason: j.reason, _score: j.score } : j.item));
+  const unanswered = judged.filter((j) => !j.answered).length;
+  const calls = Math.ceil(items.length / AI_FILTER_BATCH);
+  const plural = (/** @type {number} */ n, /** @type {string} */ one, /** @type {string} */ many) => `${n} ${n === 1 ? one : many}`;
+  ctx.data = kept;
+  // An empty list counts as nothing found, so a "Stop if" after it can end the run quietly.
+  ctx.nothing = !kept.length;
+  ctx.note = [
+    rank ? `Kept the top ${kept.length} of ${plural(items.length, 'item', 'items')} by score.` : `Kept ${kept.length} of ${plural(items.length, 'item', 'items')}.`,
+    calls > 1 ? `${calls} model calls.` : '',
+    all.length > items.length ? `Only the first ${items.length} of ${all.length} were sent.` : '',
+    retried ? `${plural(retried, 'call was', 'calls were')} tried again.` : '',
+    unanswered ? `The model gave no verdict for ${plural(unanswered, 'item', 'items')}${rank ? ', scored 0' : ', left out'}.` : '',
+  ].filter(Boolean).join(' ');
+  return JSON.stringify(kept, null, 2);
+}
+
 /** @param {CronStep} step */
 export const loopMax = (step) => Math.min(LOOP_LIMIT, Math.max(1, Math.round(Number(step.max) || LOOP_MAX)));
 
@@ -2349,6 +2488,7 @@ async function runStep(store, flow, step, input, ctx) {
   if (step.type === 'format') return formatStep(step, vars, ctx);
   if (step.type === 'parse') return parseStep(step, vars, ctx);
   if (step.type === 'dedupe') return dedupeStep(store, flow, step, vars, ctx);
+  if (step.type === 'ai-filter') return aiFilterStep(store, flow, step, vars, ctx);
   if (step.type === 'loop') {
     const all = itemsOf(step.items, vars);
     const items = all.slice(0, loopMax(step));

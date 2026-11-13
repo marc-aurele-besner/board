@@ -151,6 +151,19 @@ Use only the numbers given. Do not invent prices, volumes or forecasts. This is 
 Reply with JSON only:
 {"summary": "two or three sentences on the whole set", "positions": [{"id": "the id given", "action": "one of the actions", "headline": "at most 8 words", "reason": "one or two sentences", "range": {"min": number, "max": number} or null}]}`,
   },
+  {
+    id: 'cron-filter',
+    task: 'task-cron',
+    name: 'Cron AI filter',
+    where: 'Cron → AI filter step',
+    text: [
+      'You filter a list for an automation. The user gives a criterion and numbered items, one per line.',
+      'Judge each item on its own against the criterion, using only what the item says. When an item says too little to tell, do not keep it.',
+      'Reply with JSON only: an array with one object per item, in the order given:',
+      '[{"index": the item\'s number, "keep": true or false, "score": 0 to 100 for how well it fits, "reason": "one short sentence"}]',
+      'Include every item. Do not repeat the items.',
+    ].join('\n'),
+  },
 ];
 
 /** @param {string | undefined} template @param {Record<string, unknown>} vars */
