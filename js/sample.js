@@ -221,6 +221,8 @@ function collections() {
       dev: {
         'ship-the-pricing-page-a1b2c3': devRecord('ship-the-pricing-page-a1b2c3', ['t1'], -1, { 'claude-opus-5-5': [820, 31200, 4100000, 160000, 2.84], 'claude-haiku-5-5': [1300, 210, 0, 0, 0.0003] }, 'high'),
         'write-the-install-guide-d4e5f6': devRecord('write-the-install-guide-d4e5f6', ['t6'], 0, { 'claude-sonnet-5-5': [410, 18400, 1900000, 90000, 0.97] }, 'medium'),
+        'fix-the-footer-links-g7h8i9': devRecord('fix-the-footer-links-g7h8i9', ['t2'], -3, { 'claude-sonnet-5-5': [300, 9600, 1200000, 60000, 0.58] }, 'medium'),
+        'book-the-plumber-j1k2l3': devRecord('book-the-plumber-j1k2l3', ['t7'], -5, { 'claude-haiku-5-5': [900, 4200, 300000, 20000, 0.07] }, 'low'),
       },
     },
     tools: { every: 60, sites: { 'p-atlas': site(true, 64), 'p-docs': site(false, 9) } },

@@ -12,10 +12,10 @@ import { sortTable } from './monitoring-web.js';
 
 const DAY = 86400000;
 // Series beyond these are added up as Other, so the chart stays readable.
-const TOP = 6;
-const PALETTE = ['var(--accent)', 'var(--ai)', 'var(--income)', 'var(--warn)', 'var(--info)', 'var(--expense)'];
-const OTHER = { key: '\0other', label: 'Other', color: 'var(--muted)' };
-const NO_PROJECT = '-';
+export const TOP = 6;
+export const PALETTE = ['var(--accent)', 'var(--ai)', 'var(--income)', 'var(--warn)', 'var(--info)', 'var(--expense)'];
+export const OTHER = { key: '\0other', label: 'Other', color: 'var(--muted)' };
+export const NO_PROJECT = '-';
 export const SOURCES = [['all', 'All'], ['board', 'Board AI calls'], ['dev', 'Dev sessions']];
 export const BREAKDOWNS = [['project', 'Project'], ['source', 'Source'], ['model', 'Model'], ['feature', 'Feature']];
 export const MEASURES = [['cost', 'Cost'], ['tokens', 'Tokens'], ['calls', 'Calls']];
@@ -93,7 +93,7 @@ function change(cur, prev) {
 }
 
 /** @param {[string, string][]} options @param {string} current @param {string} label @param {(key: string) => void} pick */
-function segmented(options, current, label, pick) {
+export function segmented(options, current, label, pick) {
   return h('div', { class: 'segmented ai-seg', role: 'group', 'aria-label': label },
     options.map(([key, text]) => h('button', {
       type: 'button',
