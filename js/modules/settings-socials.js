@@ -1,6 +1,6 @@
 // Settings → X / Twitter, LinkedIn, GitHub and Instagram accounts: the accounts whose follower counts (and GitHub stars)
 // Monitoring → Socials follows, each tied to a project if wanted, and LinkedIn's signed-in session for company pages.
-import { h, icon, uid, refreshIcon, copyable } from '../ui.js';
+import { h, icon, uid, refreshIcon, copyable, notice } from '../ui.js';
 import { pickChip } from '../inline.js';
 import { toast } from '../toast.js';
 import { runJob, runnersOnline, runnersKnown } from '../runners.js';
@@ -8,6 +8,7 @@ import { LINKEDIN, signedIn } from '../linkedin-core.js';
 import { linkedinApp, linkedinRedirect, linkedinSignIn, linkedinSignOut } from '../linkedin.js';
 import { SOCIALS, NETWORKS, networkIcon, parseHandle, profileUrl, handleLabel, isOrganization } from '../socials.js';
 import { projectIcon, projectTree } from './projects.js';
+import { sessionState } from '../linkedin-session.js';
 /** @import { Store, SocialAccount, Project, LinkedinSettings } from '../../types/data' */
 
 /** @param {string} text @param {string} tone */
@@ -228,26 +229,56 @@ function publishCard(store) {
 /** @param {Store} store */
 function linkedinSession(store) {
   const saved = /** @type {LinkedinSettings} */ (store.get('settings').linkedin ?? {});
-  const set = Boolean(saved.liAt && saved.jsessionid);
   const liAt = h('input', { name: 'liAt', type: 'password', autocomplete: 'off', spellcheck: false, placeholder: 'AQEDA…', value: saved.liAt ?? '', 'aria-label': 'li_at cookie' });
   const jsession = h('input', { name: 'jsessionid', type: 'password', autocomplete: 'off', spellcheck: false, placeholder: 'ajax:123…', value: saved.jsessionid ?? '', 'aria-label': 'JSESSIONID cookie' });
-  /** @param {LinkedinSettings} value */
-  const save = (value) => {
-    // Keeps the app of Publish as you, which shares settings.linkedin.
+  const state = sessionState(store);
+  // New cookies are a new session: the stop LinkedIn's sign-out put on the queue is lifted.
+  /** @param {{ liAt?: string, jsessionid?: string }} cookies */
+  const save = (cookies) => {
+    // Keeps the app of Publish as you and the daily limit, which share settings.linkedin.
     store.update('settings', (d) => {
-      const { liAt: _a, jsessionid: _j, ...app } = d.linkedin ?? {};
-      d.linkedin = { ...app, ...value };
+      const { liAt: _a, jsessionid: _j, ...rest } = d.linkedin ?? {};
+      d.linkedin = { ...rest, ...cookies };
+    });
+    store.update(LINKEDIN, (d) => {
+      d.session ??= { calls: {} };
+      d.session.expiredAt = null;
+      d.session.error = null;
     });
     const pages = store.get(SOCIALS).accounts.filter((a) => a.network === 'linkedin' && (isOrganization(a) || a.error)).map((a) => a.id);
-    if (pages.length && value.liAt) readNow(store, pages);
+    if (pages.length && cookies.liAt) readNow(store, pages);
   };
+  const limit = h('input', { type: 'number', min: '0', max: '1000', step: '1', value: String(state.limit), 'aria-label': 'Session calls per day' });
+  const tone = !state.saved ? 'plain' : state.expiredAt ? 'high' : 'done';
+  const label = !state.saved ? 'Not set' : state.expiredAt ? 'Signed out' : 'OK';
   return h('section', { class: 'card panel' },
     h('header', { class: 'panel-head' },
       h('div', null,
         h('h2', null, 'Signed-in session'),
         h('p', { class: 'muted' }, 'A person’s public profile shows its followers to anyone. LinkedIn shows company pages only when signed in, so the runners read those with your browser’s session, as the site does.')),
-      h('div', { class: 'row' }, badge(set ? 'Saved' : 'Not set', set ? 'done' : 'plain'))),
+      h('div', { class: 'row' }, badge(label, tone))),
     h('div', { class: 'cred-body' },
+      h('div', { class: 'svc-section stack-sm' },
+        h('h3', null, 'Session'),
+        state.expiredAt
+          ? notice({ text: `LinkedIn signed the session out on ${new Date(state.expiredAt).toLocaleString()}${state.error ? ` (${state.error})` : ''}. Session reads are stopped until you save li_at and JSESSIONID again.` })
+          : null,
+        notice({ tone: 'info', text: 'Reads through the session use LinkedIn’s internal API, the one its own pages call. That is against LinkedIn’s terms, and the account is at risk: LinkedIn may sign it out or restrict it. The runners make one call at a time, 20 to 40 s apart, under the daily limit, and stop at the first sign-out.' }),
+        h('p', { class: 'muted small' }, `${state.today} of ${state.limit} calls today${state.lastCallAt ? `, the last at ${new Date(state.lastCallAt).toLocaleTimeString()}` : ''}. Answers are kept and reused, so the same read does not call again for a while.`),
+        h('form', {
+          class: 'row',
+          onsubmit: (/** @type {SubmitEvent} */ e) => {
+            e.preventDefault();
+            const n = Math.max(0, Math.min(1000, Math.floor(Number(limit.value))));
+            if (!Number.isFinite(n)) return;
+            store.update('settings', (d) => {
+              d.linkedin = { ...d.linkedin, dailyLimit: n };
+            });
+            toast(`LinkedIn session limit: ${n} calls a day`);
+          },
+        },
+          h('label', { class: 'row' }, h('span', { class: 'small' }, 'Calls per day'), limit),
+          h('button', { type: 'submit', class: 'btn-small' }, 'Save'))),
       h('div', { class: 'svc-section' },
         h('h3', null, 'Setup'),
         h('ol', { class: 'steps' },
@@ -267,7 +298,7 @@ function linkedinSession(store) {
         h('p', { class: 'muted small' }, 'Saved in settings.json in your data folder and sent only to LinkedIn, from the runners on this machine. Signing out of LinkedIn in the browser ends the session here too.'),
         h('div', { class: 'svc-actions' },
           h('button', { class: 'primary', type: 'submit' }, 'Save'),
-          set ? h('button', { type: 'button', class: 'danger', onclick: () => save({}) }, icon('x'), 'Clear') : null))));
+          state.saved ? h('button', { type: 'button', class: 'danger', onclick: () => save({}) }, icon('x'), 'Clear') : null))));
 }
 
 /** @param {Store} store @param {'x' | 'linkedin' | 'github' | 'instagram'} network */

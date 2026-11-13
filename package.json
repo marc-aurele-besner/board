@@ -9,7 +9,7 @@
     "serve": "bun tools/serve.js",
     "terminal": "bun tools/terminal.js",
     "typecheck": "node tools/typecheck.js",
-    "check": "for f in js/*.js js/*/*.js tools/*.js tools/*/*.js; do node --experimental-default-type=module --check \"$f\" || { echo \"FAIL $f\"; exit 1; }; done && node tools/check-imports.js && node tools/check-merge.js && bun run typecheck",
+    "check": "for f in js/*.js js/*/*.js tools/*.js tools/*/*.js; do node --experimental-default-type=module --check \"$f\" || { echo \"FAIL $f\"; exit 1; }; done && node tools/check-imports.js && node tools/check-merge.js && node tools/check-linkedin.js && bun run typecheck",
     "prepare": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
