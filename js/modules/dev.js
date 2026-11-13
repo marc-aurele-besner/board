@@ -1303,9 +1303,7 @@ function sessionTitle(store, s) {
         store.refresh();
       },
     }, s.running ? h('span', { class: 'term-dot', title: 'Running' }) : icon('terminal'), h('span', null, `${numberOf(s)} · ${s.cwd ? baseName(s.cwd) : 'board'}`)), () => sessionMenu(store, s)),
-    turnsButton(store, s),
-    agentsButton(s),
-    toolButtons(store, s),
+    h('span', { class: 'term-claude' }, claudeButtons(store, s)),
     h('button', {
       type: 'button',
       class: 'term-new',
@@ -1319,36 +1317,67 @@ function sessionTitle(store, s) {
     }, icon('plus')));
 }
 
+// What the bar shows of the claude the shown terminal runs: its turns, its subagents, its skills and MCP tools.
+/** @param {Store} store @param {Session} s */
+function claudeButtons(store, s) {
+  refreshTurns(store, s);
+  return [turnsButton(s), agentsButton(s), toolButtons(store, s)];
+}
+
+// Draws those buttons again where they stand, without the page: the shell holds a page render back while a panel
+// is open (the subagents panel too), a field has unsent text or the tab is hidden, and the counts went stale.
+// Only when they read differently, and not under a press, whose click a new button would drop: the next read
+// draws them then.
+/** @param {Store} store @param {Session} s */
+function drawClaudeButtons(store, s) {
+  const slot = document.querySelector('.dev .term-claude');
+  if (!slot || activeSession() !== s || slot.querySelector(':active')) return;
+  const next = h('span', null, turnsButton(s), agentsButton(s), toolButtons(store, s));
+  if (next.innerHTML === slot.innerHTML) return;
+  const focused = [...slot.children].findIndex((el) => el === document.activeElement);
+  const kind = focused < 0 ? '' : slot.children[focused].className.split(' ').slice(0, 2).join('.');
+  slot.replaceChildren(...next.childNodes);
+  if (kind) /** @type {HTMLElement | null} */ (slot.querySelector(`.${kind}`))?.focus({ preventScroll: true });
+}
+
 // The turns of the claude the shown terminal runs, read from its transcript through the runner: again every few
-// seconds while it runs, and once after it ended. A change redraws the page.
+// seconds while it runs (sooner while it or a subagent works), and once after it ended. The loop runs on its own
+// timer, for whichever terminal is shown when it fires, and a read that never answers is given up.
 const TURNS_MS = 4000;
+const TURNS_WORKING_MS = 2000;
+const TURNS_TIMEOUT_MS = 15000;
 /** @type {{ id: string, at: number, busy: boolean, data: RunnerTurns | null, timer: number }} */
 const turnsView = { id: '', at: 0, busy: false, data: null, timer: 0 };
+/** @param {Store} store */
+function nextTurns(store) {
+  const s = activeSession();
+  if (s && document.querySelector('.dev')) refreshTurns(store, s);
+}
 /** @param {Store} store @param {Session} s */
 function refreshTurns(store, s) {
   if (turnsView.id !== s.id) Object.assign(turnsView, { id: s.id, at: 0, data: null });
   clearTimeout(turnsView.timer);
   if (turnsView.busy || !view.info) return;
-  const due = turnsView.at + TURNS_MS - Date.now();
+  const data = turnsView.data;
   // An ended claude no longer changes: read once more, then wait for the next command.
-  if (turnsView.data && !s.running && turnsView.data.state === 'done') return;
+  if (data && !s.running && data.state === 'done') return;
+  const working = data?.state === 'working' || data?.agents?.some((a) => a.state === 'working');
+  const due = turnsView.at + (working ? TURNS_WORKING_MS : TURNS_MS) - Date.now();
   if (due > 0) {
-    turnsView.timer = window.setTimeout(() => {
-      if (document.querySelector('.dev') && activeSession() === s) refreshTurns(store, s);
-    }, due);
+    turnsView.timer = window.setTimeout(() => nextTurns(store), due);
     return;
   }
   turnsView.busy = true;
-  sessionTurns(runnerOf(store), s.id).then((data) => {
+  sessionTurns(runnerOf(store), s.id, AbortSignal.timeout(TURNS_TIMEOUT_MS)).then((read) => {
     if (turnsView.id !== s.id) return;
-    const changed = JSON.stringify(data) !== JSON.stringify(turnsView.data);
-    turnsView.data = data;
-    if (changed && document.querySelector('.dev')) store.refresh();
-    if (changed) drawTurns();
+    turnsView.data = read;
+    drawClaudeButtons(store, s);
+    drawTurns();
   }, () => {}).finally(() => {
     turnsView.busy = false;
-    turnsView.at = Date.now();
-    if (turnsView.id === s.id && document.querySelector('.dev') && activeSession() === s) refreshTurns(store, s);
+    if (turnsView.id === s.id) turnsView.at = Date.now();
+    // Another terminal may be shown by now: its read waited for this one.
+    nextTurns(store);
   });
 }
 
@@ -1539,9 +1568,8 @@ function idleRow(g) {
 }
 
 // How many turns the shown claude took, and where the last one stands; a click opens the turns panel.
-/** @param {Store} store @param {Session} s */
-function turnsButton(store, s) {
-  refreshTurns(store, s);
+/** @param {Session} s */
+function turnsButton(s) {
   const data = turnsView.id === s.id ? turnsView.data : null;
   if (!data?.claude) return null;
   const { turns, state } = data;
@@ -1574,7 +1602,7 @@ function agentsButton(s) {
   if (!data?.claude) return null;
   const agents = data.agents ?? [];
   const working = agents.filter((a) => a.state === 'working').length;
-  const open = turnsPop?.s === s && turnsPop.kind === 'agents';
+  const isOpen = () => turnsPop?.s === s && turnsPop.kind === 'agents';
   const title = `${agents.length} ${agents.length === 1 ? 'subagent' : 'subagents'} in this claude session${working ? ` · ${working} working` : ''}\nShow what each one is doing`;
   return h('button', {
     type: 'button',
@@ -1582,10 +1610,10 @@ function agentsButton(s) {
     title,
     'aria-label': title.split('\n')[0],
     'aria-haspopup': 'dialog',
-    'aria-expanded': String(open),
+    'aria-expanded': String(isOpen()),
     onclick: (/** @type {MouseEvent} */ e) => {
       e.stopPropagation();
-      if (open) return closeTurns();
+      if (isOpen()) return closeTurns();
       openTurns(/** @type {HTMLElement} */ (e.currentTarget), s, 'agents');
     },
   }, icon('users'), h('span', null, working ? `${working}/${agents.length}` : String(agents.length)), working ? h('span', { class: 'term-dot' }) : null);
