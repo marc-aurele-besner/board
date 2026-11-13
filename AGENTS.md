@@ -51,6 +51,8 @@ js/prompts.js         the system prompt of every AI feature; Settings → Prompt
 js/profile.js         a project's saved profile: reads its folder, commits, repos and pages, asks the model once, saves it on the project
 js/brand.js           a project's brand (images, colours, fonts, links): reads its folder and site's head tags, asks the model, adds what is new
 js/modules/project-brand.js  the Brand block of a project's page: swatches, images, fonts, links, editing and Find with AI
+js/contacts-core.js   contacts.json without the DOM: addContacts() (merged by LinkedIn handle or address), findByEmail(), contactsOf()
+js/modules/project-contacts.js  a project's Contacts block, Projects → Contacts, the contact dialog, Inbox's contact chip, Calendar's guests
 js/chart.js           SVG bar and line charts with a hover tooltip
 js/socials.js         the X, LinkedIn, GitHub and Instagram accounts, their follower (and GitHub star) history in socials.json; parsing a handle or profile link (no DOM)
 js/linkedin-core.js   linkedin.json without the DOM: the official sign-in's code trade and its expiry notice
