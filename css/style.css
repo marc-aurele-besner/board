@@ -2931,6 +2931,7 @@ button.cal-agenda-name:hover { color: var(--accent); }
 .dev > .stack { padding: 12px; border-bottom: 1px solid var(--border); }
 .ide { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 0; }
 .ide-main { display: flex; flex-direction: column; gap: 0; min-width: 0; min-height: 0; }
+.ide.side-resizable { grid-template-columns: var(--side-w) minmax(0, 1fr); }
 .ide > .card, .ide-main > .card { border: none; border-radius: 0; }
 .ide > .ide-explorer { border-right: 1px solid var(--border); }
 .ide-main > .ide-editor { border-bottom: 1px solid var(--border); }
@@ -3226,7 +3227,8 @@ button.cal-agenda-name:hover { color: var(--accent); }
 @media (max-width: 760px) {
   /* Stacked on a phone: the page scrolls, and each part keeps a fixed height. */
   .dev { height: auto; min-height: 0; }
-  .ide { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  .ide, .ide.side-resizable { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  .ide > .side-resize { display: none; }
   .ide-explorer { max-height: 260px; }
   .ide > .ide-explorer { border-right: none; border-bottom: 1px solid var(--border); }
   .ide-editor, .term { flex: none; }

@@ -21,6 +21,7 @@ import { searchPanel } from './dev-search.js';
 import { worktreesPanel, refreshWorktrees } from './dev-worktrees.js';
 import { skillsPanel, refreshSkills } from './dev-skills.js';
 import { pickChip } from '../inline.js';
+import { resizableSide } from '../side-resize.js';
 import { projectIcon } from './projects.js';
 import { linkWatcher, moveToReview } from '../task-links.js';
 import { watchDevSessions } from './todos.js';
@@ -63,6 +64,8 @@ const ACTIVE_KEY = 'board:dev-active';
 const SYNC_MS = 2000;
 // The side panel shown: 'files', 'search', 'git', 'worktrees', 'skills' or 'terminals'.
 const SIDE_KEY = 'board:dev-side';
+// The side panel's width, dragged on its right edge and remembered in this browser.
+const SIDE_RANGE = { def: 260, min: 200, max: 560 };
 
 // View state: the workspace, the sessions, the one shown, and what the runner said about itself.
 /**
@@ -1523,7 +1526,7 @@ function draw(root, store) {
   root.replaceChildren(
     h('div', { class: 'stack-lg dev' },
       view.infoError ? runnerNotice(store) : null,
-      h('div', { class: 'ide' },
+      resizableSide(h('div', { class: 'ide' },
         view.side === 'git'
           ? sourceControl(ctx, workspacePicker(store), sideSwitcher(store), rootPath(store, view.workspace))
           : view.side === 'search'
@@ -1537,7 +1540,7 @@ function draw(root, store) {
                   : explorer(ctx, workspacePicker(store), sideSwitcher(store)),
         h('div', { class: hasOpenFiles() ? 'ide-main has-file' : 'ide-main' },
           editor(ctx),
-          s ? terminal(store, s) : h('section', { class: 'card term' }, h('p', { class: 'muted small' }, 'Asking the runner for the open terminals…'))))));
+          s ? terminal(store, s) : h('section', { class: 'card term' }, h('p', { class: 'muted small' }, 'Asking the runner for the open terminals…')))), 'dev', SIDE_RANGE)));
   requestAnimationFrame(fillWindow);
   if (!s) return;
   requestAnimationFrame(() => {
