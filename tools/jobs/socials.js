@@ -105,20 +105,35 @@ async function readLinkedinSignedIn(a, session, signal) {
       : 'LinkedIn did not show this profile’s public page. Add the session in Settings → LinkedIn to read it signed in.');
   }
   const name = a.handle.replace(/^[a-z]+\//, '');
-  const url = isOrganization(a)
-    ? `https://www.linkedin.com/voyager/api/organization/companies?decorationId=com.linkedin.voyager.deco.organization.web.WebFullCompanyMain-12&q=universalName&universalName=${encodeURIComponent(name)}`
-    : `https://www.linkedin.com/voyager/api/identity/profiles/${encodeURIComponent(name)}/networkinfo`;
-  const res = await fetch(url, { headers: { 'user-agent': UA, ...headers }, signal, redirect: 'manual' });
-  if (res.status === 401 || res.status === 403 || (res.status >= 300 && res.status < 400)) {
-    throw new Error('LinkedIn did not accept the session. Copy li_at and JSESSIONID again in Settings → LinkedIn.');
+  /** @param {string} path @returns {Promise<unknown>} */
+  const get = async (path) => {
+    const res = await fetch(`https://www.linkedin.com/voyager/api/${path}`, { headers: { 'user-agent': UA, ...headers }, signal, redirect: 'manual' });
+    if (res.status === 401 || res.status === 403 || (res.status >= 300 && res.status < 400)) {
+      throw new Error('LinkedIn did not accept the session. Copy li_at and JSESSIONID again in Settings → LinkedIn.');
+    }
+    if (res.status === 404) throw new Error(`LinkedIn has no page ${a.handle}.`);
+    if (!res.ok) throw new Error(`LinkedIn answered ${res.status}.`);
+    return res.json();
+  };
+  if (isOrganization(a)) {
+    const data = await get(`organization/companies?decorationId=com.linkedin.voyager.deco.organization.web.WebFullCompanyMain-12&q=universalName&universalName=${encodeURIComponent(name)}`);
+    const followers = Number(find(data, 'followerCount'));
+    if (!Number.isFinite(followers)) throw new Error('LinkedIn’s answer had no follower count.');
+    const title = find(data, 'name');
+    return { followers, name: typeof title === 'string' ? title : undefined };
   }
-  if (res.status === 404) throw new Error(`LinkedIn has no page ${a.handle}.`);
-  if (!res.ok) throw new Error(`LinkedIn answered ${res.status}.`);
-  const data = await res.json();
-  const followers = Number(find(data, isOrganization(a) ? 'followerCount' : 'followersCount'));
+  // A person: their profile's id from the profile, then its following state, which holds the follower count.
+  // (identity/profiles/…/networkinfo, read before, now answers 410 Gone.)
+  const profile = await get(`identity/dash/profiles?q=memberIdentity&memberIdentity=${encodeURIComponent(name)}`);
+  const urn = find(profile, 'entityUrn');
+  if (typeof urn !== 'string' || !urn.startsWith('urn:li:fsd_profile:')) throw new Error(`LinkedIn has no profile ${a.handle}.`);
+  const state = await get(`feed/dash/followingStates/${encodeURIComponent(`urn:li:fsd_followingState:${urn}`)}`);
+  const followers = Number(find(state, 'followerCount') ?? find(profile, 'followerCount'));
   if (!Number.isFinite(followers)) throw new Error('LinkedIn’s answer had no follower count.');
-  const title = find(data, 'name');
-  return { followers, name: typeof title === 'string' ? title : undefined };
+  const first = find(profile, 'firstName');
+  const last = find(profile, 'lastName');
+  const full = [first, last].filter((s) => typeof s === 'string' && s).join(' ');
+  return { followers, name: full || undefined };
 }
 
 // GitHub caps a list at 100 per page; 10 pages covers 1,000 repos.
