@@ -1,18 +1,20 @@
 // What waits on the user in sections they may not have open, as a number on the nav tab: Slack mentions (a DM with
-// unread messages counts once), and claude terminals in Dev whose turn ended (a question, a plan, or done).
+// unread messages counts once), claude terminals in Dev whose turn ended (a question, a plan, or done), and unread
+// comments on the member's LinkedIn posts on the Inbox tab.
 // Read every 20 s while the page is visible. The Slack tab reads counts itself while open and reports them here,
 // so they are not read twice.
 import { runnersOnline } from './runners.js';
 import { runnerOf } from './dev-core.js';
 import { listSessions, sessionStatus } from './terminal.js';
 import { SLACK, SLACK_DEFAULTS, readCounts } from './slack.js';
+import { LINKEDIN } from './linkedin-core.js';
 /** @import { Store, SlackData } from '../types/data' */
 /** @import { Count } from './slack.js' */
 
 const EVERY_MS = 20000;
 
 /** @type {Record<string, number>} by section id */
-const counts = { slack: 0, dev: 0 };
+const counts = { slack: 0, dev: 0, inbox: 0 };
 let slackAt = 0;
 let devAt = 0;
 
@@ -20,6 +22,7 @@ let devAt = 0;
 const TITLES = {
   slack: (n) => `${n} ${n === 1 ? 'mention' : 'mentions'} in Slack`,
   dev: (n) => `${n} ${n === 1 ? 'terminal waits' : 'terminals wait'} for you in Dev`,
+  inbox: (n) => `${n} unread LinkedIn ${n === 1 ? 'comment' : 'comments'}`,
 };
 
 // The mentions a conversation shows: a DM with unread messages counts as one at least.
@@ -90,6 +93,8 @@ export function watchAttention(store) {
   const tick = () => {
     if (document.hidden) return;
     const now = Date.now();
+    // Already in the store (the runners write it): counted on every tick, no read.
+    setAttention('inbox', (store.get(LINKEDIN)?.comments ?? []).filter((c) => !c.read).length);
     if (now - devAt >= EVERY_MS) {
       devAt = now;
       readDev(store);
