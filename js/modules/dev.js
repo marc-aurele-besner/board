@@ -84,7 +84,7 @@ function readSide() {
   }
 }
 
-const maxSessions = () => view.info?.max ?? 12;
+const maxSessions = () => view.info?.max ?? 24;
 const activeSession = () => view.sessions.find((s) => s.id === view.active) ?? view.sessions[0];
 const projectsWithFolder = (/** @type {Store} */ store) => store.get('projects').projects.filter((p) => p.localPath);
 
