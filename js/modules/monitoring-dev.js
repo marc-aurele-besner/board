@@ -5,6 +5,7 @@ import { barChart, legend } from '../chart.js';
 import { sumUsage, modelName, tokensOf, fmtDuration } from '../dev-usage.js';
 import { usdPrecise, fmtTokens } from './monitoring.js';
 import { sortTable } from './monitoring-web.js';
+import { projectIcon } from './projects.js';
 import { aiView, devProjectOf, segmented, PALETTE, OTHER, NO_PROJECT, TOP } from './monitoring-ai.js';
 /** @import { DevUsage, Store } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
@@ -76,7 +77,12 @@ export function devBreakdown(store, w, records) {
     Object.assign(devView, patch);
     store.refresh();
   };
-  const colorOf = new Map(store.get('projects').projects.map((p) => [p.id, p.color ?? '']));
+  const projects = new Map(store.get('projects').projects.map((p) => [p.id, p]));
+  // A project's own icon (image or site icon) beside its swatch; none for a project without one, or in other breakdowns.
+  const iconOf = (/** @type {string} */ key) => {
+    const p = devView.by === 'project' ? projects.get(key) : undefined;
+    return p && (p.iconUrl || p.website) ? projectIcon(p, 'project-icon dev-by-icon') : null;
+  };
   const parts = partsOf(store, records);
 
   /** @typedef {{ key: string, label: string, title: string, color: string, value: number, cost: number, extra: number, tokens: number, time: number, lines: number, sessions: number, worktrees: Set<string> }} Row */
@@ -98,7 +104,7 @@ export function devBreakdown(store, w, records) {
   const withValue = rows.filter((r) => r.value);
   const shown = withValue.slice(0, withValue.length > TOP + 1 ? TOP : TOP + 1);
   shown.forEach((r, i) => {
-    r.color = devView.by === 'billing' ? BILLING[r.key].color : (devView.by === 'project' && colorOf.get(r.key)) || PALETTE[i % PALETTE.length];
+    r.color = devView.by === 'billing' ? BILLING[r.key].color : (devView.by === 'project' && projects.get(r.key)?.color) || PALETTE[i % PALETTE.length];
   });
   const shownKeys = new Set(shown.map((r) => r.key));
   for (const r of rows) if (!r.color) r.color = OTHER.color;
@@ -109,8 +115,8 @@ export function devBreakdown(store, w, records) {
     if (b >= 0) /** @type {number[]} */ (values.get(shownKeys.has(p.key) ? p.key : OTHER.key))[b] += measureOf(p);
   }
   const otherValues = /** @type {number[]} */ (values.get(OTHER.key));
-  const series = [...shown.map((r) => ({ name: r.label, color: r.color, values: /** @type {number[]} */ (values.get(r.key)) })),
-    ...(otherValues.some(Boolean) ? [{ name: OTHER.label, color: OTHER.color, values: otherValues }] : [])];
+  const series = [...shown.map((r) => ({ key: r.key, name: r.label, color: r.color, values: /** @type {number[]} */ (values.get(r.key)) })),
+    ...(otherValues.some(Boolean) ? [{ key: OTHER.key, name: OTHER.label, color: OTHER.color, values: otherValues }] : [])];
   const fmt = formatOf();
   /** @type {ChartTip} */
   const tip = (i) => {
@@ -118,7 +124,7 @@ export function devBreakdown(store, w, records) {
     return [
       h('span', { class: 'muted' }, w.items[i].label),
       list.length
-        ? list.map((sr) => h('span', { class: 'tip-row' }, h('span', null, h('span', { class: 'legend-swatch', style: { background: sr.color } }), ` ${sr.name}`), h('strong', null, fmt(sr.values[i]))))
+        ? list.map((sr) => h('span', { class: 'tip-row' }, h('span', null, h('span', { class: 'legend-swatch', style: { background: sr.color } }), iconOf(sr.key), ` ${sr.name}`), h('strong', null, fmt(sr.values[i]))))
         : h('span', { class: 'tip-row' }, h('span', null, 'Nothing')),
       list.length > 1 ? h('span', { class: 'tip-row' }, h('span', null, 'Total'), h('strong', null, fmt(list.reduce((t, sr) => t + sr.values[i], 0)))) : null,
     ];
@@ -140,8 +146,8 @@ export function devBreakdown(store, w, records) {
         clip: true,
         value: (r) => r.label,
         format: (v, r) => (devView.by === 'project' && !aiView.project
-          ? h('button', { type: 'button', class: 'link-btn ai-drill', title: 'Show only this project', onclick: () => { aiView.project = r.key; set({ by: 'model' }); } }, swatch(r), ` ${v}`)
-          : h('span', { title: r.title || null }, swatch(r), ` ${v}`)),
+          ? h('button', { type: 'button', class: 'link-btn ai-drill', title: 'Show only this project', onclick: () => { aiView.project = r.key; set({ by: 'model' }); } }, swatch(r), iconOf(r.key), ` ${v}`)
+          : h('span', { title: r.title || null }, swatch(r), iconOf(r.key), ` ${v}`)),
       },
       { label: 'Sessions', num: true, value: (r) => r.sessions },
       { label: 'Worktrees', num: true, value: (r) => r.worktrees.size },
