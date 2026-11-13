@@ -2758,6 +2758,16 @@ button.sum-line:hover { background: var(--surface-2); }
 .inbox-main > .inbox-search { width: auto; }
 .inbox-main > .inbox-card { border-radius: 0; border-left: none; border-right: none; }
 .inbox-pickers .icon-btn { flex: none; }
+.inbox-errors { position: relative; flex: none; }
+.inbox-errors-chip { list-style: none; display: inline-flex; align-items: center; gap: 4px; min-height: 30px; padding: 2px 9px; border-radius: 999px; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
+.inbox-errors-chip::-webkit-details-marker { display: none; }
+.inbox-errors-chip:hover, .inbox-errors[open] > .inbox-errors-chip { background: color-mix(in srgb, var(--danger) 16%, transparent); }
+.inbox-errors-chip .icon { width: 15px; height: 15px; }
+.inbox-errors-pop { position: absolute; z-index: 30; top: calc(100% + 6px); right: 0; width: min(380px, calc(100vw - 32px)); max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 8px 24px color-mix(in srgb, var(--text) 14%, transparent); }
+.inbox-errors-head { margin: 0; font-weight: 600; font-size: 0.9rem; }
+.inbox-errors-pop ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.inbox-errors-pop li { display: flex; flex-direction: column; gap: 1px; padding-left: 10px; border-left: 2px solid color-mix(in srgb, var(--danger) 45%, transparent); font-size: 0.85rem; overflow-wrap: anywhere; }
+.inbox-errors-pop li span { color: var(--muted); }
 .inbox-layout .inbox-folders { display: flex; flex-direction: column; gap: 2px; }
 .inbox-layout .inbox-folders .lp-chip { border-color: transparent; background: transparent; border-radius: 0 999px 999px 0; padding: 6px 12px; justify-content: flex-start; }
 .inbox-layout .inbox-folders .lp-chip:hover { background: var(--surface-2); }
