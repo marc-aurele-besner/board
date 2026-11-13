@@ -19,9 +19,25 @@ const hostOf = (link) => {
   }
 };
 
-// The post a task already has and that is still being written, so opening the composer again goes on with it.
+// The post a task already has and that is not out yet, so opening the composer again goes on with it.
 /** @param {Store} store @param {string} taskId */
-const openPostOf = (store, taskId) => store.get(LINKEDIN).posts.find((p) => p.taskId === taskId && ['draft', 'failed'].includes(p.status));
+const openPostOf = (store, taskId) => store.get(LINKEDIN).posts.find((p) => p.taskId === taskId && p.status !== 'posted');
+
+/** @param {number} ms A time as a datetime-local field writes it: local, to the minute. */
+const localInput = (ms) => {
+  const d = new Date(ms);
+  const pad = (/** @type {number} */ n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+// Tomorrow at 9:00, a usual time to post.
+const nextMorning = () => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(9, 0, 0, 0);
+  return d.getTime();
+};
+/** @param {number} ms */
+export const whenText = (ms) => new Date(ms).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 /**
  * @param {Store} store
@@ -71,8 +87,8 @@ export function openLinkedinComposer(store, { postId, taskId, projectId }) {
         value.trim() ? (long ? value.slice(0, FOLD).trimEnd() : value) : h('span', { class: 'muted' }, 'The post’s text shows here.'),
         long ? h('button', { type: 'button', class: 'btn-link-inline muted', onclick: () => { open = true; paint(); } }, '…more') : null));
     if (host) {
-      preview.append(h('div', { class: 'share li-preview-link' },
-        h('div', { class: 'share-img none' }, icon('link')),
+      preview.append(h('div', { class: 'share small li-preview-link' },
+        h('div', { class: 'share-img thumb none' }, icon('link')),
         h('div', { class: 'share-text' }, h('strong', null, host), h('span', { class: 'muted small' }, link.value.trim()))));
     }
   };
@@ -123,14 +139,38 @@ export function openLinkedinComposer(store, { postId, taskId, projectId }) {
     },
   }, icon('send'), 'Post now');
 
+  const scheduled = post.status === 'scheduled';
+  const when = h('input', {
+    type: 'datetime-local',
+    name: 'when',
+    value: localInput(post.scheduledAt ?? nextMorning()),
+    min: localInput(Date.now()),
+    'aria-label': 'When to post',
+    disabled: posted,
+  });
+  const scheduleButton = h('button', {
+    type: 'button',
+    onclick: () => {
+      const problem = check();
+      if (problem) return say(problem, false);
+      const at = when.value ? new Date(when.value).getTime() : NaN;
+      if (!Number.isFinite(at)) return say('Pick a day and time.', false);
+      if (at < Date.now() - 60000) return say('That time has passed. Pick a later one, or post now.', false);
+      save({ status: 'scheduled', scheduledAt: at, error: null });
+      dialog.close();
+      toast(`LinkedIn post scheduled for ${whenText(at)}`);
+    },
+  }, icon('clock'), scheduled ? 'Reschedule' : 'Schedule');
+
   const body = h('form', {
     class: 'li-composer',
     onsubmit: (/** @type {SubmitEvent} */ e) => {
       e.preventDefault();
       if (!text.value.trim()) return say('Write the post first.', false);
-      save(post.status === 'failed' ? { status: 'draft', error: null } : {});
+      // A scheduled post keeps its time; one that failed or was missed goes back to the drafts.
+      save(scheduled ? {} : { status: 'draft', error: null });
       dialog.close();
-      toast('LinkedIn draft saved');
+      toast(scheduled ? 'LinkedIn post saved' : 'LinkedIn draft saved');
     },
   },
     h('div', { class: 'li-composer-cols' },
@@ -140,11 +180,25 @@ export function openLinkedinComposer(store, { postId, taskId, projectId }) {
         task ? h('p', { class: 'muted small' }, 'From the task “', task.text, '”. Once posted, the task gets the post’s link and is done.') : null),
       h('div', { class: 'stack-sm' }, h('span', { class: 'small' }, 'Preview'), preview)),
     live ? null : h('p', { class: 'small error' }, 'Not signed in: ', h('a', { href: '#/settings?section=linkedin', onclick: () => dialog.close() }, 'sign in with LinkedIn'), ' to post. Drafts can still be saved.'),
+    posted ? null : h('div', { class: 'li-schedule' },
+      h('label', { class: 'stack-sm' }, h('span', { class: 'small' }, scheduled ? `Scheduled for ${whenText(/** @type {number} */ (post.scheduledAt))}` : post.status === 'missed' ? `Missed: it was due ${whenText(/** @type {number} */ (post.scheduledAt))}` : 'Schedule for'), when),
+      h('p', { class: 'muted small' }, 'The runners post it at that time, so the board needs to be running and this Mac awake. More than 12 hours late, it is not posted but marked missed.')),
     status,
     posted
-      ? h('div', { class: 'svc-actions' }, post.url ? h('a', { class: 'btn-small', href: post.url, target: '_blank', rel: 'noopener' }, icon('linkedin'), 'Open on LinkedIn') : null)
+      ? h('div', { class: 'svc-actions' },
+          post.postedAt ? h('span', { class: 'muted small' }, `Posted ${whenText(post.postedAt)}`) : null,
+          post.url ? h('a', { class: 'btn-small', href: post.url, target: '_blank', rel: 'noopener' }, icon('linkedin'), 'Open on LinkedIn') : null)
       : h('div', { class: 'svc-actions' },
-          h('button', { type: 'submit' }, 'Save draft'),
+          h('button', { type: 'submit' }, scheduled ? 'Save' : 'Save draft'),
+          scheduled ? h('button', {
+            type: 'button',
+            onclick: () => {
+              save({ status: 'draft', scheduledAt: null });
+              dialog.close();
+              toast('LinkedIn post unscheduled: it is a draft again');
+            },
+          }, icon('x'), 'Unschedule') : null,
+          scheduleButton,
           postButton));
   const dialog = openDialog({ title: posted ? 'LinkedIn post' : saved ? 'Edit LinkedIn post' : 'New LinkedIn post', body, wide: true });
   requestAnimationFrame(() => text.focus());
