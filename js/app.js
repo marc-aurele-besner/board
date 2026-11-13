@@ -16,6 +16,8 @@ import { GITHUB, GITHUB_DEFAULTS, useGithubStore } from './github.js';
 import { NPM, NPM_DEFAULTS, useNpmStore } from './npm.js';
 import { WEBSTATS, WEBSTATS_DEFAULTS } from './webstats.js';
 import { SOCIALS, SOCIALS_DEFAULTS } from './socials.js';
+import { LINKEDIN, LINKEDIN_DEFAULTS } from './linkedin-core.js';
+import { CONTACTS, CONTACTS_DEFAULTS } from './contacts-core.js';
 import { FX, FX_DEFAULTS, useFxStore } from './fx.js';
 import { JUMPS, openShortcuts } from './shortcuts.js';
 import { sampleFolder } from './sample.js';
@@ -77,6 +79,10 @@ const collectionDefaults = () => ({
   [WEBSTATS]: WEBSTATS_DEFAULTS,
   // The X, LinkedIn, GitHub and Instagram accounts and their follower counts (Settings, Monitoring → Socials).
   [SOCIALS]: SOCIALS_DEFAULTS,
+  // LinkedIn's posts, comments and sign-in (Settings → LinkedIn, Projects, Inbox, Monitoring → Socials).
+  [LINKEDIN]: LINKEDIN_DEFAULTS,
+  // People tied to projects, matched by email in Inbox and Calendar.
+  [CONTACTS]: CONTACTS_DEFAULTS,
   [FX]: FX_DEFAULTS,
 });
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);

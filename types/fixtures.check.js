@@ -20,6 +20,8 @@ import github from './fixtures/github.json' with { type: 'json' };
 import npm from './fixtures/npm.json' with { type: 'json' };
 import webstats from './fixtures/webstats.json' with { type: 'json' };
 import socials from './fixtures/socials.json' with { type: 'json' };
+import linkedin from './fixtures/linkedin.json' with { type: 'json' };
+import contacts from './fixtures/contacts.json' with { type: 'json' };
 import fx from './fixtures/fx.json' with { type: 'json' };
 import runners from './fixtures/runners.json' with { type: 'json' };
 import defiSnapshots from './fixtures/defi-snapshots.json' with { type: 'json' };
@@ -46,6 +48,8 @@ export const fixtures = {
   npm,
   webstats,
   socials,
+  linkedin,
+  contacts,
   fx,
   runners,
   'defi-snapshots': defiSnapshots,

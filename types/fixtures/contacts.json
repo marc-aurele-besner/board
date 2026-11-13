@@ -1,0 +1,19 @@
+{
+  "contacts": [
+    {
+      "id": "con-1",
+      "name": "Jane Example",
+      "headline": "Head of Engineering",
+      "company": "Example Inc",
+      "linkedin": "in/jane-example",
+      "emails": ["jane@example.com"],
+      "projectIds": ["proj-1"],
+      "notes": "Met at a conference.",
+      "image": "https://example.com/jane.png",
+      "location": "Paris",
+      "source": "manual",
+      "createdAt": 1762000000000,
+      "updatedAt": 1762000000000
+    }
+  ]
+}

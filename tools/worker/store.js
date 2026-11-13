@@ -30,6 +30,8 @@ export const DEFAULTS = {
   npm: { orgs: {}, packages: {} },
   webstats: { bing: {} },
   socials: { accounts: [], history: {} },
+  linkedin: { auth: null, posts: [], comments: [], cache: {}, session: { calls: {} } },
+  contacts: { contacts: [] },
   fx: { days: {} },
   cron: { flows: [], runs: [], templates: [], tests: {} },
   dev: { history: [], runner: '', presets: [] },

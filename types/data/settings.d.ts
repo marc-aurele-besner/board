@@ -201,6 +201,11 @@ export interface AnalyticsSettings {
 export interface LinkedinSettings {
   liAt?: string;
   jsessionid?: string;
+  // The LinkedIn developer app for the official sign-in that posts (Sign In with LinkedIn, Share on LinkedIn).
+  clientId?: string;
+  clientSecret?: string;
+  // Session reads allowed per day (the runners' queue); 60 when unset.
+  dailyLimit?: number;
 }
 
 export interface BingSettings {
