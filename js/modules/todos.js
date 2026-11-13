@@ -18,7 +18,7 @@ import { previewChips } from '../previews.js';
 import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startClaudeSession, openSession, runnerOf } from './dev.js';
-import { sessionStatus } from '../terminal.js';
+import { sessionStatus, runnerInfo } from '../terminal.js';
 import { imagesOf, imageDrop, imageStrip, imagePathsFor, addImages } from '../task-images.js';
 import { dragsFiles, imageFiles } from '../images.js';
 import { ask, parseJson } from '../ai.js';
@@ -819,6 +819,13 @@ function copyButton(store, item) {
 /** @param {Store} store @param {Task[]} items */
 async function devTasks(store, items) {
   if (!items.length) return;
+  // At the runner's limit the terminal would never start: say so, and leave the tasks where they are.
+  // A runner that cannot be reached is left to Dev, which starts the terminal once it answers.
+  const info = await runnerInfo(runnerOf(store)).catch(() => null);
+  if (info && info.running >= info.max) {
+    toast(`Not started: ${info.max} terminals are already running. Stop one in Dev, or start the board with TERMINAL_MAX set higher.`);
+    return;
+  }
   /** @type {Map<string, string[]>} */
   let images = new Map();
   if (items.some((i) => imagesOf(i).length)) {
