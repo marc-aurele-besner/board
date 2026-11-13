@@ -3,6 +3,7 @@
 // tasks. Tools → Check all now runs it with { parts } (sites) or { providers: true } (status pages).
 /** @import { Job } from '../../types/runner' */
 import { checkDeadlines } from '../../js/notify-core.js';
+import { checkLinkedinExpiry } from '../../js/linkedin-core.js';
 import { checkBudgets, checkDueSites, checkAllSites, checkProviders, providersDue } from '../../js/automations.js';
 import { loadBudgetRates } from '../../js/money-core.js';
 
@@ -17,6 +18,7 @@ export default /** @satisfies {Job} */ ({
     }
     if (params.parts) return { tasks: await checkAllSites(store, params.parts) };
     checkDeadlines(store);
+    checkLinkedinExpiry(store);
     await loadBudgetRates(store);
     checkBudgets(store);
     const tasks = await checkDueSites(store);
