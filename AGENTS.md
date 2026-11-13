@@ -57,7 +57,7 @@ js/chart.js           SVG bar and line charts with a hover tooltip
 js/socials.js         the X, LinkedIn, GitHub and Instagram accounts, their follower (and GitHub star) history in socials.json; parsing a handle or profile link (no DOM)
 js/linkedin-core.js   linkedin.json without the DOM: the official sign-in's code trade and expiry notice, a task's draft, posting through the API
 js/linkedin.js        LinkedIn's official sign-in popup (Settings → LinkedIn → Publish as you), and Post now through the runners
-js/linkedin-composer.js  the LinkedIn post composer: text, link, a feed preview, Save draft and Post now
+js/linkedin-composer.js  the LinkedIn post composer: text, link, a feed preview, Save draft, Schedule and Post now
 js/linkedin-session.js  linkedinCall(store, req): the one entry point for any LinkedIn read through the saved session (contract at its top); the runners run the queue, a tab asks them (no DOM)
 js/modules/settings-socials.js  Settings → X / Twitter, LinkedIn, GitHub and Instagram accounts: accounts, their projects, LinkedIn’s session, its state, calls today and daily limit; Read now
 js/modules/monitoring-socials.js  Monitoring → Socials (X, LinkedIn, GitHub, Instagram): followers (and GitHub stars) now, growth over the period, a line per account, Read now
@@ -136,6 +136,7 @@ tools/jobs/socials.js  reads X and LinkedIn follower counts from the profile pag
 tools/jobs/dev-usage.js, worktrees.js  what claude sessions used; removing done tasks' worktrees through the command runner
 tools/jobs/defi.js    the DeFi jobs (positions, fee history, wallets, lending, hourly snapshots), run one at a time
 tools/jobs/cron.js    starts due Cron flows every minute, and one flow on Run now
+tools/jobs/linkedin-posts.js  posts the scheduled LinkedIn posts when due, every minute; more than 12 h late they are marked missed
 tools/jobs/link-states.js  reads the states of tasks' issues and PRs every 2 minutes
 tools/jobs/previews.js  reads the preview links of open tasks' and recent Cron runs' PRs every 2 minutes
 tools/jobs/google.js  renews Google access tokens; a tab that finds one expired asks it through POST /run/google
