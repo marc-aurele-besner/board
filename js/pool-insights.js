@@ -19,9 +19,9 @@ const COLLECTION = 'pools';
 const KEEP = 5;
 
 // status and error: the read in progress. run: the saved read shown, by id ('' for the newest).
-// action, range, chain: the filters on the read shown. hidden: the panel folded by the user.
+// action, range, chain: the filters on the read shown. hidden: the panel folded; folded until opened or a new read.
 /** @type {{ status: string, error: string, run: string, action: string, range: string, chain: string, hidden: boolean }} */
-const insight = { status: 'idle', error: '', run: '', action: 'all', range: 'all', chain: 'all', hidden: false };
+const insight = { status: 'idle', error: '', run: '', action: 'all', range: 'all', chain: 'all', hidden: true };
 
 // The actions the model may pick, most urgent first; the list is shown in this order.
 /** @type {Record<string, [string, string]>} */
