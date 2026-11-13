@@ -28,6 +28,8 @@ export interface RunnerStatus {
   agents?: number;
   // What claude waits on, when waiting stopped at a tool call: a question, a plan or a tool to allow.
   ask?: SessionAsk | null;
+  // When that wait began, for one read from claude's screen rather than its transcript.
+  since?: number;
   // The Artifacts claude published in this session.
   artifacts?: SessionArtifact[];
 }

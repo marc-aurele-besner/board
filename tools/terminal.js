@@ -16,7 +16,7 @@
 /** @import { Readable, Writable } from 'node:stream' */
 /** @import { RequestBody } from '../types/runner' */
 /** @import { DevSession } from '../types/data' */
-/** @import { GitFile, RunnerEvent, RunnerSearch, SearchMatch, SessionArtifact } from '../types/terminal' */
+/** @import { GitFile, RunnerEvent, RunnerSearch, SearchMatch, SessionArtifact, SessionAsk } from '../types/terminal' */
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
@@ -72,7 +72,7 @@ const log = logger('terminal');
  * @typedef {{ id: string, events: SessionEvent[], size: number, open: SessionEvent | null, listeners: Set<ServerResponse>,
  *   run: Job | null, known: boolean, pending: string, rewrite: boolean, timer: NodeJS.Timeout | number,
  *   disk: Promise<unknown>, closed: boolean, lastOut?: number, taps?: Set<(event: SessionEvent) => void>, transcript?: string,
- *   artifacts?: SessionArtifact[], artifactsRead?: SessionEvent }} Session
+ *   artifacts?: SessionArtifact[], artifactsRead?: SessionEvent, askSince?: number }} Session
  */
 
 // Running commands by pid: the child, the folder it reports into, and its session.
@@ -269,6 +269,29 @@ async function transcriptOf(s) {
   return t;
 }
 
+// What claude's screen asks of its user, when the last thing it drew is a prompt: a question's options or a request
+// to proceed, closed by "Esc to cancel" and drawn after the "esc to interrupt" of its last working stretch. Read
+// from the end of the output, without the escapes and spaces claude draws with.
+const SCREEN_TAIL = 20000;
+/** @param {Session} s @returns {SessionAsk | null} */
+function screenAsk(s) {
+  // A session read back from disk keeps its output in many small events.
+  let out = '';
+  for (let i = s.events.length - 1; i >= 0 && out.length < SCREEN_TAIL; i--) {
+    const e = s.events[i];
+    if (e.t === 'out') out = (e.d ?? '') + out;
+    else if (e.t === 'start') break;
+  }
+  const seen = out.slice(-SCREEN_TAIL).replace(ESCAPES, '').replace(/\s+/g, '').toLowerCase();
+  const at = seen.lastIndexOf('esctocancel');
+  if (at < 0 || at < seen.lastIndexOf('esctointerrupt')) return null;
+  const prompt = seen.slice(Math.max(0, at - 3000), at);
+  if (prompt.includes('wouldyouliketoproceed')) return { kind: 'plan', text: 'Approve the plan' };
+  if (prompt.includes('doyouwantto')) return { kind: 'permission', text: 'Allow a tool' };
+  if (prompt.includes('entertoselect')) return { kind: 'question', text: 'Answer its question' };
+  return null;
+}
+
 // What a session is doing, for a task's Dev button: running (and how long it has been quiet, as a program waiting
 // for its user prints nothing), ended (with its exit code), or idle. A session that is gone is left out.
 // Quiet is not enough for claude: a long tool call or a background subagent prints nothing either, so it waits only
@@ -287,9 +310,12 @@ async function statusOf(id) {
     const activity = (await transcriptOf(s))
       ?? (name && cwd ? (await worktreeActivity([{ name, cwd }]).catch(() => /** @type {Awaited<ReturnType<typeof worktreeActivity>>} */ ({})))[name] : null);
     // A turn stopped at a tool call with the terminal quiet waits on its user: a question, a plan, or a permission.
-    const ask = activity?.ask ?? null;
+    // claude may not have written that reply to its transcript yet: the prompt on its screen tells instead.
+    const shown = activity?.busy && !activity.ask ? screenAsk(s) : null;
+    s.askSince = shown ? s.askSince || s.lastOut || Date.now() : 0;
+    const ask = activity?.ask ?? shown;
     if (activity) s.artifacts = activity.artifacts;
-    const more = activity ? { agents: activity.agents, ask, artifacts: activity.artifacts } : {};
+    const more = activity ? { agents: activity.agents, ask, artifacts: activity.artifacts, ...(shown ? { since: s.askSince } : {}) } : {};
     return { state: activity?.busy && !ask ? 'working' : 'waiting', cwd, ...more };
   }
   const exit = s.events.findLast((e) => e.t === 'exit');
@@ -314,11 +340,13 @@ async function turnsOf(id) {
   const t = await transcriptOf(await sessionOf(id)).catch(() => null);
   if (!t) return { claude: false, state: status.state, turns: [] };
   const state = status.state === 'working' || status.state === 'waiting' ? status.state : 'done';
-  const ask = 'ask' in status ? status.ask : null;
-  // The wait going on now, whatever it waits on (a permission too, which leaves no trace once answered).
+  const ask = 'ask' in status ? /** @type {SessionAsk | null} */ (status.ask) : null;
+  // The wait going on now, whatever it waits on (a permission too, which leaves no trace once answered). One read
+  // from the screen starts when the prompt was drawn.
+  const since = /** @type {{ since?: number }} */ (status).since || t.since;
   const last = t.turns.at(-1);
-  const turns = state === 'waiting' && last && t.since >= last.at
-    ? [...t.turns.slice(0, -1), { ...last, waits: [...last.waits, { kind: ask?.kind ?? 'permission', at: t.since, end: 0 }] }]
+  const turns = state === 'waiting' && last && since >= last.at
+    ? [...t.turns.slice(0, -1), { ...last, waits: [...last.waits, { kind: ask?.kind ?? 'permission', at: since, end: 0 }] }]
     : t.turns;
   return { claude: true, state, ask, turns };
 }
