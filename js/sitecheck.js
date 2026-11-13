@@ -143,6 +143,45 @@ export async function readMeta(website) {
   };
 }
 
+// The head tags that say what a site looks like: its icons, manifest, theme colour, share images, stylesheets and
+// fonts, one line each with addresses made absolute. For a project's Brand (js/brand.js).
+/** @param {string} website @returns {Promise<string[]>} */
+export async function readBrandTags(website) {
+  const res = await inTurn(() => timed(`${READER}${website}`, { headers: { 'X-Return-Format': 'html' } }));
+  if (!res.ok) throw new Error(`The page could not be read (${res.status}).`);
+  const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+  const abs = (/** @type {string} */ url) => {
+    try {
+      return new URL(url, website).href;
+    } catch {
+      return url;
+    }
+  };
+  /** @type {string[]} */
+  const lines = [];
+  for (const link of doc.querySelectorAll('link[href]')) {
+    const rel = (link.getAttribute('rel') ?? '').toLowerCase();
+    const href = abs(link.getAttribute('href') ?? '');
+    if (!/icon|manifest|stylesheet|preload|mask/.test(rel)) continue;
+    if (rel.includes('preload') && !/font|\.woff2?/i.test(`${link.getAttribute('as')} ${href}`)) continue;
+    const extra = ['sizes', 'type', 'color'].map((k) => (link.getAttribute(k) ? ` ${k}=${link.getAttribute(k)}` : '')).join('');
+    lines.push(`link rel=${rel}${extra} href=${href}`);
+  }
+  for (const meta of doc.querySelectorAll('meta[content]')) {
+    const key = meta.getAttribute('name') ?? meta.getAttribute('property') ?? '';
+    if (!/^(theme-color|msapplication-tilecolor|msapplication-tileimage|og:image|twitter:image|og:site_name)$/i.test(key)) continue;
+    const content = meta.getAttribute('content') ?? '';
+    lines.push(`meta ${key}=${/image/i.test(key) ? abs(content) : content}`);
+  }
+  // Inline styles often hold the colour tokens; only their declarations of custom properties and fonts are kept.
+  for (const style of doc.querySelectorAll('style')) {
+    for (const line of (style.textContent ?? '').split(/[;{}]/)) {
+      if (/^\s*--[\w-]+\s*:|font-family|@import/.test(line)) lines.push(`style ${line.trim()}`);
+    }
+  }
+  return [...new Set(lines)].slice(0, 120);
+}
+
 // --- DNS and email ---
 
 const DOH = 'https://cloudflare-dns.com/dns-query';
