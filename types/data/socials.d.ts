@@ -1,12 +1,12 @@
-// socials.json: the X, LinkedIn and GitHub accounts added in Settings, and their follower counts over time. The board adds
+// socials.json: the X, LinkedIn, GitHub and Instagram accounts added in Settings, and their follower counts over time. The board adds
 // and removes accounts; the runners (tools/jobs/socials.js) read each one's counts.
 
 export interface SocialAccount {
   id: string;
-  // 'x', 'linkedin' or 'github'.
+  // 'x', 'linkedin', 'github' or 'instagram'.
   network: string;
   // X: the screen name, without @. LinkedIn: the profile's path, 'in/<name>' or 'company/<name>'. GitHub: the user or
-  // organization login.
+  // organization login. Instagram: the username, without @, in lower case.
   handle: string;
   projectId?: string | null;
   // From the last read: the display name, the picture, the counts.

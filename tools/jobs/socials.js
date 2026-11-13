@@ -1,8 +1,9 @@
-// Reads the follower counts of the X, LinkedIn and GitHub accounts in socials.json. Neither X nor LinkedIn needs a
+// Reads the follower counts of the X, LinkedIn, GitHub and Instagram accounts in socials.json. Neither X nor LinkedIn needs a
 // key for a public profile: X's profile page and a LinkedIn person's page carry the counts for anyone. LinkedIn shows
 // company pages only when signed in, so those go through the session saved in Settings → LinkedIn, as the site's own
 // pages do. GitHub's API gives a user's or organization's followers and its repos' stars, with the token of
-// Settings → GitHub when there is one. Settings and Monitoring ask for accounts at once (POST /run/socials with ids).
+// Settings → GitHub when there is one. Instagram gives a profile's counts only in the page it shows link previews,
+// rounded above 10,000 as the site writes them (12.3K). Settings and Monitoring ask for accounts at once (POST /run/socials with ids).
 /** @import { Job } from '../../types/runner' */
 /** @import { LinkedinSettings, GithubSettings, SocialAccount } from '../../types/data' */
 import { SOCIALS, recordRead, isOrganization } from '../../js/socials.js';
@@ -148,6 +149,33 @@ async function readGithub(login, github, signal) {
   return { followers: user.followers ?? 0, following: user.following, stars, name: user.name || undefined, image: user.avatar_url || undefined };
 }
 
+// "1,234", "12.3K", "104M": Instagram's way of writing a count.
+/** @param {string} text */
+const igCount = (text) => {
+  const m = text.replace(/,/g, '').match(/^([\d.]+)([KMB])?$/i);
+  return m ? Math.round(Number(m[1]) * ({ k: 1e3, m: 1e6, b: 1e9 }[m[2]?.toLowerCase() ?? ''] ?? 1)) : NaN;
+};
+
+// Instagram shows a profile only to a signed-in browser, but answers a link preview's crawler with the counts in
+// the page's description: "1,234 Followers, 56 Following, 78 Posts - See Instagram photos and videos from Name (@name)".
+/** @param {string} handle @param {AbortSignal} signal @returns {Promise<Read>} */
+async function readInstagram(handle, signal) {
+  const { status, text } = await page(`https://www.instagram.com/${encodeURIComponent(handle)}/`, signal, { 'user-agent': 'facebookexternalhit/1.1' });
+  if (status === 404) throw new Error(`Instagram has no account @${handle}.`);
+  if (status === 429) throw new Error('Instagram asked to slow down. The next read tries again.');
+  if (status !== 200) throw new Error(`Instagram answered ${status}.`);
+  const desc = (meta(text, 'og:description') ?? '').replace(/&#064;/g, '@');
+  const m = desc.match(/^([\d.,]+[KMB]?) Followers, ([\d.,]+[KMB]?) Following/i);
+  if (!m) throw new Error(`Instagram did not show the counts of @${handle}. Check the username.`);
+  const title = (meta(text, 'og:title') ?? '').replace(/&#064;/g, '@').replace(/&#x2022;/g, '•');
+  return {
+    followers: igCount(m[1]),
+    following: igCount(m[2]),
+    name: title.replace(/\s*\(@[\w.]+\).*$/, '') || undefined,
+    image: meta(text, 'og:image'),
+  };
+}
+
 /** @param {SocialAccount} a @param {LinkedinSettings | undefined} session @param {AbortSignal} signal */
 async function readLinkedin(a, session, signal) {
   if (!isOrganization(a)) {
@@ -164,7 +192,7 @@ export default /** @satisfies {Job} */ ({
   async run({ store, params, signal }) {
     const all = store.get(SOCIALS).accounts ?? [];
     const accounts = params.ids?.length ? all.filter((a) => params.ids?.includes(a.id)) : all;
-    if (!accounts.length) return { waiting: 'No X, LinkedIn or GitHub account is added in Settings.' };
+    if (!accounts.length) return { waiting: 'No X, LinkedIn, GitHub or Instagram account is added in Settings.' };
     const { linkedin: session, github } = store.get('settings');
     /** @type {{ text: string }[]} */
     const errors = [];
@@ -177,7 +205,8 @@ export default /** @satisfies {Job} */ ({
       try {
         const read = a.network === 'x' ? await readX(a.handle, signal)
           : a.network === 'github' ? await readGithub(a.handle, github, signal)
-            : await readLinkedin(a, session, signal);
+            : a.network === 'instagram' ? await readInstagram(a.handle, signal)
+              : await readLinkedin(a, session, signal);
         recordRead(store, a.id, read);
       } catch (err) {
         if (signal.aborted) throw err;

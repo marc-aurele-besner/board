@@ -16,7 +16,7 @@ export const JOBS = [
   { id: 'link-states', label: 'Task issues and PRs', every: 2, description: 'Reads whether the issues and PRs linked to tasks are open, merged or closed, so Tasks can colour them.' },
   { id: 'npm', label: 'npm', every: 60, description: 'Reads the packages of every project’s npm org, and each listed package’s latest version and weekly downloads.' },
   { id: 'webstats', label: 'Bing search data', every: 360, description: 'Reads each project website’s Bing Webmaster numbers for Monitoring.' },
-  { id: 'socials', label: 'Socials', every: 360, description: 'Reads the follower counts of the X, LinkedIn and GitHub accounts added in Settings (and GitHub stars), for Monitoring → Socials.' },
+  { id: 'socials', label: 'Socials', every: 360, description: 'Reads the follower counts of the X, LinkedIn, GitHub and Instagram accounts added in Settings (and GitHub stars), for Monitoring → Socials.' },
   { id: 'fx', label: 'Exchange rates', every: 1440, description: 'Reads the USD to CAD rate of every day Money needs.' },
   { id: 'dev-usage', label: 'Dev usage', every: 1, description: 'Reads what each task’s claude session used from Claude Code’s transcripts.' },
   { id: 'worktrees', label: 'Done-task worktrees', every: 5, description: 'Removes the worktree a Dev session made once its tasks are done. Also runs as soon as a task changes.' },
