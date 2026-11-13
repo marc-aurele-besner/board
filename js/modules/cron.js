@@ -2337,8 +2337,15 @@ function runCard(store, flow, r, { showFlow = false } = {}) {
   const groups = tops.filter((id) => children.has(id)).map((id) => taskGroup(store, r, id, children));
   const links = [...tops.filter((id) => !children.has(id)).map((id) => taskChip(store, id)), ...terms.map((t) => terminalChip(store, t)), ...prs.map(prChip), ...issues.map(issueChip), ...previewChips(store, prs, 'run-chip'), ...branches.map(branchChip)];
   return h('li', { class: `cron-run${view.focusRun === r.id ? ' focus' : ''}`, 'data-run': r.id },
-    h('div', { class: 'cron-run-head' },
-      h('button', { type: 'button', class: 'cron-run-toggle', 'aria-expanded': String(open), onclick: toggle },
+    // The whole header opens the run, not only its name: a click beside the chevron or on the empty space too.
+    // Its own buttons and links keep their clicks; the toggle button handles its own for the keyboard.
+    h('div', {
+      class: 'cron-run-head',
+      onclick: (/** @type {MouseEvent} */ e) => {
+        if (!(/** @type {Element} */ (e.target)).closest('button, a, input, select')) toggle();
+      },
+    },
+      h('button', { type: 'button', class: 'cron-run-toggle', 'aria-expanded': String(open), title: open ? 'Hide the steps' : 'Show the steps', onclick: toggle },
         h('span', { class: `icon-wrap chevron${open ? ' open' : ''}` }, icon('chevron-down')),
         h('span', { class: `cron-dot ${dot}`, title: label }),
         h('span', { class: 'cron-run-name' },

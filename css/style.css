@@ -2219,7 +2219,10 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 .cron-run-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cron-run-toggle { display: flex; align-items: center; gap: 8px; flex: 1 1 260px; min-width: 0; padding: 2px 4px; border: none; background: none; color: var(--text); text-align: left; font-weight: 400; }
 .cron-run-toggle:hover strong { text-decoration: underline; text-underline-offset: 2px; }
-.cron-run-toggle .chevron { display: inline-flex; color: var(--muted); }
+.cron-run-head { cursor: pointer; }
+.cron-run-toggle { cursor: pointer; }
+.cron-run-toggle .chevron { display: inline-flex; flex: none; padding: 4px; margin: -4px 0 -4px -4px; border-radius: 6px; color: var(--muted); }
+.cron-run-toggle:hover .chevron, .cron-run-head:hover .cron-run-toggle .chevron { background: var(--surface-2); color: var(--text); }
 .cron-run-toggle .chevron .icon { width: 16px; height: 16px; }
 .cron-run-name { display: flex; flex-direction: column; min-width: 0; }
 .cron-run-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
