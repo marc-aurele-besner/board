@@ -241,3 +241,7 @@ export const gitAction = async (base, path, action, body = {}) => (await call(ba
 // Options: case, word, regex ('1' to turn on), include and exclude (comma-separated globs).
 /** @type {(base: string, params: Record<string, string>) => Promise<RunnerSearch>} */
 export const searchFiles = async (base, params) => (await call(base, `/search?${new URLSearchParams(params)}`)).json();
+
+// Shows a file or folder in Finder (Explorer on Windows, the file manager elsewhere).
+/** @param {string} base @param {string} path */
+export const revealPath = (base, path) => call(base, '/reveal', post({ path }));
