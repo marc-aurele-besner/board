@@ -1347,15 +1347,35 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
   min-height: calc(100dvh - 54px);
   & > .stack-lg > :is(header, .row.between, nav.sub-tabs, p, .notice, .period-row, .money-controls) { padding-inline: 16px; }
   & > .stack-lg > :first-child { padding-top: 14px; }
+  /* The side panel and the center panel meet: one border between them, no gap. */
+  & > .split { gap: 0; }
   & > .split > .card { border-radius: 0; border-top: none; }
   & > .split > .card:first-child { border-left: none; }
-  & > .split > .card:last-child { border-right: none; }
+  & > .split > .card.main-pane { border-left: none; border-right: none; }
   & > .split > :is(.side, .side-pane) { top: 54px; height: calc(100dvh - 54px); }
   & > .split > .main-pane { min-height: calc(100dvh - 54px); }
 }
 
+/* A side panel the user resizes (js/side-resize.js): the divider sits on its right edge. */
+.side-resizable { position: relative; }
+:is(.split, .inbox-layout, .cal-layout, .cron-layout).side-resizable { grid-template-columns: var(--side-w) minmax(0, 1fr); }
+.side-resize { position: absolute; top: 0; bottom: 0; left: calc(var(--side-w) - 4px); width: 8px; z-index: 3; cursor: col-resize; touch-action: none; }
+.side-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background 0.15s; }
+.side-resize:hover::after, .side-resizable.resizing .side-resize::after { background: var(--accent); }
+.side-resizable.resizing { cursor: col-resize; user-select: none; }
+@media (max-width: 900px) {
+  :is(.cal-layout, .cron-layout).side-resizable { grid-template-columns: minmax(0, 1fr); }
+  :is(.cal-layout, .cron-layout) > .side-resize { display: none; }
+}
+@media (max-width: 760px) {
+  .inbox-layout.side-resizable { grid-template-columns: minmax(0, 1fr); }
+  .inbox-layout > .side-resize { display: none; }
+}
+
 /* Phones */
 @media (max-width: 720px) {
+  .split.side-resizable { grid-template-columns: minmax(0, 1fr); }
+  .side-resize { display: none; }
   .view { padding: 16px; }
   .split, .split.kitchen { grid-template-columns: 1fr; }
   .side, .side-pane { position: static; height: auto; overflow: visible; }
