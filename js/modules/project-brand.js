@@ -4,6 +4,7 @@
 /** @import { BrandList } from '../brand.js' */
 import { h, icon, refreshIcon, notice, copyable } from '../ui.js';
 import { richText } from '../rich.js';
+import { openDialog } from '../modal.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { readFile } from '../terminal.js';
 import { runnerOf } from '../dev-core.js';
@@ -97,6 +98,21 @@ function imageThumb(store, value) {
   return slot;
 }
 
+// The image at full size in a dialog, on the checkerboard, with its size and address. Nothing opens while the
+// thumb has no image (a local file that is not SVG, or one still loading or failed).
+/** @param {BrandItem} item @param {HTMLImageElement | null} thumb */
+function showImage(item, thumb) {
+  if (!thumb) return;
+  const size = thumb.naturalWidth ? `${thumb.naturalWidth} × ${thumb.naturalHeight}` : '';
+  openDialog({
+    title: item.label || nameOf(item.value),
+    wide: true,
+    body: h('div', { class: 'stack' },
+      h('div', { class: 'brand-full' }, h('img', { src: thumb.src, alt: item.label || nameOf(item.value) })),
+      h('div', { class: 'row brand-full-meta' }, size ? h('span', { class: 'muted small' }, size) : null, target(item.value))),
+  });
+}
+
 // An address opens in a new tab; a local path is copied.
 /** @param {string} value */
 const target = (value) => (isUrl(value)
@@ -115,7 +131,14 @@ function brandDisplay(store, brand) {
       h('span', { class: 'small' }, c.label || ' '),
       copyable(c.value))))) : null,
     brand.images.length ? group('Images', h('div', { class: 'brand-images' }, brand.images.map((i) => h('div', { class: 'brand-image' },
-      h('div', { class: 'brand-thumb' }, imageThumb(store, i.value), h('span', { class: 'brand-size' })),
+      h('button', {
+        type: 'button',
+        class: 'brand-thumb',
+        title: 'Show full size',
+        'aria-label': `Show ${i.label || nameOf(i.value)} full size`,
+        /** @param {MouseEvent & { currentTarget: HTMLElement }} e */
+        onclick: (e) => showImage(i, e.currentTarget.querySelector('img')),
+      }, imageThumb(store, i.value), h('span', { class: 'brand-size' })),
       h('strong', { class: 'small' }, i.label || nameOf(i.value)),
       target(i.value))))) : null,
     brand.fonts.length ? group('Fonts', h('ul', { class: 'brand-list' }, brand.fonts.map((f) => h('li', null,
