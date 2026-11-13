@@ -171,10 +171,10 @@ export const clearSession = (/** @type {string} */ base, /** @type {string} */ s
 export const closeSession = (/** @type {string} */ base, /** @type {string} */ session) => call(base, '/close', post({ session }));
 
 // Stops the session and removes the worktree `name` that claude made in the repo at `cwd`, or the worktree at `path`
-// (any but the main checkout): { removed } or { missing }. Fails when git refuses (changes or untracked files in it)
-// or claude still runs there.
-/** @type {(base: string, options: { cwd?: string, name?: string, path?: string, session?: string }) => Promise<RunnerRemoved>} */
-export const removeWorktree = async (base, { cwd, name, path, session }) => (await call(base, '/worktree/remove', post({ cwd, name, path, session }))).json();
+// (any but the main checkout): { removed } or { missing }. Fails when git refuses (changes or untracked files in it,
+// unless `force` discards them) or claude still runs there.
+/** @type {(base: string, options: { cwd?: string, name?: string, path?: string, session?: string, force?: boolean }) => Promise<RunnerRemoved>} */
+export const removeWorktree = async (base, { cwd, name, path, session, force }) => (await call(base, '/worktree/remove', post({ cwd, name, path, session, force }))).json();
 
 // Ends a claude that is done in its worktree: /exit, then Remove worktree when nothing in it would be lost (no
 // uncommitted file, every commit on a remote), else Keep. { ended, removed, path, kept?: why }.

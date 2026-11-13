@@ -4,6 +4,7 @@
 import { h, icon } from '../ui.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
+import { onContextMenu, copyItem } from '../menu.js';
 import { gitStatus, gitDiff, gitAction } from '../terminal.js';
 import { openDiff, openFile, baseName, panelHead, panelAction } from './dev-files.js';
 import { openPullRequest } from './dev-pr.js';
@@ -11,6 +12,7 @@ import { openPullRequest } from './dev-pr.js';
 /** @import { GitStatus, GitRepoStatus, GitFile, GitCommit } from '../../types/terminal' */
 /** @import { Child } from '../../types/ui' */
 /** @import { IconName } from '../../types/data' */
+/** @import { MenuEntry } from '../menu.js' */
 
 // The status is read again when the panel is drawn after this long, and after every action.
 const STALE_MS = 5000;
@@ -207,6 +209,36 @@ function commit(ctx, all) {
   });
 }
 
+/** @param {DevContext} ctx @param {GitFile} f @param {'staged' | 'work'} side @returns {MenuEntry[]} */
+function fileMenu(ctx, f, side) {
+  const staged = side === 'staged';
+  const busy = !!state.busy;
+  const full = fullPath(f.path);
+  const dir = dirOf(f.path);
+  return [
+    { label: 'Open changes', icon: () => icon('diff'), onSelect: () => showDiff(ctx, f, staged) },
+    (staged ? f.index : f.work) !== 'D' ? { label: 'Open the file', icon: () => icon('file'), onSelect: () => openFile(ctx, full) } : null,
+    '-',
+    busy ? null : staged
+      ? { label: 'Unstage', icon: () => icon('minus'), onSelect: () => act(ctx, 'unstage', { files: [f.path] }) }
+      : { label: 'Stage', icon: () => icon('plus'), onSelect: () => act(ctx, 'stage', { files: [f.path] }) },
+    busy || staged ? null : { label: f.untracked ? 'Delete the new file' : 'Discard the changes', icon: () => icon('undo'), danger: true, onSelect: () => confirmDiscard(ctx, [f]) },
+    '-',
+    { label: 'Open a terminal in its folder', icon: () => icon('terminal'), onSelect: () => ctx.openTerminal(dir ? fullPath(dir) : /** @type {GitRepoStatus} */ (state.status).root) },
+    copyItem('Copy path', full),
+    copyItem('Copy relative path', f.path),
+  ];
+}
+
+/** @param {DevContext} ctx @param {GitCommit} c @returns {MenuEntry[]} */
+const commitMenu = (ctx, c) => [
+  { label: 'Open the commit', icon: () => icon('git-commit'), onSelect: () => showCommit(ctx, c) },
+  '-',
+  copyItem('Copy commit hash', c.hash),
+  copyItem('Copy short hash', c.short),
+  copyItem('Copy message', c.subject),
+];
+
 /** @param {DevContext} ctx @param {GitFile} f @param {'staged' | 'work'} side */
 function fileRow(ctx, f, side) {
   const staged = side === 'staged';
@@ -215,7 +247,7 @@ function fileRow(ctx, f, side) {
   const busy = !!state.busy;
   /** @type {(name: IconName, title: string, onclick: () => void) => HTMLButtonElement} */
   const button = (name, title, onclick) => h('button', { type: 'button', class: 'tree-action', title, 'aria-label': `${title}: ${f.path}`, disabled: busy, onclick }, icon(name));
-  return h('div', { class: 'tree-row scm-row' },
+  return onContextMenu(h('div', { class: 'tree-row scm-row' },
     h('button', { type: 'button', class: `tree-item ${tone}`, title: `${f.orig ? `${f.orig} → ` : ''}${f.path} · ${label}`, onclick: () => showDiff(ctx, f, staged) },
       icon('file'),
       h('span', { class: 'tree-name' }, baseName(f.path)),
@@ -223,7 +255,7 @@ function fileRow(ctx, f, side) {
     (staged ? f.index : f.work) !== 'D' ? button('file', 'Open the file', () => openFile(ctx, fullPath(f.path))) : null,
     side === 'work' ? button('undo', f.untracked ? 'Delete the new file' : 'Discard the changes', () => confirmDiscard(ctx, [f])) : null,
     staged ? button('minus', 'Unstage', () => act(ctx, 'unstage', { files: [f.path] })) : button('plus', 'Stage', () => act(ctx, 'stage', { files: [f.path] })),
-    h('span', { class: `scm-letter ${tone}`, title: label }, letter));
+    h('span', { class: `scm-letter ${tone}`, title: label }, letter)), () => fileMenu(ctx, f, side));
 }
 
 /** @param {DevContext} ctx @param {string} key @param {string} title @param {number | null} count @param {Child} actions @param {Child} rows */
@@ -328,12 +360,12 @@ function repoBody(ctx) {
       st.more ? h('div', { class: 'tree-note muted small' }, `${st.more} more changed files not listed.`) : null,
       section(ctx, 'log', 'Commits', null, null,
         st.log.length
-          ? st.log.map((c) => h('div', { class: 'tree-row scm-row' },
+          ? st.log.map((c) => onContextMenu(h('div', { class: 'tree-row scm-row' },
               h('button', { type: 'button', class: 'tree-item', title: `${c.subject}\n${c.author} · ${new Date(c.at).toLocaleString()} · ${c.short}`, onclick: () => showCommit(ctx, c) },
                 icon('git-commit'),
                 h('span', { class: 'tree-name' }, c.subject),
                 c.refs.length ? h('span', { class: 'scm-refs' }, c.refs.map((r) => r.replace(/^HEAD -> /, '')).join(', ')) : null,
-                h('span', { class: 'scm-dir muted' }, ago(c.at)))))
+                h('span', { class: 'scm-dir muted' }, ago(c.at)))), () => commitMenu(ctx, c)))
           : h('div', { class: 'tree-note muted small' }, 'No commits yet.'))),
   ];
 }

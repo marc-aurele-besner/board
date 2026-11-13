@@ -3,10 +3,12 @@
 // at its line. git grep runs through the runner on this machine; ignored files and claude's worktrees are left out.
 import { h, icon } from '../ui.js';
 import { searchFiles } from '../terminal.js';
+import { onContextMenu, copyItem } from '../menu.js';
 import { openFile, baseName, panelHead, panelAction } from './dev-files.js';
 /** @import { DevContext } from '../../types/dev' */
 /** @import { RunnerSearch, SearchMatch } from '../../types/terminal' */
 /** @import { Child } from '../../types/ui' */
+/** @import { MenuEntry } from '../menu.js' */
 
 // Typing waits this long before searching.
 const DEBOUNCE_MS = 300;
@@ -103,6 +105,51 @@ function lineText(line, start) {
   return parts;
 }
 
+// A path from the searched folder: a pattern without a slash would match that name at any depth.
+const anchored = (/** @type {string} */ rel) => (rel.includes('/') ? rel : `/${rel}`);
+
+// Adds a pattern to the include or exclude field, shows the fields, and searches again.
+/** @param {DevContext} ctx @param {'include' | 'exclude'} key @param {string} pattern @param {{ only?: boolean }} [options] */
+function narrow(ctx, key, pattern, { only = false } = {}) {
+  const kept = only ? [] : state[key].split(',').map((p) => p.trim()).filter(Boolean);
+  if (!kept.includes(pattern)) kept.push(pattern);
+  state[key] = kept.join(', ');
+  state.details = true;
+  ctx.refresh();
+  run(ctx, state.path);
+}
+
+/** @param {DevContext} ctx @param {string} path @param {string} rel @param {string} dir @param {boolean} open @returns {MenuEntry[]} */
+function fileMenu(ctx, path, rel, dir, open) {
+  return [
+    { label: 'Open', icon: () => icon('file'), onSelect: () => openFile(ctx, path) },
+    {
+      label: open ? 'Fold' : 'Unfold',
+      icon: () => icon('chevron-right'),
+      onSelect: () => {
+        if (open) state.folded.add(path);
+        else state.folded.delete(path);
+        redraw(ctx);
+      },
+    },
+    '-',
+    { label: 'Exclude this file', icon: () => icon('x'), onSelect: () => narrow(ctx, 'exclude', anchored(rel)) },
+    dir ? { label: 'Exclude its folder', icon: () => icon('folder'), onSelect: () => narrow(ctx, 'exclude', anchored(dir)) } : null,
+    dir ? { label: 'Search only its folder', icon: () => icon('search'), onSelect: () => narrow(ctx, 'include', anchored(dir), { only: true }) } : null,
+    '-',
+    copyItem('Copy path', path),
+    copyItem('Copy relative path', rel),
+  ];
+}
+
+/** @param {DevContext} ctx @param {string} path @param {string} rel @param {SearchMatch} m @returns {MenuEntry[]} */
+const lineMenu = (ctx, path, rel, m) => [
+  { label: `Open at line ${m.line}`, icon: () => icon('file'), onSelect: () => openFile(ctx, path, { line: m.line }) },
+  '-',
+  copyItem('Copy line', m.text.trim()),
+  copyItem('Copy path and line', `${rel}:${m.line}`),
+];
+
 /** @param {DevContext} ctx @returns {HTMLElement[]} */
 function results(ctx) {
   if (!ctx.ready()) return [h('p', { class: 'muted small search-note' }, 'Search works once the runner answers.')];
@@ -128,7 +175,7 @@ function results(ctx) {
         const rel = path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
         const dir = rel.split('/').slice(0, -1).join('/');
         return [
-          h('div', { class: 'tree-row' },
+          onContextMenu(h('div', { class: 'tree-row' },
             h('button', {
               type: 'button',
               class: 'tree-item',
@@ -144,10 +191,10 @@ function results(ctx) {
             icon('file'),
             h('span', { class: 'tree-name' }, baseName(path)),
             dir ? h('span', { class: 'search-dir muted' }, dir) : null,
-            h('span', { class: 'scm-count' }, matches.length))),
-          ...(open ? matches.map((m) => h('div', { class: 'tree-row' },
+            h('span', { class: 'scm-count' }, matches.length))), () => fileMenu(ctx, path, rel, dir, open)),
+          ...(open ? matches.map((m) => onContextMenu(h('div', { class: 'tree-row' },
             h('button', { type: 'button', class: 'tree-item search-line', style: { '--depth': 1 }, title: `${rel}:${m.line}`, onclick: () => openFile(ctx, path, { line: m.line }) },
-              h('span', { class: 'search-text' }, lineText(m.text, m.col))))) : []),
+              h('span', { class: 'search-text' }, lineText(m.text, m.col)))), () => lineMenu(ctx, path, rel, m))) : []),
         ];
       })),
   ];

@@ -10,6 +10,7 @@
 import { h, icon, notice, uid } from '../ui.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
+import { onContextMenu, copyItem } from '../menu.js';
 import { TERMINAL_RUNNER, runnerInfo, listSessions, saveSessionList, listSession, moveSession, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput, saveImage } from '../terminal.js';
 import { imageFiles, dragsFiles } from '../images.js';
 import { createTerminal, styleOf, colorOf } from '../vt.js';
@@ -31,6 +32,7 @@ import { cronRunOf, cronRunHref } from '../cron.js';
 /** @import { DevContext } from '../../types/dev' */
 /** @import { Child } from '../../types/ui' */
 /** @import { Terminal, Line } from '../vt.js' */
+/** @import { MenuEntry } from '../menu.js' */
 
 /**
  * How a command ended: stopped, lost when the runner stopped, or its exit code or signal.
@@ -1108,6 +1110,44 @@ function confirmClose(store, list, title) {
   });
 }
 
+// A terminal's right-click menu, in the Terminals panel and on its tab.
+/** @param {Store} store @param {Session} s @returns {MenuEntry[]} */
+function sessionMenu(store, s) {
+  const task = s.tasks.map((id) => store.get('todos').items.find((t) => t.id === id)).find(Boolean);
+  const others = view.sessions.filter((x) => x !== s);
+  return [
+    { label: 'Show', icon: () => icon('terminal'), onSelect: () => jumpTo(store, s) },
+    s.running ? { label: 'Stop the command', icon: () => icon('stop'), onSelect: () => { stopCommand(runnerOf(store), s.id).catch((err) => toast(err.message)); } } : null,
+    { label: 'Clear the output', icon: () => icon('clear-all'), onSelect: () => clearTerminal(s) },
+    view.sessions.length < maxSessions() ? {
+      label: 'Open a new terminal in its folder',
+      icon: () => icon('plus'),
+      onSelect: () => {
+        if (newSession(store, s.cwd || undefined)) store.refresh();
+      },
+    } : null,
+    task ? {
+      label: 'Open its task',
+      icon: () => icon('check-square'),
+      onSelect: () => { location.hash = `#/todos?${new URLSearchParams({ filter: task.projectId || 'personal', status: 'all', task: task.id })}`; },
+    } : null,
+    '-',
+    s.cwd ? copyItem('Copy folder path', s.cwd) : null,
+    s.command ? copyItem('Copy command', s.command) : null,
+    '-',
+    others.length ? { label: 'Close the others', icon: () => icon('x'), onSelect: () => confirmClose(store, others, 'Close the other terminals') } : null,
+    {
+      label: s.running ? 'Stop and close' : 'Close',
+      icon: () => icon('trash'),
+      danger: s.running,
+      onSelect: () => {
+        closeSession(s);
+        store.refresh();
+      },
+    },
+  ];
+}
+
 /** @param {Store} store @param {Child} picker @param {Child} switcher */
 function terminalsPanel(store, picker, switcher) {
   const tasks = store.get('todos').items;
@@ -1120,7 +1160,7 @@ function terminalsPanel(store, picker, switcher) {
     const titles = s.tasks.map((id) => tasks.find((t) => t.id === id)?.text).filter(Boolean);
     const what = s.running ? oneLine(s.command) : exitText(s.exit) || 'Ready';
     const state = s.running ? 'Running' : 'Idle';
-    return h('div', { class: s.id === shown ? 'tree-row scm-row term-list-row active' : 'tree-row scm-row term-list-row' },
+    return onContextMenu(h('div', { class: s.id === shown ? 'tree-row scm-row term-list-row active' : 'tree-row scm-row term-list-row' },
       h('button', {
         type: 'button',
         class: 'tree-item',
@@ -1142,7 +1182,7 @@ function terminalsPanel(store, picker, switcher) {
           closeSession(s);
           store.refresh();
         },
-      }, icon('x')));
+      }, icon('x'))), () => sessionMenu(store, s));
   };
   return h('aside', { class: 'card ide-explorer scm', 'aria-label': 'Terminals' },
     switcher,
@@ -1166,7 +1206,7 @@ function sessionTabs(store) {
   return h('nav', { class: 'term-tabs', role: 'tablist', 'aria-label': 'Terminals' },
     view.sessions.map((s) => {
       const active = s.id === activeSession()?.id;
-      return h('div', { class: active ? 'term-tab active' : 'term-tab' },
+      return onContextMenu(h('div', { class: active ? 'term-tab active' : 'term-tab' },
         h('button', {
           type: 'button',
           role: 'tab',
@@ -1187,7 +1227,7 @@ function sessionTabs(store) {
             closeSession(s);
             store.refresh();
           },
-        }, icon('x')));
+        }, icon('x'))), () => sessionMenu(store, s));
     }),
     h('button', {
       type: 'button',

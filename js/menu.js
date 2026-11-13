@@ -1,6 +1,7 @@
 // A context menu like a desktop app's: actions, separators and submenus that open to the side.
 // Opened by a right click at the pointer, or by a ⋯ button under the button. One menu at a time.
 import { h, icon } from './ui.js';
+import { toast } from './toast.js';
 
 /** @import { Child } from '../types/ui' */
 /**
@@ -236,3 +237,11 @@ export function onContextMenu(el, build) {
   });
   return el;
 }
+
+// A row that copies `text` to the clipboard, and says so.
+/** @param {string} label @param {string} text @returns {MenuItem} */
+export const copyItem = (label, text) => ({
+  label,
+  icon: () => icon('copy'),
+  onSelect: () => navigator.clipboard.writeText(text).then(() => toast('Copied'), () => toast('Could not copy')),
+});

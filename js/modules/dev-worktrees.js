@@ -1,15 +1,18 @@
 // Dev's Worktrees panel: every git worktree of the workspace's repository, the ones `claude --worktree` makes and
 // any other, each with a dot saying whether it is in use. One can be removed, or all the unused ones, or all of them.
-// git keeps a worktree with changes or untracked files, so removing never loses work; its branch stays.
+// git keeps a worktree with changes or untracked files, so removing never loses work; its branch stays. A right
+// click offers Force remove, which discards them.
 import { h, icon, statusOf } from '../ui.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
+import { onContextMenu, copyItem } from '../menu.js';
 import { listWorktrees, removeWorktree } from '../terminal.js';
 import { tasksOfWorktree, forgetWorktree } from '../task-worktrees.js';
 import { baseName, panelHead, panelAction } from './dev-files.js';
 /** @import { DevContext } from '../../types/dev' */
 /** @import { RunnerWorktrees, RunnerWorktree } from '../../types/terminal' */
 /** @import { Child } from '../../types/ui' */
+/** @import { MenuEntry } from '../menu.js' */
 /** @import { IconName, Task } from '../../types/data' */
 /** @typedef {ReturnType<typeof usageOf>} Use */
 /** @typedef {[RunnerWorktree, Use]} Entry */
@@ -90,14 +93,14 @@ function usageTone(ctx, w) {
   return { tone: 'idle', label: 'Not in use', why: task ? 'its task is done' : '', task, more, session: worktree?.session ?? '' };
 }
 
-/** @param {DevContext} ctx @param {RunnerWorktree} w @param {Use} use */
-async function removeOne(ctx, w, use) {
+/** @param {DevContext} ctx @param {RunnerWorktree} w @param {Use} use @param {boolean} [force] */
+async function removeOne(ctx, w, use, force = false) {
   state.busy.add(w.path);
   state.errors.delete(w.path);
   ctx.refresh();
   try {
     // The panel lists worktrees only from a repository's answer.
-    await removeWorktree(ctx.base(), { cwd: /** @type {RunnerWorktrees} */ (state.data).root, path: w.path, session: use.session });
+    await removeWorktree(ctx.base(), { cwd: /** @type {RunnerWorktrees} */ (state.data).root, path: w.path, session: use.session, force });
     if (w.claude) forgetWorktree(ctx.store, w.name);
     return true;
   } catch (err) {
@@ -109,23 +112,27 @@ async function removeOne(ctx, w, use) {
 }
 
 // One after another: git takes a lock on the repository for each removal.
-/** @param {DevContext} ctx @param {Entry[]} list */
-async function removeMany(ctx, list) {
+/** @param {DevContext} ctx @param {Entry[]} list @param {boolean} [force] */
+async function removeMany(ctx, list, force = false) {
   let removed = 0;
-  for (const [w, use] of list) if (await removeOne(ctx, w, use)) removed++;
+  for (const [w, use] of list) if (await removeOne(ctx, w, use, force)) removed++;
   const kept = list.length - removed;
   toast(kept ? `${removed} removed, ${kept} kept: see the reasons in the list` : `${removed} ${removed === 1 ? 'worktree' : 'worktrees'} removed`);
   refreshWorktrees(ctx, state.path, { force: true });
 }
 
-/** @param {DevContext} ctx @param {Entry[]} list @param {string} title */
-function confirmRemove(ctx, list, title) {
+// `force` removes a worktree with changes or untracked files too, losing them.
+/** @param {DevContext} ctx @param {Entry[]} list @param {string} title @param {{ force?: boolean }} [options] */
+function confirmRemove(ctx, list, title, { force = false } = {}) {
   const running = list.filter(([, use]) => use.tone === 'running').length;
   const held = list.filter(([, use]) => use.tone === 'held').length;
+  const changes = list.reduce((n, [w]) => n + (w.changes ?? 0), 0);
   const notes = [
     running ? `${running} in use: the board's terminal running in it is stopped; a claude started elsewhere keeps its worktree.` : '',
     held ? `${held} still held by an open task or terminal.` : '',
-    'git keeps a worktree with changes or untracked files. Branches are kept.',
+    force
+      ? `Its uncommitted changes and untracked files are lost${changes ? ` (${changes} changed ${changes === 1 ? 'file' : 'files'})` : ''}. Commits stay on the branch, which is kept.`
+      : 'git keeps a worktree with changes or untracked files. Branches are kept.',
   ].filter(Boolean);
   const dialog = openDialog({
     title,
@@ -139,14 +146,53 @@ function confirmRemove(ctx, list, title) {
           class: 'btn-small danger',
           onclick: () => {
             dialog.close();
-            removeMany(ctx, list);
+            removeMany(ctx, list, force);
           },
-        }, 'Remove'))),
+        }, force ? 'Force remove' : 'Remove'))),
   });
 }
 
 // A line under a worktree's name: an icon and a text cut to the panel's width, in full on hover.
 const meta = (/** @type {IconName} */ name, /** @type {string} */ text, cls = '') => h('div', { class: `wt-meta muted ${cls}`, title: text }, icon(name), h('span', { class: 'wt-meta-text' }, text));
+
+/** @param {DevContext} ctx @param {RunnerWorktree} w @param {Use} use */
+function remove(ctx, w, use) {
+  if (use.tone === 'running') return confirmRemove(ctx, [[w, use]], 'Remove a worktree in use');
+  removeOne(ctx, w, use).then((ok) => {
+    if (ok) toast(`Worktree ${w.name} removed`);
+    refreshWorktrees(ctx, state.path, { force: true });
+  });
+}
+
+/** @param {Task} t */
+const openTask = (t) => { location.hash = `#/todos?${new URLSearchParams({ filter: t.projectId || 'personal', status: 'all', task: t.id })}`; };
+
+// A worktree's right-click menu: its terminal, its task, copies, and removing it, forced or not.
+/** @param {DevContext} ctx @param {RunnerWorktree} w @param {Use} use @returns {MenuEntry[]} */
+function menuOf(ctx, w, use) {
+  const busy = state.busy.has(w.path);
+  const term = use.terminal;
+  return [
+    w.prunable ? null : term
+      ? { label: `Show ${term.n ? `terminal ${term.n}` : 'its terminal'}`, icon: () => icon('terminal'), onSelect: () => ctx.showTerminal(term.id, term.cwd) }
+      : null,
+    w.prunable ? null : { label: 'Open a new terminal in it', icon: () => icon('plus'), onSelect: () => ctx.openTerminal(w.path) },
+    use.task ? { label: 'Open its task', icon: () => icon('check-square'), onSelect: () => openTask(/** @type {Task} */ (use.task)) } : null,
+    '-',
+    copyItem('Copy path', w.path),
+    w.branch ? copyItem('Copy branch name', w.branch) : null,
+    w.head ? copyItem('Copy commit hash', w.head) : null,
+    '-',
+    busy ? null : { label: 'Remove', icon: () => icon('trash'), onSelect: () => remove(ctx, w, use) },
+    w.prunable || busy ? null : {
+      label: 'Force remove',
+      hint: w.changes ? `${w.changes} changed` : '',
+      icon: () => icon('trash'),
+      danger: true,
+      onSelect: () => confirmRemove(ctx, [[w, use]], `Force remove ${w.name}`, { force: true }),
+    },
+  ];
+}
 
 /** @param {DevContext} ctx @param {RunnerWorktree} w @param {Use} use */
 function row(ctx, w, use) {
@@ -156,7 +202,7 @@ function row(ctx, w, use) {
   const button = (name, title, onclick) => h('button', { type: 'button', class: 'tree-action', title, 'aria-label': `${title}: ${w.name}`, disabled: busy, onclick }, icon(name));
   const branch = w.branch && w.branch !== `worktree-${w.name}` ? w.branch : '';
   const task = use.task ? `${use.task.text}${use.more > 0 ? ` (+${use.more})` : ''}` : '';
-  return h('div', { class: 'wt-item', role: 'listitem' },
+  return onContextMenu(h('div', { class: 'wt-item', role: 'listitem' },
     h('div', { class: 'tree-row scm-row wt-row' },
       h('div', { class: 'tree-item', title: w.path },
         h('span', { class: `wt-dot ${use.tone}`, role: 'img', 'aria-label': use.label, title: use.label }),
@@ -172,18 +218,12 @@ function row(ctx, w, use) {
         }, icon('terminal'))
         : button('terminal', 'Open a terminal in it', () => ctx.openTerminal(w.path)),
       w.prunable ? null : ctx.cronLink({ session: use.session, worktree: w.claude ? w.name : '', runId: use.task?.cronRun }, w.name),
-      busy ? h('span', { class: 'tree-action spin-icon wt-busy' }, icon('refresh')) : button('trash', 'Remove this worktree', () => {
-        if (use.tone === 'running') confirmRemove(ctx, [[w, use]], 'Remove a worktree in use');
-        else removeOne(ctx, w, use).then((ok) => {
-          if (ok) toast(`Worktree ${w.name} removed`);
-          refreshWorktrees(ctx, state.path, { force: true });
-        });
-      }),
+      busy ? h('span', { class: 'tree-action spin-icon wt-busy' }, icon('refresh')) : button('trash', 'Remove this worktree', () => remove(ctx, w, use)),
       w.changes ? h('span', { class: 'scm-letter git-mod', title: `${w.changes} changed ${w.changes === 1 ? 'file' : 'files'}: git keeps it until they are committed or discarded` }, w.changes) : null),
     task ? meta('check-square', task) : null,
     branch ? meta('git-branch', branch) : w.branch ? null : meta('git-commit', w.head ? `detached at ${w.head.slice(0, 7)}` : 'no branch'),
     w.prunable ? meta('alert', 'its folder is gone: removing it cleans git up', 'wt-warn') : use.why ? meta(use.tone === 'running' ? 'activity' : 'info', use.why) : null,
-    error ? h('p', { class: 'small tree-error wt-error' }, error) : null);
+    error ? h('p', { class: 'small tree-error wt-error' }, error) : null), () => menuOf(ctx, w, use));
 }
 
 // One group of worktrees, folded or open, with its count.
