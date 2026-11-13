@@ -26,6 +26,7 @@ import { openDialog } from '../modal.js';
 import { buildProfile, profileOf, hasProfileSources, profilesFor } from '../profile.js';
 import { fmtCost } from '../dev-usage.js';
 import { brandBlock } from './project-brand.js';
+import { contactsBlock, contactsPanel } from './project-contacts.js';
 import { resizableSide } from '../side-resize.js';
 import { PALETTE, makeProject, createProject } from '../projects-core.js';
 
@@ -43,12 +44,12 @@ const DEFAULT_CATEGORIES = [
 /** @param {{ color?: string } | null | undefined} label */
 export const labelColor = (label) => label?.color || PALETTE[0];
 
-// View state. mode: 'view' | 'categories'. Projects are edited in place, so there is no edit or new mode.
+// View state. mode: 'view' | 'categories' | 'people' (every contact; who: its search). Projects are edited in place, so there is no edit or new mode.
 // category filter: 'all' | 'none' | <category id>.
 /** @type {Store | null} */
 let liveStore = null;
-/** @type {{ selectedId: string | null, mode: string, error: string, draft: null, query: string, category: string, notice: string, adding: boolean }} */
-const view = { selectedId: null, mode: 'view', error: '', draft: null, query: '', category: 'all', notice: '', adding: false };
+/** @type {{ selectedId: string | null, mode: string, error: string, draft: null, query: string, category: string, notice: string, adding: boolean, who: string }} */
+const view = { selectedId: null, mode: 'view', error: '', draft: null, query: '', category: 'all', notice: '', adding: false, who: '' };
 
 /** @param {string} text */
 const splitLines = (text) => text.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -394,6 +395,13 @@ const select = (store, id) => {
   view.mode = 'view';
   view.error = '';
   view.draft = null;
+  store.refresh();
+};
+
+/** @param {Store} store */
+const showContacts = (store) => {
+  view.mode = 'people';
+  view.error = '';
   store.refresh();
 };
 
@@ -1188,6 +1196,7 @@ function projectView(store, p, items, categories) {
     npmOf(p).org || npmOf(p).packages.length ? npmTable(store, p) : null,
     profileBlock(store, p),
     brandBlock(store, p),
+    contactsBlock(store, p, () => showContacts(store)),
     overviewBlock(store, p),
     triageBlock(store, p));
 }
@@ -1360,7 +1369,16 @@ function draw(root, store) {
 
   let detail;
   if (view.mode === 'categories') detail = categoriesPanel(store, categories, projects);
-  else if (selected) detail = projectView(store, selected, items, categories);
+  else if (view.mode === 'people') {
+    detail = contactsPanel(store, {
+      query: view.who,
+      onBack: () => {
+        view.mode = 'view';
+        store.refresh();
+      },
+      onQuery: (q) => { view.who = q; },
+    });
+  } else if (selected) detail = projectView(store, selected, items, categories);
   else detail = projectsRecap(store, projects, items, categories);
 
   root.replaceChildren(
@@ -1400,6 +1418,11 @@ function draw(root, store) {
                   view.error = '';
                   store.refresh();
                 },
+              },
+              {
+                label: 'Contacts',
+                icon: () => icon('users'),
+                onSelect: () => showContacts(store),
               },
               {
                 label: 'Re-run icons',
@@ -1461,10 +1484,12 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
     mode: view.mode === 'view' ? '' : view.mode,
     category: view.category === 'all' ? '' : view.category,
     q: view.query,
+    who: view.mode === 'people' ? view.who : '',
   }),
   restore: (/** @type {Record<string, string>} */ p = {}) => {
     view.selectedId = p.project || null;
-    view.mode = p.mode === 'categories' ? 'categories' : 'view';
+    view.mode = p.mode === 'categories' || p.mode === 'people' ? p.mode : 'view';
+    view.who = p.who || '';
     view.category = p.category || 'all';
     view.query = p.q || '';
     view.error = '';
