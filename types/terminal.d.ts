@@ -26,6 +26,22 @@ export interface RunnerStatus {
   cwd: string;
   // Subagents still working, for claude in a worktree.
   agents?: number;
+  // What claude waits on, when waiting stopped at a tool call: a question, a plan or a tool to allow.
+  ask?: SessionAsk | null;
+  // The Artifacts claude published in this session.
+  artifacts?: SessionArtifact[];
+}
+
+// kind: question, plan or permission. text: the question, or the tool and what it runs.
+export interface SessionAsk {
+  kind: string;
+  text: string;
+}
+
+// A claude.ai Artifact link; title '' when none was given.
+export interface SessionArtifact {
+  url: string;
+  title: string;
 }
 
 // GET /files.

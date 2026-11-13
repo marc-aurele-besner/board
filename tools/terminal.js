@@ -16,7 +16,7 @@
 /** @import { Readable, Writable } from 'node:stream' */
 /** @import { RequestBody } from '../types/runner' */
 /** @import { DevSession } from '../types/data' */
-/** @import { GitFile, RunnerEvent, RunnerSearch, SearchMatch } from '../types/terminal' */
+/** @import { GitFile, RunnerEvent, RunnerSearch, SearchMatch, SessionArtifact } from '../types/terminal' */
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
@@ -71,7 +71,8 @@ const log = logger('terminal');
 /**
  * @typedef {{ id: string, events: SessionEvent[], size: number, open: SessionEvent | null, listeners: Set<ServerResponse>,
  *   run: Job | null, known: boolean, pending: string, rewrite: boolean, timer: NodeJS.Timeout | number,
- *   disk: Promise<unknown>, closed: boolean, lastOut?: number, taps?: Set<(event: SessionEvent) => void>, transcript?: string }} Session
+ *   disk: Promise<unknown>, closed: boolean, lastOut?: number, taps?: Set<(event: SessionEvent) => void>, transcript?: string,
+ *   artifacts?: SessionArtifact[], artifactsRead?: SessionEvent }} Session
  */
 
 // Running commands by pid: the child, the folder it reports into, and its session.
@@ -272,6 +273,7 @@ async function transcriptOf(s) {
 // for its user prints nothing), ended (with its exit code), or idle. A session that is gone is left out.
 // Quiet is not enough for claude: a long tool call or a background subagent prints nothing either, so it waits only
 // once its transcript says the turn ended and no subagent is still working.
+// The Artifacts claude published come along, as last read from its transcript (not while output streams).
 const QUIET_MS = 8000;
 /** @param {string} id */
 async function statusOf(id) {
@@ -280,17 +282,27 @@ async function statusOf(id) {
   if (s.closed) return null;
   if (s.run) {
     const cwd = s.open?.cwd ?? '';
-    if (Date.now() - (s.lastOut ?? 0) < QUIET_MS) return { state: 'working', cwd };
+    if (Date.now() - (s.lastOut ?? 0) < QUIET_MS) return { state: 'working', cwd, ...(s.artifacts ? { artifacts: s.artifacts } : {}) };
     const name = worktreeOf(s.open?.command);
     const activity = (await transcriptOf(s))
-      ?? (name && cwd ? (await worktreeActivity([{ name, cwd }]).catch(() => /** @type {Record<string, { busy: boolean, agents: number }>} */ ({})))[name] : null);
-    return { state: activity?.busy ? 'working' : 'waiting', cwd, ...(activity ? { agents: activity.agents } : {}) };
+      ?? (name && cwd ? (await worktreeActivity([{ name, cwd }]).catch(() => /** @type {Awaited<ReturnType<typeof worktreeActivity>>} */ ({})))[name] : null);
+    // A turn stopped at a tool call with the terminal quiet waits on its user: a question, a plan, or a permission.
+    const ask = activity?.ask ?? null;
+    if (activity) s.artifacts = activity.artifacts;
+    const more = activity ? { agents: activity.agents, ask, artifacts: activity.artifacts } : {};
+    return { state: activity?.busy && !ask ? 'working' : 'waiting', cwd, ...more };
   }
   const exit = s.events.findLast((e) => e.t === 'exit');
   const where = s.events.findLast((e) => e.t === 'cwd' || e.t === 'start');
   const cwd = (where?.t === 'cwd' ? where.d : where?.cwd) ?? '';
   if (!exit) return { state: 'idle', cwd };
-  return { state: exit.stopped ? 'stopped' : exit.code === 0 ? 'done' : 'failed', code: exit.code, cwd };
+  // claude may publish just before it quits: its transcript is read once more after the exit.
+  if (s.artifactsRead !== exit) {
+    s.artifactsRead = exit;
+    const t = await transcriptOf(s).catch(() => null);
+    if (t) s.artifacts = t.artifacts;
+  }
+  return { state: exit.stopped ? 'stopped' : exit.code === 0 ? 'done' : 'failed', code: exit.code, cwd, ...(s.artifacts ? { artifacts: s.artifacts } : {}) };
 }
 
 // Each page reads every terminal through one stream: a browser opens only six connections to a host, so a stream
