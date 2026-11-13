@@ -73,6 +73,14 @@ export interface DevModelUsage {
   extraCost?: number | null;
 }
 
+// One tool's use within a turn: its calls, those that failed (or the user refused), and the time (ms) from each
+// call to its result. A question's or a plan's time is the user's, so it is left out.
+export interface DevToolUse {
+  calls: number;
+  errors?: number;
+  ms?: number;
+}
+
 // One prompt of a claude session and how it went. Times in ms: `at` when it was sent, `end` claude's last reply to it.
 export interface DevTurn {
   // The prompt's start, cut short.
@@ -84,6 +92,15 @@ export interface DevTurn {
   // Since the session's previous turn ended: the user reading, reviewing and writing the prompt. 0 for a first turn.
   review: number;
   interrupted?: boolean;
+  // Its last reply gave the done signal (js/dev-done.js).
+  done?: boolean;
+  // By tool name ('Bash', 'mcp__<server>__<tool>'), in the main session, not its subagents. {} for a turn without a
+  // call; lacking in turns read before tools were kept, null once the transcript was gone before they could be.
+  tools?: Record<string, DevToolUse> | null;
+  // Uses per skill name, through the Skill tool or typed as a slash command. Kept with tools.
+  skills?: Record<string, number>;
+  // Output tokens of claude's replies. Kept with tools.
+  tokens?: number;
 }
 
 // A worktree's claude sessions. Records only remembered (no transcript read yet) have just name, cwd, added and taskIds.

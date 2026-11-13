@@ -73,9 +73,9 @@ let busy = false;
 export async function refreshDevUsage(store, read = (list) => worktreeUsage(runnerOf(store), list)) {
   if (busy) return;
   rememberWorktrees(store, heldWorktrees(store));
-  // Records saved before the cost was split into included and extra, before skills and MCP calls were counted, or
-  // before turns were kept, are read once more.
-  const stale = (/** @type {DevUsage} */ r) => r.billing === undefined || (!!r.sessions && (!r.skills || r.turns === undefined));
+  // Records saved before the cost was split into included and extra, before skills and MCP calls were counted,
+  // before turns were kept, or before the turns kept their tools, are read once more.
+  const stale = (/** @type {DevUsage} */ r) => r.billing === undefined || (!!r.sessions && (!r.skills || r.turns === undefined || r.turns.some((t) => t.tools === undefined)));
   const records = Object.values(devUsage(store)).filter((r) => r.cwd && (live(store, r) || stale(r)));
   if (!records.length) return;
   // A record not read yet has no `end`: its `added` stands in, so a new session is read first rather than never.
@@ -100,6 +100,7 @@ export async function refreshDevUsage(store, read = (list) => worktreeUsage(runn
         if (r.billing === undefined) r.billing = null;
         if (r.sessions && !r.skills) Object.assign(r, { skills: {}, mcp: {} });
         if (r.sessions && r.turns === undefined) r.turns = [];
+        for (const t of r.turns ?? []) if (t.tools === undefined) t.tools = null;
       }
     });
   } finally {
