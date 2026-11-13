@@ -130,6 +130,20 @@
       "body": "{ \"name\": \"Sample\" }",
       "form": [],
       "auth": { "type": "bearer", "token": "placeholder-token" }
+    },
+    {
+      "id": "rq-graphql",
+      "name": "One item",
+      "projectId": null,
+      "method": "POST",
+      "url": "https://api.example.com/graphql",
+      "params": [],
+      "headers": [],
+      "bodyType": "graphql",
+      "body": "query Item($id: ID!) { item(id: $id) { name } }",
+      "variables": "{ \"id\": \"1\" }",
+      "form": [],
+      "auth": { "type": "none" }
     }
   ],
   "schemaVersion": 1

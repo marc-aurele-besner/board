@@ -25,6 +25,25 @@ const hasHeader = (/** @type {[string, string][]} */ headers, /** @type {string}
 /** @param {string} text */
 const base64 = (text) => btoa(String.fromCharCode(...new TextEncoder().encode(text)));
 
+// A GraphQL request's variables, parsed. Empty text sends none; text that is not a JSON object throws.
+/** @param {ApiRequest} req @returns {Record<string, unknown> | undefined} */
+export function variablesOf(req) {
+  const text = (req.variables ?? '').trim();
+  if (!text) return undefined;
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch (err) {
+    throw new Error(`The variables are not valid JSON: ${/** @type {Error} */ (err).message}`);
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('The variables must be a JSON object.');
+  return value;
+}
+
+// The name after `query`, `mutation` or `subscription`, sent as operationName so a document with several
+// operations runs the first named one.
+const operationOf = (/** @type {string} */ query) => /^\s*(?:query|mutation|subscription)\s+([_A-Za-z][_0-9A-Za-z]*)/m.exec(query)?.[1];
+
 // The URL with the params table added to the query it may already have. A URL without a scheme gets https://.
 /** @param {ApiRequest} req */
 export function urlOf(req) {
@@ -32,6 +51,14 @@ export function urlOf(req) {
   if (!raw) throw new Error('Type a URL first.');
   const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`);
   for (const p of on(req.params)) url.searchParams.append(p.key.trim(), p.value);
+  // GraphQL over GET puts the query and its variables in the address.
+  if (req.bodyType === 'graphql' && req.method === 'GET' && req.body.trim()) {
+    url.searchParams.set('query', req.body);
+    const variables = variablesOf(req);
+    if (variables) url.searchParams.set('variables', JSON.stringify(variables));
+    const name = operationOf(req.body);
+    if (name) url.searchParams.set('operationName', name);
+  }
   return url.toString();
 }
 
@@ -50,6 +77,12 @@ export function wireOf(req) {
     if (req.bodyType === 'json' || req.bodyType === 'text') {
       body = req.body;
       if (!hasHeader(headers, 'content-type')) headers.push(['Content-Type', req.bodyType === 'json' ? 'application/json' : 'text/plain']);
+    } else if (req.bodyType === 'graphql') {
+      const variables = variablesOf(req);
+      const name = operationOf(req.body);
+      body = JSON.stringify({ query: req.body, ...(variables ? { variables } : {}), ...(name ? { operationName: name } : {}) });
+      if (!hasHeader(headers, 'content-type')) headers.push(['Content-Type', 'application/json']);
+      if (!hasHeader(headers, 'accept')) headers.push(['Accept', 'application/graphql-response+json, application/json']);
     } else if (req.bodyType === 'form') {
       body = new URLSearchParams(on(req.form).map((p) => [p.key.trim(), p.value])).toString();
       if (!hasHeader(headers, 'content-type')) headers.push(['Content-Type', 'application/x-www-form-urlencoded']);
@@ -235,10 +268,84 @@ export function fromCurl(text, id) {
     } else {
       req.bodyType = json ? 'json' : 'text';
       req.body = body;
+      // A JSON body with a query string is a GraphQL request: it opens in the GraphQL editor.
+      if (json) {
+        try {
+          const parsed = JSON.parse(body);
+          if (parsed && typeof parsed.query === 'string') {
+            req.bodyType = 'graphql';
+            req.body = parsed.query;
+            req.variables = parsed.variables ? JSON.stringify(parsed.variables, null, 2) : '';
+          }
+        } catch {
+          // Not parseable after all: kept as JSON text.
+        }
+      }
     }
     // A header the body type sets by itself is not kept twice.
     if (req.bodyType !== 'text') req.headers = req.headers.filter((p) => !(p.key.toLowerCase() === 'content-type' && /json|x-www-form-urlencoded/i.test(p.value)));
+    if (req.bodyType === 'graphql') req.headers = req.headers.filter((p) => !(p.key.toLowerCase() === 'accept' && /graphql-response/i.test(p.value)));
   }
   req.method = method && METHODS.includes(method) ? method : (data.length || form.length) && !get ? 'POST' : 'GET';
   return req;
+}
+
+// --- GraphQL schema ---
+
+/** A type as introspection writes it: a name, or a list or non-null wrapper around one. @typedef {{ kind: string, name: string | null, ofType?: TypeRef | null }} TypeRef */
+/**
+ * A root field of the schema, ready to list and to turn into a query.
+ * @typedef {{ op: 'query' | 'mutation', name: string, description: string, args: { name: string, type: string }[], type: string, leaf: boolean }} SchemaField
+ */
+
+// Only the root fields, their arguments and return types: enough to list what the API offers and start a query.
+const TYPE_REF = 'kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } }';
+export const INTROSPECTION = `query Introspection { __schema { queryType { fields { ...F } } mutationType { fields { ...F } } } }
+fragment F on __Field { name description args { name type { ${TYPE_REF} } } type { ${TYPE_REF} } }`;
+
+// `[Item!]!` from the nested wrappers.
+/** @param {TypeRef | null | undefined} t @returns {string} */
+const typeName = (t) => (!t ? '?' : t.kind === 'NON_NULL' ? `${typeName(t.ofType)}!` : t.kind === 'LIST' ? `[${typeName(t.ofType)}]` : t.name ?? '?');
+/** @param {TypeRef | null | undefined} t @returns {string} */
+const baseKind = (t) => (!t ? '' : t.ofType ? baseKind(t.ofType) : t.kind);
+
+// The root fields from an introspection answer's body. Throws when the body is not one.
+/** @param {string} body @returns {SchemaField[]} */
+export function schemaFields(body) {
+  let json;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    throw new Error('The answer is not JSON, so the server does not look like a GraphQL API.');
+  }
+  const schema = json?.data?.__schema;
+  if (!schema) throw new Error(json?.errors?.[0]?.message ? `The schema could not be read: ${json.errors[0].message}` : 'The answer has no schema. Introspection may be turned off on this server.');
+  /** @type {SchemaField[]} */
+  const out = [];
+  for (const op of /** @type {const} */ (['query', 'mutation'])) {
+    /** @type {{ name: string, description?: string | null, args?: { name: string, type: TypeRef }[], type: TypeRef }[]} */
+    const fields = schema[`${op}Type`]?.fields ?? [];
+    for (const f of fields) {
+      const kind = baseKind(f.type);
+      out.push({
+        op,
+        name: f.name,
+        description: f.description ?? '',
+        args: (f.args ?? []).map((a) => ({ name: a.name, type: typeName(a.type) })),
+        type: typeName(f.type),
+        leaf: kind === 'SCALAR' || kind === 'ENUM',
+      });
+    }
+  }
+  return out;
+}
+
+// A starting query for one root field: its arguments become variables, and an object result asks for __typename,
+// the one field every object has.
+/** @param {SchemaField} f */
+export function templateOf(f) {
+  const name = f.name.charAt(0).toUpperCase() + f.name.slice(1);
+  const vars = f.args.length ? `(${f.args.map((a) => `$${a.name}: ${a.type}`).join(', ')})` : '';
+  const args = f.args.length ? `(${f.args.map((a) => `${a.name}: $${a.name}`).join(', ')})` : '';
+  return `${f.op} ${name}${vars} {\n  ${f.name}${args}${f.leaf ? '' : ' {\n    __typename\n  }'}\n}\n`;
 }
