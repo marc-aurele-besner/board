@@ -5,7 +5,7 @@ import { barChart, legend } from '../chart.js';
 import { byUse, mcpTool } from '../dev-usage.js';
 import { stat } from './monitoring.js';
 import { sortTable } from './monitoring-web.js';
-import { devProjectOf, segmented, PALETTE, OTHER, TOP } from './monitoring-ai.js';
+import { devProjectOf, projectLabel, segmented, PALETTE, OTHER, TOP } from './monitoring-ai.js';
 /** @import { DevUsage, Store } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 /** @import { ChartTip } from '../chart.js' */
@@ -38,7 +38,7 @@ function labelOf(key) {
 /** @param {Store} store @param {PeriodWindow} w @param {DevUsage[]} records Dev records in the period */
 export function toolUsage(store, w, records) {
   const tasks = store.get('todos').items;
-  const projectName = new Map(store.get('projects').projects.map((p) => [p.id, p.name]));
+  const projectOf = new Map(store.get('projects').projects.map((p) => [p.id, p]));
   const set = (/** @type {string} */ kind) => {
     toolsView.kind = kind;
     store.refresh();
@@ -121,7 +121,12 @@ export function toolUsage(store, w, records) {
                   ...(toolsView.kind === 'mcp' ? [{ label: 'Server', clip: true, value: (/** @type {Row} */ r) => r.server }] : []),
                   { label: toolsView.kind === 'skills' ? 'Uses' : 'Calls', num: true, value: (r) => r.uses },
                   { label: 'Sessions', num: true, value: (r) => r.sessions },
-                  { label: 'Projects', clip: true, value: (r) => [...r.projects].map((id) => projectName.get(id) ?? 'Removed project').join(', ') || null },
+                  {
+                    label: 'Projects',
+                    clip: true,
+                    value: (r) => [...r.projects].map((id) => projectOf.get(id)?.name ?? 'Removed project').join(', ') || null,
+                    format: (_v, r) => h('span', { class: 'ai-project-list' }, [...r.projects].map((id) => projectLabel(projectOf.get(id)))),
+                  },
                   { label: 'Last used', num: true, value: (r) => r.last || null, format: (v) => new Date(v).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) },
                   {
                     label: 'Share',

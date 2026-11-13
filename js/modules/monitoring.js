@@ -13,7 +13,7 @@ import { usageRecords, sumUsage, modelName, modelsByUse, fmtDuration } from '../
 import { devBreakdown } from './monitoring-dev.js';
 import { toolUsage } from './monitoring-tools.js';
 import { developmentTab, developmentView } from './monitoring-development.js';
-import { aiOverview, aiView, devProjectOf, projectShown, sourceShown, SOURCES, BREAKDOWNS, MEASURES } from './monitoring-ai.js';
+import { aiOverview, aiView, devProjectOf, projectLabel, projectShown, sourceShown, SOURCES, BREAKDOWNS, MEASURES } from './monitoring-ai.js';
 import { sessionStatus } from '../terminal.js';
 import { runnerOf } from '../dev-core.js';
 /** @import { AiCallMeta, AiMessage, DevUsage, Store, UsageEntry } from '../../types/data' */
@@ -295,7 +295,7 @@ const devRecords = (store, w) => {
 /** @param {Store} store @param {PeriodWindow} w */
 function devSessions(store, w) {
   const tasks = store.get('todos').items;
-  const projectName = new Map(store.get('projects').projects.map((p) => [p.id, p.name]));
+  const projectOf = new Map(store.get('projects').projects.map((p) => [p.id, p]));
   const records = devRecords(store, w);
   const sum = sumUsage(records);
   // The terminal session of a record: its own, or one of its tasks' (records saved before they named it).
@@ -306,8 +306,8 @@ function devSessions(store, w) {
     const named = tasks.filter((t) => r.taskIds?.includes(t.id)).map((t) => t.text);
     const state = live.status[sessionOf(r)]?.state;
     const projectId = devProjectOf(tasks, r);
-    const project = projectId ? projectName.get(projectId) ?? 'Removed project' : '';
-    return { label: named.join(', ') || r.name, name: r.name, project, one, end: r.end, state: LIVE_STATES[/** @type {string} */ (state)] ? state : '' };
+    const project = projectId ? projectOf.get(projectId)?.name ?? 'Removed project' : '';
+    return { label: named.join(', ') || r.name, name: r.name, projectId, project, one, end: r.end, state: LIVE_STATES[/** @type {string} */ (state)] ? state : '' };
   });
   const running = rows.filter((r) => r.state).length;
   const costCell = /** @param {number | null} v @param {boolean} [partial] */ (v, partial) => (v === null ? '—' : `${partial ? '≥ ' : ''}${usdPrecise(v)}`);
@@ -326,7 +326,7 @@ function devSessions(store, w) {
           devBreakdown(store, w, records),
           sortTable('dev-tasks', [
             { label: 'Task', clip: true, value: (r) => r.label, format: (v, r) => h('span', { title: r.name }, v) },
-            { label: 'Project', clip: true, value: (r) => r.project || null },
+            { label: 'Project', clip: true, value: (r) => r.project || null, format: (_v, r) => (r.projectId ? projectLabel(projectOf.get(r.projectId)) : '—') },
             { label: 'Status', value: (r) => (r.state ? 0 : 1), format: (v, r) => h('span', { class: `pill dev-state dev-${r.state || 'finished'}`, title: r.state ? 'claude is still running: the numbers keep growing until it quits' : 'claude has quit or nothing is running' }, r.state ? LIVE_STATES[r.state] : 'Finished') },
             { label: 'Model', value: (r) => modelsByUse(r.one).map(modelName).join(', ') },
             { label: 'Effort', value: (r) => r.one.effort || '—' },
