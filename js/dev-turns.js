@@ -243,3 +243,100 @@ export function insights({ turns, prev, tasks, projectName }) {
   if (workOf(longest.t) >= 30 * MIN) out.push({ tone: 'info', view: 'turns', text: `The longest turn ran ${fmtSpan(workOf(longest.t))}: “${longest.t.text.slice(0, 80)}${longest.t.text.length > 80 ? '…' : ''}”` });
   return out.slice(0, 8);
 }
+
+// A claude session's skills, the most run first, for the skills button on Dev's bar: each with its uses, the turns
+// it ran in (numbered from 1) and when the last of them ended. `totals` are the session's own counts, which still
+// hold the turns no longer kept. `ran` is how many turns ran a skill.
+/** @typedef {{ name: string, uses: number, turns: number[], last: number }} SessionSkillRow */
+/** @param {{ skills?: Record<string, number>, end: number }[]} turns @param {Record<string, number>} [totals] */
+export function sessionSkills(turns, totals) {
+  /** @type {Map<string, SessionSkillRow>} */
+  const out = new Map();
+  const rowOf = (/** @type {string} */ name) => {
+    let row = out.get(name);
+    if (!row) out.set(name, (row = { name, uses: 0, turns: [], last: 0 }));
+    return row;
+  };
+  let ran = 0;
+  turns.forEach((t, i) => {
+    const used = Object.entries(t.skills ?? {});
+    if (used.length) ran++;
+    for (const [name, n] of used) {
+      const row = rowOf(name);
+      row.uses += n;
+      row.turns.push(i + 1);
+      row.last = Math.max(row.last, t.end);
+    }
+  });
+  for (const [name, n] of Object.entries(totals ?? {})) {
+    const row = rowOf(name);
+    row.uses = Math.max(row.uses, n);
+  }
+  const rows = [...out.values()].sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name));
+  return { rows, uses: sum(rows.map((r) => r.uses)), ran };
+}
+
+// A claude session's MCP calls by server, then by tool, the most called first, for the MCP button on Dev's bar:
+// calls (its subagents' included, counted in `agents`), failures, call time, the turns that called it and when the
+// last of them ended. `totals` are the session's own counts by tool, as for sessionSkills.
+/** @typedef {{ name: string, server: string, tool: string, calls: number, errors: number, ms: number, agents: number, turns: number[], last: number }} SessionMcpTool */
+/** @typedef {{ server: string, calls: number, errors: number, ms: number, agents: number, last: number, tools: SessionMcpTool[] }} SessionMcpServer */
+/**
+ * @param {{ tools?: Record<string, DevToolUse> | null, end: number }[]} turns
+ * @param {Record<string, DevToolUse>} [agentTools]
+ * @param {Record<string, number>} [totals]
+ */
+export function sessionMcp(turns, agentTools, totals) {
+  /** @type {Map<string, SessionMcpTool>} */
+  const out = new Map();
+  const rowOf = (/** @type {string} */ name) => {
+    let row = out.get(name);
+    if (!row) out.set(name, (row = { name, ...mcpTool(name), calls: 0, errors: 0, ms: 0, agents: 0, turns: [], last: 0 }));
+    return row;
+  };
+  turns.forEach((t, i) => {
+    for (const [name, u] of Object.entries(t.tools ?? {})) {
+      if (!isMcp(name)) continue;
+      const row = rowOf(name);
+      row.calls += u.calls;
+      row.errors += u.errors ?? 0;
+      row.ms += u.ms ?? 0;
+      row.turns.push(i + 1);
+      row.last = Math.max(row.last, t.end);
+    }
+  });
+  for (const [name, n] of Object.entries(totals ?? {})) {
+    const row = rowOf(name);
+    row.calls = Math.max(row.calls, n);
+  }
+  for (const [name, u] of Object.entries(agentTools ?? {})) {
+    if (!isMcp(name)) continue;
+    const row = rowOf(name);
+    row.calls += u.calls;
+    row.agents += u.calls;
+    row.errors += u.errors ?? 0;
+    row.ms += u.ms ?? 0;
+  }
+  const byCalls = (/** @type {{ calls: number }} */ a, /** @type {{ calls: number }} */ b) => b.calls - a.calls;
+  /** @type {Map<string, SessionMcpServer>} */
+  const servers = new Map();
+  for (const t of [...out.values()].sort((a, b) => byCalls(a, b) || a.name.localeCompare(b.name))) {
+    let s = servers.get(t.server);
+    if (!s) servers.set(t.server, (s = { server: t.server, calls: 0, errors: 0, ms: 0, agents: 0, last: 0, tools: [] }));
+    s.calls += t.calls;
+    s.errors += t.errors;
+    s.ms += t.ms;
+    s.agents += t.agents;
+    s.last = Math.max(s.last, t.last);
+    s.tools.push(t);
+  }
+  const rows = [...servers.values()].sort((a, b) => byCalls(a, b) || a.server.localeCompare(b.server));
+  return {
+    servers: rows,
+    tools: out.size,
+    calls: sum(rows.map((r) => r.calls)),
+    errors: sum(rows.map((r) => r.errors)),
+    ms: sum(rows.map((r) => r.ms)),
+    agents: sum(rows.map((r) => r.agents)),
+  };
+}
