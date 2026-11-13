@@ -357,7 +357,7 @@ function openConversation(store, key) {
 // ---- small parts ------------------------------------------------------------------------------------------------
 
 /** @param {SlackWorkspace} w @param {string} [className] */
-function teamIcon(w, className = 'slack-team-icon') {
+export function teamIcon(w, className = 'slack-team-icon') {
   return w.icon
     ? h('img', { class: className, src: w.icon, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' })
     : h('span', { class: `${className} slack-initials` }, w.name.slice(0, 1).toUpperCase());
@@ -600,7 +600,7 @@ function sectionMenu(store, section) {
 }
 
 /** @param {Store} store @param {SlackWorkspace} w */
-function confirmRemove(store, w) {
+export function confirmRemove(store, w) {
   const dialog = openDialog({
     title: `Remove ${w.name}?`,
     body: h('div', { class: 'stack' },
@@ -1158,8 +1158,8 @@ function mainPane(store) {
 
 const CONSOLE = 'copy(JSON.parse(localStorage.localConfig_v2).teams)';
 
-/** @param {Store} store @param {() => void} [done] */
-function signInForm(store, done) {
+/** @param {Store} store @param {(said: string) => void} [done] called with what it says once a workspace is in */
+export function signInForm(store, done) {
   const tokens = h('textarea', { name: 'tokens', rows: 4, placeholder: '{"T0123…": {"token": "xoxc-…", …}} or xoxc-…', 'aria-label': 'Tokens' });
   const cookie = h('input', { name: 'cookie', type: 'password', autocomplete: 'off', placeholder: 'xoxd-…', 'aria-label': 'd cookie', value: data(store).workspaces[0]?.cookie ?? '' });
   const status = h('p', { class: 'small muted', role: 'status' });
@@ -1177,7 +1177,7 @@ function signInForm(store, done) {
         status.textContent = [added.length ? `Signed in to ${added.join(', ')}.` : '', ...errors].filter(Boolean).join(' ');
         if (added.length) {
           refreshCounts(store);
-          done?.();
+          done?.(status.textContent);
         }
       } catch (err) {
         status.textContent = /** @type {Error} */ (err).message;

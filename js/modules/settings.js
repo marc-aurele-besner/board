@@ -17,6 +17,7 @@ import { chainsCard } from './settings-chains.js';
 import { contractsCard } from './settings-contracts.js';
 import { devEnvironmentCard } from './settings-dev.js';
 import { runnersCard } from './settings-runners.js';
+import { slackCard } from './settings-slack.js';
 import { modelForTask } from '../models.js';
 import { logo } from './positions.js';
 
@@ -64,6 +65,7 @@ const SECTION_GROUPS = [
       ['openrouter', 'OpenRouter', 'key'],
       ['google', 'Google Calendar', 'calendar'],
       ['gmail', 'Gmail', 'inbox'],
+      ['slack', 'Slack', 'slack'],
       ['wallets', 'Wallets', 'wallet'],
       ['blockchains', 'Blockchains', 'cube'],
       ['contracts', 'Smart contracts', 'code'],
@@ -1030,6 +1032,7 @@ function draw(root, store) {
         : view.section === 'search' ? searchCard(store)
         : view.section === 'resend' ? resendCard(store)
         : view.section === 'gmail' ? gmailCard(store)
+        : view.section === 'slack' ? slackCard(store)
         : view.section === 'notifications' ? notificationsCard(store)
         : view.section === 'automations' ? automationsCard(store)
         : view.section === 'dev' ? devEnvironmentCard(store)
