@@ -1296,11 +1296,23 @@ function draw(root, store) {
   // The section is drawn into a page not yet attached, where scrollTop is ignored: the lists go back to their
   // place once it is on screen, before it is painted.
   requestAnimationFrame(() => {
+    fillWindow();
     if (side) side.scrollTop = live.sideScroll;
     if (list) placeScroll(list, view.open);
     if (thread) placeScroll(thread, `${view.open}|${view.thread}`);
   });
 }
+
+// The layout fills the window below where it starts, which moves with the top bar's wrapping and the banners above it.
+function fillWindow() {
+  const layout = /** @type {HTMLElement | null} */ (document.querySelector('.slack-layout'));
+  if (!layout) return;
+  // offsetTop, not the bounding box: the entrance animation moves the page while it plays.
+  let top = 0;
+  for (let el = /** @type {HTMLElement | null} */ (layout); el; el = /** @type {HTMLElement | null} */ (el.offsetParent)) top += el.offsetTop;
+  layout.style.setProperty('--slack-top', `${Math.round(top)}px`);
+}
+addEventListener('resize', fillWindow);
 
 export default /** @satisfies {import('../../types/data').Module} */ ({
   id: 'slack',

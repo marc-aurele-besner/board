@@ -3185,8 +3185,12 @@ button.sum-line:hover { background: var(--surface-2); }
 /* Slack: one sidebar for every workspace, the conversation, and its thread beside it */
 .slack .stack-sm, .slack-signin .stack-sm { display: flex; flex-direction: column; gap: 4px; }
 .slack .stack-xs { display: flex; flex-direction: column; gap: 0; min-width: 0; }
-.slack.stack { gap: 8px; }
-.slack-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); height: calc(100vh - 150px); min-height: 460px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+/* Slack takes the whole page below the top bar, edge to edge: no padding around it, and its height runs to the
+   bottom of the window from where it starts (--slack-top, measured by slack.js under any banners). */
+.view:has(> .slack) { padding: 0; }
+.slack.stack { gap: 0; }
+.slack > .notice { margin: 8px 12px; }
+.slack-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); height: calc(100dvh - var(--slack-top, 55px)); min-height: 460px; overflow: hidden; background: var(--surface); }
 .slack-layout.with-thread { grid-template-columns: 240px minmax(0, 1fr) minmax(300px, 380px); }
 .slack-layout.alone { grid-template-columns: minmax(0, 1fr); }
 .slack-side, .slack-main, .slack-thread { background: var(--surface); min-height: 0; min-width: 0; }
