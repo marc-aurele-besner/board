@@ -1,24 +1,30 @@
 // Tools → Requests: a small Postman. Build an HTTP request, send it, read the answer, and keep it with a project.
 // The runners send it, past CORS; with them off the browser sends it, and CORS may block it.
 import { h, icon, empty, notice, uid } from '../ui.js';
-import { projectTree } from './projects.js';
+import { projectTree, projectIcon } from './projects.js';
 import { workerCall } from '../runners.js';
-import { METHODS, blankRequest, wireOf, sendWire, toCurl, fromCurl } from '../http-request.js';
+import { METHODS, blankRequest, wireOf, sendWire, toCurl, fromCurl, INTROSPECTION, schemaFields, templateOf } from '../http-request.js';
 import { highlight, languageOf } from '../highlight.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
+import { pickChip } from '../inline.js';
 /** @import { ApiRequest, RequestPair, Store } from '../../types/data' */
-/** @import { Wire, WireAnswer } from '../http-request.js' */
+/** @import { Wire, WireAnswer, SchemaField } from '../http-request.js' */
 
 /** @typedef {{ busy?: boolean, error?: string, data?: WireAnswer, via?: string }} Answer */
+/** @typedef {{ busy?: boolean, error?: string, fields?: SchemaField[], url?: string }} Schema */
 
 // draft: the request being edited; a saved one's copy, or a new one not in the list yet.
-// answers: request id -> its last answer, kept while the page is open.
-/** @type {{ draft: ApiRequest | null, part: string, answers: Record<string, Answer>, resTab: string, raw: boolean, wanted: string }} */
-const view = { draft: null, part: 'params', answers: {}, resTab: 'body', raw: false, wanted: '' };
+// answers: request id -> its last answer, kept while the page is open. schemas: the same for a GraphQL schema.
+// query: the search over the saved requests.
+/** @type {{ draft: ApiRequest | null, part: string, answers: Record<string, Answer>, schemas: Record<string, Schema>, schemaQuery: string, resTab: string, raw: boolean, wanted: string, query: string }} */
+const view = { draft: null, part: 'params', answers: {}, schemas: {}, schemaQuery: '', resTab: 'body', raw: false, wanted: '', query: '' };
 
 const PARTS = [['params', 'Params'], ['headers', 'Headers'], ['body', 'Body'], ['auth', 'Auth']];
-const BODY_TYPES = [['none', 'None'], ['json', 'JSON'], ['text', 'Text'], ['form', 'Form']];
+const BODY_TYPES = [['none', 'None'], ['json', 'JSON'], ['graphql', 'GraphQL'], ['text', 'Text'], ['form', 'Form']];
+/** @type {Record<string, string>} */
+const METHOD_TONE = { GET: 'done', POST: 'medium', PUT: 'low', PATCH: 'low', DELETE: 'high' };
+const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl+';
 // workerCall()'s errors when nothing answers, or when runners started before this route have no POST /http.
 const RUNNERS_OFF = /^The runners are not running|^Runners error 404/;
 
@@ -82,9 +88,26 @@ function setAnswer(store, /** @type {string} */ id, answer) {
 }
 
 // Sends through the runners; when they are off, from the browser, where a CORS block reads as a failed fetch.
+/** @param {Wire} wire @returns {Promise<{ data: WireAnswer, via: string }>} */
+async function transmit(wire) {
+  try {
+    return { data: /** @type {WireAnswer} */ (await workerCall('POST', '/http', wire, 70000)), via: 'runners' };
+  } catch (err) {
+    if (!/** @type {Error} */ (err).message.match(RUNNERS_OFF)) throw err;
+  }
+  try {
+    return { data: await sendWire(wire), via: 'browser' };
+  } catch (err) {
+    throw err instanceof TypeError
+      ? new Error('The browser could not read the answer: the server is unreachable, or it does not allow requests from other sites (CORS). Start the board with bun start, and the runners send it instead.')
+      : err;
+  }
+}
+
 /** @param {Store} store */
 async function send(store) {
   const draft = /** @type {ApiRequest} */ (view.draft);
+  if (view.answers[draft.id]?.busy) return;
   /** @type {Wire} */
   let wire;
   try {
@@ -94,20 +117,42 @@ async function send(store) {
   }
   setAnswer(store, draft.id, { busy: true });
   try {
-    const data = /** @type {WireAnswer} */ (await workerCall('POST', '/http', wire, 70000));
-    return setAnswer(store, draft.id, { data, via: 'runners' });
+    setAnswer(store, draft.id, await transmit(wire));
   } catch (err) {
-    if (!/** @type {Error} */ (err).message.match(RUNNERS_OFF)) return setAnswer(store, draft.id, { error: /** @type {Error} */ (err).message });
+    setAnswer(store, draft.id, { error: /** @type {Error} */ (err).message });
   }
+}
+
+// Asks a GraphQL API for its root fields, with the request's own URL, headers and auth.
+/** @param {Store} store @param {ApiRequest} r */
+async function readSchema(store, r) {
+  /** @type {Wire} */
+  let wire;
   try {
-    setAnswer(store, draft.id, { data: await sendWire(wire), via: 'browser' });
+    wire = wireOf({ ...r, method: 'POST', body: INTROSPECTION, variables: '' });
   } catch (err) {
-    const message = /** @type {Error} */ (err).message;
-    setAnswer(store, draft.id, {
-      error: err instanceof TypeError
-        ? 'The browser could not read the answer: the server is unreachable, or it does not allow requests from other sites (CORS). Start the board with bun start, and the runners send it instead.'
-        : message,
-    });
+    view.schemas[r.id] = { error: /** @type {Error} */ (err).message };
+    return store.refresh();
+  }
+  view.schemas[r.id] = { busy: true };
+  store.refresh();
+  try {
+    const { data } = await transmit(wire);
+    view.schemas[r.id] = { fields: schemaFields(data.body), url: r.url };
+  } catch (err) {
+    view.schemas[r.id] = { error: /** @type {Error} */ (err).message };
+  }
+  store.refresh();
+}
+
+// The errors a GraphQL answer carries in its body, which often comes with a 200.
+/** @param {WireAnswer} d @returns {string[]} */
+function graphqlErrors(d) {
+  try {
+    const json = JSON.parse(d.body);
+    return Array.isArray(json?.errors) ? json.errors.map((/** @type {{ message?: string }} */ e) => String(e?.message ?? e)) : [];
+  } catch {
+    return [];
   }
 }
 
@@ -179,10 +224,19 @@ function bodyPart(store, r) {
       toast(`Not valid JSON: ${/** @type {Error} */ (err).message}`);
     }
   };
+  const pickType = (/** @type {string} */ k) => () => {
+    // GraphQL goes as a POST body; over GET it goes in the address, which most servers allow for queries only.
+    if (k === 'graphql' && r.method === 'HEAD') r.method = 'POST';
+    if (k === 'graphql' && r.method === 'GET' && !r.body.trim()) r.method = 'POST';
+    r.bodyType = k;
+    store.refresh();
+  };
   return h('div', { class: 'stack' },
-    h('div', { class: 'chips', role: 'group', 'aria-label': 'Body type' }, BODY_TYPES.map(([k, label]) =>
-      h('button', { type: 'button', class: r.bodyType === k ? 'chip active' : 'chip', 'aria-pressed': String(r.bodyType === k), onclick: () => { r.bodyType = k; store.refresh(); } }, label))),
-    noBody && r.bodyType !== 'none' ? h('p', { class: 'muted small' }, `${r.method} requests send no body. Pick another method to send it.`) : null,
+    h('div', { class: 'segmented req-body-types', role: 'group', 'aria-label': 'Body type' }, BODY_TYPES.map(([k, label]) =>
+      h('button', { type: 'button', class: r.bodyType === k ? 'seg active' : 'seg', 'aria-pressed': String(r.bodyType === k), onclick: pickType(k) }, label))),
+    r.bodyType === 'graphql'
+      ? graphqlPart(store, r)
+      : noBody && r.bodyType !== 'none' ? h('p', { class: 'muted small' }, `${r.method} requests send no body. Pick another method to send it.`) : null,
     r.bodyType === 'json' || r.bodyType === 'text'
       ? h('div', { class: 'stack' },
         h('textarea', {
@@ -192,15 +246,83 @@ function bodyPart(store, r) {
           'aria-label': 'Body',
           placeholder: r.bodyType === 'json' ? '{ "name": "value" }' : 'Text to send',
           oninput: (/** @type {Event} */ e) => (r.body = /** @type {HTMLTextAreaElement} */ (e.target).value),
-          onkeydown: (/** @type {KeyboardEvent} */ e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              send(store);
-            }
-          },
         }, r.body),
         r.bodyType === 'json' ? h('div', null, h('button', { type: 'button', class: 'btn-small', onclick: format }, 'Format JSON')) : null)
       : r.bodyType === 'form' ? pairsEditor(store, r.form, 'field') : null);
+}
+
+// The query and its variables, side by side, and the API's root fields once its schema is read: a click starts a query.
+/** @param {Store} store @param {ApiRequest} r */
+function graphqlPart(store, r) {
+  const schema = view.schemas[r.id];
+  const formatVariables = () => {
+    try {
+      r.variables = JSON.stringify(JSON.parse(r.variables || '{}'), null, 2);
+      store.refresh();
+    } catch (err) {
+      toast(`Not valid JSON: ${/** @type {Error} */ (err).message}`);
+    }
+  };
+  /** @param {SchemaField} f */
+  const use = (f) => () => {
+    const before = { body: r.body, variables: r.variables ?? '' };
+    r.body = templateOf(f);
+    r.variables = f.args.length ? JSON.stringify(Object.fromEntries(f.args.map((a) => [a.name, null])), null, 2) : '';
+    store.refresh();
+    if (before.body.trim()) {
+      toast(`Started a ${f.op} on ${f.name}`, {
+        undo: () => {
+          Object.assign(r, before);
+          store.refresh();
+        },
+      });
+    }
+  };
+  // Typing in the search hides rows in place, so the field keeps its focus.
+  const rows = (schema?.fields ?? []).map((f) =>
+    h('li', { 'data-name': `${f.op} ${f.name} ${f.description}`.toLowerCase() },
+      h('button', { type: 'button', class: 'req-field', title: f.description || `Start a ${f.op} on ${f.name}`, onclick: use(f) },
+        h('span', { class: `req-op ${f.op}` }, f.op === 'query' ? 'Q' : 'M'),
+        h('code', null, f.name, f.args.length ? h('span', { class: 'muted' }, `(${f.args.map((a) => `${a.name}: ${a.type}`).join(', ')})`) : null),
+        h('span', { class: 'muted small req-field-type' }, f.type))));
+  const filter = (/** @type {string} */ q) => {
+    view.schemaQuery = q;
+    const lower = q.trim().toLowerCase();
+    for (const li of rows) li.hidden = Boolean(lower) && !String(li.dataset.name).includes(lower);
+  };
+  if (view.schemaQuery) filter(view.schemaQuery);
+  return h('div', { class: 'stack' },
+    h('div', { class: 'req-gql' },
+      h('label', { class: 'stack req-gql-query' }, h('span', { class: 'small muted' }, 'Query'),
+        h('textarea', {
+          class: 'req-mono req-body',
+          rows: 12,
+          spellcheck: 'false',
+          placeholder: 'query {\n  items {\n    id\n    name\n  }\n}',
+          oninput: (/** @type {Event} */ e) => (r.body = /** @type {HTMLTextAreaElement} */ (e.target).value),
+        }, r.body)),
+      h('label', { class: 'stack req-gql-vars' }, h('span', { class: 'small muted' }, 'Variables (JSON)'),
+        h('textarea', {
+          class: 'req-mono req-body',
+          rows: 12,
+          spellcheck: 'false',
+          placeholder: '{ "id": "1" }',
+          oninput: (/** @type {Event} */ e) => (r.variables = /** @type {HTMLTextAreaElement} */ (e.target).value),
+        }, r.variables ?? ''))),
+    h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'btn-small', disabled: Boolean(schema?.busy), onclick: () => readSchema(store, r) }, icon('refresh'), schema?.busy ? 'Reading the schema…' : schema?.fields ? 'Read the schema again' : 'Read the schema'),
+      h('button', { type: 'button', class: 'btn-small', onclick: formatVariables }, 'Format variables'),
+      r.method === 'GET' ? h('span', { class: 'muted small' }, 'Sent in the address, as GET. Mutations need POST.') : null),
+    schema?.error ? notice({ text: schema.error }) : null,
+    schema?.fields
+      ? h('div', { class: 'stack req-schema' },
+          h('div', { class: 'row between' },
+            h('span', { class: 'small muted' }, `${schema.fields.filter((f) => f.op === 'query').length} queries, ${schema.fields.filter((f) => f.op === 'mutation').length} mutations. Pick one to start from it.`),
+            schema.fields.length > 8
+              ? h('input', { type: 'search', class: 'req-schema-search', placeholder: 'Find a field…', value: view.schemaQuery, 'aria-label': 'Find a field', oninput: (/** @type {Event} */ e) => filter(/** @type {HTMLInputElement} */ (e.target).value) })
+              : null),
+          rows.length ? h('ul', { class: 'req-fields' }, rows) : h('p', { class: 'muted small' }, 'The schema has no root fields.'))
+      : null);
 }
 
 /** @param {Store} store @param {ApiRequest} r */
@@ -221,13 +343,70 @@ function editor(store, r) {
   const saved = savedOf(store, r.id);
   const projects = projectTree(store.get('projects').projects).map(({ project }) => project);
   const counts = { params: r.params.length, headers: r.headers.length, body: r.bodyType === 'none' ? 0 : 1, auth: r.auth.type === 'none' ? 0 : 1 };
-  return h('section', { class: 'card stack req-editor' },
+  // Fields write into the draft without a re-render, so the unsaved mark is set from their input events.
+  const changed = () => (saved ? JSON.stringify(saved) !== JSON.stringify(r) : Boolean(r.url.trim() || r.name.trim()));
+  const mark = h('span', { class: 'req-unsaved small', hidden: !changed() }, saved ? 'Unsaved changes' : 'Not saved yet');
+  const onEdit = () => {
+    mark.hidden = !changed();
+  };
+  const method = pickChip({
+    value: r.method,
+    options: METHODS.map((m) => ({ value: m, label: m, tone: METHOD_TONE[m] ?? 'plain' })),
+    className: 'field-pick req-method-pick',
+    onPick: (m) => {
+      r.method = m;
+      store.refresh();
+    },
+  });
+  method.setAttribute('aria-label', 'Method');
+  const project = pickChip({
+    value: r.projectId ?? '',
+    options: [{ value: '', label: 'Personal', plainIcon: () => icon('home') }, ...projects.map((p) => ({ value: p.id, label: p.name, plainIcon: () => projectIcon(p) }))],
+    className: 'field-pick req-project-pick',
+    onPick: (id) => {
+      r.projectId = id || null;
+      store.refresh();
+    },
+  });
+  project.setAttribute('aria-label', 'Project');
+  project.title = 'The project this request is kept under';
+  // A pasted cURL command opens as a request, like Import cURL.
+  const onPaste = (/** @type {ClipboardEvent} */ e) => {
+    const text = e.clipboardData?.getData('text') ?? '';
+    if (!/^\s*curl\s/.test(text)) return;
+    e.preventDefault();
+    try {
+      const req = fromCurl(text, r.id);
+      req.name = r.name;
+      req.projectId = r.projectId;
+      view.draft = req;
+      view.part = req.bodyType !== 'none' ? 'body' : req.headers.length ? 'headers' : 'params';
+      store.refresh();
+      toast('Read the cURL command');
+    } catch (err) {
+      toast(/** @type {Error} */ (err).message);
+    }
+  };
+  return h('section', {
+    class: 'card stack req-editor',
+    oninput: onEdit,
+    onchange: onEdit,
+    onkeydown: (/** @type {KeyboardEvent} */ e) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        send(store);
+      } else if (e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        save(store);
+      }
+    },
+  },
     h('div', { class: 'row req-meta' },
       h('input', { class: 'grow', value: r.name, placeholder: 'Untitled request', 'aria-label': 'Request name', autocomplete: 'off', oninput: (/** @type {Event} */ e) => (r.name = /** @type {HTMLInputElement} */ (e.target).value) }),
-      h('select', { 'aria-label': 'Project', onchange: (/** @type {Event} */ e) => { r.projectId = /** @type {HTMLSelectElement} */ (e.target).value || null; } },
-        h('option', { value: '' }, 'Personal'),
-        projects.map((p) => h('option', { value: p.id, selected: p.id === r.projectId }, p.name))),
-      h('button', { type: 'button', class: 'btn-small primary', onclick: () => save(store) }, saved ? 'Save' : 'Save request')),
+      project,
+      mark,
+      h('button', { type: 'button', class: 'btn-small primary', title: `Save (${MOD}S)`, onclick: () => save(store) }, saved ? 'Save' : 'Save request')),
     h('form', {
       class: 'req-line',
       onsubmit: (/** @type {SubmitEvent} */ e) => {
@@ -235,10 +414,9 @@ function editor(store, r) {
         send(store);
       },
     },
-      h('select', { class: `req-method m-${r.method.toLowerCase()}`, 'aria-label': 'Method', onchange: (/** @type {Event} */ e) => { r.method = /** @type {HTMLSelectElement} */ (e.target).value; store.refresh(); } },
-        METHODS.map((m) => h('option', { value: m, selected: m === r.method }, m))),
-      h('input', { class: 'req-mono', value: r.url, placeholder: 'https://api.example.com/items', 'aria-label': 'URL', autocomplete: 'off', spellcheck: 'false', inputmode: 'url', oninput: (/** @type {Event} */ e) => (r.url = /** @type {HTMLInputElement} */ (e.target).value) }),
-      h('button', { type: 'submit', class: 'primary', disabled: Boolean(view.answers[r.id]?.busy) }, icon('send'), view.answers[r.id]?.busy ? 'Sending…' : 'Send')),
+      method,
+      h('input', { class: 'req-mono', value: r.url, placeholder: 'https://api.example.com/items, or paste a cURL command', 'aria-label': 'URL', autocomplete: 'off', spellcheck: 'false', inputmode: 'url', onpaste: onPaste, oninput: (/** @type {Event} */ e) => (r.url = /** @type {HTMLInputElement} */ (e.target).value) }),
+      h('button', { type: 'submit', class: 'primary', title: `Send (${MOD}Enter)`, disabled: Boolean(view.answers[r.id]?.busy) }, icon('send'), view.answers[r.id]?.busy ? 'Sending…' : 'Send')),
     h('nav', { class: 'sub-tabs req-parts', role: 'tablist', 'aria-label': 'Request' }, PARTS.map(([k, label]) =>
       h('button', {
         type: 'button',
@@ -285,18 +463,21 @@ function bodyView(data) {
 /** @param {Store} store @param {ApiRequest} r */
 function answerView(store, r) {
   const a = view.answers[r.id];
-  if (!a) return h('section', { class: 'card' }, empty('Send the request to see its answer here. Cmd/Ctrl+Enter in the body sends it too.'));
+  if (!a) return h('section', { class: 'card' }, empty(`Send the request to see its answer here. ${MOD}Enter sends it from any field, ${MOD}S saves it.`));
   if (a.busy) return h('section', { class: 'card' }, h('p', { class: 'muted' }, 'Sending…'));
   if (a.error || !a.data) return notice({ text: a.error ?? 'No answer.' });
   const d = a.data;
+  const errors = r.bodyType === 'graphql' ? graphqlErrors(d) : [];
   return h('section', { class: 'card stack req-answer' },
     h('header', { class: 'row between' },
       h('div', { class: 'row req-stats' },
         h('span', { class: `pill tone-${toneOf(d.status)}` }, `${d.status} ${d.statusText}`.trim()),
+        errors.length ? h('span', { class: 'pill tone-high', title: errors.join('\n') }, `${errors.length} GraphQL error${errors.length === 1 ? '' : 's'}`) : null,
         h('span', { class: 'small' }, `${d.ms.toLocaleString()} ms`),
         h('span', { class: 'small' }, sizeOf(d.size)),
         h('span', { class: 'small muted' }, a.via === 'browser' ? 'sent by the browser' : 'sent by the runners')),
       d.body ? h('button', { type: 'button', class: 'btn-small', onclick: () => copy(d.body, 'Body') }, icon('copy'), 'Copy body') : null),
+    errors.length ? notice({ text: errors.slice(0, 3).join(' · ') + (errors.length > 3 ? ` · and ${errors.length - 3} more` : '') }) : null,
     d.redirected ? h('p', { class: 'small muted' }, 'Redirected to ', h('code', null, d.url)) : null,
     d.truncated ? h('p', { class: 'small muted' }, `Only the first 2 MB of ${sizeOf(d.size)} are shown.`) : null,
     h('nav', { class: 'sub-tabs', role: 'tablist', 'aria-label': 'Answer' },
@@ -322,18 +503,40 @@ function list(store, current) {
     pick(r);
     store.refresh();
   };
+  const blocks = groups.map((g) => h('div', { class: 'req-group' },
+    h('h4', { class: 'muted small' }, g.name),
+    h('ul', { class: 'req-items' }, g.items.map((r) =>
+      h('li', { 'data-find': `${titleOf(r)} ${r.url} ${r.method} ${r.bodyType === 'graphql' ? 'graphql' : ''} ${g.name}`.toLowerCase() },
+        h('button', { type: 'button', class: r.id === current.id ? 'req-item active' : 'req-item', 'aria-current': r.id === current.id ? 'true' : null, onclick: open(r) },
+          h('span', { class: `req-m m-${r.method.toLowerCase()}` }, r.bodyType === 'graphql' ? 'GQL' : r.method),
+          h('span', { class: 'req-title' }, titleOf(r))))))));
+  const none = h('p', { class: 'muted small', hidden: true }, 'No saved request matches.');
+  // Hides rows in place while typing, so the search keeps its focus.
+  const filter = (/** @type {string} */ q) => {
+    view.query = q;
+    const lower = q.trim().toLowerCase();
+    let any = false;
+    for (const block of blocks) {
+      let shown = 0;
+      for (const li of block.querySelectorAll('li')) {
+        li.hidden = Boolean(lower) && !String(li.dataset.find).includes(lower);
+        if (!li.hidden) shown++;
+      }
+      block.hidden = !shown;
+      any ||= shown > 0;
+    }
+    none.hidden = any || !blocks.length;
+  };
+  if (view.query) filter(view.query);
   return h('aside', { class: 'card stack req-list' },
     h('div', { class: 'row' },
       h('button', { type: 'button', class: 'btn-small primary', onclick: () => { view.draft = { ...blankRequest(uid()), projectId: current.projectId }; view.part = 'params'; store.refresh(); } }, icon('plus'), 'New'),
       h('button', { type: 'button', class: 'btn-small', onclick: () => importCurl(store) }, 'Import cURL')),
-    groups.length
-      ? groups.map((g) => h('div', { class: 'req-group' },
-        h('h4', { class: 'muted small' }, g.name),
-        h('ul', { class: 'req-items' }, g.items.map((r) =>
-          h('li', null, h('button', { type: 'button', class: r.id === current.id ? 'req-item active' : 'req-item', 'aria-current': r.id === current.id ? 'true' : null, onclick: open(r) },
-            h('span', { class: `req-m m-${r.method.toLowerCase()}` }, r.method),
-            h('span', { class: 'req-title' }, titleOf(r))))))))
-      : h('p', { class: 'muted small' }, 'Saved requests show here, grouped by project.'));
+    requests.length > 5
+      ? h('input', { type: 'search', class: 'req-find', placeholder: 'Find a request…', value: view.query, 'aria-label': 'Find a saved request', oninput: (/** @type {Event} */ e) => filter(/** @type {HTMLInputElement} */ (e.target).value) })
+      : null,
+    blocks.length ? blocks : h('p', { class: 'muted small' }, 'Saved requests show here, grouped by project.'),
+    none);
 }
 
 /** @param {Store} store */

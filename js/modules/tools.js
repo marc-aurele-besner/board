@@ -8,9 +8,10 @@ import { makeTask } from '../capture.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
 import { barChart } from '../chart.js';
+import { pickChip } from '../inline.js';
 import { contractsTab, contractsSerialize, contractsRestore } from './tools-contracts.js';
 import { requestsTab, requestsSerialize, requestsRestore } from './tools-requests.js';
-/** @import { CrawlFile, IconName, LlmsFile, Project, Provider, ProviderStatus, RobotsFile, SecurityFile, Site, SiteCrawl, SiteDns, SiteLogEntry, SiteDomain, SiteMeta, SitemapFile, Store } from '../../types/data' */
+/** @import { CrawlFile, HealthSample, IconName, LlmsFile, Project, Provider, ProviderStatus, RobotsFile, SecurityFile, Site, SiteCrawl, SiteDns, SiteLogEntry, SiteDomain, SiteMeta, SitemapFile, Store } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 
 /** A crawl file of any kind, or the stand-in for one not read yet. @typedef {Partial<Omit<CrawlFile, 'found'> & RobotsFile & SitemapFile & LlmsFile & SecurityFile> & { found: boolean }} CrawlEntry */
@@ -27,8 +28,12 @@ const EVERY = [[15, '15 minutes'], [60, 'hour'], [360, '6 hours'], [1440, 'day']
 const STATUS = { up: ['Up', 'done'], slow: ['Slow', 'medium'], down: ['Down', 'high'] };
 
 // View state: the tab, the project shown in the metadata preview, and which sites are being checked now.
-/** @type {{ tab: string, project: string, busy: Set<string>, openDns: Set<string>, openFile: string, logLevel: string }} */
-const view = { tab: 'health', project: '', busy: new Set(), openDns: new Set(), openFile: '', logLevel: '' };
+// layouts: tab -> 'cards' or 'list' for its "All" view, once picked.
+/** @type {{ tab: string, project: string, busy: Set<string>, openDns: Set<string>, openFile: string, logLevel: string, layouts: Record<string, string> }} */
+const view = { tab: 'health', project: '', busy: new Set(), openDns: new Set(), openFile: '', logLevel: '', layouts: {} };
+// The tabs whose "All" view has cards and a list, and the one each opens with.
+/** @type {Record<string, string>} */
+const LAYOUT_DEFAULT = { health: 'cards', ssl: 'list', meta: 'list' };
 
 const pillOf = (/** @type {string} */ text, /** @type {string} */ tone) => h('span', { class: `pill tone-${tone}` }, text);
 const timeOf = (/** @type {string | undefined} */ at) => (at ? new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never');
@@ -187,7 +192,7 @@ function siteDetail(store, sites, p) {
     ['crawl', 'Crawl files', crawlCore === null ? null : pillOf(`${crawlCore} of ${CORE.length} key files`, crawlCore === CORE.length ? 'done' : 'medium'), s.crawl?.robots?.blocksSearch ? 'robots.txt blocks search engines' : s.crawl?.at ? `read ${timeOf(s.crawl.at)}` : 'Not read yet'],
     ['meta', 'Share tags', metaCount === null ? null : pillOf(`${metaCount} of 8 tags`, metaCount === 8 ? 'done' : 'medium'), s.meta?.at ? `read ${timeOf(s.meta.at)}` : 'Not read yet'],
   ];
-  return h('div', { class: 'stack-lg' }, siteChips(store, sites, p),
+  return h('div', { class: 'stack-lg' }, siteBar(store, sites, p),
     h('section', { class: `card stack site-detail ${s.health?.status ?? ''}` },
       h('div', { class: 'row between' },
         h('div', { class: 'row' },
@@ -244,49 +249,77 @@ function siteDetail(store, sites, p) {
         : null));
 }
 
+// The recent checks of a site as bars, oldest first.
+const upBars = (/** @type {HealthSample[]} */ history, /** @type {number} */ count) =>
+  h('div', { class: 'up-bars', role: 'img', 'aria-label': 'Recent checks, oldest first' },
+    history.length
+      ? history.slice(-count).map((c) => h('span', { class: c.ok ? (c.ms > 1500 ? 'slow' : '') : 'bad', title: `${timeOf(c.at)}: ${c.ok ? `${c.ms} ms` : 'no answer'}` }))
+      : h('span', { class: 'na' }));
+
 /** @param {Store} store @param {Project[]} sites */
 function healthTab(store, sites) {
   const picked = pickedSite(sites);
   if (picked) return siteDetail(store, sites, picked);
-  const data = sites.map((p) => /** @type {[Project, Site]} */ ([p, siteData(store, p.id)]));
-  const countOf = (/** @type {string} */ status) => data.filter(([, s]) => s.health?.status === status).length;
+  const rows = sites.map((p) => {
+    const s = siteData(store, p.id);
+    const history = s.history ?? [];
+    const [label, tone] = STATUS[/** @type {string} */ (s.health?.status)] ?? ['Not checked', 'plain'];
+    return {
+      p,
+      s,
+      host: hostOf(p.website),
+      busy: view.busy.has(p.id) || view.busy.has('all'),
+      history,
+      state: /** @type {Child} */ (view.busy.has(p.id) || view.busy.has('all') ? pillOf('Checking…', 'plain') : pillOf(label, tone)),
+      up: history.length ? Math.round((history.filter((c) => c.ok).length / history.length) * 1000) / 10 : null,
+      issues: logOf(s).filter((e) => e.level !== 'info' && Date.now() - Date.parse(e.at) < 86400000).length,
+    };
+  });
+  const countOf = (/** @type {string} */ status) => rows.filter(({ s }) => s.health?.status === status).length;
   const stat = (/** @type {number} */ n, /** @type {string} */ label) => h('div', { class: 'card stat' }, h('strong', null, String(n)), h('span', { class: 'muted small' }, label));
+  const lookInto = (/** @type {typeof rows[number]} */ r) => (r.s.health?.status === 'down' || r.s.health?.status === 'slow'
+    ? taskCell(store, r.p, 'health', `Look into ${r.host}: ${r.s.health.status === 'down' ? 'not answering' : 'slow'}`)
+    : null);
+  const checkNow = (/** @type {typeof rows[number]} */ r) => h('button', { type: 'button', class: 'icon-btn', disabled: r.busy, title: 'Check now', 'aria-label': `Check ${r.host} now`, onclick: () => check(store, r.p, ['health']) }, refreshIcon(r.busy));
+  const issuesPill = (/** @type {number} */ n) => (n ? h('span', { class: 'pill tone-medium', title: 'Warnings and errors in the last 24 hours' }, `${n} issue${n === 1 ? '' : 's'}`) : null);
+  const cards = () => h('div', { class: 'site-grid' }, rows.map((r) => {
+    const { p, s, host, history, up } = r;
+    return h('article', { class: `card site-card ${s.health?.status ?? ''}` },
+      h('div', { class: 'row between' },
+        h('div', { class: 'row' },
+          projectIcon(p, 'project-icon large'),
+          h('div', null,
+            h('button', { type: 'button', class: 'site-name', title: 'Show details and the log', onclick: openSite(store, p) }, p.name),
+            h('div', null, h('a', { href: p.website, target: '_blank', rel: 'noopener', class: 'small' }, host)))),
+        r.state),
+      h('div', { class: 'stats' },
+        h('div', null, h('strong', null, s.health ? (s.health.status === 'down' ? 'No answer' : 'Answered') : '—'), h('span', { class: 'muted small' }, 'last check')),
+        h('div', null, h('strong', null, s.health?.ms ? `${s.health.ms} ms` : '—'), h('span', { class: 'muted small' }, 'response')),
+        h('div', null, h('strong', null, up === null ? '—' : `${up}%`), h('span', { class: 'muted small' }, `of ${history.length} check${history.length === 1 ? '' : 's'}`))),
+      upBars(history, 40),
+      h('div', { class: 'row between' },
+        h('div', { class: 'row' }, h('span', { class: 'muted small' }, `Checked ${timeOf(s.health?.at)}`), issuesPill(r.issues)),
+        h('div', { class: 'row' },
+          lookInto(r),
+          checkNow(r),
+          h('button', { type: 'button', class: 'icon-btn', title: 'Details and the log', 'aria-label': `Details of ${p.name}`, onclick: openSite(store, p) }, icon('chevron-right')))));
+  }));
+  const list = () => h('div', { class: 'card mon-scroll' },
+    h('table', { class: 'mon-table tool-table' },
+      h('thead', null, h('tr', null, ['Site', 'Status', 'Response', 'Uptime', 'Recent checks', 'Checked', ''].map((t) => h('th', null, t)))),
+      h('tbody', null, rows.map((r) =>
+        h('tr', null,
+          siteCell(store, r.p),
+          h('td', null, h('div', { class: 'row' }, r.state, issuesPill(r.issues))),
+          h('td', { class: 'nowrap' }, r.s.health?.ms ? `${r.s.health.ms} ms` : '—'),
+          h('td', { class: 'nowrap' }, r.up === null ? '—' : `${r.up}%`),
+          h('td', { class: 'up-cell' }, upBars(r.history, 24)),
+          h('td', { class: 'muted small nowrap' }, timeOf(r.s.health?.at)),
+          h('td', null, h('div', { class: 'row end nowrap' }, lookInto(r), checkNow(r))))))));
   return h('div', { class: 'stack-lg' },
-    siteChips(store, sites, null),
+    siteBar(store, sites, null, [layoutSwitch(store, 'health')]),
     h('div', { class: 'summary tool-stats' }, stat(countOf('up'), 'up'), stat(countOf('slow'), 'slow'), stat(countOf('down'), 'down'), stat(sites.length, 'sites')),
-    h('div', { class: 'site-grid' }, data.map(([p, s]) => {
-      const host = hostOf(p.website);
-      const busy = view.busy.has(p.id) || view.busy.has('all');
-      const [label, tone] = STATUS[/** @type {string} */ (s.health?.status)] ?? ['Not checked', 'plain'];
-      const history = s.history ?? [];
-      const up = history.length ? Math.round((history.filter((c) => c.ok).length / history.length) * 1000) / 10 : null;
-      const issues = logOf(s).filter((e) => e.level !== 'info' && Date.now() - Date.parse(e.at) < 86400000).length;
-      return h('article', { class: `card site-card ${s.health?.status ?? ''}` },
-        h('div', { class: 'row between' },
-          h('div', { class: 'row' },
-            projectIcon(p, 'project-icon large'),
-            h('div', null,
-              h('button', { type: 'button', class: 'site-name', title: 'Show details and the log', onclick: openSite(store, p) }, p.name),
-              h('div', null, h('a', { href: p.website, target: '_blank', rel: 'noopener', class: 'small' }, host)))),
-          busy ? pillOf('Checking…', 'plain') : pillOf(label, tone)),
-        h('div', { class: 'stats' },
-          h('div', null, h('strong', null, s.health ? (s.health.status === 'down' ? 'No answer' : 'Answered') : '—'), h('span', { class: 'muted small' }, 'last check')),
-          h('div', null, h('strong', null, s.health?.ms ? `${s.health.ms} ms` : '—'), h('span', { class: 'muted small' }, 'response')),
-          h('div', null, h('strong', null, up === null ? '—' : `${up}%`), h('span', { class: 'muted small' }, `of ${history.length} check${history.length === 1 ? '' : 's'}`))),
-        h('div', { class: 'up-bars', role: 'img', 'aria-label': 'Recent checks, oldest first' },
-          history.length
-            ? history.slice(-40).map((c) => h('span', { class: c.ok ? (c.ms > 1500 ? 'slow' : '') : 'bad', title: `${timeOf(c.at)}: ${c.ok ? `${c.ms} ms` : 'no answer'}` }))
-            : h('span', { class: 'na' })),
-        h('div', { class: 'row between' },
-          h('span', { class: 'muted small' }, `Checked ${timeOf(s.health?.at)}`),
-          h('div', { class: 'row' },
-            h('button', { type: 'button', class: 'btn-small', onclick: openSite(store, p) },
-              'Details', issues ? h('span', { class: 'pill tone-medium', title: 'Warnings and errors in the last 24 hours' }, String(issues)) : null),
-            h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => check(store, p, ['health']) }, refreshIcon(busy), 'Check now'),
-            s.health?.status === 'down' || s.health?.status === 'slow'
-              ? taskCell(store, p, 'health', `Look into ${host}: ${/** @type {NonNullable<Site['health']>} */ (s.health).status === 'down' ? 'not answering' : 'slow'}`)
-              : null)));
-    })),
+    layoutOf('health') === 'list' ? list() : cards(),
     h('p', { class: 'muted small' }, 'A check asks the site for its home page from this browser. The browser hides the answer itself, so a check tells “answered” from “did not answer” and how long it took, not the status code.'));
 }
 
@@ -296,31 +329,67 @@ function healthTab(store, sites) {
 function sslTab(store, sites) {
   const ssl = ruleOf(store, 'ssl');
   const domain = ruleOf(store, 'domain');
+  const picked = pickedSite(sites);
+  const shown = picked ? [picked] : sites;
   const cell = (/** @type {{ until?: string, error?: string } | undefined} */ info, /** @type {() => Child} */ body) => (info?.until ? body() : h('span', { class: 'muted small' }, info?.error ?? 'Not checked yet'));
+  const rows = shown.map((p) => {
+    const s = siteData(store, p.id);
+    const host = hostOf(p.website);
+    const sslUntil = s.ssl?.until;
+    const domainUntil = s.domain?.until;
+    return {
+      p,
+      host,
+      busy: view.busy.has(p.id) || view.busy.has('all'),
+      cert: cell(s.ssl, () => [daysPill(/** @type {string} */ (sslUntil)), h('div', { class: 'muted small' }, `valid until ${sslUntil}`)]),
+      issuer: s.ssl?.issuer ?? '',
+      sslTask: sslUntil && daysUntil(sslUntil) <= 30 ? taskCell(store, p, 'ssl', `Renew the SSL certificate for ${host}`, sslUntil) : h('span', { class: 'muted small' }, sslUntil ? 'Not needed yet' : ''),
+      domain: cell(s.domain, () => [daysPill(/** @type {string} */ (domainUntil)), h('div', { class: 'muted small' }, `${s.domain?.name} · renews by ${domainUntil}`)]),
+      registrar: s.domain?.registrar ?? '',
+      domainTask: domainUntil && daysUntil(domainUntil) <= 60 ? taskCell(store, p, 'domain', `Renew the domain ${s.domain?.name}`, domainUntil) : h('span', { class: 'muted small' }, domainUntil ? 'Not needed yet' : ''),
+    };
+  });
+  const again = (/** @type {typeof rows[number]} */ r) => h('button', { type: 'button', class: 'icon-btn', disabled: r.busy, title: 'Look up again', 'aria-label': `Look up ${r.host} again`, onclick: () => check(store, r.p, ['ssl', 'domain']) }, refreshIcon(r.busy));
+  const list = () => h('div', { class: 'card mon-scroll' },
+    h('table', { class: 'mon-table tool-table' },
+      h('thead', null, h('tr', null,
+        ['Site', 'SSL certificate', 'Issuer', 'SSL task', 'Domain', 'Registrar', 'Domain task', ''].map((t) => h('th', null, t)))),
+      h('tbody', null, rows.map((r) =>
+        h('tr', null,
+          siteCell(store, r.p),
+          h('td', null, r.cert),
+          h('td', null, r.issuer),
+          h('td', null, r.sslTask),
+          h('td', null, r.domain),
+          h('td', null, r.registrar),
+          h('td', null, r.domainTask),
+          h('td', null, again(r)))))));
+  const part = (/** @type {string} */ title, /** @type {Child} */ state, /** @type {string} */ by, /** @type {Child} */ task) =>
+    h('div', { class: 'ssl-part' },
+      h('span', { class: 'muted small' }, title),
+      h('div', null, state),
+      by ? h('span', { class: 'small' }, by) : null,
+      h('div', null, task));
+  const cards = () => h('div', { class: 'site-grid' }, rows.map((r) =>
+    h('article', { class: 'card site-card' },
+      h('div', { class: 'row between' },
+        h('div', { class: 'row' },
+          projectIcon(r.p, 'project-icon large'),
+          h('div', null,
+            h('button', { type: 'button', class: 'site-name', title: 'Show this site only', onclick: () => { view.project = r.p.id; store.refresh(); } }, r.p.name),
+            h('div', null, h('a', { href: r.p.website, target: '_blank', rel: 'noopener', class: 'small' }, r.host)))),
+        again(r)),
+      h('div', { class: 'ssl-parts' },
+        part('SSL certificate', r.cert, r.issuer, r.sslTask),
+        part('Domain', r.domain, r.registrar, r.domainTask)))));
   return h('div', { class: 'stack-lg' },
+    siteBar(store, sites, picked, picked ? [] : [layoutSwitch(store, 'ssl')]),
     notice({
       tone: 'info',
       text: `Tasks are created automatically ${ssl.on ? `${ssl.days} days before an SSL certificate expires` : 'for SSL only when you ask'} and ${domain.on ? `${domain.days} days before a domain does` : 'for domains only when you ask'}. Each one is flagged “Auto” in Tasks.`,
       actions: [h('a', { href: '#/settings?section=automations', class: 'btn-small' }, 'Change the rules')],
     }),
-    h('div', { class: 'card mon-scroll' },
-      h('table', { class: 'mon-table tool-table' },
-        h('thead', null, h('tr', null,
-          ['Site', 'SSL certificate', 'Issuer', 'SSL task', 'Domain', 'Registrar', 'Domain task', ''].map((t) => h('th', null, t)))),
-        h('tbody', null, sites.map((p) => {
-          const s = siteData(store, p.id);
-          const host = hostOf(p.website);
-          const busy = view.busy.has(p.id) || view.busy.has('all');
-          return h('tr', null,
-            h('td', null, h('div', { class: 'row' }, projectIcon(p), h('div', null, h('strong', null, p.name), h('div', { class: 'muted small' }, host)))),
-            h('td', null, cell(s.ssl, () => [daysPill(/** @type {{ until: string }} */ (s.ssl).until), h('div', { class: 'muted small' }, `valid until ${/** @type {{ until: string }} */ (s.ssl).until}`)])),
-            h('td', null, s.ssl?.issuer ?? ''),
-            h('td', null, s.ssl?.until && daysUntil(s.ssl.until) <= 30 ? taskCell(store, p, 'ssl', `Renew the SSL certificate for ${host}`, s.ssl.until) : h('span', { class: 'muted small' }, s.ssl?.until ? 'Not needed yet' : '')),
-            h('td', null, cell(s.domain, () => [daysPill(/** @type {{ until: string }} */ (s.domain).until), h('div', { class: 'muted small' }, `${/** @type {SiteDomain} */ (s.domain).name} · renews by ${/** @type {SiteDomain} */ (s.domain).until}`)])),
-            h('td', null, s.domain?.registrar ?? ''),
-            h('td', null, s.domain?.until && daysUntil(s.domain.until) <= 60 ? taskCell(store, p, 'domain', `Renew the domain ${s.domain.name}`, s.domain.until) : h('span', { class: 'muted small' }, s.domain?.until ? 'Not needed yet' : '')),
-            h('td', null, h('button', { type: 'button', class: 'icon-btn', disabled: busy, title: 'Look up again', 'aria-label': `Look up ${host} again`, onclick: () => check(store, p, ['ssl', 'domain']) }, refreshIcon(busy))));
-        })))),
+    picked || layoutOf('ssl') === 'cards' ? cards() : list(),
     h('p', { class: 'muted small' }, 'The certificate date comes from the public certificate logs (Cert Spotter, then crt.sh): the newest certificate issued for the host. The domain date comes from its registry (RDAP). Only the site’s address is sent to them.'));
 }
 
@@ -513,14 +582,14 @@ function crawlTab(store, sites) {
   const busy = view.busy.has(p.id) || view.busy.has('all');
   const read = h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => check(store, p, ['crawl']) }, refreshIcon(busy), busy ? 'Reading…' : c ? 'Read again' : 'Read the files');
   if (!c?.robots) {
-    return h('div', { class: 'stack-lg' }, siteChips(store, sites, p),
+    return h('div', { class: 'stack-lg' }, siteBar(store, sites, p),
       c?.error ? notice({ text: c.error }) : null,
       h('div', { class: 'card stack' }, h('p', { class: 'muted' }, `Read the files on ${host} that crawlers, AI assistants and app stores look for.`), h('div', null, read)));
   }
   const missing = CORE.filter(([k]) => !crawlFile(c, k).found && !crawlFile(c, k).unread).map(([, name]) => name);
   const present = CORE.filter(([k]) => crawlFile(c, k).found).length;
   const extras = CRAWL_FILES.filter(([k, , , , core]) => !core && crawlFile(c, k).found).length;
-  return h('div', { class: 'stack-lg' }, siteChips(store, sites, p),
+  return h('div', { class: 'stack-lg' }, siteBar(store, sites, p),
     c.robots.blocksSearch
       ? notice({ text: `robots.txt on ${host} blocks search engines from the whole site, so it drops out of search results.`, actions: [taskCell(store, p, 'crawl', `Let search engines crawl ${host}`)] })
       : null,
@@ -560,7 +629,7 @@ function crawlTab(store, sites) {
 /** @param {Store} store @param {Project[]} sites */
 function crawlAll(store, sites) {
   const cols = CRAWL_FILES.length + 3;
-  return h('div', { class: 'stack-lg' }, siteChips(store, sites, null),
+  return h('div', { class: 'stack-lg' }, siteBar(store, sites, null),
     h('div', { class: 'card mon-scroll' },
       h('table', { class: 'mon-table tool-table crawl-table' },
         h('thead', null, h('tr', null, ['Site', ...CRAWL_FILES.map(([, name, short]) => h('span', { title: name }, short)), 'Read', ''].map((t) => h('th', null, t)))),
@@ -610,19 +679,55 @@ function shareCard(kind, p, m) {
   return h('div', { class: 'share imsg' }, image(), h('div', { class: 'share-text' }, h('strong', null, title), h('span', { class: 'muted small' }, host)));
 }
 
-// The tabs that show one site at a time pick it with a row of chips. "All" comes first and is the default:
-// an empty `view.project` means every site, shown side by side in one table.
+// The tabs that show one site at a time pick it from a searchable list, since a board with many projects made a row
+// of buttons wrap over several lines. "All sites" comes first and is the default: an empty `view.project` means every
+// site, side by side. The arrows step through the sites one at a time.
+const ALL = 'all-sites';
 const pickedSite = (/** @type {Project[]} */ sites) => sites.find((x) => x.id === view.project) ?? null;
-const siteChips = (/** @type {Store} */ store, /** @type {Project[]} */ sites, /** @type {Project | null} */ p) =>
-  h('div', { class: 'chips' }, [{ id: '', name: 'All' }, ...sites].map((x) =>
-    h('button', {
-      type: 'button',
-      class: x.id === (p?.id ?? '') ? 'chip active' : 'chip',
-      onclick: () => {
-        view.project = x.id;
-        store.refresh();
-      },
-    }, x.name)));
+/** @param {Store} store @param {Project[]} sites @param {Project | null} p @param {Child[]} [tail] */
+function siteBar(store, sites, p, tail = []) {
+  const go = (/** @type {string} */ id) => {
+    view.project = id;
+    store.refresh();
+  };
+  const at = p ? sites.indexOf(p) : -1;
+  const step = (/** @type {number} */ by) => () => go(sites[(at + by + sites.length) % sites.length].id);
+  const picker = pickChip({
+    value: p?.id ?? ALL,
+    options: [{ value: ALL, label: `All sites (${sites.length})`, plainIcon: () => icon('globe') }, ...sites.map((x) => ({ value: x.id, label: x.name, plainIcon: () => projectIcon(x) }))],
+    className: 'field-pick site-pick',
+    onPick: (v) => go(v === ALL ? '' : v),
+  });
+  picker.setAttribute('aria-label', 'Site');
+  return h('div', { class: 'row between site-bar' },
+    h('div', { class: 'row site-bar-pick' },
+      picker,
+      p && sites.length > 1
+        ? h('div', { class: 'row site-step' },
+            h('button', { type: 'button', class: 'icon-btn', title: 'Previous site', 'aria-label': 'Previous site', onclick: step(-1) }, icon('chevron-left')),
+            h('span', { class: 'muted small' }, `${at + 1} of ${sites.length}`),
+            h('button', { type: 'button', class: 'icon-btn', title: 'Next site', 'aria-label': 'Next site', onclick: step(1) }, icon('chevron-right')))
+        : null,
+      p ? h('button', { type: 'button', class: 'btn-link-inline small', onclick: () => go('') }, 'Show all') : null),
+    tail.length ? h('div', { class: 'row site-bar-tail' }, tail) : null);
+}
+
+// Cards or a list for a tab's "All" view, kept per tab.
+const layoutOf = (/** @type {string} */ tab) => view.layouts[tab] ?? LAYOUT_DEFAULT[tab] ?? 'list';
+/** @param {Store} store @param {string} tab */
+function layoutSwitch(store, tab) {
+  return h('div', { class: 'segmented site-layout', role: 'group', 'aria-label': 'View' },
+    /** @type {[string, string, IconName][]} */ ([['cards', 'Cards', 'cards'], ['list', 'List', 'list']]).map(([key, label, iconName]) =>
+      h('button', {
+        type: 'button',
+        class: layoutOf(tab) === key ? 'seg active' : 'seg',
+        'aria-pressed': String(layoutOf(tab) === key),
+        onclick: () => {
+          view.layouts[tab] = key;
+          store.refresh();
+        },
+      }, icon(iconName), label)));
+}
 
 // The site cell of an "All" table. Its name opens the site on its own.
 const siteCell = (/** @type {Store} */ store, /** @type {Project} */ p) =>
@@ -631,7 +736,7 @@ const siteCell = (/** @type {Store} */ store, /** @type {Project} */ p) =>
       h('button', { type: 'button', class: 'btn-link-inline', onclick: () => { view.project = p.id; store.refresh(); } }, h('strong', null, p.name)),
       h('div', { class: 'muted small' }, hostOf(p.website)))));
 
-// Reads every page from the metadata "All" view, which has no "Check all now" in its header.
+// Reads every page from the metadata "All" view, which has no "Check all now" in its header; it sits in the site bar.
 const readAll = (/** @type {Store} */ store, /** @type {string} */ part, /** @type {string} */ label) =>
   h('button', {
     type: 'button',
@@ -688,26 +793,52 @@ const previewTask = (/** @type {Store} */ store, /** @type {Project} */ p, /** @
 function metaAll(store, sites) {
   /** @type {(keyof SiteMeta)[]} */
   const TAGS = ['title', 'description', 'ogTitle', 'ogDescription', 'ogImage', 'ogUrl', 'twitterCard', 'twitterImage'];
-  return h('div', { class: 'stack-lg' }, siteChips(store, sites, null),
-    h('div', { class: 'card mon-scroll' },
-      h('table', { class: 'mon-table tool-table' },
-        h('thead', null, h('tr', null, ['Site', 'Share tags', 'Title', 'og:image', 'Read', ''].map((t) => h('th', null, t)))),
-        h('tbody', null, sites.map((p) => {
-          const m = siteData(store, p.id).meta;
-          const busy = view.busy.has(p.id) || view.busy.has('all');
-          const again = h('td', null, againButton(store, p, 'meta', busy));
-          if (!m || (m.error && !m.title && !m.ogTitle)) {
-            return h('tr', null, siteCell(store, p), h('td', { colspan: 4 }, h('span', { class: 'muted small' }, busy ? 'Reading…' : m?.error ?? 'Not read yet')), again);
-          }
-          const present = TAGS.filter((k) => m[k]).length;
-          return h('tr', null, siteCell(store, p),
-            h('td', null, pillOf(`${present} of ${TAGS.length}`, present === TAGS.length ? 'done' : present >= TAGS.length / 2 ? 'medium' : 'high')),
+  const rows = sites.map((p) => {
+    const m = siteData(store, p.id).meta;
+    const busy = view.busy.has(p.id) || view.busy.has('all');
+    const read = Boolean(m && !(m.error && !m.title && !m.ogTitle));
+    const present = m && read ? TAGS.filter((k) => m[k]).length : 0;
+    return {
+      p,
+      m: read ? /** @type {SiteMeta} */ (m) : null,
+      busy,
+      why: busy ? 'Reading…' : m?.error ?? 'Not read yet',
+      tags: pillOf(`${present} of ${TAGS.length} tags`, present === TAGS.length ? 'done' : present >= TAGS.length / 2 ? 'medium' : 'high'),
+      again: againButton(store, p, 'meta', busy),
+    };
+  });
+  const open = (/** @type {Project} */ p) => () => {
+    view.project = p.id;
+    store.refresh();
+  };
+  const list = () => h('div', { class: 'card mon-scroll' },
+    h('table', { class: 'mon-table tool-table' },
+      h('thead', null, h('tr', null, ['Site', 'Share tags', 'Title', 'og:image', 'Read', ''].map((t) => h('th', null, t)))),
+      h('tbody', null, rows.map(({ p, m, why, tags, again }) => (!m
+        ? h('tr', null, siteCell(store, p), h('td', { colspan: 4 }, h('span', { class: 'muted small' }, why)), h('td', null, again))
+        : h('tr', null, siteCell(store, p),
+            h('td', null, tags),
             h('td', { class: 'cell-clip' }, m.ogTitle || m.title || h('span', { class: 'muted small' }, 'Missing')),
             h('td', null, tick(Boolean(m.ogImage), m.ogImage ? 'og:image found' : 'og:image missing', metaTask(store, p, 'og:image'))),
             h('td', { class: 'muted small' }, timeOf(m.at)),
-            again);
-        })))),
-    h('div', null, readAll(store, 'meta', 'Read every page')));
+            h('td', null, again)))))));
+  // Each card is the link as most networks show it: the og:image above the title and description.
+  const cards = () => h('div', { class: 'site-grid' }, rows.map(({ p, m, why, tags, again }) =>
+    h('article', { class: 'card site-card meta-card' },
+      h('button', { type: 'button', class: 'meta-card-img', title: 'Show the tags and previews', 'aria-label': `Show the share tags of ${p.name}`, onclick: open(p) },
+        m?.ogImage ? h('img', { src: m.ogImage, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' }) : h('span', { class: 'muted small' }, icon('image'), m ? 'No og:image' : why)),
+      h('div', { class: 'row between' },
+        h('div', { class: 'row' },
+          projectIcon(p),
+          h('button', { type: 'button', class: 'site-name', title: 'Show the tags and previews', onclick: open(p) }, p.name)),
+        h('div', { class: 'row' }, m ? tags : null, again)),
+      m ? h('div', { class: 'meta-card-text' },
+        h('strong', null, m.ogTitle || m.title || h('span', { class: 'muted' }, 'No title')),
+        h('span', { class: 'muted small' }, m.ogDescription || m.description || 'No description')) : null,
+      h('span', { class: 'muted small' }, m ? `Read ${timeOf(m.at)}` : ''))));
+  return h('div', { class: 'stack-lg' },
+    siteBar(store, sites, null, [layoutSwitch(store, 'meta'), readAll(store, 'meta', 'Read every page')]),
+    layoutOf('meta') === 'cards' ? cards() : list());
 }
 
 /** @param {Store} store @param {Project[]} sites */
@@ -716,7 +847,7 @@ function metaTab(store, sites) {
   if (!p) return metaAll(store, sites);
   const m = siteData(store, p.id).meta;
   const busy = view.busy.has(p.id);
-  const chips = siteChips(store, sites, p);
+  const chips = siteBar(store, sites, p);
   const read = h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => check(store, p, ['meta']) }, refreshIcon(busy), busy ? 'Reading…' : m ? 'Read again' : 'Read the page');
   if (!m || (m.error && !m.title && !m.ogTitle)) {
     return h('div', { class: 'stack-lg' }, chips,
@@ -1007,10 +1138,11 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
   collection: COLLECTION,
   defaults: TOOLS_DEFAULTS,
   render: draw,
-  serialize: () => ({ tab: view.tab === 'health' ? '' : view.tab, project: ['meta', 'crawl', 'health'].includes(view.tab) ? view.project : '', contract: view.tab === 'contracts' ? contractsSerialize() : '', request: view.tab === 'requests' ? requestsSerialize() : '' }),
+  serialize: () => ({ tab: view.tab === 'health' ? '' : view.tab, project: ['meta', 'crawl', 'health', 'ssl'].includes(view.tab) ? view.project : '', view: view.layouts[view.tab] ?? '', contract: view.tab === 'contracts' ? contractsSerialize() : '', request: view.tab === 'requests' ? requestsSerialize() : '' }),
   restore: (/** @type {Record<string, string>} */ p = {}) => {
     view.tab = TABS.some(([k]) => k === p.tab) ? p.tab : 'health';
     view.project = p.project || '';
+    if (p.view === 'cards' || p.view === 'list') view.layouts[view.tab] = p.view;
     contractsRestore(p.contract);
     requestsRestore(p.request);
   },

@@ -1848,6 +1848,26 @@ label.check { cursor: pointer; }
 .up-bars .slow { background: var(--warn); }
 .up-bars .na { max-width: none; background: var(--surface-2); }
 .tool-table td { vertical-align: middle; }
+.site-bar { flex-wrap: wrap; gap: 10px; }
+.site-bar-pick, .site-bar-tail { flex-wrap: wrap; gap: 8px; min-width: 0; }
+.chip-pick.site-pick { min-width: 220px; max-width: 100%; justify-content: space-between; }
+.site-step { gap: 4px; }
+.site-layout { margin: 0; flex: none; }
+.site-layout .seg { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; white-space: nowrap; }
+.up-cell { min-width: 140px; }
+.up-cell .up-bars { height: 18px; }
+.ssl-parts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap); }
+.ssl-part { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; min-width: 0; }
+.meta-card { gap: 10px; }
+.meta-card-img { display: grid; place-items: center; aspect-ratio: 1.91 / 1; width: 100%; padding: 0; min-height: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.meta-card-img img { width: 100%; height: 100%; object-fit: cover; }
+.meta-card-img > span { display: inline-flex; align-items: center; gap: 6px; }
+.meta-card-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.meta-card-text > * { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+@media (max-width: 560px) {
+  .ssl-parts { grid-template-columns: 1fr; }
+  .site-bar-pick, .site-pick { width: 100%; }
+}
 .tool-table tr:has(+ .dns-raw) td { border-bottom: 0; padding-bottom: 0; }
 .dns-raw td { padding-top: 2px; }
 .crawl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--gap); align-items: start; }
@@ -3001,6 +3021,25 @@ button.sum-line:hover { background: var(--surface-2); }
 .req-meta select { width: auto; }
 .req-line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; }
 .req-line .req-method { width: auto; font-weight: 600; color: var(--m, var(--text)); }
+.chip-pick.req-method-pick { min-width: 7.5rem; justify-content: flex-start; }
+.chip-pick.req-method-pick .pill { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }
+.chip-pick.req-project-pick { min-height: 36px; font-size: 0.9rem; max-width: 220px; }
+.req-unsaved { color: var(--warn); white-space: nowrap; }
+.req-unsaved::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: middle; }
+.req-body-types { margin: 0; align-self: flex-start; max-width: 100%; overflow-x: auto; }
+.req-body-types .seg { flex: none; padding: 4px 12px; white-space: nowrap; }
+.req-gql { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 10px; }
+.req-gql label { gap: 4px; }
+.req-schema { gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
+.req-schema-search { max-width: 240px; }
+.req-fields { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow: auto; }
+.req-field { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 4px 8px; border: none; background: none; border-radius: 6px; text-align: left; font-weight: 400; }
+.req-field:hover { background: var(--surface-2); }
+.req-field code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8rem; }
+.req-field-type { flex: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.req-op { flex: none; width: 1.4rem; text-align: center; border-radius: 4px; font: 600 0.7rem ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--info); background: color-mix(in srgb, var(--info) 14%, transparent); }
+.req-op.mutation { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.req-find { margin: 0; }
 .req-line button { display: inline-flex; align-items: center; gap: 6px; }
 .req-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .req-body { font-size: 13px; min-height: 160px; }
@@ -3024,6 +3063,7 @@ button.sum-line:hover { background: var(--surface-2); }
   .req-pair { grid-template-columns: auto minmax(0, 1fr) auto; }
   .req-pair input:nth-of-type(3) { grid-column: 2; }
   .req-headers { grid-template-columns: 1fr; }
+  .req-gql { grid-template-columns: 1fr; }
   .req-headers dd { margin-bottom: 6px; }
 }
 

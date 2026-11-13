@@ -237,9 +237,11 @@ export interface ApiRequest {
   url: string;
   params: RequestPair[];
   headers: RequestPair[];
-  // 'none' | 'json' | 'text' | 'form'
+  // 'none' | 'json' | 'text' | 'form' | 'graphql'. For 'graphql', `body` is the query.
   bodyType: string;
   body: string;
+  // A GraphQL request's variables, as JSON text. Missing in requests saved before GraphQL.
+  variables?: string;
   form: RequestPair[];
   auth: RequestAuth;
 }
