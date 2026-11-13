@@ -612,7 +612,7 @@ export function gmailCard(store) {
 
 // --- Data folder ---
 
-const DATA_FILES = ['projects', 'todos', 'recipes', 'finance', 'tools', 'inbox', 'calendar', 'github', 'webstats', 'fx', 'notifications', 'usage', 'settings', 'runners'];
+const DATA_FILES = ['projects', 'todos', 'recipes', 'finance', 'tools', 'inbox', 'calendar', 'github', 'webstats', 'socials', 'fx', 'notifications', 'usage', 'settings', 'runners'];
 
 /** @param {Store} store */
 export function dataCard(store) {

@@ -126,6 +126,7 @@ Nothing runs on a server. Automatic work runs either in an open board tab or in 
 | DeFi → Wallets | each chain's node, as above, from the runners every 5 minutes | your wallet addresses and the token addresses checked |
 | DeFi → Lending / Borrowing | each chain's node, as above (Aave v3's contracts on it), from the runners every 5 minutes | your wallet addresses |
 | Slack | `slack.com` (each workspace's `<name>.slack.com/api`), from the runners, which add the session cookie | your session token and `d` cookie with each call, and what you do: listing conversations and people, reading unread counts, messages and threads, posting, editing, deleting, reacting and marking read; images shared in messages are read with the same session |
+| X and LinkedIn follower counts | each account's public profile page (`x.com/<name>`, `www.linkedin.com/in/<name>`), from the runners; a LinkedIn company page through `www.linkedin.com/voyager/api` | nothing for a public profile but the request itself; for a company page, the `li_at` and `JSESSIONID` cookies saved in Settings → LinkedIn |
 | Tools → Requests | the URL you type, from the runners, or the browser when they are off | exactly the request you build: its method, URL, headers, body and auth |
 | Blockchains node test | each of the chain's nodes | a request for its chain ID and latest block |
 | Smart contracts | the chain's node | the contract address and each call's inputs; for Monitoring, a search of the contract's recent event logs |
