@@ -97,7 +97,7 @@ const hoursLabel = (/** @type {number | null} */ hours) => {
   return `${(hours / 24).toFixed(1)} days`;
 };
 
-/** @param {string} label @param {Child} value @param {Child} [hint] */
+/** @param {Child} label @param {Child} value @param {Child} [hint] */
 export function stat(label, value, hint) {
   return h('div', { class: 'card stat' },
     h('span', { class: 'muted small' }, label),

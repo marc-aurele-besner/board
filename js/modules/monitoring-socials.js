@@ -6,10 +6,11 @@ import { lineChart } from '../chart.js';
 import { settingsHref } from '../integrations.js';
 import { SOCIALS, NETWORKS, networkIcon, dayKey, profileUrl, handleLabel } from '../socials.js';
 import { stat } from './monitoring.js';
+import { projectLabel } from './monitoring-ai.js';
 import { sortTable } from './monitoring-web.js';
 import { readNow, isReading } from './settings-socials.js';
 import { postMarks, postsCard } from './monitoring-linkedin-posts.js';
-/** @import { Store, SocialAccount } from '../../types/data' */
+/** @import { Store, SocialAccount, Project } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 
 const DAY = 86400000;
@@ -23,7 +24,7 @@ const signed = (/** @type {number} */ n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}
 const percent = (/** @type {number | null} */ p) => (p === null ? '' : `${p > 0 ? '+' : p < 0 ? '−' : ''}${Math.abs(p * 100).toFixed(Math.abs(p) < 0.1 ? 1 : 0)}%`);
 
 /** @typedef {{ now: number | null, change: number | null, pct: number | null, values: (number | null)[] }} Series */
-/** @typedef {Series & { account: SocialAccount, project: string, stars: Series | null }} AccountRow */
+/** @typedef {Series & { account: SocialAccount, project: string, projectOf: Project | undefined, stars: Series | null }} AccountRow */
 
 // The days from `start` to `end` (ms), both included, as history keys.
 /** @param {number} start @param {number} end */
@@ -54,6 +55,10 @@ function avatar(a) {
     : h('span', { class: 'social-avatar' }, icon(networkIcon(a.network)));
 }
 
+// A network named with its icon.
+/** @param {string} network @param {string} [text] */
+export const networkLabel = (network, text = NETWORKS[network] ?? network) => h('span', { class: 'social-net' }, icon(networkIcon(network)), text);
+
 /** @param {number | null} change @param {number | null} pct */
 const changePill = (change, pct) => (change === null
   ? h('span', { class: 'muted small' }, 'No change yet')
@@ -75,7 +80,7 @@ function accountCard(store, row, labels, days) {
         h('span', { class: 'muted small' },
           icon(networkIcon(a.network)), ' ',
           h('a', { href: profileUrl(a), target: '_blank', rel: 'noopener noreferrer' }, handleLabel(a)),
-          row.project ? ` · ${row.project}` : '')),
+          row.projectOf ? [' · ', projectLabel(row.projectOf)] : '')),
       h('button', { type: 'button', class: 'icon-btn social-read', title: 'Read the counts now', 'aria-label': `Read ${handleLabel(a)} now`, disabled: busy, onclick: () => readNow(store, [a.id]) }, refreshIcon(busy))),
     h('div', { class: 'social-figures' },
       h('div', { class: 'social-now' },
@@ -107,10 +112,7 @@ export function socialsTab(store, w) {
       tone: 'info',
       text: 'No account followed yet. Add your X, LinkedIn, GitHub and Instagram accounts in Settings, and their followers show here over time.',
       actions: [
-        h('a', { href: settingsHref('x'), class: 'btn-small primary-link' }, 'Add X accounts'),
-        h('a', { href: settingsHref('linkedin'), class: 'btn-small primary-link' }, 'Add LinkedIn accounts'),
-        h('a', { href: settingsHref('githubAccounts'), class: 'btn-small primary-link' }, 'Add GitHub accounts'),
-        h('a', { href: settingsHref('instagram'), class: 'btn-small primary-link' }, 'Add Instagram accounts'),
+        ...Object.keys(NETWORKS).map((n) => h('a', { href: settingsHref(SETTINGS_KEY[n]), class: 'btn-small primary-link' }, networkLabel(n, `Add ${NETWORKS[n]} accounts`))),
       ],
     });
   }
@@ -119,24 +121,28 @@ export function socialsTab(store, w) {
   const last = dayKey(end);
   const days = daysBetween(Math.min(w.start, end - (MIN_DAYS - 1) * DAY), end);
   const labels = days.map((k) => `${Number(k.slice(5, 7))}/${Number(k.slice(8))}`);
-  const projects = new Map(store.get('projects').projects.map((p) => [p.id, p.name]));
+  const projects = new Map(store.get('projects').projects.map((p) => [p.id, p]));
 
   /** @type {AccountRow[]} */
   /** @param {Record<string, number>} hist @returns {Series} */
   const series = (hist) => ({ ...changeOver(hist, first, last), values: days.map((k) => hist[k] ?? null) });
-  const rows = accounts.map((a) => ({
-    account: a,
-    ...series(history?.[a.id] ?? {}),
-    stars: a.network === 'github' ? series(stars?.[a.id] ?? {}) : null,
-    project: (a.projectId && projects.get(a.projectId)) || '',
-  }));
+  const rows = accounts.map((a) => {
+    const projectOf = a.projectId ? projects.get(a.projectId) : undefined;
+    return {
+      account: a,
+      ...series(history?.[a.id] ?? {}),
+      stars: a.network === 'github' ? series(stars?.[a.id] ?? {}) : null,
+      project: projectOf?.name ?? '',
+      projectOf,
+    };
+  });
 
   const read = rows.filter((r) => r.now !== null);
   const total = read.reduce((s, r) => s + /** @type {number} */ (r.now), 0);
   const changed = rows.filter((r) => r.change !== null);
   const gained = changed.reduce((s, r) => s + /** @type {number} */ (r.change), 0);
   const startTotal = changed.reduce((s, r) => s + /** @type {number} */ (r.now) - /** @type {number} */ (r.change), 0);
-  const byNetwork = Object.keys(NETWORKS).map((n) => [NETWORKS[n], accounts.filter((a) => a.network === n).length]).filter(([, c]) => c);
+  const byNetwork = Object.keys(NETWORKS).map((n) => ({ network: n, n: accounts.filter((a) => a.network === n).length })).filter((x) => x.n);
   const failed = accounts.filter((a) => a.error);
   const starRows = rows.flatMap((r) => (r.stars ? [r.stars] : []));
   const starsNow = starRows.reduce((s, r) => s + (r.now ?? 0), 0);
@@ -160,17 +166,17 @@ export function socialsTab(store, w) {
       stat('Followers', count.format(total), `across ${read.length} of ${accounts.length} account${accounts.length === 1 ? '' : 's'}`),
       stat('Growth', changed.length ? signed(gained) : '—', changed.length ? `${percent(startTotal ? gained / startTotal : null) || 'new'} over the period` : 'Needs counts from two days'),
       starRows.length
-        ? stat('GitHub stars', count.format(starsNow), starsChanged.length ? `${signed(starsGained)}${starsStart ? ` (${percent(starsGained / starsStart)})` : ''} over the period` : 'Needs counts from two days')
+        ? stat(networkLabel('github', 'GitHub stars'), count.format(starsNow), starsChanged.length ? `${signed(starsGained)}${starsStart ? ` (${percent(starsGained / starsStart)})` : ''} over the period` : 'Needs counts from two days')
         : null,
-      stat('Accounts', String(accounts.length), byNetwork.map(([n, c]) => `${c} ${n}`).join(' · '))),
+      stat('Accounts', String(accounts.length), h('span', { class: 'social-nets' }, byNetwork.map((x) => networkLabel(x.network, `${x.n} ${NETWORKS[x.network]}`))))),
     h('div', { class: 'social-grid' }, rows.map((r) => accountCard(store, r, labels, days))),
-    postsCard(store, w),
+    postsCard(store, w, projects),
     h('section', { class: 'card stack' },
       h('h3', null, 'By account'),
       sortTable('socials', [
-        { label: 'Account', value: (r) => r.account.name || handleLabel(r.account) },
-        { label: 'Network', value: (r) => NETWORKS[r.account.network] ?? r.account.network },
-        { label: 'Project', value: (r) => r.project || '—' },
+        { label: 'Account', value: (r) => r.account.name || handleLabel(r.account), format: (v, r) => h('span', { class: 'social-net' }, avatar(r.account), v) },
+        { label: 'Network', value: (r) => NETWORKS[r.account.network] ?? r.account.network, format: (_, r) => networkLabel(r.account.network) },
+        { label: 'Project', value: (r) => r.project || '—', format: (v, r) => (r.projectOf ? projectLabel(r.projectOf) : v) },
         { label: 'Followers', num: true, value: (r) => r.now ?? -1, format: (v) => (v < 0 ? '—' : count.format(v)) },
         { label: 'Change', num: true, value: (r) => r.change ?? 0, format: (v, r) => (r.change === null ? '—' : signed(v)) },
         { label: 'Change %', num: true, value: (r) => r.pct ?? 0, format: (v, r) => (r.pct === null ? '—' : percent(v)) },

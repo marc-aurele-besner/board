@@ -3731,3 +3731,15 @@ button.cal-agenda-name:hover { color: var(--accent); }
 .social-bar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .social-head .social-name { flex: 1; }
 .social-read { flex: none; }
+/* A network or an account named with its icon, in stats, tables and buttons. */
+.social-net { display: inline-flex; align-items: center; gap: 6px; min-width: 0; vertical-align: middle; }
+.social-net > svg { width: 14px; height: 14px; flex: none; }
+h3.social-net { display: flex; }
+h3.social-net > svg { width: 16px; height: 16px; }
+.social-net .social-pic, .social-net .social-avatar { width: 20px; height: 20px; border-radius: 50%; }
+.social-net .social-avatar svg { width: 12px; height: 12px; }
+.social-nets { display: inline-flex; flex-wrap: wrap; gap: 2px 10px; }
+.social-net-icon { margin-right: 6px; color: var(--muted); }
+.social-net-icon svg { width: 14px; height: 14px; vertical-align: -2px; }
+.social-name .ai-project-name { gap: 4px; vertical-align: -2px; }
+.social-name .ai-project-name .project-icon { width: 12px; height: 12px; }

@@ -7,7 +7,8 @@ import { LINKEDIN, latestMetrics } from '../linkedin-core.js';
 import { METRIC_STEPS, stepOf } from '../linkedin-reads.js';
 import { dayKey, isOrganization } from '../socials.js';
 import { sortTable } from './monitoring-web.js';
-/** @import { Store, SocialAccount, LinkedinPost, LinkedinPostMetrics } from '../../types/data' */
+import { projectLabel } from './monitoring-ai.js';
+/** @import { Store, SocialAccount, LinkedinPost, LinkedinPostMetrics, Project } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 /** @import { Child } from '../../types/ui' */
 
@@ -92,13 +93,13 @@ const stepCell = (m) => (m
   : h('span', { class: 'muted' }, '—'));
 
 // The Posts card: the posts published in the period with their last read results and the reactions at each step.
-/** @param {Store} store @param {PeriodWindow} w */
-export function postsCard(store, w) {
+/** @param {Store} store @param {PeriodWindow} w @param {Map<string, Project>} projects */
+export function postsCard(store, w, projects) {
   const all = posted(store);
   if (!all.length) return null;
   const rows = all.filter((p) => Number(p.postedAt) >= w.start && Number(p.postedAt) < w.end)
     .sort((a, b) => Number(b.postedAt) - Number(a.postedAt))
-    .map((p) => ({ post: p, last: latestMetrics(p) }));
+    .map((p) => ({ post: p, last: latestMetrics(p), project: p.projectId ? projects.get(p.projectId) : undefined }));
   /** @typedef {typeof rows[number]} Row */
   /** @param {(m: LinkedinPostMetrics) => number | undefined} pick */
   const num = (pick) => ({
@@ -107,7 +108,7 @@ export function postsCard(store, w) {
     format: (/** @type {number} */ v) => (v < 0 ? '—' : count.format(v)),
   });
   return h('section', { class: 'card stack' },
-    h('h3', null, 'LinkedIn posts'),
+    h('h3', { class: 'social-net' }, icon('linkedin'), 'LinkedIn posts'),
     h('p', { class: 'muted small' }, 'Results are read through the saved session about 1 hour, 24 hours and 7 days after posting. The 1h, 24h and 7d columns are reactions at each read.'),
     rows.length
       ? sortTable('linkedin-posts', [
@@ -116,8 +117,12 @@ export function postsCard(store, w) {
           label: 'Post',
           clip: true,
           value: (r) => firstLine(r.post),
-          format: (v, r) => (r.post.url ? h('a', { href: r.post.url, target: '_blank', rel: 'noopener noreferrer', title: 'Open on LinkedIn' }, v) : v),
+          format: (v, r) => [
+            h('span', { class: 'social-net-icon' }, icon('linkedin')),
+            r.post.url ? h('a', { href: r.post.url, target: '_blank', rel: 'noopener noreferrer', title: 'Open on LinkedIn' }, v) : v,
+          ],
         },
+        { label: 'Project', value: (r) => r.project?.name ?? '—', format: (v, r) => (r.project ? projectLabel(r.project) : v) },
         { label: 'Reactions', ...num((m) => m.reactions) },
         { label: 'Comments', ...num((m) => m.comments) },
         { label: 'Reposts', ...num((m) => m.reposts) },
