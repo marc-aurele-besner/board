@@ -274,8 +274,10 @@ export function pickChip({ value = null, options, placeholder = 'Set', nullable 
     /** @param {MouseEvent} e */
     onclick: (e) => {
       e.stopPropagation();
-      if (openPicker && openPicker.anchor === chip) return closePicker();
-      showPicker(chip, {
+      // The button on screen: after a patched redraw it runs the handler of a fresh, never shown `chip`.
+      const anchor = /** @type {HTMLElement} */ (e.currentTarget);
+      if (openPicker && openPicker.anchor === anchor) return closePicker();
+      showPicker(anchor, {
         options,
         value,
         nullable,
@@ -304,8 +306,9 @@ export function pickButton({ label, options, title, className = 'btn-small', onP
     /** @param {MouseEvent} e */
     onclick: (e) => {
       e.stopPropagation();
-      if (openPicker && openPicker.anchor === button) return closePicker();
-      showPicker(button, { options, value: undefined, onPick });
+      const anchor = /** @type {HTMLElement} */ (e.currentTarget);
+      if (openPicker && openPicker.anchor === anchor) return closePicker();
+      showPicker(anchor, { options, value: undefined, onPick });
     },
   }, label, icon('chevron-down'));
   return button;
@@ -322,12 +325,13 @@ export function infoButton({ title, text }) {
     /** @param {MouseEvent} e */
     onclick: (e) => {
       e.stopPropagation();
-      if (openPicker && openPicker.anchor === button) return closePicker();
+      const anchor = /** @type {HTMLElement} */ (e.currentTarget);
+      if (openPicker && openPicker.anchor === anchor) return closePicker();
       closePicker();
       const el = h('div', { class: 'popover info-pop', role: 'dialog', 'aria-label': title }, h('strong', null, title), h('p', null, text));
       document.body.append(el);
-      openPicker = { el, anchor: button, key: null };
-      positionPopover(el, button);
+      openPicker = { el, anchor, key: null };
+      positionPopover(el, anchor);
       document.addEventListener('pointerdown', onOutside, true);
       document.addEventListener('keydown', onKey, true);
       // A shortcut can change the page with no click; an open popover would hold its re-renders.
@@ -372,7 +376,7 @@ export function pickMulti({ key, values = [], options, anyLabel = 'Any', ariaLab
     onclick: (e) => {
       e.stopPropagation();
       if (openPicker && openPicker.key === key) return closePicker();
-      showPicker(button, { options, value: values, multi: true, key, onPick: onChange });
+      showPicker(/** @type {HTMLElement} */ (e.currentTarget), { options, value: values, multi: true, key, onPick: onChange });
     },
   }, h('span', { class: 'pick-multi-text' }, text), icon('chevron-down'));
   return button;
@@ -398,7 +402,7 @@ export function pickTree({ key, label, title, ariaLabel, getOptions, onToggle })
     onclick: (e) => {
       e.stopPropagation();
       if (openPicker && openPicker.key === key) return closePicker();
-      showTree(button, { key, getOptions, onToggle });
+      showTree(/** @type {HTMLElement} */ (e.currentTarget), { key, getOptions, onToggle });
     },
   }, h('span', { class: 'pick-multi-text' }, label), icon('chevron-down'));
   return button;

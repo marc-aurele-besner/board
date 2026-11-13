@@ -217,8 +217,10 @@ export function menuButton({ title, className = 'icon-btn', build }) {
     /** @param {MouseEvent} e */
     onclick: (e) => {
       e.stopPropagation();
-      if (open?.anchor === button) return closeMenu();
-      openMenu(build(), button);
+      // The button on screen: after a patched redraw it runs the handler of a fresh, never shown `button`.
+      const anchor = /** @type {HTMLElement} */ (e.currentTarget);
+      if (open?.anchor === anchor) return closeMenu();
+      openMenu(build(), anchor);
     },
   }, icon('more'));
   return button;
