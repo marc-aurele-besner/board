@@ -21,7 +21,7 @@ A personal command center that runs locally. It is plain HTML, CSS and JavaScrip
 
 ```
 index.html            entry point; inline script applies the saved theme before paint
-oauth.html            where Google's sign-in comes back; hands the code to the board's tab
+oauth.html            where Google's and Notion's sign-ins come back; hands the code to the board's tab
 css/style.css         design tokens (light and dark) and all styles
 js/app.js             shell: folder connection, router, top nav, theme toggle
 js/storage.js         File System Access API wrapper; remembers the folder in IndexedDB
@@ -43,6 +43,8 @@ js/folder-picker.js   the dialog that finds a folder on this machine through the
 js/vt.js              the terminal emulator Dev draws command output with (cursor moves, colours, alternate screen)
 js/highlight.js       syntax colours for the Dev file reader, per language, with no dependency
 js/sitecheck.js       the lookups behind Tools (health, domain, certificate, share tags)
+js/notion.js          Notion databases into tasks: integration secret or OAuth token at api.notion.com, or the browser session
+js/notion-session.js  Notion through the token_v2 cookie and notion.so's own web API, answers in the public API's shape (no DOM)
 js/telegram.js        tasks from Telegram messages, read by the runners; setup's Find my chat
 js/ai.js              the one OpenRouter call; logs each call's input, output and details to usage.json
 js/prompts.js         the system prompt of every AI feature; Settings → Prompts overrides them
