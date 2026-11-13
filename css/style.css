@@ -2143,8 +2143,14 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 /* Projects: a label's colour beside its name */
 
 /* Cron: flow list beside an editor; the flow is a chain of nodes joined by links */
-.cron-layout { display: grid; grid-template-columns: minmax(330px, 420px) minmax(0, 1fr); gap: var(--gap); align-items: start; }
+.cron-layout { display: grid; grid-template-columns: minmax(330px, 420px) minmax(0, 1fr); gap: 0; align-items: start; }
 .cron-list { display: flex; flex-direction: column; gap: 10px; }
+/* The flow list runs under the tabs to the bottom of the window and meets the editor with one border: the cards on
+   both sides lose their corners and outer edges. */
+.cron:has(> .cron-layout) { gap: 0; }
+.cron-layout > .cron-list { position: sticky; top: 54px; height: calc(100dvh - 54px); overflow-y: auto; border-radius: 0; border-top: none; border-left: none; }
+.cron-layout > .card:not(.cron-list), .cron-editor > .card { border-radius: 0; border-top: none; border-left: none; border-right: none; }
+.cron-layout > .cron-editor { gap: 0; }
 .cron-flows { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
 .cron-flow-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .cron-flow-toggle { flex: none; margin-right: 6px; }
@@ -2357,7 +2363,10 @@ button.json-key:hover { background: color-mix(in srgb, var(--accent) 15%, transp
 .json-string { color: var(--syn-string); }
 .json-number { color: var(--syn-number); }
 .json-boolean, .json-null { color: var(--syn-function); }
-@media (max-width: 900px) { .cron-layout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 900px) {
+  .cron-layout { grid-template-columns: minmax(0, 1fr); }
+  .cron-layout > .cron-list { position: static; height: auto; border-right: none; }
+}
 @media (max-width: 720px) {
   .flow-canvas { flex-direction: column; align-items: stretch; padding: 12px; }
   .flow-node { width: 100%; }

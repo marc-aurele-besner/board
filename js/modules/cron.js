@@ -21,6 +21,7 @@ import { previewChips } from '../previews.js';
 import { attachSession, sessionStatus, listSkills } from '../terminal.js';
 import { createTerminal } from '../vt.js';
 import { hasProfileSources } from '../profile.js';
+import { resizableSide } from '../side-resize.js';
 /** @import { Store, CronFlow, CronStep, CronSource, CronFormatField, CronSchedule, CronRun, CronRunStep, CronRunTerminal, CronPr, Project, Task, IconName } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @import { Vars } from '../cron.js' */
@@ -2583,12 +2584,12 @@ function flowsTab(store) {
   if (flow) view.flow = flow.id;
   // A step the address names that this flow no longer has falls back to the schedule.
   if (flow && view.node !== 'trigger' && !flow.steps.some((s) => s.id === view.node)) view.node = 'trigger';
-  return h('div', { class: 'cron-layout' },
+  return resizableSide(h('div', { class: 'cron-layout' },
     flowList(store, all, flows),
     flow ? editor(store, flow) : h('div', { class: 'card stack' }, empty('Create a flow to schedule AI work, such as a morning plan from your open tasks.'),
       h('div', { class: 'row' },
         h('button', { type: 'button', class: 'primary', onclick: () => openNewFlow(store) }, icon('plus'), 'New flow'),
-        h('button', { type: 'button', class: 'btn-link', onclick: () => openTemplates(store) }, 'Start from a template'))));
+        h('button', { type: 'button', class: 'btn-link', onclick: () => openTemplates(store) }, 'Start from a template')))), 'cron', { def: 360, min: 260, max: 640 });
 }
 
 /**
