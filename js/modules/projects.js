@@ -21,6 +21,7 @@ import { connectedCalendarsOf } from '../gcal.js';
 import { resendSettings } from '../resend.js';
 import { DEFAULT_DEV_COMMAND, devPresets, runnerOf } from './dev.js';
 import { pickFolder } from '../folder-picker.js';
+import { menuButton } from '../menu.js';
 import { openDialog } from '../modal.js';
 import { buildProfile, profileOf, hasProfileSources, profilesFor } from '../profile.js';
 import { fmtCost } from '../dev-usage.js';
@@ -46,8 +47,8 @@ export const labelColor = (label) => label?.color || PALETTE[0];
 // category filter: 'all' | 'none' | <category id>.
 /** @type {Store | null} */
 let liveStore = null;
-/** @type {{ selectedId: string | null, mode: string, error: string, draft: null, query: string, category: string, notice: string }} */
-const view = { selectedId: null, mode: 'view', error: '', draft: null, query: '', category: 'all', notice: '' };
+/** @type {{ selectedId: string | null, mode: string, error: string, draft: null, query: string, category: string, notice: string, adding: boolean }} */
+const view = { selectedId: null, mode: 'view', error: '', draft: null, query: '', category: 'all', notice: '', adding: false };
 
 /** @param {string} text */
 const splitLines = (text) => text.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -1365,55 +1366,87 @@ function draw(root, store) {
   root.replaceChildren(
     resizableSide(h('div', { class: 'split' },
       h('section', { class: 'card side-pane' },
-        h('input', {
-          type: 'search',
-          placeholder: 'Search projects',
-          'aria-label': 'Search projects',
-          value: view.query,
-          oninput: (/** @type {Event & { target: HTMLInputElement }} */ e) => {
-            view.query = e.target.value;
-            fillList();
-          },
-        }),
-        h('div', { class: 'side-tools' },
-          view.notice ? notice({ text: view.notice }) : null,
-          h('div', { class: 'chips' },
-            chip('all', 'All'),
-            chip('none', 'None'),
-            categories.map((c) => chip(c.id, c.name))),
-          h('form', {
-            class: 'quick-project',
-            onsubmit: (/** @type {SubmitEvent & { currentTarget: HTMLFormElement }} */ e) => {
-              e.preventDefault();
-              const input = /** @type {HTMLInputElement} */ (e.currentTarget.querySelector('input[name="name"]'));
-              const name = input.value.trim();
-              if (name) quickCreate(store, name);
+        // Search, New project and the rarer tools share one row, so the list starts near the top.
+        h('div', { class: 'side-head' },
+          h('input', {
+            type: 'search',
+            placeholder: 'Search projects',
+            'aria-label': 'Search projects',
+            value: view.query,
+            oninput: (/** @type {Event & { target: HTMLInputElement }} */ e) => {
+              view.query = e.target.value;
+              fillList();
             },
-          },
-            h('input', { name: 'name', placeholder: 'New project…', 'aria-label': 'New project name', autocomplete: 'off' }),
-            h('button', { class: 'icon-btn primary-icon', type: 'submit', title: 'Add project', 'aria-label': 'Add project' }, icon('plus'))),
-          h('div', { class: 'side-links' },
-            h('button', {
-              type: 'button',
-              class: 'linkish',
-              title: 'Search every project website again for its icon',
-              onclick: () => {
-                clearFaviconCache(store.get(COLLECTION).projects.map((p) => p.website).filter(Boolean));
-                store.refresh();
+          }),
+          h('button', {
+            type: 'button',
+            class: view.adding ? 'icon-btn primary-icon active' : 'icon-btn primary-icon',
+            title: 'New project',
+            'aria-label': 'New project',
+            'aria-expanded': String(view.adding),
+            onclick: () => {
+              view.adding = !view.adding;
+              store.refresh();
+            },
+          }, icon('plus')),
+          menuButton({
+            title: 'More',
+            build: () => [
+              {
+                label: 'Manage labels',
+                icon: () => icon('tag'),
+                onSelect: () => {
+                  view.mode = 'categories';
+                  view.error = '';
+                  store.refresh();
+                },
               },
-            }, 'Re-run icons'),
-            h('button', {
-              type: 'button',
-              class: 'linkish',
-              onclick: () => {
-                view.mode = 'categories';
-                view.error = '';
-                store.refresh();
+              {
+                label: 'Re-run icons',
+                icon: () => icon('refresh'),
+                onSelect: () => {
+                  clearFaviconCache(store.get(COLLECTION).projects.map((p) => p.website).filter(Boolean));
+                  store.refresh();
+                },
               },
-            }, 'Manage labels'))),
+            ],
+          })),
+        view.adding
+          ? h('form', {
+              class: 'quick-project',
+              onsubmit: (/** @type {SubmitEvent & { currentTarget: HTMLFormElement }} */ e) => {
+                e.preventDefault();
+                const input = /** @type {HTMLInputElement} */ (e.currentTarget.querySelector('input[name="name"]'));
+                const name = input.value.trim();
+                if (!name) return;
+                view.adding = false;
+                quickCreate(store, name);
+              },
+            },
+              h('input', {
+                name: 'name',
+                placeholder: 'Project name, Enter',
+                'aria-label': 'New project name',
+                autocomplete: 'off',
+                onkeydown: (/** @type {KeyboardEvent} */ e) => {
+                  if (e.key !== 'Escape') return;
+                  view.adding = false;
+                  store.refresh();
+                },
+              }))
+          : null,
+        view.notice ? notice({ text: view.notice }) : null,
+        categories.length
+          ? h('div', { class: 'chips side-chips' },
+              chip('all', 'All'),
+              chip('none', 'None'),
+              categories.map((c) => chip(c.id, c.name)))
+          : null,
         listBox),
 
       h('section', { class: 'card main-pane' }, detail)), 'projects', { def: 300, min: 220, max: 560 }));
+  // The section renders off the page; focus once it is in.
+  if (view.adding) requestAnimationFrame(() => /** @type {HTMLInputElement | null} */ (root.querySelector('.quick-project input'))?.focus());
 }
 
 export default /** @satisfies {import('../../types/data').Module} */ ({
