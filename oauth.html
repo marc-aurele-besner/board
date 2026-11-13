@@ -8,7 +8,8 @@
 <body>
 <p>Signing in…</p>
 <script>
-  // Google's and Notion's sign-ins come back here with a code. The board's tab listens on this channel (js/google.js and js/modules/settings-notion.js signIn).
+  // Google's, Notion's and LinkedIn's sign-ins come back here with a code. The board's tab listens on this channel
+  // (js/google.js, js/modules/settings-notion.js signIn and js/linkedin.js linkedinSignIn).
   const params = new URLSearchParams(location.search);
   const channel = new BroadcastChannel('board-oauth');
   channel.postMessage({ state: params.get('state'), code: params.get('code'), error: params.get('error') });

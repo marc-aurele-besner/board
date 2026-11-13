@@ -17,6 +17,7 @@ import { serve } from './worker/http.js';
 import { jobs } from './jobs/index.js';
 import { sendWire } from '../js/http-request.js';
 import { slackCall, slackFile } from './slack.js';
+import { exchangeLinkedinCode } from '../js/linkedin-core.js';
 
 const PORT = Number(process.env.WORKER_PORT) || 8420;
 const CONFIG = join(homedir(), '.config', 'board', 'worker.json');
@@ -120,6 +121,13 @@ serve({
     // The Slack tab: Web API calls and session-only files, with the session cookie a page cannot send.
     'POST /slack': (body) => slackCall(body),
     'POST /slack/file': (body) => slackFile(body),
+    // Settings → LinkedIn: the official sign-in's code for a token. LinkedIn's token endpoint answers no CORS request.
+    'POST /linkedin/token': (body) => exchangeLinkedinCode({
+      clientId: String(body.clientId ?? ''),
+      clientSecret: String(body.clientSecret ?? ''),
+      code: String(body.code ?? ''),
+      redirectUri: String(body.redirectUri ?? ''),
+    }),
     'GET /status': () => ({ ...scheduler.status(), folder: { path: folder.path, from: folder.from, error: folder.error } }),
     'POST /run/*': (body, id) => scheduler.run(id, { params: body ?? {} }),
     'POST /config': (body) => {

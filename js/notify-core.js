@@ -23,6 +23,7 @@ export const KINDS = [
   ['lending', 'Aave health factor low', 'landmark'],
   ['budget', 'Budgets gone over', 'wallet'],
   ['cron', 'Cron flows', 'repeat'],
+  ['linkedin', 'LinkedIn sign-in and posts', 'linkedin'],
 ];
 
 // A kind that was never changed shows in the board and is not sent to Telegram.

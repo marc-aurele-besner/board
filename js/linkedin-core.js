@@ -1,7 +1,56 @@
 // linkedin.json without the DOM: LinkedIn's posts, comments, official sign-in and the saved session's call queue state.
 // Follower counts stay in socials.json (js/socials.js). The runners import this file.
-/** @import { LinkedinData } from '../types/data' */
+/** @import { LinkedinData, LinkedinAuth, DataStore } from '../types/data' */
+import { notify } from './notify-core.js';
 
 export const LINKEDIN = 'linkedin';
 /** @type {LinkedinData} */
 export const LINKEDIN_DEFAULTS = { auth: null, posts: [], comments: [], cache: {}, session: { calls: {} } };
+
+// The official sign-in, with the member's own developer app (Settings → LinkedIn → Publish as you).
+export const LINKEDIN_AUTHORIZE = 'https://www.linkedin.com/oauth/v2/authorization';
+export const LINKEDIN_SCOPES = 'openid profile email w_member_social';
+const TOKEN_URL = 'https://www.linkedin.com/oauth/v2/accessToken';
+const USERINFO_URL = 'https://api.linkedin.com/v2/userinfo';
+// Warn this long before the token stops working: it cannot be renewed, only signed in again.
+const EXPIRY_WARNING = 7 * 86400000;
+
+/** @param {LinkedinAuth | null | undefined} auth */
+export const signedIn = (auth) => Boolean(auth?.token && auth.expires > Date.now());
+
+// Trades the sign-in's code for a token, then reads who signed in. Runs in the runners: LinkedIn's token endpoint
+// answers no CORS request.
+/** @param {{ clientId: string, clientSecret: string, code: string, redirectUri: string }} p @returns {Promise<LinkedinAuth>} */
+export async function exchangeLinkedinCode({ clientId, clientSecret, code, redirectUri }) {
+  if (!clientId || !clientSecret) throw new Error('Save the app’s Client ID and Client Secret first.');
+  if (!code) throw new Error('LinkedIn sent no code.');
+  const res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: clientId, client_secret: clientSecret }),
+    signal: AbortSignal.timeout(20000),
+  });
+  const token = /** @type {{ access_token?: string, expires_in?: number, error?: string, error_description?: string }} */ (await res.json().catch(() => ({})));
+  if (!res.ok || !token.access_token) throw new Error(`LinkedIn refused the sign-in: ${token.error_description || token.error || `HTTP ${res.status}`}`);
+  const at = Date.now();
+  const who = await fetch(USERINFO_URL, { headers: { authorization: `Bearer ${token.access_token}` }, signal: AbortSignal.timeout(20000) });
+  const user = /** @type {{ sub?: string, name?: string, picture?: string, message?: string }} */ (await who.json().catch(() => ({})));
+  if (!who.ok || !user.sub) throw new Error(`LinkedIn did not say who signed in: ${user.message || `HTTP ${who.status}`}`);
+  return { token: token.access_token, expires: at + (token.expires_in ?? 60 * 86400) * 1000, sub: user.sub, name: user.name ?? '', picture: user.picture ?? '', at };
+}
+
+// Announces, once per sign-in, that its token stops working within a week.
+/** @param {DataStore} store */
+export function checkLinkedinExpiry(store) {
+  const auth = store.get(LINKEDIN)?.auth;
+  if (!auth?.token || auth.expires - Date.now() > EXPIRY_WARNING) return false;
+  const day = new Date(auth.expires).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return notify(store, {
+    kind: 'linkedin',
+    text: auth.expires > Date.now()
+      ? `LinkedIn’s sign-in ends on ${day}. Sign in again in Settings → LinkedIn to keep posting.`
+      : 'LinkedIn’s sign-in has ended. Sign in again in Settings → LinkedIn to post.',
+    href: '#/settings?section=linkedin',
+    key: `linkedin-expiry:${auth.expires}`,
+  });
+}
