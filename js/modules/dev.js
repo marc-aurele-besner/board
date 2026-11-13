@@ -27,7 +27,7 @@ import { linkWatcher, moveToReview } from '../task-links.js';
 import { watchDevSessions } from './todos.js';
 import { recordOfSession, sumUsage, usageLine, usageTitle, byUse, mcpTool } from '../dev-usage.js';
 import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand } from '../dev-core.js';
-import { toolRows, fmtSpan, pct } from '../dev-turns.js';
+import { sessionTools, fmtSpan, pct } from '../dev-turns.js';
 import { cronRunOf, cronRunHref } from '../cron.js';
 /** @import { Store, DevSessionList, IconName } from '../../types/data' */
 /** @import { RunnerInfo, RunnerEvent, RunnerTurns, SessionTurn, SessionAgent } from '../../types/terminal' */
@@ -1468,7 +1468,7 @@ function drawTurns() {
   const data = turnsView.id === s.id ? turnsView.data : null;
   if (!data || activeSession() !== s || !el.isConnected) return closeTurns();
   if (turnsPop.kind === 'agents') return drawAgents(el, data.agents ?? []);
-  if (turnsPop.kind === 'tools') return drawTools(el, data.turns);
+  if (turnsPop.kind === 'tools') return drawTools(el, data);
   const { turns, state } = data;
   const now = Date.now();
   const idle = idleOf(data, now);
@@ -1678,17 +1678,16 @@ function drawAgents(el, agents) {
   }
 }
 
-// The tools the shown claude called, read with its turns: how many calls its session made so far. A click opens
-// the tools panel.
+// The tools the shown claude called, read with its turns: how many calls its session and its subagents made so
+// far. A click opens the tools panel.
 /** @param {Session} s */
 function toolsButton(s) {
   const data = turnsView.id === s.id ? turnsView.data : null;
   if (!data?.claude) return null;
-  const rows = toolRows(data.turns);
-  const calls = rows.reduce((n, r) => n + r.calls, 0);
-  const errors = rows.reduce((n, r) => n + r.errors, 0);
+  const { rows, calls, errors, agents } = sessionTools(data.turns, data.agentTools);
   const isOpen = () => turnsPop?.s === s && turnsPop.kind === 'tools';
-  const title = `${calls} tool ${calls === 1 ? 'call' : 'calls'} in this claude session${rows.length ? ` (${rows.length} ${rows.length === 1 ? 'tool' : 'tools'}${errors ? `, ${errors} failed` : ''})` : ''}\nShow each tool, with its calls, failures and time`;
+  const more = [`${rows.length} ${rows.length === 1 ? 'tool' : 'tools'}`, agents ? `${agents} by subagents` : '', errors ? `${errors} failed` : ''].filter(Boolean).join(', ');
+  const title = `${calls} tool ${calls === 1 ? 'call' : 'calls'} in this claude session${rows.length ? ` (${more})` : ''}\nShow a summary of the tools it used`;
   return h('button', {
     type: 'button',
     class: `term-tool tools${calls ? '' : ' none'}`,
@@ -1704,16 +1703,26 @@ function toolsButton(s) {
   }, icon('wrench'), h('span', null, String(calls)));
 }
 
-// The tools panel: every tool the session called, the most called first, with a bar of its share of the calls
-// (the failed ones in red), its failures and its time per call. A row naming several tools (an MCP server's, the
-// subagents') lists them in its tooltip.
-/** @param {HTMLElement} el @param {SessionTurn[]} turns */
-function drawTools(el, turns) {
-  const rows = toolRows(turns);
-  const calls = rows.reduce((n, r) => n + r.calls, 0);
-  const errors = rows.reduce((n, r) => n + r.errors, 0);
-  const ms = rows.reduce((n, r) => n + r.ms, 0);
+// The tools panel, a summary of the tools the session used: the calls it and its subagents made, how many failed
+// and the time they took, the tools called most, then every tool, the most called first, with a bar of its share
+// of the calls (the failed ones in red), its failures and its time per call. A row naming several tools (an MCP
+// server's, the subagents') lists them in its tooltip.
+/** @param {HTMLElement} el @param {RunnerTurns} data */
+function drawTools(el, data) {
+  const { rows, calls, errors, ms, agents } = sessionTools(data.turns, data.agentTools);
   const most = rows[0]?.calls ?? 0;
+  // Most calls answer in well under a second.
+  const perCall = (/** @type {number} */ t) => (t < 1000 ? `${Math.max(1, Math.round(t))} ms` : fmtSpan(t));
+  const started = data.agents?.length ?? 0;
+  const top = rows.slice(0, 3).map((r) => `${r.label} ${pct(r.calls, calls)}`).join(', ');
+  const slowest = [...rows].sort((a, b) => b.ms - a.ms)[0];
+  const failing = [...rows].sort((a, b) => b.errors - a.errors)[0];
+  const facts = /** @type {[string, string][]} */ ([
+    ['By', started || agents ? `claude ${calls - agents} · its ${started === 1 ? 'subagent' : `${started || ''} subagents`.trim()} ${agents}` : ''],
+    ['Most used', rows.length > 1 ? top : ''],
+    ['Most time', rows.length > 1 && slowest?.ms >= 1000 ? `${slowest.label}, ${fmtSpan(slowest.ms)} (${pct(slowest.ms, ms)} of the time in calls)` : ''],
+    ['Most failures', rows.length > 1 && failing?.errors ? `${failing.label}, ${failing.errors} of its ${failing.calls} calls` : ''],
+  ]).filter(([, text]) => text);
   const scroll = el.querySelector('.turns-list')?.scrollTop ?? 0;
   el.replaceChildren(
     h('div', { class: 'turns-head' },
@@ -1724,15 +1733,15 @@ function drawTools(el, turns) {
       calls ? h('div', { class: 'muted small turns-sum' },
         h('span', { class: 'turns-key work' }), `${calls - errors} succeeded`,
         errors ? [h('span', { class: 'turns-key fail' }), `${errors} failed (${pct(errors, calls)})`] : null,
-        ms ? h('span', { class: 'tools-time' }, `${fmtSpan(ms)} in calls`) : null) : null),
+        ms ? h('span', { class: 'tools-time' }, `${fmtSpan(ms)} in calls`) : null) : null,
+      facts.length ? h('dl', { class: 'small tools-facts' }, facts.map(([name, text]) => [h('dt', { class: 'muted' }, name), h('dd', null, text)])) : null,
+      started && !data.agentTools ? h('div', { class: 'muted small' }, 'Restart the command runner to count the subagents’ calls.') : null),
     rows.length
       ? h('div', { class: 'turns-list', role: 'list' }, rows.map(toolRow))
       : h('p', { class: 'muted small agents-empty' }, 'No tool called yet.'));
   const list = el.querySelector('.turns-list');
   if (list) list.scrollTop = scroll;
 
-  // Most calls answer in well under a second.
-  const perCall = (/** @type {number} */ t) => (t < 1000 ? `${Math.max(1, Math.round(t))} ms` : fmtSpan(t));
   /** @param {typeof rows[number]} r */
   function toolRow(r) {
     const names = r.names.map((n) => (n.startsWith('mcp__') ? mcpTool(n).tool || n : n));
@@ -1749,6 +1758,7 @@ function drawTools(el, turns) {
         h('span', null, [
           `${pct(r.calls, calls)} of the calls`,
           r.errors ? `${r.errors} failed (${pct(r.errors, r.calls)})` : '',
+          r.agents ? `${r.agents} by subagents` : '',
           r.ms ? `${perCall(r.ms / r.calls)} a call` : '',
           r.ms >= 1000 && r.calls > 1 ? `${fmtSpan(r.ms)} in all` : '',
         ].filter(Boolean).join(' · '))));

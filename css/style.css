@@ -3179,6 +3179,8 @@ button.cal-agenda-name:hover { color: var(--accent); }
 .turns-sum .turns-key.fail { margin-left: 6px; }
 .turns-seg.rest { min-width: 0; }
 .tools-time { margin-left: auto; }
+.tools-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; margin: 4px 0 0; }
+.tools-facts dd { margin: 0; font-variant-numeric: tabular-nums; }
 .tool-row { flex: none; cursor: default; }
 .tool-row:hover { background: none; }
 .turns-row.idle:hover { background: none; }

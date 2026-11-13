@@ -99,6 +99,7 @@ export function callsOf(t, keep = () => true) {
 // Every tool some turns called, added up by tool (as toolGroup names it), the most called first: what the tools
 // button on Dev's bar lists for the shown claude.
 /** @typedef {{ key: string, label: string, calls: number, errors: number, ms: number, names: string[] }} ToolRow */
+/** @typedef {ToolRow & { agents: number }} SessionToolRow */
 /** @param {{ tools?: Record<string, DevToolUse> | null }[]} turns @returns {ToolRow[]} */
 export function toolRows(turns) {
   /** @type {Map<string, ToolRow>} */
@@ -115,6 +116,21 @@ export function toolRows(turns) {
     }
   }
   return [...out.values()].sort((a, b) => b.calls - a.calls || a.label.localeCompare(b.label));
+}
+// A claude session's tools: its turns' calls and its subagents' own, added up by tool, the most called first.
+// `agents` is how many of a row's calls the subagents made.
+/** @param {{ tools?: Record<string, DevToolUse> | null }[]} turns @param {Record<string, DevToolUse>} [agentTools] */
+export function sessionTools(turns, agentTools) {
+  const byAgents = new Map(toolRows([{ tools: agentTools }]).map((r) => [r.key, r.calls]));
+  /** @type {SessionToolRow[]} */
+  const rows = toolRows([...turns, { tools: agentTools }]).map((r) => ({ ...r, agents: byAgents.get(r.key) ?? 0 }));
+  return {
+    rows,
+    calls: sum(rows.map((r) => r.calls)),
+    errors: sum(rows.map((r) => r.errors)),
+    ms: sum(rows.map((r) => r.ms)),
+    agents: sum(rows.map((r) => r.agents)),
+  };
 }
 export const isMcp = (/** @type {string} */ name) => name.startsWith('mcp__');
 export const skillUses = (/** @type {DevTurn} */ t) => sum(Object.values(t.skills ?? {}));

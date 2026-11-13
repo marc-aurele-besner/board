@@ -76,6 +76,8 @@ export interface RunnerTurns {
   mcp?: Record<string, number>;
   // Its subagents, newest first.
   agents?: SessionAgent[];
+  // What all its subagents called, by tool (as a turn's tools). Missing from a runner started before it was read.
+  agentTools?: Record<string, DevToolUse>;
 }
 
 // A subagent of a claude session, from its transcript and .meta.json in <session>/subagents. state: working, done,
