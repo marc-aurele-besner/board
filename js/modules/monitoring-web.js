@@ -1,16 +1,17 @@
-// Monitoring tabs for the project websites: visitors (Google Analytics) and search (Google Search Console, Bing).
+// Monitoring tabs for the project websites: visitors (Google Analytics) and search (Google Search Console, Bing, or both added together).
 import { h, empty, notice, progress, icon, refreshIcon } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { isConnected } from '../google.js';
-import { analyticsReport, searchReport, bingReport } from '../webstats.js';
+import { analyticsReport, searchReport, bingReport, mergeSearchRows, mergeSearchReports } from '../webstats.js';
 import { sitesOf } from '../automations.js';
 import { hostOf } from '../sitecheck.js';
 import { barChart, legend } from '../chart.js';
 import { stat } from './monitoring.js';
+import { projectLabel } from './monitoring-ai.js';
 /** @import { Project, Store } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @import { MonitoringView, PeriodWindow, SortColumn } from '../../types/monitoring' */
-/** @import { SearchReport, SearchRow } from '../webstats.js' */
+/** @import { SearchReport } from '../webstats.js' */
 
 /** @typedef {Awaited<ReturnType<typeof analyticsReport>>} AnalyticsData */
 /** @template T @typedef {{ status: 'loading' } | { status: 'ok', data: T } | { status: 'error', error: string }} Loaded */
@@ -56,17 +57,18 @@ function dayBuckets(w) {
 }
 
 // "All" comes first and is the default: an empty `view.site` adds every site together.
+// A site's chip carries its project's icon; "All" has none.
 /** @param {Store} store @param {MonitoringView} view @param {Project[]} sites @param {Project | null} current */
 function siteChips(store, view, sites, current) {
-  return h('div', { class: 'chips' }, [{ id: '', name: 'All' }, ...sites].map((p) =>
+  return h('div', { class: 'chips' }, [null, ...sites].map((p) =>
     h('button', {
       type: 'button',
-      class: p.id === (current?.id ?? '') ? 'chip active' : 'chip',
+      class: (p?.id ?? '') === (current?.id ?? '') ? 'chip active' : 'chip',
       onclick: () => {
-        view.site = p.id;
+        view.site = p?.id ?? '';
         store.refresh();
       },
-    }, p.name)));
+    }, p ? projectLabel(p) : 'All')));
 }
 
 const pickedSite = (/** @type {MonitoringView} */ view, /** @type {Project[]} */ sites) => sites.find((x) => x.id === view.site) ?? null;
@@ -95,25 +97,6 @@ function mergeRows(lists, n = 8) {
     }
   }
   return [...sum.entries()].sort((a, b) => b[1][0] - a[1][0]).slice(0, n).map(([name, nums]) => [name, ...nums]);
-}
-
-// Search rows are [name, clicks, impressions, ctr, position]. Clicks and impressions add up; the rate
-// is worked out again and the position is weighed by impressions.
-/** @param {SearchRow[][]} lists @param {number} [n] @returns {SearchRow[]} */
-function mergeSearchRows(lists, n = 10) {
-  /** @type {Map<string, { clicks: number, imps: number, pos: number }>} */
-  const sum = new Map();
-  for (const rows of lists) {
-    for (const [name, clicks, imps, , pos] of rows) {
-      const cur = sum.get(name) ?? { clicks: 0, imps: 0, pos: 0 };
-      cur.clicks += clicks;
-      cur.imps += imps;
-      cur.pos += (pos || 0) * imps;
-      sum.set(name, cur);
-    }
-  }
-  return [...sum.entries()].sort((a, b) => b[1].clicks - a[1].clicks || b[1].imps - a[1].imps).slice(0, n)
-    .map(([name, v]) => /** @type {SearchRow} */ ([name, v.clicks, v.imps, v.imps ? v.clicks / v.imps : 0, v.imps ? v.pos / v.imps : 0]));
 }
 
 // Sort choice per table, kept across re-renders. No entry means the order the rows came in.
@@ -178,6 +161,17 @@ function table(head, rows, format) {
   })), rows);
 }
 
+/** A site's row in an All view: its project, then its numbers. @typedef {[Project, ...number[]]} SiteRow */
+
+// The "By site" table: a site is named with its project's icon, and still sorts by its name.
+/** @param {string[]} head @param {SiteRow[]} rows @param {((value: number) => Child)[]} format One per number column. */
+function siteTable(head, rows, format) {
+  if (!rows.length) return empty('Nothing in this period.');
+  return sortTable(head.join('|'), head.map((label, i) => (i
+    ? { label, num: true, value: (/** @type {SiteRow} */ r) => r[i], format: format[i - 1] }
+    : { label, clip: true, value: (/** @type {SiteRow} */ r) => r[0].name, format: (/** @type {string} */ _name, /** @type {SiteRow} */ r) => projectLabel(r[0]) })), rows);
+}
+
 /** @param {Store} store @param {string | string[]} keys */
 function refreshButton(store, keys) {
   const busy = [keys].flat().some((key) => cache.get(key)?.status === 'loading');
@@ -237,13 +231,49 @@ export function analyticsTab(store, view, w) {
 
 // --- Search ---
 
+/** @typedef {'google' | 'bing'} SearchEngine */
+/** @type {Record<SearchEngine, { name: string, label: string }>} */
+const SEARCH_ENGINES = {
+  google: { name: 'Google', label: 'Google Search Console' },
+  bing: { name: 'Bing', label: 'Bing Webmaster Tools' },
+};
+
+const daysIn = (/** @type {DayBuckets} */ b, /** @type {SearchReport} */ d) => b.days.map((day) => d.days[day]).filter(Boolean);
+
+// Reads every site from each engine in `sources`, one cache entry per engine and site, so All, Google and
+// Bing share what is loaded. A site counts once one engine answered: `parts` are its reports, `d` those
+// merged, `google` the one the indexing card reads. Each failure is named, with its engine when two are read.
+/** @param {Store} store @param {Project[]} sites @param {SearchEngine[]} sources @param {DayBuckets} b */
+function loadSearch(store, sites, sources, b) {
+  const entries = sites.flatMap((p) => sources.map((engine) => {
+    const key = `${engine}:${p.id}:${b.from}:${b.to}`;
+    const entry = load(store, key, () => (engine === 'google' ? searchReport(p.website, b.from, b.to) : bingReport(store, p.website, b.from, b.to)));
+    return { p, engine, key, entry };
+  }));
+  const on = (/** @type {SearchEngine} */ engine) => (sources.length > 1 ? ` on ${SEARCH_ENGINES[engine].name}` : '');
+  return {
+    keys: entries.map((e) => e.key),
+    loading: entries.some((e) => e.entry.status === 'loading'),
+    ok: sites.flatMap((p) => {
+      const mine = entries.filter((e) => e.p === p);
+      const parts = mine.flatMap((e) => (e.entry.status === 'ok' ? [e.entry.data] : []));
+      const g = mine.find((e) => e.engine === 'google')?.entry;
+      return parts.length ? [{ p, parts, d: mergeSearchReports(parts), google: g?.status === 'ok' ? g.data : null }] : [];
+    }),
+    failed: entries.flatMap((e) => (e.entry.status === 'error' ? [`${hostOf(e.p.website)}${on(e.engine)} (${e.entry.error})`] : [])),
+    errors: entries.flatMap((e) => (e.entry.status === 'error' ? [e.entry.error] : [])),
+  };
+}
+
 /** @param {Store} store @param {MonitoringView} view @param {PeriodWindow} w */
 export function searchTab(store, view, w) {
   const settings = store.get('settings');
-  const engine = view.engine === 'bing' ? 'bing' : 'google';
-  const bingKey = settings.bing?.key ?? '';
+  // "All" comes first and is the default: it adds up the engines that are set up.
+  const engine = view.engine === 'google' || view.engine === 'bing' ? view.engine : 'all';
+  /** @type {Record<SearchEngine, boolean>} */
+  const ready = { google: isConnected('search'), bing: Boolean(settings.bing?.key) };
   const engines = h('div', { class: 'period', role: 'group', 'aria-label': 'Search engine' },
-    [['google', 'Google Search Console'], ['bing', 'Bing Webmaster Tools']].map(([key, label]) =>
+    [['all', 'All'], ['google', SEARCH_ENGINES.google.label], ['bing', SEARCH_ENGINES.bing.label]].map(([key, label]) =>
       h('button', {
         type: 'button',
         class: engine === key ? 'period-btn active' : 'period-btn',
@@ -253,47 +283,56 @@ export function searchTab(store, view, w) {
           store.refresh();
         },
       }, label)));
-  if (engine === 'google' ? !isConnected('search') : !bingKey) {
+  /** @type {SearchEngine[]} */
+  const wanted = engine === 'all' ? ['google', 'bing'] : [engine];
+  const sources = wanted.filter((e) => ready[e]);
+  if (!sources.length) {
     return h('div', { class: 'stack-lg' }, engines,
-      setupBanner('search', engine === 'google'
-        ? 'Connect Google Search Console to see clicks, impressions and queries.'
-        : 'Add a Bing Webmaster API key to see clicks, impressions and queries from Bing.'));
+      setupBanner('search', engine === 'all'
+        ? 'Connect Google Search Console or add a Bing Webmaster API key to see clicks, impressions and queries.'
+        : engine === 'google'
+          ? 'Connect Google Search Console to see clicks, impressions and queries.'
+          : 'Add a Bing Webmaster API key to see clicks, impressions and queries from Bing.'));
   }
+  // Under "All" with one engine set up, a quiet line says the other is missing.
+  const missing = wanted.find((e) => !ready[e]);
+  const note = missing
+    ? ` ${SEARCH_ENGINES[missing].label} is not connected: only ${SEARCH_ENGINES[sources[0]].name} is counted.`
+    : sources.length > 1 ? ' Google and Bing are added together.' : '';
   const sites = sitesOf(store);
   if (!sites.length) return h('div', { class: 'stack-lg' }, engines, empty('No project has a website yet. Add one on a project page.'));
   const p = pickedSite(view, sites);
   const b = dayBuckets(w);
-  const report = (/** @type {Project} */ x) => (engine === 'google' ? searchReport(x.website, b.from, b.to) : bingReport(store, x.website, b.from, b.to));
-  if (!p) return searchAll(store, view, sites, engine, engines, b, report);
-  const key = `${engine}:${p.id}:${b.from}:${b.to}`;
-  const entry = load(store, key, () => report(p));
-  const head = h('div', { class: 'row between' }, siteChips(store, view, sites, p), refreshButton(store, key));
-  if (entry.status === 'loading') return h('div', { class: 'stack-lg' }, engines, head, progress(`Reading search data for ${hostOf(p.website)}…`));
-  if (entry.status === 'error') return h('div', { class: 'stack-lg' }, engines, head, notice({ text: entry.error }));
-  const d = entry.data;
-  const clicks = b.days.map((day) => d.days[day]?.clicks ?? 0);
-  const imps = b.days.map((day) => d.days[day]?.impressions ?? 0);
-  const C = clicks.reduce((s, n) => s + n, 0);
-  const I = imps.reduce((s, n) => s + n, 0);
-  const positions = /** @type {number[]} */ (b.days.map((day) => d.days[day]?.position).filter(Boolean));
+  const all = loadSearch(store, p ? [p] : sites, sources, b);
+  if (!p) return searchAll(store, view, sites, engines, b, all, note);
+  const head = h('div', { class: 'row between' }, siteChips(store, view, sites, p), refreshButton(store, all.keys));
+  if (all.loading) return h('div', { class: 'stack-lg' }, engines, head, progress(`Reading search data for ${hostOf(p.website)}…`));
+  // One engine failing leaves the other's numbers standing, with the failure named above them.
+  const failed = all.failed.length ? notice({ text: sources.length > 1 ? `Could not read: ${all.failed.join('; ')}` : all.errors[0] }) : null;
+  const x = all.ok[0];
+  if (!x) return h('div', { class: 'stack-lg' }, engines, head, failed);
+  const d = x.d;
+  // Totals come from each engine's own days, so Bing's days (no position) leave the average position alone.
+  const total = searchTotals(x.parts.flatMap((r) => daysIn(b, r)));
   const cols = ['', 'Clicks', 'Impressions', 'CTR', 'Position'];
   const format = [null, fmt, fmt, pct, (/** @type {number} */ n) => (n ? n.toFixed(1) : '—')];
-  const clickSeries = [{ name: 'Clicks', color: 'var(--accent)', values: clicks }];
-  const impSeries = [{ name: 'Impressions', color: 'var(--info)', values: imps }];
-  return h('div', { class: 'stack-lg' }, engines, head,
-    h('p', { class: 'muted small' }, `${hostOf(p.website)} · ${d.site}. Search data arrives two to three days late.`),
+  const clickSeries = [{ name: 'Clicks', color: 'var(--accent)', values: b.days.map((day) => d.days[day]?.clicks ?? 0) }];
+  const impSeries = [{ name: 'Impressions', color: 'var(--info)', values: b.days.map((day) => d.days[day]?.impressions ?? 0) }];
+  return h('div', { class: 'stack-lg' }, engines, head, failed,
+    h('p', { class: 'muted small' }, `${hostOf(p.website)} · ${d.site}. Search data arrives two to three days late.${note}`),
     h('div', { class: 'summary' },
-      stat('Clicks', fmt(C)),
-      stat('Impressions', fmt(I)),
-      stat('Click-through rate', I ? pct(C / I) : '—'),
-      stat('Average position', positions.length ? (positions.reduce((s, n) => s + n, 0) / positions.length).toFixed(1) : '—')),
+      stat('Clicks', fmt(total.clicks)),
+      stat('Impressions', fmt(total.imps)),
+      stat('Click-through rate', total.imps ? pct(total.ctr) : '—'),
+      stat('Average position', total.position ? total.position.toFixed(1) : '—')),
     h('div', { class: 'split-2' },
-      h('section', { class: 'card stack' }, h('h3', null, 'Clicks'), C ? barChart(b.labels, clickSeries) : empty('No clicks in this period.'), legend(clickSeries)),
-      h('section', { class: 'card stack' }, h('h3', null, 'Impressions'), I ? barChart(b.labels, impSeries) : empty('No impressions in this period.'), legend(impSeries))),
+      h('section', { class: 'card stack' }, h('h3', null, 'Clicks'), total.clicks ? barChart(b.labels, clickSeries) : empty('No clicks in this period.'), legend(clickSeries)),
+      h('section', { class: 'card stack' }, h('h3', null, 'Impressions'), total.imps ? barChart(b.labels, impSeries) : empty('No impressions in this period.'), legend(impSeries))),
     h('div', { class: 'split-2' },
       h('section', { class: 'card stack' }, h('h3', null, 'Top queries'), table(['Query', ...cols.slice(1)], d.queries, format)),
       h('section', { class: 'card stack' }, h('h3', null, 'Top pages'), table(['Page', ...cols.slice(1)], d.pages, format))),
-    engine === 'google' ? indexingCard(d) : null);
+    // The sitemaps describe the site, not an engine: they show whenever Google's report is among those read.
+    x.google ? indexingCard(x.google) : null);
 }
 
 // What Google holds for the site's sitemaps: how many pages each lists, and whether Google could read it.
@@ -328,7 +367,7 @@ function analyticsAll(store, view, sites, props, b) {
     { name: 'Users', color: 'var(--accent)', values: b.days.map((day) => sum((d) => d.days[day]?.users ?? 0)) },
     { name: 'Page views', color: 'var(--info)', values: b.days.map((day) => sum((d) => d.days[day]?.views ?? 0)) },
   ];
-  const bySite = all.ok.map(({ p, d }) => [p.name, d.totals.users, d.totals.sessions, d.totals.views]).sort((a, c) => c[3] - a[3]);
+  const bySite = all.ok.map(({ p, d }) => /** @type {SiteRow} */ ([p, d.totals.users, d.totals.sessions, d.totals.views])).sort((a, c) => c[3] - a[3]);
   const pages = mergeRows(all.ok.map(({ p, d }) => d.pages.map(([path, ...n]) => [`${hostOf(p.website)}${path}`, ...n])));
   return h('div', { class: 'stack-lg' }, head, failed,
     h('p', { class: 'muted small' }, `${all.ok.length} site${all.ok.length === 1 ? '' : 's'} added together. Users are counted per site, so someone who visits two sites counts twice.`),
@@ -340,7 +379,7 @@ function analyticsAll(store, view, sites, props, b) {
       stat('Engagement rate', pct(perSession((d) => d.totals.engagement)))),
     h('div', { class: 'split-2' }, series.map((s) =>
       h('section', { class: 'card stack' }, h('h3', null, s.name), views ? barChart(b.labels, [s]) : empty('No visits recorded in this period.'), legend([s])))),
-    h('section', { class: 'card stack' }, h('h3', null, 'By site'), table(['Site', 'Users', 'Sessions', 'Page views'], bySite, [null, fmt, fmt, fmt])),
+    h('section', { class: 'card stack' }, h('h3', null, 'By site'), siteTable(['Site', 'Users', 'Sessions', 'Page views'], bySite, [fmt, fmt, fmt])),
     h('div', { class: 'split-3' },
       h('section', { class: 'card stack' }, h('h3', null, 'Top pages'), table(['Page', 'Views', 'Users'], pages, [null, fmt, fmt])),
       h('section', { class: 'card stack' }, h('h3', null, 'Where visitors come from'), table(['Source', 'Sessions'], mergeRows(all.ok.map((x) => x.d.sources)), [null, fmt])),
@@ -358,28 +397,28 @@ function searchTotals(rows) {
 }
 
 /**
- * @param {Store} store @param {MonitoringView} view @param {Project[]} sites @param {string} engine @param {HTMLElement} engines
- * @param {DayBuckets} b @param {(p: Project) => Promise<SearchReport>} report
+ * @param {Store} store @param {MonitoringView} view @param {Project[]} sites @param {HTMLElement} engines
+ * @param {DayBuckets} b @param {ReturnType<typeof loadSearch>} all @param {string} note
  */
-function searchAll(store, view, sites, engine, engines, b, report) {
-  const all = loadAll(store, sites, (p) => `${engine}:${p.id}:${b.from}:${b.to}`, report);
+function searchAll(store, view, sites, engines, b, all, note) {
   const head = h('div', { class: 'row between' }, siteChips(store, view, sites, null), refreshButton(store, all.keys));
   const failed = all.failed.length ? notice({ text: `Could not read: ${all.failed.join('; ')}` }) : null;
   if (all.loading) return h('div', { class: 'stack-lg' }, engines, head, progress(`Reading search data for ${sites.length} site${sites.length === 1 ? '' : 's'}…`));
   if (!all.ok.length) return h('div', { class: 'stack-lg' }, engines, head, failed);
-  const daysOf = (/** @type {SearchReport} */ d) => b.days.map((day) => d.days[day]).filter(Boolean);
-  const total = searchTotals(all.ok.flatMap((x) => daysOf(x.d)));
+  // Every engine's report of every site, unmerged: totals and rows are added up from these.
+  const parts = all.ok.flatMap((x) => x.parts);
+  const total = searchTotals(parts.flatMap((r) => daysIn(b, r)));
   const daySum = (/** @type {'clicks' | 'impressions'} */ f) => b.days.map((day) => all.ok.reduce((s, x) => s + (x.d.days[day]?.[f] ?? 0), 0));
   const cols = ['', 'Clicks', 'Impressions', 'CTR', 'Position'];
   const format = [null, fmt, fmt, pct, (/** @type {number} */ n) => (n ? n.toFixed(1) : '—')];
-  const bySite = all.ok.map(({ p, d }) => {
-    const t = searchTotals(daysOf(d));
-    return /** @type {SearchRow} */ ([p.name, t.clicks, t.imps, t.ctr, t.position]);
+  const bySite = all.ok.map((x) => {
+    const t = searchTotals(x.parts.flatMap((r) => daysIn(b, r)));
+    return /** @type {SiteRow} */ ([x.p, t.clicks, t.imps, t.ctr, t.position]);
   }).sort((a, c) => c[1] - a[1] || c[2] - a[2]);
   const clickSeries = [{ name: 'Clicks', color: 'var(--accent)', values: daySum('clicks') }];
   const impSeries = [{ name: 'Impressions', color: 'var(--info)', values: daySum('impressions') }];
   return h('div', { class: 'stack-lg' }, engines, head, failed,
-    h('p', { class: 'muted small' }, `${all.ok.length} site${all.ok.length === 1 ? '' : 's'} added together. Search data arrives two to three days late.`),
+    h('p', { class: 'muted small' }, `${all.ok.length} site${all.ok.length === 1 ? '' : 's'} added together. Search data arrives two to three days late.${note}`),
     h('div', { class: 'summary' },
       stat('Clicks', fmt(total.clicks)),
       stat('Impressions', fmt(total.imps)),
@@ -388,8 +427,8 @@ function searchAll(store, view, sites, engine, engines, b, report) {
     h('div', { class: 'split-2' },
       h('section', { class: 'card stack' }, h('h3', null, 'Clicks'), total.clicks ? barChart(b.labels, clickSeries) : empty('No clicks in this period.'), legend(clickSeries)),
       h('section', { class: 'card stack' }, h('h3', null, 'Impressions'), total.imps ? barChart(b.labels, impSeries) : empty('No impressions in this period.'), legend(impSeries))),
-    h('section', { class: 'card stack' }, h('h3', null, 'By site'), table(['Site', ...cols.slice(1)], bySite, format)),
+    h('section', { class: 'card stack' }, h('h3', null, 'By site'), siteTable(['Site', ...cols.slice(1)], bySite, [fmt, fmt, pct, (n) => (n ? n.toFixed(1) : '—')])),
     h('div', { class: 'split-2' },
-      h('section', { class: 'card stack' }, h('h3', null, 'Top queries'), table(['Query', ...cols.slice(1)], mergeSearchRows(all.ok.map((x) => x.d.queries)), format)),
-      h('section', { class: 'card stack' }, h('h3', null, 'Top pages'), table(['Page', ...cols.slice(1)], mergeSearchRows(all.ok.map((x) => x.d.pages)), format))));
+      h('section', { class: 'card stack' }, h('h3', null, 'Top queries'), table(['Query', ...cols.slice(1)], mergeSearchRows(parts.map((r) => r.queries)), format)),
+      h('section', { class: 'card stack' }, h('h3', null, 'Top pages'), table(['Page', ...cols.slice(1)], mergeSearchRows(parts.map((r) => r.pages)), format))));
 }

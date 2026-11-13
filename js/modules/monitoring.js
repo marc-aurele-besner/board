@@ -41,9 +41,9 @@ const PERIODS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['7', '7 days']
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // View state: the sub-tab and the period. The period applies to every chart and number on the page.
-// `site` and `engine` belong to the two website tabs: the project shown, and Google or Bing.
+// `site` and `engine` belong to the two website tabs: the project shown, and every search engine added together ('all'), Google or Bing.
 /** @type {MonitoringView} */
-const view = { tab: 'ai', period: '7', site: '', engine: 'google' };
+const view = { tab: 'ai', period: '7', site: '', engine: 'all' };
 // Prices per model (USD per token), used to estimate calls that had no reported cost.
 /** @type {{ status: string, map: Map<string, { prompt: number, completion: number }> }} */
 const prices = { status: 'idle', map: new Map() };
@@ -622,7 +622,7 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
       tab: view.tab === 'ai' ? '' : view.tab,
       period: view.period === '7' ? '' : view.period,
       site: web ? view.site : '',
-      engine: view.tab === 'search' && view.engine === 'bing' ? 'bing' : '',
+      engine: view.tab === 'search' && view.engine !== 'all' ? view.engine : '',
       contract: view.tab === 'contracts' ? contractsActivitySerialize() : '',
       source: view.tab === 'ai' && aiView.source !== 'all' ? aiView.source : '',
       project: view.tab === 'ai' ? aiView.project : view.tab === 'development' ? developmentView.project : '',
@@ -634,7 +634,7 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
   restore: (/** @type {Record<string, string>} */ p = {}) => {
     view.tab = TABS.some(([k]) => k === p.tab) ? p.tab : 'ai';
     view.site = p.site || '';
-    view.engine = p.engine === 'bing' ? 'bing' : 'google';
+    view.engine = p.engine === 'bing' || p.engine === 'google' ? p.engine : 'all';
     view.period = PERIODS.some(([k]) => k === p.period) ? p.period : '7';
     contractsActivityRestore(p.contract);
     const pick = (/** @type {string[][]} */ list, /** @type {string} */ v, /** @type {string} */ fallback) => (list.some(([k]) => k === v) ? v : fallback);
