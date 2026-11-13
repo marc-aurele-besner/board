@@ -84,6 +84,8 @@
       "linesRemoved": 37,
       "efforts": { "high": 60 },
       "replies": 60,
+      "skills": { "example-skill": 2, "plugin:other-skill": 1 },
+      "mcp": { "mcp__example-server__read_page": 5, "mcp__example-server__navigate": 3 },
       "start": 1762682400000,
       "end": 1762684800000
     },

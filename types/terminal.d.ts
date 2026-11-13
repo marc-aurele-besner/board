@@ -65,6 +65,9 @@ export interface RunnerTurns {
   state: string;
   ask?: SessionAsk | null;
   turns: SessionTurn[];
+  // The skills it ran and the MCP tools it called, with how many times (as in DevUsage).
+  skills?: Record<string, number>;
+  mcp?: Record<string, number>;
 }
 
 // A claude.ai Artifact link; title '' when none was given.
