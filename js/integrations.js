@@ -13,6 +13,8 @@ const SECTIONS = {
   search: ['search', 'Search consoles'],
   resend: ['resend', 'Resend'],
   gmail: ['gmail', 'Gmail'],
+  x: ['x', 'X / Twitter'],
+  linkedin: ['linkedin', 'LinkedIn'],
 };
 
 /** @import { DataStore } from '../types/data' */

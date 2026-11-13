@@ -7,6 +7,7 @@ import { fetchActivity } from '../github.js';
 import { setupBanner } from '../integrations.js';
 import { analyticsTab, searchTab, sortTable } from './monitoring-web.js';
 import { runnersTab } from './monitoring-runners.js';
+import { socialsTab } from './monitoring-socials.js';
 import { contractsActivityTab, contractsActivitySerialize, contractsActivityRestore } from './monitoring-contracts.js';
 import { usageRecords, sumUsage, modelName, modelsByUse, fmtDuration, tokensOf } from '../dev-usage.js';
 import { sessionStatus } from '../terminal.js';
@@ -20,13 +21,14 @@ import { runnerOf } from '../dev-core.js';
 const COLLECTION = 'usage';
 const DAY = 86400000;
 const HOUR = 3600000;
-const TABS = [['ai', 'AI usage'], ['github', 'GitHub activity'], ['analytics', 'Web analytics'], ['search', 'Search'], ['contracts', 'Contracts'], ['runners', 'Board runners']];
+const TABS = [['ai', 'AI usage'], ['github', 'GitHub activity'], ['analytics', 'Web analytics'], ['search', 'Search'], ['socials', 'Socials'], ['contracts', 'Contracts'], ['runners', 'Board runners']];
 /** @type {Record<string, string>} */
 const SUBTITLES = {
   ai: 'AI calls made by the board, and what the claude sessions Dev ran for tasks used.',
   github: 'Commits, pull requests and issues across the repos linked to your projects.',
   analytics: 'Visitors and page views for each project website, from Google Analytics.',
   search: 'How each project website shows up in Google and Bing search.',
+  socials: 'Followers of the X and LinkedIn accounts added in Settings, and how they grew.',
   contracts: 'Transactions and events on the smart contracts saved in Settings.',
   runners: 'The processes bun start runs on this computer, and how each background job of the worker is doing.',
 };
@@ -635,6 +637,7 @@ function draw(root, store) {
   const body = view.tab === 'github' ? githubTab(store, w)
     : view.tab === 'analytics' ? analyticsTab(store, view, w)
       : view.tab === 'search' ? searchTab(store, view, w)
+      : view.tab === 'socials' ? socialsTab(store, w)
       : view.tab === 'contracts' ? contractsActivityTab(store, w, view.period)
       : view.tab === 'runners' ? runnersTab(store, runnersShown)
         : aiTab(store, w);

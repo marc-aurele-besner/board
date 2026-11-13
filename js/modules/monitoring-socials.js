@@ -1,0 +1,138 @@
+// Monitoring → Socials: the followers of each X and LinkedIn account added in Settings, and how they grew over the
+// period. The runners read the counts a few times a day (tools/jobs/socials.js); each day keeps its last read.
+import { h, icon, empty, notice } from '../ui.js';
+import { lineChart } from '../chart.js';
+import { settingsHref } from '../integrations.js';
+import { SOCIALS, NETWORKS, dayKey, profileUrl, handleLabel } from '../socials.js';
+import { stat } from './monitoring.js';
+import { sortTable } from './monitoring-web.js';
+/** @import { Store, SocialAccount } from '../../types/data' */
+/** @import { PeriodWindow } from '../../types/monitoring' */
+
+const DAY = 86400000;
+// A day's period still draws a week, since the counts are read once or a few times a day.
+const MIN_DAYS = 7;
+const count = new Intl.NumberFormat();
+const signed = (/** @type {number} */ n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${count.format(Math.abs(n))}`;
+const percent = (/** @type {number | null} */ p) => (p === null ? '' : `${p > 0 ? '+' : p < 0 ? '−' : ''}${Math.abs(p * 100).toFixed(Math.abs(p) < 0.1 ? 1 : 0)}%`);
+
+/** @typedef {{ account: SocialAccount, now: number | null, change: number | null, pct: number | null, values: (number | null)[], project: string }} AccountRow */
+
+// The days from `start` to `end` (ms), both included, as history keys.
+/** @param {number} start @param {number} end */
+function daysBetween(start, end) {
+  const out = [];
+  const d = new Date(start);
+  d.setHours(12, 0, 0, 0);
+  for (; d.getTime() <= end + DAY / 2; d.setDate(d.getDate() + 1)) out.push(dayKey(d));
+  return out;
+}
+
+// The followers at the end of the period, and their change since the last count before it (or its first count).
+/** @param {Record<string, number>} hist @param {string} first @param {string} last */
+function changeOver(hist, first, last) {
+  const keys = Object.keys(hist).filter((k) => k <= last).sort();
+  if (!keys.length) return { now: null, change: null, pct: null };
+  const now = hist[keys[keys.length - 1]];
+  const base = keys.filter((k) => k < first).pop() ?? keys.find((k) => k >= first);
+  if (!base || base === keys[keys.length - 1]) return { now, change: null, pct: null };
+  const from = hist[base];
+  return { now, change: now - from, pct: from ? (now - from) / from : null };
+}
+
+/** @param {SocialAccount} a */
+function avatar(a) {
+  return a.image
+    ? h('img', { class: 'social-pic', src: a.image, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' })
+    : h('span', { class: 'social-avatar' }, icon(a.network === 'x' ? 'x-mark' : 'linkedin'));
+}
+
+/** @param {number | null} change @param {number | null} pct */
+const changePill = (change, pct) => (change === null
+  ? h('span', { class: 'muted small' }, 'No change yet')
+  : h('span', { class: `social-change ${change > 0 ? 'up' : change < 0 ? 'down' : ''}` }, `${signed(change)}${pct === null ? '' : ` (${percent(pct)})`}`));
+
+/** @param {AccountRow} row @param {string[]} labels */
+function accountCard(row, labels) {
+  const { account: a } = row;
+  const points = row.values.filter((v) => v !== null).length;
+  return h('section', { class: 'card stack social-card' },
+    h('header', { class: 'social-head' },
+      avatar(a),
+      h('div', { class: 'social-name' },
+        h('strong', null, a.name || handleLabel(a)),
+        h('span', { class: 'muted small' },
+          icon(a.network === 'x' ? 'x-mark' : 'linkedin'), ' ',
+          h('a', { href: profileUrl(a), target: '_blank', rel: 'noopener noreferrer' }, handleLabel(a)),
+          row.project ? ` · ${row.project}` : ''))),
+    h('div', { class: 'social-now' },
+      h('strong', null, row.now === null ? '—' : count.format(row.now)),
+      h('span', { class: 'muted small' }, 'followers'),
+      changePill(row.change, row.pct)),
+    a.error ? h('p', { class: 'small social-error', role: 'status' }, a.error) : null,
+    points > 1
+      ? lineChart(labels, [{ name: 'Followers', color: 'var(--accent)', values: row.values, area: true }], { fit: true, format: (v) => count.format(Math.round(v)) })
+      : h('p', { class: 'muted small' }, points ? 'The line starts once a second day is read.' : 'Not read yet. The runners read the counts every few hours.'),
+    a.at ? h('p', { class: 'muted small' }, `Read ${new Date(a.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`) : null);
+}
+
+/** @param {Store} store @param {PeriodWindow} w */
+export function socialsTab(store, w) {
+  const { accounts, history } = store.get(SOCIALS);
+  if (!accounts.length) {
+    return notice({
+      tone: 'info',
+      text: 'No account followed yet. Add your X and LinkedIn accounts in Settings, and their followers show here over time.',
+      actions: [
+        h('a', { href: settingsHref('x'), class: 'btn-small primary-link' }, 'Add X accounts'),
+        h('a', { href: settingsHref('linkedin'), class: 'btn-small primary-link' }, 'Add LinkedIn accounts'),
+      ],
+    });
+  }
+  const end = w.end - 1;
+  const first = dayKey(w.start);
+  const last = dayKey(end);
+  const days = daysBetween(Math.min(w.start, end - (MIN_DAYS - 1) * DAY), end);
+  const labels = days.map((k) => `${Number(k.slice(5, 7))}/${Number(k.slice(8))}`);
+  const projects = new Map(store.get('projects').projects.map((p) => [p.id, p.name]));
+
+  /** @type {AccountRow[]} */
+  const rows = accounts.map((a) => {
+    const hist = history?.[a.id] ?? {};
+    return {
+      account: a,
+      ...changeOver(hist, first, last),
+      values: days.map((k) => hist[k] ?? null),
+      project: (a.projectId && projects.get(a.projectId)) || '',
+    };
+  });
+
+  const read = rows.filter((r) => r.now !== null);
+  const total = read.reduce((s, r) => s + /** @type {number} */ (r.now), 0);
+  const changed = rows.filter((r) => r.change !== null);
+  const gained = changed.reduce((s, r) => s + /** @type {number} */ (r.change), 0);
+  const startTotal = changed.reduce((s, r) => s + /** @type {number} */ (r.now) - /** @type {number} */ (r.change), 0);
+  const byNetwork = Object.keys(NETWORKS).map((n) => [NETWORKS[n], accounts.filter((a) => a.network === n).length]).filter(([, c]) => c);
+  const failed = accounts.filter((a) => a.error);
+
+  return h('div', { class: 'stack-lg' },
+    failed.length
+      ? notice({ text: `${failed.length} account${failed.length > 1 ? 's' : ''} could not be read on the last try: ${failed.map((a) => `${handleLabel(a)} (${a.error})`).join('; ')}` })
+      : null,
+    h('div', { class: 'summary' },
+      stat('Followers', count.format(total), `across ${read.length} of ${accounts.length} account${accounts.length === 1 ? '' : 's'}`),
+      stat('Growth', changed.length ? signed(gained) : '—', changed.length ? `${percent(startTotal ? gained / startTotal : null) || 'new'} over the period` : 'Needs counts from two days'),
+      stat('Accounts', String(accounts.length), byNetwork.map(([n, c]) => `${c} ${n}`).join(' · '))),
+    h('div', { class: 'social-grid' }, rows.map((r) => accountCard(r, labels))),
+    h('section', { class: 'card stack' },
+      h('h3', null, 'By account'),
+      sortTable('socials', [
+        { label: 'Account', value: (r) => r.account.name || handleLabel(r.account) },
+        { label: 'Network', value: (r) => NETWORKS[r.account.network] ?? r.account.network },
+        { label: 'Project', value: (r) => r.project || '—' },
+        { label: 'Followers', num: true, value: (r) => r.now ?? -1, format: (v) => (v < 0 ? '—' : count.format(v)) },
+        { label: 'Change', num: true, value: (r) => r.change ?? 0, format: (v, r) => (r.change === null ? '—' : signed(v)) },
+        { label: 'Change %', num: true, value: (r) => r.pct ?? 0, format: (v, r) => (r.pct === null ? '—' : percent(v)) },
+      ], rows)),
+    rows.some((r) => r.now !== null) ? null : empty('The runners read the counts every few hours. Start them with bun start.'));
+}
