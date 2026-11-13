@@ -370,7 +370,7 @@ const toggleExpanded = (store, id) => {
   store.refresh();
 };
 
-// Used by drag-and-drop onto a sidebar list. projectId null means Personal.
+// projectId null means Personal.
 /** @param {Store} store @param {string} id @param {string | null} projectId */
 const moveToProject = (store, id, projectId) => updateItem(store, id, { projectId });
 
@@ -431,6 +431,59 @@ function nestUnder(store, id, parentId, patch = {}) {
     if ('status' in patch) delete item.done;
   });
 }
+
+// --- Dragging several tasks: a drag that starts on a selected task carries every selected task ---
+
+// The tasks a drag carries: the selected ones, in list order, when the dragged task is among them, else the dragged
+// task alone. With `tops`, a selected task under another selected task is left out: it moves with its parent.
+/** @param {Store} store @param {boolean} [tops] @returns {string[]} */
+function draggedIds(store, tops = false) {
+  const id = view.dragId;
+  if (!id) return [];
+  if (!view.selected.has(id) || view.selected.size < 2) return [id];
+  const items = store.get(COLLECTION).items;
+  const byId = new Map(items.map((i) => [i.id, i]));
+  /** @param {Task} item */
+  const underPicked = (item) => {
+    for (let at = item.parentId, n = 0; at && n <= items.length; at = byId.get(at)?.parentId, n++) if (view.selected.has(at)) return true;
+    return false;
+  };
+  return items.filter((i) => view.selected.has(i.id) && !(tops && underPicked(i))).map((i) => i.id);
+}
+
+// Puts the dragged tasks under `parentId`, in their order. One that would go under itself stays where it is.
+/** @param {Store} store @param {string} parentId @param {Partial<Task>} [patch] */
+function nestDragged(store, parentId, patch = {}) {
+  const items = store.get(COLLECTION).items;
+  const ids = draggedIds(store, true).filter((id) => id !== parentId);
+  const ok = ids.filter((id) => !wouldLoop(items, id, parentId));
+  if (ok.length < ids.length) toast(ids.length === 1 ? 'A task cannot go under one of its own subtasks' : 'A task cannot go under one of its own subtasks, so it stayed where it was');
+  for (const id of ok) nestUnder(store, id, parentId, patch);
+}
+
+// Moves the dragged tasks next to `targetId`, one after another in their order.
+/** @param {Store} store @param {string} targetId @param {boolean} after @param {string} parentId @param {Partial<Task>} [patch] */
+function moveDragged(store, targetId, after, parentId, patch = {}) {
+  let anchor = targetId;
+  let side = after;
+  for (const id of draggedIds(store, true).filter((x) => x !== targetId)) {
+    moveItem(store, id, anchor, side, parentId, patch);
+    anchor = id;
+    side = true;
+  }
+}
+
+// Fades every task a drag carries, not only the one under the pointer.
+/** @param {Store} store */
+function markDragging(store) {
+  const ids = new Set(draggedIds(store));
+  for (const el of document.querySelectorAll('.todo-item[data-id], .kanban-card[data-id]')) {
+    if (ids.has(/** @type {HTMLElement} */ (el).dataset.id ?? '')) el.classList.add('dragging');
+  }
+}
+const unmarkDragging = () => {
+  for (const el of document.querySelectorAll('.todo-item.dragging, .kanban-card.dragging')) el.classList.remove('dragging');
+};
 
 /**
  * Where a task sits in the list on screen: how deep, the task it shows under, and how many tasks are under it.
@@ -1078,12 +1131,12 @@ function todoRow(store, item, ctx, place) {
       view.dragStatus = statusOf(item);
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', item.id); // Firefox needs data to start a drag
-      e.currentTarget.classList.add('dragging');
+      markDragging(store);
     },
     ondragend: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
       view.dragId = null;
       e.currentTarget.draggable = false;
-      e.currentTarget.classList.remove('dragging');
+      unmarkDragging();
     },
     // The middle of a row puts the dragged task under it; its top and bottom edges reorder.
     ondragover: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
@@ -1105,8 +1158,8 @@ function todoRow(store, item, ctx, place) {
       if (side !== 'inside' && !(reorderEnabled() && canDropOn(item))) return;
       e.preventDefault();
       clearDropMarks(e.currentTarget);
-      if (side === 'inside') nestUnder(store, view.dragId, item.id);
-      else moveItem(store, view.dragId, item.id, side === 'after', place.parentId);
+      if (side === 'inside') nestDragged(store, item.id);
+      else moveDragged(store, item.id, side === 'after', place.parentId);
       view.dragId = null;
     },
   },
@@ -1267,11 +1320,11 @@ function boardCard(store, item, projects, order, place) {
       view.dragId = item.id;
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', item.id); // Firefox needs data to start a drag
-      e.currentTarget.classList.add('dragging');
+      markDragging(store);
     },
-    ondragend: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
+    ondragend: () => {
       view.dragId = null;
-      e.currentTarget.classList.remove('dragging');
+      unmarkDragging();
     },
     // A card's middle puts the dragged task under it; its edges place it before or after, beside it in the tree.
     // Both take the column's status, as a drop on the column does.
@@ -1294,8 +1347,8 @@ function boardCard(store, item, projects, order, place) {
       e.currentTarget.closest('.kanban-col')?.classList.remove('drop-target');
       const side = dropSide(e, true);
       const patch = { status: statusOf(item) };
-      if (side === 'inside') nestUnder(store, view.dragId, item.id, patch);
-      else moveItem(store, view.dragId, item.id, side === 'after', place.parentId, patch);
+      if (side === 'inside') nestDragged(store, item.id, patch);
+      else moveDragged(store, item.id, side === 'after', place.parentId, patch);
       view.dragId = null;
     },
   },
@@ -1376,7 +1429,7 @@ function boardView(store, items, projects, order) {
       ondrop: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
         e.preventDefault();
         e.currentTarget.classList.remove('drop-target');
-        if (view.dragId) updateItem(store, view.dragId, { status: key });
+        updateItems(store, draggedIds(store), { status: key });
         view.dragId = null;
       },
     },
@@ -1732,7 +1785,7 @@ function draw(root, store) {
         if (!accepts || !view.dragId) return;
         e.preventDefault();
         e.currentTarget.classList.remove('drop-target');
-        moveToProject(store, view.dragId, key === 'personal' ? null : key);
+        updateItems(store, draggedIds(store), { projectId: key === 'personal' ? null : key });
         view.dragId = null;
       },
     },
