@@ -39,6 +39,9 @@ for (const c of EMOJI_CATEGORIES) {
 // Slack's suggested reactions, in its order.
 export const QUICK_REACTIONS = ['+1', 'white_check_mark', 'eyes', 'heart', 'joy', 'tada', 'pray', 'raised_hands', 'fire', 'thinking_face', '100', 'rocket'];
 
+/** @param {string} name */
+export const takesSkinTone = (name) => SKIN.has(name);
+
 // Slack's skin tones 2 to 6 are these modifiers.
 const TONES = ['\u{1F3FB}', '\u{1F3FC}', '\u{1F3FD}', '\u{1F3FE}', '\u{1F3FF}'];
 

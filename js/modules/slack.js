@@ -10,7 +10,8 @@ import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import { runnersOnline, runnersKnown } from '../runners.js';
 import { markup } from '../slack-markup.js';
-import { emojiChar, EMOJI, QUICK_REACTIONS } from '../emoji.js';
+import { emojiChar, QUICK_REACTIONS } from '../emoji.js';
+import { pickEmoji } from '../emoji-picker.js';
 import {
   SLACK, SLACK_DEFAULTS, keyOf, splitKey, addWorkspaces, listChannels, ensureUsers, readCounts, readHistory, readThread,
   postMessage, editMessage, deleteMessage, react, markRead, customEmoji, fileData, slackLink,
@@ -840,26 +841,13 @@ function sessionImage(w, url, alt) {
   return img;
 }
 
-// The reaction picker: Slack's usual ones, then any emoji by name, the workspace's own included.
-/** @param {SlackWorkspace} w @param {(name: string) => void} onPick */
-function pickEmoji(w, onPick) {
-  const custom = Object.keys(live.emoji.get(w.id) ?? {});
-  const names = [...new Set([...Object.keys(EMOJI), ...custom])];
-  const results = h('div', { class: 'slack-emoji-grid' });
-  /** @param {string} name */
-  const choice = (name) => h('button', { type: 'button', class: 'slack-emoji-choice', title: `:${name}:`, onclick: () => { dialog.close(); onPick(name); } }, emojiNode(w.id, name));
-  /** @param {string} q */
-  const fill = (q) => {
-    const words = q.trim().toLowerCase().replace(/:/g, '');
-    const list = words ? names.filter((n) => n.includes(words)).slice(0, 80) : QUICK_REACTIONS;
-    results.replaceChildren(...(list.length ? list.map(choice) : [h('p', { class: 'muted small' }, 'No emoji by that name.')]));
-  };
-  fill('');
-  const dialog = openDialog({
-    title: 'React',
-    body: h('div', { class: 'stack' },
-      h('input', { type: 'search', placeholder: 'Find an emoji by name', 'aria-label': 'Find an emoji', oninput: (/** @type {Event} */ e) => fill(/** @type {HTMLInputElement} */ (e.target).value) }),
-      results),
+// The reaction picker, with the workspace's own emoji. Picking one already there as mine takes it off, as in Slack.
+/** @param {Store} store @param {string} key @param {Message} m @param {SlackWorkspace} w */
+function pickReaction(store, key, m, w) {
+  pickEmoji({
+    custom: Object.keys(live.emoji.get(w.id) ?? {}),
+    render: (name) => emojiNode(w.id, name),
+    onPick: (name) => toggleReaction(store, key, m, !m.reactions.find((r) => r.name === name)?.users.includes(w.userId), name),
   });
 }
 
@@ -965,7 +953,7 @@ function messageRow(store, key, m, { compact, inThread }) {
             onclick: () => toggleReaction(store, key, m, !on, r.name),
           }, emojiNode(team, r.name), h('span', null, String(r.count)));
         }),
-        h('button', { type: 'button', class: 'slack-reaction add', title: 'Add a reaction', 'aria-label': 'Add a reaction', onclick: () => pickEmoji(w, (n) => toggleReaction(store, key, m, true, n)) }, icon('smile')))
+        h('button', { type: 'button', class: 'slack-reaction add', title: 'Add a reaction', 'aria-label': 'Add a reaction', onclick: () => pickReaction(store, key, m, w) }, icon('smile')))
     : null;
   const thread = !inThread && m.replyCount
     ? h('button', { type: 'button', class: 'slack-thread-link', onclick: () => openThread(store, m.ts) },
@@ -986,7 +974,7 @@ function messageRow(store, key, m, { compact, inThread }) {
     : null;
   const actions = h('div', { class: 'slack-msg-actions' },
     QUICK_REACTIONS.slice(0, 3).map((n) => h('button', { type: 'button', class: 'icon-btn', title: `React :${n}:`, 'aria-label': `React :${n}:`, onclick: () => toggleReaction(store, key, m, !m.reactions.find((r) => r.name === n)?.users.includes(w.userId), n) }, emojiNode(team, n))),
-    h('button', { type: 'button', class: 'icon-btn', title: 'Add a reaction', 'aria-label': 'Add a reaction', onclick: () => pickEmoji(w, (n) => toggleReaction(store, key, m, true, n)) }, icon('smile')),
+    h('button', { type: 'button', class: 'icon-btn', title: 'Add a reaction', 'aria-label': 'Add a reaction', onclick: () => pickReaction(store, key, m, w) }, icon('smile')),
     inThread ? null : h('button', { type: 'button', class: 'icon-btn', title: 'Reply in thread', 'aria-label': 'Reply in thread', onclick: () => openThread(store, m.ts) }, icon('message')),
     mine ? h('button', { type: 'button', class: 'icon-btn', title: 'Edit', 'aria-label': 'Edit', onclick: () => editDialog(store, key, m) }, icon('pencil')) : null,
     mine ? h('button', { type: 'button', class: 'icon-btn', title: 'Delete', 'aria-label': 'Delete', onclick: () => deleteDialog(store, key, m) }, icon('trash')) : null,

@@ -64,7 +64,8 @@ js/gmail.js           the Inbox's Gmail reads: one sign-in per account, its emai
 js/gcal.js            Calendar's Google reads: one sign-in per account, its calendar list; events read by the runners into calendar.json
 js/slack.js           the Slack tab's Web API calls through the runners (browser session token and d cookie): workspaces, channels, people, counts, messages, threads, reactions
 js/slack-markup.js    Slack's mrkdwn (mentions, links, code, quotes, emoji) as DOM nodes
-js/emoji.js           Slack's emoji short names for the common emoji
+js/emoji.js           Slack's emoji short names, categories and skin tones, from js/emoji-data.js (generated from emoji-datasource)
+js/emoji-picker.js    the emoji picker, laid out like Slack's: search, category tabs, preview, skin tone, frequently used
 js/modules/slack.js   Slack: every workspace in one sidebar with groups, order, mutes and projects; messages, threads and reactions read live
 js/runner-jobs.js     the jobs the runners do, with their labels and default intervals (shared by the worker and Settings)
 js/runners.js         the board's side of the runners: their heartbeat in runners.json, Run now, their data folder's path
