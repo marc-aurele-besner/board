@@ -136,11 +136,33 @@ export interface NotionLink {
   syncedAt?: string;
   // The last sync's error, '' after one that worked.
   error?: string;
+  // How it is read: 'oauth' with the OAuth sign-in, 'session' with the browser session; missing with the secret.
+  via?: string;
+}
+
+// A public integration's sign-in, for a workspace where no internal integration can be made.
+export interface NotionOAuth {
+  clientId: string;
+  clientSecret: string;
+  // Empty until signed in.
+  accessToken?: string;
+  refreshToken?: string;
+  // The workspace the sign-in was given for.
+  workspace?: string;
+}
+
+// notion.so's own session (the token_v2 cookie): reads what the signed-in account sees, through the web app's API.
+export interface NotionSession {
+  tokenV2: string;
+  // The notion_user_id cookie, when several accounts are signed in.
+  userId?: string;
 }
 
 export interface NotionSettings {
   // An internal integration's secret (ntn_… or secret_…).
   token: string;
+  oauth?: NotionOAuth;
+  session?: NotionSession;
   links: NotionLink[];
 }
 

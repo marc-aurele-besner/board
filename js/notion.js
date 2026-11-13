@@ -1,12 +1,15 @@
 // Notion: the pages of chosen databases become tasks, each database in its own project (Settings → Notion).
 // Notion's API does not answer web pages (no CORS), so the runners call it (tools/jobs/notion.js) and Settings asks
-// them for its checks. The token goes only to api.notion.com. No DOM here: the worker imports this file.
+// them for its checks. A database is read one of three ways (its link's `via`): with an internal integration's
+// secret, with a public integration's OAuth sign-in, both at api.notion.com, or with the browser session through
+// notion.so's own API (js/notion-session.js). No DOM here: the worker imports this file.
 // A page edited later in Notion updates its task, field by field, only where Notion's value changed since the last
 // read (task.notion keeps it), so what was changed on the board stays. Nothing is written back to Notion.
 import { makeTask } from './capture.js';
 import { notify } from './notify-core.js';
 import { workerCall } from './runners.js';
-/** @import { DataStore, NotionLink, NotionSettings, Task, TaskNotion } from '../types/data' */
+import { sessionDatabase, sessionPages, checkSession } from './notion-session.js';
+/** @import { DataStore, NotionLink, NotionSettings, NotionSession, Task, TaskNotion } from '../types/data' */
 /**
  * A database property or a page's property value, as far as it is read.
  * @typedef {{ type: string, name?: string, title?: { plain_text?: string }[], status?: { name?: string } | null,
@@ -27,8 +30,20 @@ export const notionSettings = (store) => ({ token: '', links: [], ...(store.get(
 /** @param {DataStore} store */
 export const hasNotion = (store) => {
   const cfg = notionSettings(store);
-  return Boolean(cfg.token && cfg.links.some((l) => l.on !== false));
+  return Boolean(ways(cfg).length && cfg.links.some((l) => l.on !== false));
 };
+
+// The ways this board can read Notion now, in the order a new database tries them.
+/** @param {NotionSettings} cfg @returns {('token' | 'oauth' | 'session')[]} */
+export function ways(cfg) {
+  /** @type {('token' | 'oauth' | 'session')[]} */
+  const list = [];
+  if (cfg.token) list.push('token');
+  if (cfg.oauth?.accessToken) list.push('oauth');
+  if (cfg.session?.tokenV2) list.push('session');
+  return list;
+}
+export const WAY_LABELS = { token: 'Integration secret', oauth: 'OAuth', session: 'Browser session' };
 
 // The database id in a pasted link or id. In a link it ends the last part of the path, after the title
 // ("My-Tasks-0123…"); ?v= names a view, not the database.
@@ -46,7 +61,7 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** @param {number} status @param {{ message?: string, code?: string } | null} body */
 function explain(status, body) {
-  if (status === 401) return 'Notion rejected this token. Copy the integration secret again.';
+  if (status === 401) return 'Notion rejected this token. Copy the integration secret again, or sign in with Notion again.';
   if (status === 404 || body?.code === 'object_not_found') return 'Notion cannot see this database. Open it in Notion, then ⋯ → Connections, and add the integration.';
   return body?.message || `Notion error ${status}`;
 }
@@ -79,7 +94,7 @@ function call(token, method, path, body) {
         await wait(1000 * (Number(res.headers.get('retry-after')) || 1));
         continue;
       }
-      throw new Error(explain(res.status, answer));
+      throw Object.assign(new Error(explain(res.status, answer)), { status: res.status });
     }
   };
   const result = queue.then(run);
@@ -181,29 +196,101 @@ export async function checkNotionToken(token) {
   return `Connected as “${me.name ?? 'integration'}”${where}.`;
 }
 
-// Runners side of adding a database: its title and the properties the sync will read.
-/** @param {string} token @param {string} databaseId */
-export async function describeDatabase(token, databaseId) {
-  const db = await getDatabase(token, databaseId);
-  return { name: plain(db.title) || 'Untitled database', fields: pickProperties(db.properties ?? {}) };
+export { checkSession };
+
+/** @param {NotionSettings} cfg @param {string} [via] */
+const tokenFor = (cfg, via) => (via === 'oauth' ? cfg.oauth?.accessToken ?? '' : cfg.token);
+
+// A database's title and properties, read the link's way.
+/** @param {NotionSettings} cfg @param {string | undefined} via @param {string} databaseId @returns {Promise<NotionDatabase>} */
+const databaseVia = (cfg, via, databaseId) => (via === 'session'
+  ? sessionDatabase(/** @type {NotionSession} */ (cfg.session), databaseId)
+  : getDatabase(tokenFor(cfg, via), databaseId));
+
+// Runners side of adding a database: its title and the properties the sync will read. Each way that is set up is
+// tried in turn, so a database only the session can open is still found; `via` says which one did.
+/** @param {NotionSettings} cfg @param {string} databaseId */
+export async function describeDatabase(cfg, databaseId) {
+  const list = ways(cfg);
+  if (!list.length) throw new Error('Set up an integration secret, an OAuth sign-in or a browser session first.');
+  /** @type {string[]} */
+  const errors = [];
+  for (const via of list) {
+    try {
+      const db = await databaseVia(cfg, via, databaseId);
+      return { name: plain(db.title) || 'Untitled database', fields: pickProperties(db.properties ?? {}), via };
+    } catch (err) {
+      const message = /** @type {Error} */ (err).message;
+      errors.push(list.length > 1 ? `${WAY_LABELS[via]}: ${message}` : message);
+    }
+  }
+  throw new Error(errors.join(' '));
 }
 
-// Settings → Notion: the same two, through the runners.
+// Runners side of the OAuth sign-in: trades the code (or the refresh token) for an access token. The client secret
+// goes only to api.notion.com.
+/**
+ * @param {{ clientId: string, clientSecret: string, code?: string, redirectUri?: string, refreshToken?: string }} p
+ * @returns {Promise<{ accessToken: string, refreshToken: string, workspace: string }>}
+ */
+export async function exchangeNotionCode({ clientId, clientSecret, code, redirectUri, refreshToken }) {
+  if (!clientId || !clientSecret) throw new Error('Add the OAuth client ID and secret first.');
+  let res;
+  try {
+    res = await fetch(`${API}/oauth/token`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`, 'Notion-Version': VERSION, 'content-type': 'application/json' },
+      body: JSON.stringify(refreshToken
+        ? { grant_type: 'refresh_token', refresh_token: refreshToken }
+        : { grant_type: 'authorization_code', code, redirect_uri: redirectUri }),
+    });
+  } catch {
+    throw new Error('Could not reach Notion. Check the connection.');
+  }
+  /** @type {{ access_token?: string, refresh_token?: string, workspace_name?: string, error?: string, error_description?: string, message?: string } | null} */
+  const answer = await res.json().catch(() => null);
+  if (!res.ok || !answer?.access_token) {
+    if (answer?.error === 'invalid_client') throw new Error('Notion does not know this client ID and secret. Copy them again from the integration.');
+    throw new Error(answer?.error_description || answer?.message || answer?.error || `Notion error ${res.status}`);
+  }
+  return { accessToken: answer.access_token, refreshToken: answer.refresh_token ?? refreshToken ?? '', workspace: answer.workspace_name ?? '' };
+}
+
+// Settings → Notion: the checks, through the runners.
 /** @param {string} token @returns {Promise<string>} */
 export const checkNotion = async (token) => (await workerCall('POST', '/notion/check', { token }, 30000)).text;
-/** @param {string} token @param {string} databaseId @returns {Promise<{ id: string, name: string, fields: PropertyNames }>} */
-export const readNotionDatabase = (token, databaseId) => workerCall('POST', '/notion/database', { token, databaseId }, 30000);
+/** @param {NotionSession} session @returns {Promise<string>} */
+export const checkNotionSession = async (session) => (await workerCall('POST', '/notion/session', { session }, 30000)).text;
+/** @param {NotionSettings} cfg @param {string} databaseId @returns {Promise<{ id: string, name: string, fields: PropertyNames, via: string }>} */
+export const readNotionDatabase = (cfg, databaseId) => workerCall('POST', '/notion/database', { cfg, databaseId }, 45000);
+/**
+ * @param {{ clientId: string, clientSecret: string, code: string, redirectUri: string }} p
+ * @returns {Promise<{ accessToken: string, refreshToken: string, workspace: string }>}
+ */
+export const finishNotionSignIn = (p) => workerCall('POST', '/notion/oauth', p, 30000);
 
 /** @type {(keyof Omit<TaskNotion, 'url' | 'link' | 'edited'>)[]} */
 const FIELDS = ['text', 'status', 'due', 'priority'];
 
 // Reads one database and brings its tasks up to date. The first read skips pages already done, so linking a long
 // database does not fill the board with finished work.
-/** @param {DataStore} store @param {string} token @param {NotionLink} link */
-async function syncLink(store, token, link) {
-  const db = await getDatabase(token, link.databaseId);
+/** @param {DataStore} store @param {NotionSettings} cfg @param {NotionLink} link */
+async function syncLink(store, cfg, link) {
+  /** @type {NotionDatabase} */
+  let db;
+  /** @type {NotionPage[]} */
+  let all;
+  if (link.via === 'session') {
+    if (!cfg.session?.tokenV2) throw new Error('This database is read with the browser session, and none is set.');
+    ({ database: db, pages: all } = await sessionPages(cfg.session, link.databaseId, link.syncedAt));
+  } else {
+    const token = tokenFor(cfg, link.via);
+    if (!token) throw new Error(link.via === 'oauth' ? 'This database is read with the OAuth sign-in. Sign in with Notion again.' : 'This database is read with the integration secret, and none is set.');
+    db = await getDatabase(token, link.databaseId);
+    all = await queryPages(token, link.databaseId, link.syncedAt);
+  }
   const names = pickProperties(db.properties ?? {});
-  const pages = (await queryPages(token, link.databaseId, link.syncedAt)).filter((p) => !p.archived && !p.in_trash);
+  const pages = all.filter((p) => !p.archived && !p.in_trash);
   let added = 0;
   let updated = 0;
   /** @type {Task[]} */
@@ -243,7 +330,7 @@ async function syncLink(store, token, link) {
 // Runs in the runners.
 /** @param {DataStore} store @param {{ ids?: string[] }} [options] */
 export async function syncNotion(store, { ids } = {}) {
-  const { token, links } = notionSettings(store);
+  const { links } = notionSettings(store);
   const chosen = links.filter((l) => l.on !== false && (!ids?.length || ids.includes(l.id)));
   let added = 0;
   let updated = 0;
@@ -253,7 +340,17 @@ export async function syncNotion(store, { ids } = {}) {
     /** @type {Partial<NotionLink>} */
     let patch;
     try {
-      const r = await syncLink(store, token, link);
+      const r = await syncLink(store, notionSettings(store), link).catch(async (err) => {
+        // An OAuth token Notion stopped accepting: renew it once with the refresh token, then read again.
+        const { oauth } = notionSettings(store);
+        if (link.via !== 'oauth' || err?.status !== 401 || !oauth?.refreshToken) throw err;
+        const fresh = await exchangeNotionCode({ clientId: oauth.clientId, clientSecret: oauth.clientSecret, refreshToken: oauth.refreshToken });
+        store.update('settings', (d) => {
+          const cfg = d.notion ?? { token: '', links: [] };
+          d.notion = { ...cfg, oauth: { ...oauth, ...cfg.oauth, accessToken: fresh.accessToken, refreshToken: fresh.refreshToken } };
+        });
+        return syncLink(store, notionSettings(store), link);
+      });
       added += r.added;
       updated += r.updated;
       patch = { syncedAt: r.syncedAt, error: '' };
