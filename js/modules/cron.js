@@ -13,7 +13,7 @@ import {
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, templateFromFlow, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
   testStep, testsOf, isTesting, clearTests, resumeDevTests, useDevStarter, varsTree, fillParts, pathTo, parseData, INPUT_NONE, reorderSteps, projectVars, runState, devWaits, DEV_WAIT_MINUTES, devJsonOffered, devJson, DEV_JSON_PROMPT,
-  FORMAT_MODES, PARSE_MODES, DEDUPE_MATCH, DEDUPE_SCOPE, SEPARATOR_OPTIONS, LOOP_LIMIT, makeField, loopSpan, loopOf, loopMax, valueOf, listOf, withItem, linkedinDays,
+  FORMAT_MODES, PARSE_MODES, DEDUPE_MATCH, DEDUPE_SCOPE, AI_FILTER_MODES, AI_FILTER_BATCH, AI_FILTER_MAX, aiFilterTop, SEPARATOR_OPTIONS, LOOP_LIMIT, makeField, loopSpan, loopOf, loopMax, valueOf, listOf, withItem, linkedinDays,
 } from '../cron.js';
 import { modelForTask } from '../models.js';
 import { DEV_MODELS, DEV_MODEL_NAMES, DEV_EFFORTS } from '../dev-core.js';
@@ -674,6 +674,10 @@ function stepSummary(store, flow, step) {
   if (step.type === 'dedupe') {
     const scope = /** @type {Record<string, string>} */ ({ flow: 'this flow’s tasks', project: 'the project’s tasks', all: 'every task' })[step.scope || 'flow'] ?? 'this flow’s tasks';
     return `${step.text || '{{item}}'} not in ${scope}`;
+  }
+  if (step.type === 'ai-filter') {
+    const what = String(step.criterion ?? '').split('\n').find((l) => l.trim())?.trim() || 'Describe what to keep';
+    return step.mode === 'rank' ? `Top ${aiFilterTop(step)}: ${what}` : what;
   }
   if (step.type === 'loop') {
     const n = loopSpan(flow, flow.steps.indexOf(step));
@@ -1642,6 +1646,7 @@ function stepForm(store, flow, step) {
   if (step.type === 'format') return formatForm(store, flow, step, set);
   if (step.type === 'parse') return parseForm(store, flow, step, set);
   if (step.type === 'dedupe') return dedupeForm(store, flow, step, set);
+  if (step.type === 'ai-filter') return aiFilterForm(store, flow, step, set);
   if (step.type === 'loop') return loopForm(store, flow, step, set);
   if (step.type === 'profile') {
     const own = withFlowProject(flow, step).projectId;
@@ -1867,6 +1872,43 @@ function dedupeForm(store, flow, step, set) {
       'Keeps the items no task matches yet, done tasks included, so what a past run found is not made again; two items with the same key keep the first. ',
       'With “title or description”, put the key in the task, such as the link in its description. ',
       'Its output is the list it kept: a Loop after it makes a task for each, and a “Stop if” on “The data step found nothing” ends the run when every item was already there.'));
+}
+
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {(patch: Partial<CronStep>) => void} set
+ */
+function aiFilterForm(store, flow, step, set) {
+  const index = flow.steps.indexOf(step);
+  const n = String(index + 1);
+  const vars = () => previewVars(store, flow, step);
+  const rank = step.mode === 'rank';
+  return h('div', { class: 'stack' },
+    varField('Items', h('input', { value: step.items ?? '{{input}}', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (/** @type {FieldEvent} */ e) => set({ items: e.target.value.trim() }) }),
+      `${step.id}:items`, varNames(flow, index), ITEMS_HINT, vars),
+    varField('Keep the items that are', h('textarea', { rows: 2, placeholder: 'people who decide on engineering hires', onchange: (/** @type {FieldEvent} */ e) => set({ criterion: e.target.value }) }, step.criterion ?? ''),
+      `${step.id}:criterion`, varNames(flow, index), 'In plain words; the model judges each item on what it shows.', vars),
+    h('div', { class: 'row cron-fields' },
+      field('Keep', select(step.mode || 'keep', AI_FILTER_MODES, (mode) => set({ mode }))),
+      rank
+        ? field('N', h('input', {
+            type: 'number', min: 1, max: AI_FILTER_MAX, value: String(aiFilterTop(step)),
+            onchange: (/** @type {FieldEvent} */ e) => set({ top: Math.min(AI_FILTER_MAX, Math.max(1, Math.round(Number(e.target.value) || 1))) }),
+          }), 'The best scores, in that order.')
+        : null),
+    varField('Each item as the model sees it (optional)', h('input', { value: step.text ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, placeholder: '{{item.name}} — {{item.headline}}', onchange: (/** @type {FieldEvent} */ e) => set({ text: e.target.value }) }),
+      `${step.id}:text`, varNames(flow, index, loopOf(flow, index) >= 0 ? [] : DEDUPE_NAMES),
+      'Empty sends the whole item as JSON. Fewer, telling parts cost less and judge better.', vars),
+    h('div', { class: 'row' },
+      h('span', { class: 'muted small' }, 'Model'),
+      modelChip({ value: step.model, nullable: true, nullLabel: `Default (${modelForTask(store, AI_TASK) || 'not set'})`, onPick: (model) => set({ model: model ?? '' }) })),
+    store.get('settings').openrouter?.key ? null : notice({ tone: 'info', text: 'AI steps need an OpenRouter key.', actions: [h('a', { href: '#/settings?section=openrouter', class: 'btn-link' }, 'Add a key')] }),
+    h('p', { class: 'muted small' },
+      `Sends the items ${AI_FILTER_BATCH} at a time, one model call after the other, and keeps ${rank ? 'the best scores' : 'those that match, in their order'}. `,
+      `Its output is the kept items as they were, each JSON item with the model’s _reason and _score: {{step${n}[0].name}}, or {{item._reason}} in a Loop after it. `,
+      `At most ${AI_FILTER_MAX} items are sent. A call that fails is tried once more, then the step fails. An empty result lets a “Stop if” on “The data step found nothing” end the run. The system prompt is in Settings → Prompts.`));
 }
 
 /**
