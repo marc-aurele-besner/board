@@ -2062,13 +2062,6 @@ async function runStep(store, flow, step, input, ctx) {
     const category = step.category || '';
     // The task to go under: an id, most often an earlier Create task step's output ({{step2}}).
     const parentId = fill(step.parent ?? '', vars).trim();
-    ctx.data = { title, description, projectId, priority: step.priority || 'none', status, category, due, ...(parentId ? { parentId } : {}) };
-    // A test of the whole flow makes the task for real, so the Dev step after it can work on it.
-    if (ctx.dry && !ctx.live) {
-      ctx.note = `Test run: would create the task “${title}”${due ? ` due ${due}` : ''}${parentId ? ' under another task' : ''}.`;
-      return '';
-    }
-    if (parentId && !store.get('todos').items.some((t) => t.id === parentId)) throw new Error(`No task has the id “${parentId.slice(0, 80)}” to put this one under.`);
     const task = makeTask({
       text: title,
       description,
@@ -2081,10 +2074,17 @@ async function runStep(store, flow, step, input, ctx) {
       autoRef: flow.id,
       ...(parentId ? { parentId } : {}),
     });
+    // The id first: it is what {{stepN}} gives a later step. A test shows the id the task would get.
+    ctx.data = { id: task.id, title, description, projectId, priority: task.priority, status, category, due, ...(parentId ? { parentId } : {}) };
+    // A test of the whole flow makes the task for real, so the Dev step after it can work on it.
+    if (ctx.dry && !ctx.live) {
+      ctx.note = `Test run: would create the task “${title}”${due ? ` due ${due}` : ''}${parentId ? ' under another task' : ''}.`;
+      return task.id;
+    }
+    if (parentId && !store.get('todos').items.some((t) => t.id === parentId)) throw new Error(`No task has the id “${parentId.slice(0, 80)}” to put this one under.`);
     // The run that made it, so the task can open it (Tasks shows a Cron button).
     if (ctx.runId) task.cronRun = ctx.runId;
     store.update('todos', (d) => d.items.push(task));
-    /** @type {{ id?: string }} */ (ctx.data).id = task.id;
     if (ctx.dry) ctx.note = `Test run: created the task “${title}”${due ? ` due ${due}` : ''}.`;
     // A "Run in Dev" step later in the run works on this task.
     ctx.task = task;
