@@ -3111,6 +3111,14 @@ button.cal-agenda-name:hover { color: var(--accent); }
 .term-turns.waiting { color: var(--text); }
 .term-turns-state.working { background: var(--income); animation: pulse 1.4s ease-in-out infinite; }
 .term-turns-state.waiting { background: var(--accent); }
+/* claude's done signal: a check in place of the dot, and a Done chip on the turn that gave it. */
+.term-turns.signal { color: var(--text); }
+.term-turns-check { display: inline-flex; color: var(--income); }
+.term-turns .term-turns-check .icon, .turns-title .term-turns-check .icon { width: 12px; height: 12px; }
+.turns-signal { display: flex; gap: 6px; align-items: center; color: var(--text); }
+.turns-signal .icon { width: 13px; height: 13px; flex: none; color: var(--income); }
+.turns-done { flex: none; padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, var(--income) 16%, transparent); color: var(--income); font-size: 0.72rem; font-weight: 600; }
+.turns-row.signal .turns-icon { color: var(--income); }
 .turns-pop { width: min(420px, calc(100vw - 16px)); padding: 0; gap: 0; overflow: hidden; animation-duration: 0.1s; }
 .turns-head { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
 .turns-title { display: flex; align-items: center; gap: 7px; font-size: 0.88rem; }
