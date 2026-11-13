@@ -46,7 +46,7 @@ export interface CronFormatField {
   value: string;
 }
 
-// A step (makeStep()). type: 'gather', 'ai', 'stop', 'format', 'parse', 'dedupe', 'loop', 'task', 'update', 'notify',
+// A step (makeStep()). type: 'gather', 'ai', 'stop', 'format', 'parse', 'dedupe', 'ai-filter', 'loop', 'task', 'update', 'notify',
 // 'profile' or 'dev'; each type uses some fields.
 export interface CronStep {
   id: string;
@@ -96,8 +96,12 @@ export interface CronStep {
   // 'text' (its title or description holds it); scope: 'flow', 'project' or 'all', the tasks it compares with.
   match?: string;
   scope?: string;
-  // format 'list', dedupe and loop: the list to read, as a variable ('{{input}}', '{{step2.items}}').
+  // format 'list', dedupe, ai-filter and loop: the list to read, as a variable ('{{input}}', '{{step2.items}}').
   items?: string;
+  // ai-filter: which items to keep, in words (takes variables). mode 'keep' (the matching items) or 'rank' (the `top`
+  // best by score). `text` is each item as the model reads it ('' for the item as JSON); `model` '' is Cron's default.
+  criterion?: string;
+  top?: number;
   // format 'list': each item's text, and what goes between them ('line', 'blank', 'comma' or 'space').
   itemText?: string;
   separator?: string;
