@@ -1473,11 +1473,12 @@ function drawTurns() {
           title: `${p.kind === 'work' ? 'Working' : `Waiting on ${WAIT_KINDS[p.kind] ?? 'you'}`} · ${clock(p.at)} · ${took(p.end - p.at)}`,
         }))) : null,
         h('div', { class: 'muted small turns-meta' },
-          clock(r.t.at),
-          now ? ` · ${now.kind === 'work' ? 'working' : `waiting on ${WAIT_KINDS[now.kind] ?? 'you'}`} for ${took(now.end - now.at)}` : '',
-          r.total > 0 ? ` · ${took(r.worked)} working` : '',
-          r.waited ? ` · ${took(r.waited)} waiting on you${waits > 1 ? ` (${waits} times)` : ''}` : '',
-          status === 'interrupted' ? ' · interrupted' : ''));
+          h('span', null, `Started ${clock(r.t.at)}`),
+          now ? h('span', null, h('span', { class: `turns-key ${now.kind === 'work' ? 'work' : 'wait'}` }),
+            `Now ${now.kind === 'work' ? 'working' : `waiting on ${WAIT_KINDS[now.kind] ?? 'you'}`} for ${took(now.end - now.at)}`) : null,
+          r.total > 0 ? h('span', null, h('span', { class: 'turns-key work' }), `${took(r.worked)} working`) : null,
+          r.waited ? h('span', null, h('span', { class: 'turns-key wait' }), `${took(r.waited)} waiting on you${waits > 1 ? ` (${waits} times)` : ''}`) : null,
+          status === 'interrupted' ? h('span', null, 'Interrupted') : null));
       }))
       : h('p', { class: 'muted small' }, 'No prompt yet.'));
   const list = el.querySelector('.turns-list');
