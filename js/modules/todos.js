@@ -340,6 +340,9 @@ function dueControl(store, item) {
 /** @param {Task} item */
 function autoBadge(item) {
   if (!item.auto) return null;
+  if (item.auto === 'notion' && item.notion?.url) {
+    return h('a', { class: 'auto-badge', href: item.notion.url, target: '_blank', rel: 'noopener', title: 'Imported from Notion. Open the page' }, icon('notion'), 'Notion');
+  }
   const telegram = item.auto === 'telegram';
   return h('span', { class: 'auto-badge', title: `Created automatically by ${/** @type {Record<string, string>} */ (AUTO_SOURCES)[item.auto] ?? 'a rule'}` }, icon(telegram ? 'send' : 'zap'), telegram ? 'Telegram' : 'Auto');
 }

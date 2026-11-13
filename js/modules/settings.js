@@ -19,6 +19,7 @@ import { devEnvironmentCard } from './settings-dev.js';
 import { runnersCard } from './settings-runners.js';
 import { slackCard } from './settings-slack.js';
 import { socialsCard } from './settings-socials.js';
+import { notionCard } from './settings-notion.js';
 import { modelForTask } from '../models.js';
 import { logo } from './positions.js';
 
@@ -75,6 +76,7 @@ const SECTION_GROUPS = [
       ['contracts', 'Smart contracts', 'code'],
       ['uniswap', 'Uniswap', 'droplet'],
       ['telegram', 'Telegram', 'send'],
+      ['notion', 'Notion', 'notion'],
       ['analytics', 'Google Analytics', 'activity'],
       ['search', 'Search consoles', 'search'],
       ['resend', 'Resend', 'mail'],
@@ -1032,6 +1034,7 @@ function draw(root, store) {
         : view.section === 'contracts' ? contractsCard(store)
         : view.section === 'categories' ? labelsCard(store)
         : view.section === 'telegram' ? telegramCard(store)
+        : view.section === 'notion' ? notionCard(store)
         : view.section === 'analytics' ? analyticsCard(store)
         : view.section === 'search' ? searchCard(store)
         : view.section === 'resend' ? resendCard(store)

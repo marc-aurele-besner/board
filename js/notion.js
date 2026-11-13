@@ -191,7 +191,7 @@ export async function describeDatabase(token, databaseId) {
 // Settings → Notion: the same two, through the runners.
 /** @param {string} token @returns {Promise<string>} */
 export const checkNotion = async (token) => (await workerCall('POST', '/notion/check', { token }, 30000)).text;
-/** @param {string} token @param {string} databaseId @returns {Promise<{ name: string, fields: PropertyNames }>} */
+/** @param {string} token @param {string} databaseId @returns {Promise<{ id: string, name: string, fields: PropertyNames }>} */
 export const readNotionDatabase = (token, databaseId) => workerCall('POST', '/notion/database', { token, databaseId }, 30000);
 
 /** @type {(keyof Omit<TaskNotion, 'url' | 'link' | 'edited'>)[]} */
