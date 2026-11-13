@@ -90,13 +90,13 @@ const formatOf = () => (aiView.measure === 'cost' ? usdPrecise : aiView.measure 
 
 // The same span just before: the day before for a one-day period (up to the same hour today), else as many days before.
 /** @param {PeriodWindow} w */
-function previous(w) {
+export function previous(w) {
   const span = w.hourly ? DAY : w.end - w.start;
   return { start: w.start - span, end: w.end - span };
 }
 
 /** @param {number} cur @param {number} prev */
-function change(cur, prev) {
+export function change(cur, prev) {
   if (!prev) return cur ? 'new' : '—';
   const p = (cur - prev) / prev;
   return `${p > 0 ? '+' : p < 0 ? '−' : ''}${Math.abs(p * 100).toFixed(Math.abs(p) < 0.1 ? 1 : 0)}%`;

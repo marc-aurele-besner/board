@@ -12,7 +12,7 @@ import { contractsActivityTab, contractsActivitySerialize, contractsActivityRest
 import { usageRecords, sumUsage, modelName, modelsByUse, fmtDuration } from '../dev-usage.js';
 import { devBreakdown } from './monitoring-dev.js';
 import { toolUsage } from './monitoring-tools.js';
-import { developmentTab, developmentView } from './monitoring-development.js';
+import { developmentTab, developmentView, VIEWS as DEV_VIEWS, KINDS as DEV_KINDS } from './monitoring-development.js';
 import { aiOverview, aiView, devProjectOf, projectLabel, projectShown, sourceShown, SOURCES, BREAKDOWNS, MEASURES } from './monitoring-ai.js';
 import { sessionStatus } from '../terminal.js';
 import { runnerOf } from '../dev-core.js';
@@ -29,7 +29,7 @@ const TABS = [['ai', 'AI usage'], ['development', 'Development'], ['github', 'Gi
 /** @type {Record<string, string>} */
 const SUBTITLES = {
   ai: 'AI calls made by the board, and what the claude sessions Dev ran for tasks used.',
-  development: 'The claude sessions Dev ran for tasks, turn by turn: time per turn, review time and time per task.',
+  development: 'The claude sessions Dev ran for tasks, turn by turn: time per turn, review time, insights, and the skills, MCP and tools they used.',
   github: 'Commits, pull requests and issues across the repos linked to your projects.',
   analytics: 'Visitors and page views for each project website, from Google Analytics.',
   search: 'How each project website shows up in Google and Bing search.',
@@ -629,6 +629,8 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
       measure: view.tab === 'development' && developmentView.measure !== 'time' ? developmentView.measure
         : view.tab === 'ai' && aiView.measure !== 'cost' ? aiView.measure : '',
       by: view.tab === 'ai' && aiView.by !== 'project' ? aiView.by : '',
+      view: view.tab === 'development' && developmentView.view !== 'overview' ? developmentView.view : '',
+      kind: view.tab === 'development' && developmentView.view === 'skills' && developmentView.kind !== 'skills' ? developmentView.kind : '',
     };
   },
   restore: (/** @type {Record<string, string>} */ p = {}) => {
@@ -645,5 +647,7 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
     aiView.measure = pick(MEASURES, ai ? p.measure : '', 'cost');
     developmentView.project = view.tab === 'development' ? p.project || '' : '';
     developmentView.measure = view.tab === 'development' && p.measure === 'turns' ? 'turns' : 'time';
+    developmentView.view = pick(DEV_VIEWS, p.view, 'overview');
+    developmentView.kind = pick(DEV_KINDS, p.kind, 'skills');
   },
 });
