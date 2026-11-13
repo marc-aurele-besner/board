@@ -947,8 +947,9 @@ async function devTasks(store, items) {
 
 // What each task's terminal is doing, asked of the runner every few seconds once Tasks has been shown.
 // A task whose terminal the runner no longer has (closed, or forgotten after a month) has no entry.
-// A task waits for review once claude quits, or once it has a PR and claude waits for its user: the runner says
-// waiting only when claude's turn ended and no subagent still works, so a PR opened mid-turn does not count yet.
+// A task waits for review once claude quits, once its turn ends with the done signal (its terminal's dot turns
+// green), or once it has a PR and claude waits for its user: the runner says waiting only when claude's turn ended
+// and no subagent still works, so a PR opened mid-turn does not count yet.
 const DEV_POLL_MS = 4000;
 /** @type {{ status: Record<string, RunnerStatus>, withPr: Set<string>, timer: number, polled: boolean }} */
 const devWatch = { status: {}, withPr: new Set(), timer: 0, polled: false };
@@ -974,7 +975,7 @@ export function watchDevSessions(store) {
     devWatch.withPr = withPr;
     if (JSON.stringify(status) === JSON.stringify(was) && [...withPr].every((id) => hadPr.has(id))) return;
     devWatch.status = status;
-    // Only on a change (claude quit, started waiting, or a PR came while it waits), so a task put back in progress
+    // Only on a change (claude quit, gave the done signal, started waiting, or a PR came while it waits), so a task put back in progress
     // while claude waits stays there. claude waiting on a question or a permission is not done.
     const ready = items.filter((t) => {
       // A task with no session reads no entry.
@@ -982,7 +983,10 @@ export function watchDevSessions(store) {
       const before = was[/** @type {string} */ (t.devSession)]?.state;
       if (now === 'done') return before !== 'done';
       const s = status[/** @type {string} */ (t.devSession)];
-      return now === 'waiting' && !s?.ask && withPr.has(t.id) && (before !== 'waiting' || !hadPr.has(t.id));
+      if (now !== 'waiting' || s?.ask) return false;
+      // The done signal says the work is over, with or without a PR.
+      if (s?.signalled && !was[/** @type {string} */ (t.devSession)]?.signalled) return true;
+      return withPr.has(t.id) && (before !== 'waiting' || !hadPr.has(t.id));
     });
     // A new question or permission is said once, wherever the board is open; not those already asked at load.
     if (polled) for (const [id, s] of Object.entries(status)) {
