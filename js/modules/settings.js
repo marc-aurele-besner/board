@@ -700,7 +700,6 @@ function uniswapCard(store) {
   };
   /** @param {Added} x */
   const removeAdded = (x) => {
-    /** @type {'v3ids' | 'v4ids'} */
     const list = addedListOf(x.version);
     save({ [list]: (cfg[list] ?? []).filter((y) => !(y.chainId === x.chainId && String(y.tokenId) === String(x.tokenId))) });
   };

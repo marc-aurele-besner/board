@@ -37,7 +37,7 @@ export interface ChainChoice {
   explorer?: string;
 }
 
-// A Uniswap position added by hand.
+// A Uniswap position added by hand. A v2 pair's tokenId is its address.
 export interface AddedPosition {
   chainId: number;
   tokenId: string;
@@ -50,6 +50,8 @@ export interface UniswapSettings {
   chains: Record<string, ChainChoice>;
   v3ids?: AddedPosition[];
   v4ids?: AddedPosition[];
+  // v2 pairs, read for every wallet.
+  v2ids?: AddedPosition[];
   // Old: Ethereum's node, from before the chains list. Saved as '' once the chains are saved.
   node?: string;
   // Old: the Etherscan key, now under blockchains.etherscan.

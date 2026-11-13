@@ -1,4 +1,4 @@
-// Uniswap v3 and v4 liquidity positions, read straight from each chain's node. Read-only: only public addresses are used,
+// Uniswap v2, v3 and v4 liquidity positions, read straight from each chain's node. Read-only: only public addresses are used,
 // never keys. Token prices come from DefiLlama's public price endpoint.
 import { keccak256 } from './keccak.js';
 /** @import { Chain, Position, PoolState, Swap, ListedToken, RpcLog, Receipt, TxSource, BigIntish, V4Deployment } from '../types/uniswap' */
@@ -11,29 +11,29 @@ const ETH_LOGO = trustLogo('ethereum');
 
 // The chains the LP tab reads. Each address is Uniswap's own deployment on that chain, checked on-chain.
 // The same address is not used on every chain, so every chain carries its own.
-// v4 is left out on a chain Uniswap has not deployed v4 to. etherscan: false marks a chain Etherscan's API does not cover.
+// v2 (its factory) and v4 are left out on a chain Uniswap has not deployed them to. etherscan: false marks a chain Etherscan's API does not cover.
 // v4.start is the first block worth searching for v4 positions (the deployment, or a day before it).
 // span is the widest block range the default node accepts in one log search.
 const ETH = { symbol: 'ETH', coingecko: 'ethereum', logo: ETH_LOGO };
 /** @type {Chain[]} */
 export const CHAINS = [
-  { id: 1, name: 'Ethereum', rpc: 'https://ethereum.publicnode.com', span: 10000, prices: 'ethereum', app: 'ethereum', logo: ETH_LOGO, native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  { id: 1, name: 'Ethereum', rpc: 'https://ethereum.publicnode.com', span: 10000, prices: 'ethereum', app: 'ethereum', logo: ETH_LOGO, native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', v2: '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',
     v4: { positions: '0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e', stateView: '0x7ffe42c4a5deea5b0fec41c94c136cf115597227', start: 21689089 } },
-  { id: 8453, name: 'Base', rpc: 'https://base.publicnode.com', span: 50000, prices: 'base', app: 'base', logo: trustLogo('base'), native: ETH, factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD', positions: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
+  { id: 8453, name: 'Base', rpc: 'https://base.publicnode.com', span: 50000, prices: 'base', app: 'base', logo: trustLogo('base'), native: ETH, factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD', positions: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1', v2: '0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6',
     v4: { positions: '0x7c5f5a4bbd8fd63184577525326123b519429bdc', stateView: '0xa3c0c9b65bad0b08107aa264b0f3db444b867a71', start: 25350993 } },
-  { id: 42161, name: 'Arbitrum One', rpc: 'https://arbitrum-one-rpc.publicnode.com', span: 10000, prices: 'arbitrum', app: 'arbitrum', logo: trustLogo('arbitrum'), native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  { id: 42161, name: 'Arbitrum One', rpc: 'https://arbitrum-one-rpc.publicnode.com', span: 10000, prices: 'arbitrum', app: 'arbitrum', logo: trustLogo('arbitrum'), native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', v2: '0xf1D7CC64Fb4452F05c498126312eBE29f30Fbcf9',
     v4: { positions: '0xd88f38f930b7952f2db2432cb002e7abbf3dd869', stateView: '0x76fd297e2d437cd7f76d50f01afe6160f86e9990', start: 298179155 } },
-  { id: 10, name: 'Optimism', rpc: 'https://optimism-rpc.publicnode.com', span: 10000, prices: 'optimism', app: 'optimism', logo: trustLogo('optimism'), native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  { id: 10, name: 'Optimism', rpc: 'https://optimism-rpc.publicnode.com', span: 10000, prices: 'optimism', app: 'optimism', logo: trustLogo('optimism'), native: ETH, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', v2: '0x0c3c1c532F1e39EdF36BE9Fe0bE1410313E074Bf',
     v4: { positions: '0x3c3ea4b57a46241e54610e5f022e5c45859a1017', stateView: '0xc18a3169788f4f75a170290584eca6395c75ecdb', start: 130947681 } },
-  { id: 137, name: 'Polygon', rpc: 'https://polygon-bor-rpc.publicnode.com', span: 10000, prices: 'polygon', app: 'polygon', logo: trustLogo('polygon'), native: { symbol: 'POL', coingecko: 'polygon-ecosystem-token', logo: trustLogo('polygon') }, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  { id: 137, name: 'Polygon', rpc: 'https://polygon-bor-rpc.publicnode.com', span: 10000, prices: 'polygon', app: 'polygon', logo: trustLogo('polygon'), native: { symbol: 'POL', coingecko: 'polygon-ecosystem-token', logo: trustLogo('polygon') }, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', positions: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', v2: '0x9e5A52f57b3038F1B8EeE45F28b3C1967e22799C',
     v4: { positions: '0x1ec2ebf4f37e7363fdfe3551602425af0b3ceef9', stateView: '0x5ea1bd7974c8a611cbab0bdcafcb1d9cc9b3ba5a', start: 66980394 } },
-  { id: 56, name: 'BNB Chain', rpc: 'https://bsc-rpc.publicnode.com', span: 50000, prices: 'bsc', app: 'bnb', logo: trustLogo('smartchain'), native: { symbol: 'BNB', coingecko: 'binancecoin', logo: trustLogo('smartchain') }, factory: '0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7', positions: '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613',
+  { id: 56, name: 'BNB Chain', rpc: 'https://bsc-rpc.publicnode.com', span: 50000, prices: 'bsc', app: 'bnb', logo: trustLogo('smartchain'), native: { symbol: 'BNB', coingecko: 'binancecoin', logo: trustLogo('smartchain') }, factory: '0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7', positions: '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613', v2: '0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6',
     v4: { positions: '0x7a4a5c919ae2541aed11041a1aeee68f1287f95b', stateView: '0xd13dd3d6e93f276fafc9db9e6bb47c1180aee0c4', start: 45996818 } },
-  { id: 43114, name: 'Avalanche', rpc: 'https://avalanche-c-chain-rpc.publicnode.com', span: 50000, prices: 'avax', app: 'avalanche', logo: trustLogo('avalanchec'), native: { symbol: 'AVAX', coingecko: 'avalanche-2', logo: trustLogo('avalanchec') }, factory: '0x740b1c1de25031C31FF4fC9A62f554A55cdC1baD', positions: '0x655C406EBFa14EE2006250925e54ec43AD184f8B',
+  { id: 43114, name: 'Avalanche', rpc: 'https://avalanche-c-chain-rpc.publicnode.com', span: 50000, prices: 'avax', app: 'avalanche', logo: trustLogo('avalanchec'), native: { symbol: 'AVAX', coingecko: 'avalanche-2', logo: trustLogo('avalanchec') }, factory: '0x740b1c1de25031C31FF4fC9A62f554A55cdC1baD', positions: '0x655C406EBFa14EE2006250925e54ec43AD184f8B', v2: '0x9e5A52f57b3038F1B8EeE45F28b3C1967e22799C',
     v4: { positions: '0xb74b1f14d2754acfcbbe1a221023a5cf50ab8acd', stateView: '0xc3c9e198c735a4b97e3e683f391ccbdd60b69286', start: 56203165 } },
-  { id: 130, name: 'Unichain', rpc: 'https://unichain-rpc.publicnode.com', span: 10000, prices: 'unichain', app: 'unichain', logo: ETH_LOGO, native: ETH, factory: '0x1f98400000000000000000000000000000000003', positions: '0x943e6e07a7e8e791dafc44083e54041d743c46e9',
+  { id: 130, name: 'Unichain', rpc: 'https://unichain-rpc.publicnode.com', span: 10000, prices: 'unichain', app: 'unichain', logo: ETH_LOGO, native: ETH, factory: '0x1f98400000000000000000000000000000000003', positions: '0x943e6e07a7e8e791dafc44083e54041d743c46e9', v2: '0x1f98400000000000000000000000000000000002',
     v4: { positions: '0x4529a01c7a0410167c5740c487a8de60232617bf', stateView: '0x86e8631a016f9068c3f085faf484ee3f5fdee8f2', start: 6819679 } },
-  { id: 4663, name: 'Robinhood Chain', rpc: 'https://rpc.mainnet.chain.robinhood.com', span: 10000000, prices: 'robinhood', app: 'robinhood', logo: ETH_LOGO, native: ETH, factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa', positions: '0x73991a25c818bf1f1128deaab1492d45638de0d3',
+  { id: 4663, name: 'Robinhood Chain', rpc: 'https://rpc.mainnet.chain.robinhood.com', span: 10000000, prices: 'robinhood', app: 'robinhood', logo: ETH_LOGO, native: ETH, factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa', positions: '0x73991a25c818bf1f1128deaab1492d45638de0d3', v2: '0x8bceaa40b9acdfaedf85adf4ff01f5ad6517937f',
     v4: { positions: '0x58daec3116aae6d93017baaea7749052e8a04fa7', stateView: '0xf3334192d15450cdd385c8b70e03f9a6bd9e673b', start: 9506 } },
   { id: 324, name: 'ZKsync Era', rpc: 'https://mainnet.era.zksync.io', span: 50000, prices: 'era', app: 'zksync', logo: trustLogo('zksync'), native: ETH, factory: '0x8FdA5a7a8dCA67BBcDd10F02Fa0649A937215422', positions: '0x0616e5762c1E7Dc3723c50663dF10a162D690a86', etherscan: false },
 ];
@@ -109,7 +109,15 @@ const SEL = {
   getPositionInfo: '0xdacf1d2f',
   collect: '0xfc6f7865',
   poolManager: '0xdc4c90d3',
+  token0: '0x0dfe1681',
+  token1: '0xd21220a7',
+  getReserves: '0x0902f1ac',
+  totalSupply: '0x18160ddd',
+  getPair: '0xe6a43905',
+  feeTo: '0x017e7e58',
 };
+// Swap(address,uint256,uint256,uint256,uint256,address) on a v2 pair.
+const SWAP_V2 = '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822';
 // Swap(address,address,int256,int256,uint160,uint128,int24) on a v3 pool, and
 // Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24) on v4's pool manager.
 const SWAP_V3 = '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67';
@@ -117,6 +125,7 @@ const SWAP_V4 = '0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad71
 const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const MAX_POSITIONS = 40;
 const Q96 = 2 ** 96;
+export const MAX_TICK = 887272; // the widest possible range: a "full range" position
 
 const pad = (/** @type {string} */ hex) => hex.replace(/^0x/, '').toLowerCase().padStart(64, '0');
 const padInt = (/** @type {number} */ n) => pad((n < 0 ? 2n ** 256n + BigInt(n) : BigInt(n)).toString(16));
@@ -334,6 +343,68 @@ export async function readV3Position(chain, node, tokenId) {
     if (/** @type {RpcError} */ (err).refused) return null; // both calls revert for a burned token
     throw err;
   }
+}
+
+// A Uniswap v2 pair, and what each of the owners holds of it. A v2 position is a balance of the pair's own token:
+// its share of the supply is its share of both reserves, over the full range. Fees stay in the reserves, so
+// nothing is owed. tokenId is the pair's address, liquidity the balance, supply the pair's token supply.
+// null when the address is not a pair of Uniswap's own factory: other exchanges run the same code.
+// Swaps pay 0.3%; once the factory's fee switch is on (feeTo is set), a sixth of it goes to the protocol.
+/** @param {Chain} chain @param {string} node @param {string} pair @param {string[]} owners @returns {Promise<{ positions: Position[], pool: PoolState } | null>} */
+export async function readV2Pair(chain, node, pair, owners) {
+  const factory = /** @type {string} */ (chain.v2); // v2 only
+  /** @type {(string | undefined)[]} */
+  let tokens;
+  try {
+    tokens = (await Promise.all([rpcCall(node, pair, SEL.token0), rpcCall(node, pair, SEL.token1)])).map((hex) => words(hex)[0]);
+  } catch (err) {
+    if (/** @type {RpcError} */ (err).refused) return null; // not a pair: the calls revert
+    throw err;
+  }
+  const [w0, w1] = tokens;
+  if (w0?.length !== 64 || w1?.length !== 64) return null; // no contract there
+  const token0 = addressOf(w0);
+  const token1 = addressOf(w1);
+  const own = words(await rpcCall(node, factory, SEL.getPair + pad(token0) + pad(token1)))[0];
+  if (!own || addressOf(own) !== lower(pair)) return null;
+  const [feeTo, reserves, supplyHex, ...balances] = await Promise.all([
+    rpcCall(node, factory, SEL.feeTo),
+    rpcCall(node, pair, SEL.getReserves),
+    rpcCall(node, pair, SEL.totalSupply),
+    ...owners.map((o) => rpcCall(node, pair, SEL.balanceOf + pad(o))),
+  ]);
+  const r = words(reserves);
+  const r0 = big(r[0]);
+  const r1 = big(r[1]);
+  const supply = big(words(supplyHex)[0]);
+  const lpFee = big(words(feeTo)[0]) === 0n ? 3000 : 2500;
+  const price = r0 > 0n ? Number(r1) / Number(r0) : 0;
+  /** @type {Position[]} */
+  const positions = [];
+  for (const [i, owner] of owners.entries()) {
+    const balance = big(words(balances[i])[0]);
+    if (balance === 0n || supply === 0n) continue;
+    positions.push({
+      version: 'v2',
+      chainId: chain.id,
+      tokenId: lower(pair),
+      owner,
+      token0,
+      token1,
+      fee: 3000,
+      lpFee,
+      tickLower: -MAX_TICK,
+      tickUpper: MAX_TICK,
+      liquidity: balance,
+      supply,
+      amount0: (r0 * balance) / supply,
+      amount1: (r1 * balance) / supply,
+      owed0: 0n,
+      owed1: 0n,
+      feesFull: true,
+    });
+  }
+  return { positions, pool: { pool: lower(pair), sqrtPrice: Math.sqrt(price), tick: price > 0 ? Math.floor(Math.log(price) / Math.log(1.0001)) : 0 } };
 }
 
 // The pool a position is in: its current price (sqrt, as a float) and tick. null when the pool does not exist.
@@ -761,6 +832,20 @@ export async function walletPositionTxs(key, chain, wallet, startblock) {
   };
 }
 
+// The Uniswap v2 pair tokens a wallet received, from a block on, as Etherscan names them: every token called UNI-V2,
+// which other exchanges' pairs are called too, so each is checked against the factory when it is read
+// (readV2Pair). Etherscan sends up to 1000 transfers a call; last and more are as in walletPositionTxs.
+/** @param {string} key @param {Chain} chain @param {string} wallet @param {number} startblock */
+export async function walletV2Pairs(key, chain, wallet, startblock) {
+  /** @type {{ to: string, contractAddress: string, tokenSymbol: string, blockNumber: string }[]} */
+  const list = await etherscan(key, chain.id, { module: 'account', action: 'tokentx', address: wallet, startblock: String(startblock), endblock: '999999999', sort: 'asc', page: '1', offset: '1000' });
+  return {
+    pairs: [...new Set(list.filter((t) => t.tokenSymbol === 'UNI-V2' && lower(t.to) === lower(wallet)).map((t) => lower(t.contractAddress)))],
+    last: list.length ? Number(list[list.length - 1].blockNumber) : null,
+    more: list.length >= 1000,
+  };
+}
+
 // The positions a transaction collected from: v3 Collect events and v4 liquidity changes made through the
 // position manager that did not add liquidity.
 /** @param {Chain} chain @param {string} node @param {Receipt | null | undefined} receipt */
@@ -913,10 +998,12 @@ async function managerOf(chain, node) {
 
 // One swap, kept small: the block, the tick and active liquidity after it, the amount paid in of each token and,
 // on v4, the fee charged (v4 fees can change per swap). v3 amounts are the pool's side, so paid in is positive;
-// v4 amounts are the swapper's, so paid in is negative.
+// v4 amounts are the swapper's, so paid in is negative. A v2 swap logs the amounts in and out and nothing else:
+// its tick is 0, inside the full range, and its liquidity 0, where the pair's supply stands in (swapEarn).
 /** @param {RpcLog} log @param {string} version @returns {Swap} */
 function parseSwap(log, version) {
   const w = words(log.data);
+  if (version === 'v2') return { block: Number(log.blockNumber), tick: 0, liq: 0n, in0: big(w[0]), in1: big(w[1]), fee: null };
   const side = version === 'v3' ? 1n : -1n;
   const a0 = signed(w[0]) * side;
   const a1 = signed(w[1]) * side;
@@ -944,14 +1031,14 @@ async function swapsIn(node, filter, version, start, end, span, forward) {
 
 // A pool's swaps from block `from` to `head`, adding to what was already read: new blocks first, then older ones
 // back to `from`. Stops at the call budget, so on a fast chain a long window may be covered only in part; the
-// returned `from` is the oldest block read. pool is the v3 pool address or the v4 pool id.
+// returned `from` is the oldest block read. pool is the v2 pair or v3 pool address, or the v4 pool id.
 /** @param {Chain} chain @param {string} node @param {string} version @param {string} pool @param {number} from @param {number} head @returns {Promise<SwapRead>} */
 export async function poolSwaps(chain, node, version, pool, from, head) {
   const key = `${chain.id}:${version}:${pool}`;
   let c = swapCache.get(key);
   // A gap too long to close in one load starts over, so the swaps read are always one unbroken range.
   if (!c || nodeKey(c.node) !== nodeKey(node) || head - c.to > chain.span * (SWAP_CALLS / 2)) c = { node, from: head + 1, to: head, swaps: [] };
-  const filter = version === 'v3' ? { address: pool, topics: [SWAP_V3] } : { address: await managerOf(chain, node), topics: [SWAP_V4, pool] };
+  const filter = version === 'v4' ? { address: await managerOf(chain, node), topics: [SWAP_V4, pool] } : { address: pool, topics: [version === 'v2' ? SWAP_V2 : SWAP_V3] };
   let span = chain.span;
   let calls = SWAP_CALLS;
   while (c.to < head && calls > 0) {
@@ -991,15 +1078,17 @@ export function swapFees(swaps, fromBlock, p, toBlock = Infinity) {
   return { e0, e1 };
 }
 
-// What one swap paid a position, in raw units of each token. p.liquidity may be text.
-/** @typedef {{ tickLower: number, tickUpper: number, liquidity: BigIntish, fee: number }} EarningPosition */
+// What one swap paid a position, in raw units of each token. p.liquidity may be text. A v2 position gives its
+// pair's supply as read now: its share of a past swap is taken as its share today.
+/** @typedef {{ tickLower: number, tickUpper: number, liquidity: BigIntish, fee: number, supply?: BigIntish | null }} EarningPosition */
 /** @param {Swap} s @param {EarningPosition} p @returns {[bigint, bigint]} */
 export function swapEarn(s, p) {
-  if (s.tick < p.tickLower || s.tick >= p.tickUpper || s.liq === 0n) return [0n, 0n];
+  const active = p.supply != null ? BigInt(p.supply) : s.liq;
+  if (s.tick < p.tickLower || s.tick >= p.tickUpper || active === 0n) return [0n, 0n];
   const L = BigInt(p.liquidity);
-  const share = L < s.liq ? L : s.liq;
+  const share = L < active ? L : active;
   const pips = BigInt(s.fee ?? p.fee);
-  return [(s.in0 * pips * share) / (1000000n * s.liq), (s.in1 * pips * share) / (1000000n * s.liq)];
+  return [(s.in0 * pips * share) / (1000000n * active), (s.in1 * pips * share) / (1000000n * active)];
 }
 
 // The id Uniswap v4 gives a pool: the hash of its key.
@@ -1066,36 +1155,43 @@ export async function readV4Position(chain, node, tokenId) {
 }
 
 // Positions added by hand, for those the board does not find: a v3 position held by an address that is not in the
-// wallet list, or a v4 position older than the node's history. v4ids came first, so each version has its own list.
+// wallet list, a v4 position older than the node's history, or a v2 pair, which is named by its address (the
+// tokenId of its entry) and read for every wallet. v4ids came first, so each version has its own list.
 export const addedPositions = (/** @type {Partial<UniswapSettings> | undefined} */ cfg) => [
   ...(cfg?.v3ids ?? []).map((x) => ({ ...x, version: 'v3' })),
   ...(cfg?.v4ids ?? []).map((x) => ({ ...x, version: 'v4' })),
+  ...(cfg?.v2ids ?? []).map((x) => ({ ...x, version: 'v2' })),
 ];
-export const addedListOf = (/** @type {string} */ version) => (version === 'v3' ? 'v3ids' : 'v4ids');
+/** @returns {'v2ids' | 'v3ids' | 'v4ids'} */
+export const addedListOf = (/** @type {string} */ version) => (version === 'v2' ? 'v2ids' : version === 'v3' ? 'v3ids' : 'v4ids');
 
 // Whether the board reads positions of this Uniswap version on the chain.
-export const hasVersion = (/** @type {Chain} */ chain, /** @type {string} */ version) => version === 'v3' || (version === 'v4' && Boolean(chain.v4));
+export const hasVersion = (/** @type {Chain} */ chain, /** @type {string} */ version) => version === 'v3' || (version === 'v4' && Boolean(chain.v4)) || (version === 'v2' && Boolean(chain.v2));
+// The versions read on a chain, in words: "v2, v3 and v4".
+export const versionsOf = (/** @type {Chain} */ chain) => ['v2', 'v3', 'v4'].filter((v) => hasVersion(chain, v)).join(', ').replace(/, (?=[^,]*$)/, ' and ');
 
-// Reads a Uniswap app link (…/positions/<v3|v4>/<chain>/<id>), which names its chain, version and number.
+// Reads a Uniswap app link (…/positions/<v2|v3|v4>/<chain>/<id>), which names its chain, version and number, or
+// for v2 its pair's address.
 // Returns null for text that is not such a link, and { slug } alone when the link names a chain the board does not read.
 /** @param {unknown} text @returns {{ chainId?: number, version: string, tokenId?: string, slug: string } | null} */
 export function readLink(text) {
-  const m = String(text ?? '').trim().match(/positions\/(v3|v4)\/([a-z0-9_-]+)\/(\d+)/i);
+  const m = String(text ?? '').trim().match(/positions\/(?:(v3|v4)\/([a-z0-9_-]+)\/(\d+)|(v2)\/([a-z0-9_-]+)\/(0x[0-9a-f]{40}))/i);
   if (!m) return null;
-  const slug = m[2].toLowerCase();
+  const slug = (m[2] ?? m[5]).toLowerCase();
   const chain = CHAINS.find((c) => c.app === slug);
-  const version = m[1].toLowerCase();
-  return chain && hasVersion(chain, version) ? { chainId: chain.id, version, tokenId: m[3], slug } : { slug, version };
+  const version = (m[1] ?? m[4]).toLowerCase();
+  return chain && hasVersion(chain, version) ? { chainId: chain.id, version, tokenId: (m[3] ?? m[6]).toLowerCase(), slug } : { slug, version };
 }
 
-// Reads what was typed to add a position: a Uniswap app link, or a plain number, which takes the chain and version
-// picked beside it.
+// Reads what was typed to add a position: a Uniswap app link, a plain number, which takes the chain and version
+// picked beside it, or an address, which can only be a v2 pair on the chain picked.
 /** @param {unknown} text @param {number} chainId @param {string} version @returns {{ chainId: number, version: string, tokenId: string } | null} */
 export function parsePosition(text, chainId, version) {
   const link = readLink(text);
   if (link) return link.chainId ? { chainId: link.chainId, version: link.version, tokenId: /** @type {string} */ (link.tokenId) } : null;
   const s = String(text ?? '').trim();
   const chain = CHAINS.find((c) => c.id === chainId);
+  if (isAddress(s)) return chain && hasVersion(chain, 'v2') ? { chainId, version: 'v2', tokenId: s.toLowerCase() } : null;
   return /^\d+$/.test(s) && chain && hasVersion(chain, version) ? { chainId, version, tokenId: s } : null;
 }
 
@@ -1103,8 +1199,8 @@ export function parsePosition(text, chainId, version) {
 /** @param {Store} store @param {{ chainId: number, version: string, tokenId: string }} entry */
 export function addPosition(store, entry) {
   const cfg = store.get('settings').uniswap ?? {};
-  if (addedPositions(cfg).some((x) => x.version === entry.version && x.chainId === entry.chainId && String(x.tokenId) === entry.tokenId)) {
-    return 'That position is already in the list.';
+  if (addedPositions(cfg).some((x) => x.version === entry.version && x.chainId === entry.chainId && String(x.tokenId).toLowerCase() === entry.tokenId)) {
+    return entry.version === 'v2' ? 'That pair is already in the list.' : 'That position is already in the list.';
   }
   const list = addedListOf(entry.version);
   store.update('settings', (d) => {
