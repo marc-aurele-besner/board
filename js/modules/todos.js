@@ -931,32 +931,15 @@ export function watchDevSessions(store) {
   devWatch.timer = setTimeout(poll, 0);
 }
 
-// The Dev button and, beside it, a down arrow with the model and effort the task's sessions use.
+// The Dev button; a right click on it opens the model and effort the task's sessions use.
 /** @param {Store} store @param {Task} item */
 function devControl(store, item) {
-  return h('span', { class: 'dev-control' }, devButton(store, item), devOptionsButton(store, item));
+  return h('span', { class: 'dev-control' }, devButton(store, item));
 }
 
 // The task's model and effort: Default leaves the project's command (or claude) to choose. Saved on the task, so
-// its Dev button starts every session with them.
-/** @param {Store} store @param {Task} item */
-function devOptionsButton(store, item) {
-  const picked = [item.devModel ?? '', item.devEffort && `${item.devEffort} effort`].filter(Boolean).join(', ');
-  const title = `Dev options: ${picked || 'default model and effort'}`;
-  return h('button', {
-    type: 'button',
-    class: `icon-btn dev-options${picked ? ' set' : ''}`,
-    title,
-    'aria-label': `${title} for "${item.text}"`,
-    'aria-haspopup': 'menu',
-    onclick: (/** @type {MouseEvent} */ e) => {
-      e.stopPropagation();
-      openMenu(devOptionEntries(store, item), /** @type {HTMLElement} */ (e.currentTarget));
-    },
-  }, icon('chevron-down'));
-}
-
-// The rows of a task's Dev options menu: its model and effort, and a new session. Its right-click menu shows them too.
+// its Dev button starts every session with them. The rows of the task's right-click menu: its model and effort, and
+// a new session.
 /** @param {Store} store @param {Task} item @returns {MenuEntry[]} */
 function devOptionEntries(store, item) {
   const model = item.devModel ?? '';
@@ -992,7 +975,7 @@ function devButton(store, item) {
     return h('button', {
       type: 'button',
       class: 'icon-btn copy-btn',
-      title: 'Start a Dev session on this task',
+      title: 'Start a Dev session on this task. Right-click for its model and effort.',
       'aria-label': `Start a Dev session on "${item.text}"`,
       onclick: () => devTasks(store, [item]),
     }, icon('terminal'));
@@ -1004,7 +987,7 @@ function devButton(store, item) {
   return h('button', {
     type: 'button',
     class: `icon-btn dev-btn dev-${state}`,
-    title: `Dev: ${label}. Click to open its terminal; Shift-click to start a new session.`,
+    title: `Dev: ${label}. Click to open its terminal; Shift-click to start a new session; right-click for its model and effort.`,
     'aria-label': `Open the Dev terminal of "${item.text}" (${label})`,
     onclick: (/** @type {MouseEvent} */ e) => {
       if (e.shiftKey) return devTasks(store, [item]);
