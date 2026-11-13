@@ -282,17 +282,6 @@ function collections() {
       },
     },
     // Four accounts with three months of follower counts (and stars for GitHub), so Monitoring → Socials has lines to draw.
-    // A placeholder sign-in (it posts nothing: sample data has no runners) and a draft, so the composer and the
-    // LinkedIn screens have something to show.
-    linkedin: {
-      auth: { token: 'sample', expires: Date.now() + 40 * 86400000, sub: 'sample', name: 'Sample Person', picture: '', at: Date.now() - 20 * 86400000 },
-      posts: [
-        { id: 'li-1', taskId: null, projectId: 'p-atlas', text: 'Atlas Docs now has an install guide for every platform.', link: 'https://docs.example.com', status: 'draft', scheduledAt: null, createdAt: Date.now() - 86400000 },
-      ],
-      comments: [],
-      cache: {},
-      session: { calls: {} },
-    },
     socials: {
       accounts: [
         { id: 's-x', network: 'x', handle: 'atlas_example', name: 'Atlas', projectId: 'p-atlas', followers: 1789, following: 180, at: Date.now() - 2 * 3600000, error: null },
@@ -314,7 +303,8 @@ function collections() {
     // Posts written in the board with their results read at 1 hour, 24 hours and 7 days: the last one does far
     // better than the ones before, for the weekly summary and the "post doing well" rule.
     linkedin: {
-      auth: null,
+      // A placeholder sign-in: it posts nothing, since sample data has no runners.
+      auth: { token: 'sample', expires: Date.now() + 40 * 86400000, sub: 'sample', name: 'Sample Person', picture: '', at: Date.now() - 20 * 86400000 },
       posts: [
         liPost('lp1', 'Three things we learned shipping the new pricing page.', 20, [[1, 6], [24, 14], [168, 22]]),
         liPost('lp2', 'Why we write the docs before the feature.', 13, [[1, 4], [24, 11], [168, 15]]),
