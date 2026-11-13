@@ -12,6 +12,7 @@ import { pickChip } from '../inline.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import { resizableSide } from '../side-resize.js';
+import { contactChip, contactOfSender } from './project-contacts.js';
 /** @import { Store, InboxMessage, Project, GmailAccount, RunnerJobError, IconName } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @typedef {[string, string, IconName, (e: InboxMessage) => unknown]} Folder */
@@ -404,12 +405,16 @@ function openReader(store, e) {
     .filter((x) => x.id !== e.id && threadKey(x) === threadKey(e))
     .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
 
+  // The people of the address book this email is with: its sender, or for a sent one its recipients.
+  const people = [...new Set((e.dir === 'sent' ? e.to : [e.from]).map((a) => contactOfSender(store, a)).filter((c) => c !== null))];
+
   const dialog = openDialog({
     title: e.subject || '(no subject)',
     wide: true,
     body: h('div', { class: 'stack' },
       h('div', { class: 'mail-meta' },
         meta('From', e.from),
+        people.length ? h('div', { class: 'mail-meta-row' }, h('span', { class: 'muted' }, 'Contact'), h('span', { class: 'row' }, people.map((c) => contactChip(store, c)))) : null,
         meta('To', e.to.join(', ')),
         meta('Cc', e.cc.join(', ')),
         meta('Date', fullDate(e.at)),
