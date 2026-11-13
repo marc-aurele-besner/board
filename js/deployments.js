@@ -288,5 +288,9 @@ export async function deployLog(store, item) {
     return vercelLog(token, item);
   }
   if (!item.site) throw new Error('This deploy has no site.');
-  return /** @type {Promise<DeployLog>} */ (workerCall('GET', `/previews/log/netlify/${encodeURIComponent(item.site)}/${encodeURIComponent(item.id)}`, null, LOG_TIMEOUT + 15000));
+  return /** @type {Promise<DeployLog>} */ (workerCall('GET', `/previews/log/netlify/${encodeURIComponent(item.site)}/${encodeURIComponent(item.id)}`, null, LOG_TIMEOUT + 15000)
+    .catch((err) => {
+      // Runners started before this route existed answer 404.
+      throw /404/.test(err.message) ? new Error('These runners cannot read Netlify logs yet. Restart them (bun start) to load the new version.') : err;
+    }));
 }
