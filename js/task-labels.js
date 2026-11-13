@@ -1,20 +1,27 @@
 // Task statuses and category colours, with the names and colours set in Settings → Labels.
-// The seven status keys are fixed: search (is:), the board columns, the sort order and automations rely on them.
+// The eight status keys are fixed: search (is:), the board columns, the sort order and automations rely on them.
 // Only a status's name, colour, place in the pickers and whether pickers offer it can change. todos.json keeps the
 // overrides as `statuses: { [key]: { name, color, hidden } }` and the order as `statusOrder: [key]`, and a category's
 // colour as `color` on the category.
 /** @import { DataStore, TaskCategory } from '../types/data' */
 
 // [key, default name, palette tone], in picker order.
+// Blocked comes before To do, so the board reads from what cannot move yet to what is done.
 export const STATUSES = [
-  ['todo', 'To do', 'todo'],
+  ['parking', 'Parking', 'plain'],
   ['blocked', 'Blocked', 'high'],
+  ['todo', 'To do', 'todo'],
   ['paused', 'Paused', 'plain'],
   ['ondeck', 'On Deck', 'low'],
   ['doing', 'In progress', 'doing'],
   ['review', 'In Review', 'medium'],
   ['done', 'Completed', 'done'],
 ];
+
+// "Ready": open tasks that can be picked up, so neither parked nor blocked.
+const NOT_READY = ['done', 'parking', 'blocked'];
+/** @param {string} status */
+export const isReady = (status) => !NOT_READY.includes(status);
 
 // A new task starts in one and the done button moves it to the other, so neither can be hidden.
 export const ALWAYS_SHOWN = ['todo', 'done'];

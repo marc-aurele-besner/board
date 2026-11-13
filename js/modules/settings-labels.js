@@ -146,7 +146,7 @@ function taskStatusesSection(store) {
     sectionHead('Task statuses', statusOrder?.length
       ? sortButton('Reset order', 'Put the statuses back in their original order', () => store.update('todos', (d) => { delete d.statusOrder; }))
       : null),
-    h('p', { class: 'muted small' }, 'The seven statuses are fixed, so search (is:doing), the board and automations keep working, but each can be renamed, recoloured and dragged into another order; the pickers and the board columns follow it. Clear a name to go back to the original. A hidden status leaves the pickers and the board; tasks already in it keep it.'),
+    h('p', { class: 'muted small' }, 'The eight statuses are fixed, so search (is:doing), the board and automations keep working, but each can be renamed, recoloured and dragged into another order; the pickers and the board columns follow it. Clear a name to go back to the original. A hidden status leaves the pickers and the board; tasks already in it keep it.'),
     h('ul', { class: 'label-list' }, statuses.map((st) => {
       const count = items.filter((i) => statusOf(i) === st.key).length;
       const fixed = ALWAYS_SHOWN.includes(st.key);
