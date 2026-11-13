@@ -250,19 +250,39 @@ function collections() {
     socials: {
       accounts: [
         { id: 's-x', network: 'x', handle: 'atlas_example', name: 'Atlas', projectId: 'p-atlas', followers: 1789, following: 180, at: Date.now() - 2 * 3600000, error: null },
-        { id: 's-li', network: 'linkedin', handle: 'company/atlas-example', name: 'Atlas', projectId: 'p-atlas', followers: 784, at: Date.now() - 2 * 3600000, error: null },
+        { id: 's-li', network: 'linkedin', handle: 'company/atlas-example', name: 'Atlas', projectId: 'p-atlas', followers: 758, at: Date.now() - 2 * 3600000, error: null },
         { id: 's-gh', network: 'github', handle: 'atlas-example', name: 'Atlas', projectId: 'p-atlas', followers: 321, following: 4, stars: 2845, at: Date.now() - 2 * 3600000, error: null },
         { id: 's-ig', network: 'instagram', handle: 'atlas.example', name: 'Atlas', projectId: 'p-atlas', followers: 1312, following: 210, at: Date.now() - 2 * 3600000, error: null },
       ],
       history: {
         's-x': Object.fromEntries(Array.from({ length: 90 }, (_, i) => [day(i - 89), 1240 + i * 6 + (i % 7) * 3])),
-        's-li': Object.fromEntries(Array.from({ length: 90 }, (_, i) => [day(i - 89), 610 + i * 2 - (i % 5)])),
+        // The last five days dip, so the weekly summary and the followers rule have something to say.
+        's-li': Object.fromEntries(Array.from({ length: 90 }, (_, i) => [day(i - 89), i < 84 ? 610 + i * 2 - (i % 5) : 778 - (i - 84) * 4])),
         's-gh': Object.fromEntries(Array.from({ length: 90 }, (_, i) => [day(i - 89), 232 + i])),
         's-ig': Object.fromEntries(Array.from({ length: 90 }, (_, i) => [day(i - 89), 980 + i * 4 - (i % 6)])),
       },
       stars: {
         's-gh': Object.fromEntries(Array.from({ length: 90 }, (_, i) => [day(i - 89), 2400 + i * 5 + (i % 4)])),
       },
+    },
+    // Posts written in the board with their results read at 1 hour, 24 hours and 7 days: the last one does far
+    // better than the ones before, for the weekly summary and the "post doing well" rule.
+    linkedin: {
+      auth: null,
+      posts: [
+        liPost('lp1', 'Three things we learned shipping the new pricing page.', 20, [[1, 6], [24, 14], [168, 22]]),
+        liPost('lp2', 'Why we write the docs before the feature.', 13, [[1, 4], [24, 11], [168, 15]]),
+        liPost('lp3', 'A small change to onboarding that halved support emails.', 6, [[1, 8], [24, 12], [168, 19]]),
+        liPost('lp4', 'What a week without meetings did to our release.', 2, [[1, 9], [24, 48]]),
+        { id: 'lp5', projectId: 'p-atlas', text: 'How we pick what to build next.', status: 'scheduled', scheduledAt: Date.now() + 2 * 86400000, createdAt: Date.now() - 86400000 },
+        { id: 'lp6', projectId: 'p-atlas', text: 'A draft about our hiring process.', status: 'draft', createdAt: Date.now() - 3 * 86400000 },
+      ],
+      comments: [
+        { id: 'lc1', postId: 'lp4', postUrn: 'urn:li:share:4', author: 'Sam Rivera', text: 'We tried the same, it worked.', at: Date.now() - 86400000, read: false },
+        { id: 'lc2', postId: 'lp4', postUrn: 'urn:li:share:4', author: 'Alex Kim', text: 'How did you handle urgent questions?', at: Date.now() - 20 * 3600000, read: true },
+      ],
+      cache: {},
+      session: { calls: {} },
     },
     notifications: {
       prefs: {},
@@ -271,6 +291,16 @@ function collections() {
         { id: 'n2', kind: 'telegram', text: 'New task from Telegram: “Ask about the invoice”. It waits in To Organize.', href: '#/todos?filter=organize', key: '', at, read: false },
       ],
     },
+  };
+}
+
+// A posted LinkedIn post of the sample, `daysAgo` days ago, with its reads as [hours after posting, reactions].
+/** @param {string} id @param {string} text @param {number} daysAgo @param {[number, number][]} reads */
+function liPost(id, text, daysAgo, reads) {
+  const postedAt = Date.now() - daysAgo * 86400000;
+  return {
+    id, projectId: 'p-atlas', text, status: 'posted', postedAt, createdAt: postedAt - 3600000, urn: `urn:li:share:${id}`, url: 'https://www.linkedin.com/feed/',
+    metrics: reads.filter(([h]) => postedAt + h * 3600000 < Date.now()).map(([h, reactions]) => ({ at: postedAt + h * 3600000, reactions, comments: Math.round(reactions / 6), reposts: Math.round(reactions / 12) })),
   };
 }
 
