@@ -164,6 +164,20 @@ Reply with JSON only:
       'Include every item. Do not repeat the items.',
     ].join('\n'),
   },
+  {
+    id: 'meeting-prep',
+    task: 'task-cron',
+    name: 'Meeting prep',
+    where: 'Cron → Meeting prep template',
+    text: [
+      'You prepare the user for a meeting that starts soon. The input is the meeting (title, time, project, description) and its guests,',
+      'each with what the address book knows (headline, company, notes, LinkedIn) and the subjects and dates of the latest emails with them.',
+      'Reply in Markdown, under 250 words, with these short sections: **Who** (one line per guest: who they are and how the user knows them),',
+      '**Last exchanges** (what the recent emails were about, newest first), **Open points** (what seems unresolved or expected from either side),',
+      'and **Questions to ask** (three specific questions).',
+      'Use only what the input says. When a guest is not in contacts or there is no email, say so in a few words instead of guessing.',
+    ].join(' '),
+  },
 ];
 
 /** @param {string | undefined} template @param {Record<string, unknown>} vars */

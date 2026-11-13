@@ -32,6 +32,7 @@ export interface CronSource {
   projectId: string;
   url: string;
   text: string;
+  // Runs for 'history', days for 'linkedin', hours ahead for 'meetings'.
   count: number;
   // How many linked pages a 'page' source follows.
   follow: number;
@@ -65,6 +66,8 @@ export interface CronStep {
   // ai
   prompt?: string;
   system?: string;
+  // A prompt of js/prompts.js used as the system instructions while `system` is empty (a template's AI step).
+  promptId?: string;
   model?: string;
   // task; a missing description is the input, as before it could be written.
   title?: string;
