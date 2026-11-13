@@ -12,6 +12,7 @@ import { contractsActivityTab, contractsActivitySerialize, contractsActivityRest
 import { usageRecords, sumUsage, modelName, modelsByUse, fmtDuration } from '../dev-usage.js';
 import { devBreakdown } from './monitoring-dev.js';
 import { toolUsage } from './monitoring-tools.js';
+import { developmentTab, developmentView } from './monitoring-development.js';
 import { aiOverview, aiView, devProjectOf, projectShown, sourceShown, SOURCES, BREAKDOWNS, MEASURES } from './monitoring-ai.js';
 import { sessionStatus } from '../terminal.js';
 import { runnerOf } from '../dev-core.js';
@@ -24,10 +25,11 @@ import { runnerOf } from '../dev-core.js';
 const COLLECTION = 'usage';
 const DAY = 86400000;
 const HOUR = 3600000;
-const TABS = [['ai', 'AI usage'], ['github', 'GitHub activity'], ['analytics', 'Web analytics'], ['search', 'Search'], ['socials', 'Socials'], ['contracts', 'Contracts'], ['runners', 'Board runners']];
+const TABS = [['ai', 'AI usage'], ['development', 'Development'], ['github', 'GitHub activity'], ['analytics', 'Web analytics'], ['search', 'Search'], ['socials', 'Socials'], ['contracts', 'Contracts'], ['runners', 'Board runners']];
 /** @type {Record<string, string>} */
 const SUBTITLES = {
   ai: 'AI calls made by the board, and what the claude sessions Dev ran for tasks used.',
+  development: 'The claude sessions Dev ran for tasks, turn by turn: time per turn, review time and time per task.',
   github: 'Commits, pull requests and issues across the repos linked to your projects.',
   analytics: 'Visitors and page views for each project website, from Google Analytics.',
   search: 'How each project website shows up in Google and Bing search.',
@@ -560,7 +562,8 @@ function miniStat(n, label) {
 function draw(root, store) {
   if (prices.status === 'idle') setTimeout(() => loadPrices(store), 0);
   const w = periodWindow(view.period);
-  const body = view.tab === 'github' ? githubTab(store, w)
+  const body = view.tab === 'development' ? developmentTab(store, w)
+    : view.tab === 'github' ? githubTab(store, w)
     : view.tab === 'analytics' ? analyticsTab(store, view, w)
       : view.tab === 'search' ? searchTab(store, view, w)
       : view.tab === 'socials' ? socialsTab(store, w)
@@ -622,9 +625,10 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
       engine: view.tab === 'search' && view.engine === 'bing' ? 'bing' : '',
       contract: view.tab === 'contracts' ? contractsActivitySerialize() : '',
       source: view.tab === 'ai' && aiView.source !== 'all' ? aiView.source : '',
-      project: view.tab === 'ai' ? aiView.project : '',
+      project: view.tab === 'ai' ? aiView.project : view.tab === 'development' ? developmentView.project : '',
+      measure: view.tab === 'development' && developmentView.measure !== 'time' ? developmentView.measure
+        : view.tab === 'ai' && aiView.measure !== 'cost' ? aiView.measure : '',
       by: view.tab === 'ai' && aiView.by !== 'project' ? aiView.by : '',
-      measure: view.tab === 'ai' && aiView.measure !== 'cost' ? aiView.measure : '',
     };
   },
   restore: (/** @type {Record<string, string>} */ p = {}) => {
@@ -635,8 +639,11 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
     contractsActivityRestore(p.contract);
     const pick = (/** @type {string[][]} */ list, /** @type {string} */ v, /** @type {string} */ fallback) => (list.some(([k]) => k === v) ? v : fallback);
     aiView.source = pick(SOURCES, p.source, 'all');
-    aiView.project = p.project || '';
+    const ai = view.tab === 'ai';
+    aiView.project = ai ? p.project || '' : '';
     aiView.by = pick(BREAKDOWNS, p.by, 'project');
-    aiView.measure = pick(MEASURES, p.measure, 'cost');
+    aiView.measure = pick(MEASURES, ai ? p.measure : '', 'cost');
+    developmentView.project = view.tab === 'development' ? p.project || '' : '';
+    developmentView.measure = view.tab === 'development' && p.measure === 'turns' ? 'turns' : 'time';
   },
 });

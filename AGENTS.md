@@ -58,6 +58,7 @@ js/modules/monitoring-socials.js  Monitoring → Socials (X, LinkedIn, GitHub, I
 js/modules/monitoring-ai.js  Monitoring → AI usage overview: board calls and Dev sessions by source and project, a chart and table broken down by project, source, model or feature, against the period before
 js/modules/monitoring-dev.js  Monitoring → AI usage → Dev sessions: a chart and table by project, model, effort or billing, in cost, tokens, time or sessions
 js/modules/monitoring-tools.js  Monitoring → AI usage → Skills and MCP: the skills Dev sessions ran and the MCP tools they called, each counted on its own
+js/modules/monitoring-development.js  Monitoring → Development: the Dev sessions' claude turns (usage.json `dev` turns): time per turn, review and waiting time, task time, interruptions, a log of recent turns
 js/chains.js          every chain the board reads: the built-in ones and those added in Settings → Blockchains
 js/abi.js             Solidity ABI encoding and decoding: calls, answers and event logs
 js/contracts.js       saved smart contracts: reads through the node, writes through the browser wallet, activity
