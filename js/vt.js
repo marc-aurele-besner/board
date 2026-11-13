@@ -81,7 +81,10 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
 
   /** @param {Line} l */
   function pushHistory(l) {
-    if (t.main) return; // the alternate screen keeps no history
+    if (!t.main) keepLine(l); // the alternate screen keeps no history
+  }
+  /** @param {Line} l */
+  function keepLine(l) {
     t.history.push(l);
     if (t.history.length > HISTORY_MAX) {
       const drop = t.history.length - HISTORY_MAX;
@@ -138,6 +141,7 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
     } else if (!on && t.main) {
       ({ screen: t.screen, x: t.x, y: t.y } = t.main);
       t.main = null;
+      t.y = fitScreen(t.screen, t.y, t.rows, true);
       t.screen.forEach(touch);
     }
   }
@@ -397,20 +401,28 @@ export function createTerminal({ cols = 100, rows = 30, reply = () => {}, backgr
     return last + 1;
   }
 
+  // Gives a screen `rows` lines. Lines above the cursor go first (to history, for the main screen), so the cursor
+  // stays on screen. Returns the cursor's row.
+  /** @param {Line[]} screen @param {number} y @param {number} rows @param {boolean} keep */
+  function fitScreen(screen, y, rows, keep) {
+    if (screen.length > rows) {
+      const fromTop = Math.max(0, Math.min(screen.length - rows, y - rows + 1));
+      for (const l of screen.splice(0, fromTop)) if (keep) keepLine(l);
+      screen.length = rows;
+      y -= fromTop;
+    }
+    while (screen.length < rows) screen.push(blankLine());
+    return Math.min(Math.max(y, 0), rows - 1);
+  }
+
   /** @param {number} cols @param {number} rows */
   function resize(cols, rows) {
     if (cols === t.cols && rows === t.rows) return;
     t.cols = cols;
-    if (rows < t.rows) {
-      // Lines above the cursor go to history first, so the cursor stays on screen.
-      const extra = t.rows - rows;
-      const fromTop = Math.max(0, Math.min(extra, t.y - rows + 1));
-      for (const l of t.screen.splice(0, fromTop)) pushHistory(l);
-      t.screen.length = rows;
-      t.y -= fromTop;
-    } else {
-      while (t.screen.length < rows) t.screen.push(blankLine());
-    }
+    // The main screen, put aside while a program (claude) draws on the alternate one, is resized with it: else
+    // it comes back with its old number of rows, and drawing or writing past its end throws.
+    if (t.main) t.main.y = fitScreen(t.main.screen, t.main.y, rows, true);
+    t.y = fitScreen(t.screen, t.y, rows, !t.main);
     t.rows = rows;
     t.top = 0;
     t.bottom = rows - 1;
