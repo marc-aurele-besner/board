@@ -124,7 +124,9 @@
   "automations": {
     "domain": { "on": true, "days": 30 },
     "email": { "on": false },
-    "lending": { "on": true, "factor": 1.5 }
+    "lending": { "on": true, "factor": 1.5 },
+    "linkedin-followers": { "on": true, "drop": 25 },
+    "linkedin-post": { "on": false, "times": 4 }
   },
   "models": {
     "default": "example/model-a",

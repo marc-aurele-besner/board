@@ -6,6 +6,8 @@ import { makeTask } from './capture.js';
 import { notify } from './notify-core.js';
 import { checkHealth, checkDomain, checkCertificate, checkDns, readMeta, readCrawlFiles, checkProvider, hostOf, daysUntil } from './sitecheck.js';
 import { nextRecurringDue, overBudget } from './money-core.js';
+import { LINKEDIN, followerChange, postStandout } from './linkedin-core.js';
+import { SOCIALS, dayKey, handleLabel } from './socials.js';
 /** @import { AutomationRule, CrawlCheck, DataStore, Project, Provider, Site, SiteDns, SiteLogEntry, ToolsData, ProviderStatus } from '../types/data' */
 /** @import { IconName } from './ui.js' */
 
@@ -19,14 +21,21 @@ export const RULES = [
   ['recurring', 'Recurring bill due', 'Create a task before a recurring expense in Money is due.', true],
   ['pools', 'Position out of range', 'Create a task when a liquidity position leaves its price range.', false],
   ['lending', 'Aave health factor low', 'Create a high-priority task when an Aave account’s health factor falls below the level set. The account is liquidated below 1.', 'factor'],
+  ['linkedin-followers', 'LinkedIn followers dropped', 'Create a task when a LinkedIn account lost at least this many followers over 7 days. At most one a week per account.', 'drop'],
+  ['linkedin-post', 'LinkedIn post doing well', 'Create a task when a post has this many times the median reactions of your earlier posts read at the same age (1 hour, 24 hours or 7 days), so you can answer its comments while it travels.', 'times'],
+  ['linkedin-session', 'LinkedIn session signed out', 'Create a high-priority task when LinkedIn signs the saved session out: follower counts of pages, results and comments stop until it is saved again.', false],
+  ['linkedin-signin', 'LinkedIn sign-in ending', 'Create a task before the official LinkedIn sign-in (used to post) stops working. It lasts 60 days and is renewed only by signing in again.', true],
 ];
 /** @type {Record<string, AutomationRule>} */
-const RULE_DEFAULTS = { domain: { on: true, days: 30 }, ssl: { on: true, days: 14 }, health: { on: true }, email: { on: false }, crawl: { on: true }, recurring: { on: false, days: 3 }, pools: { on: false }, lending: { on: true, factor: 1.2 } };
+const RULE_DEFAULTS = {
+  domain: { on: true, days: 30 }, ssl: { on: true, days: 14 }, health: { on: true }, email: { on: false }, crawl: { on: true }, recurring: { on: false, days: 3 }, pools: { on: false }, lending: { on: true, factor: 1.2 },
+  'linkedin-followers': { on: true, drop: 10 }, 'linkedin-post': { on: true, times: 3 }, 'linkedin-session': { on: true }, 'linkedin-signin': { on: true, days: 7 },
+};
 // `days` and `factor` are read only on the rules whose defaults have them.
 export const ruleOf = (/** @type {DataStore} */ store, /** @type {string} */ key) => /** @type {Required<AutomationRule>} */ ({ ...RULE_DEFAULTS[key], ...(store.get('settings').automations?.[key] ?? {}) });
 
 // What each source is called on a task's "Auto" flag.
-export const AUTO_SOURCES = { domain: 'the domain check', ssl: 'the SSL check', health: 'the website health check', email: 'the DNS check', crawl: 'the crawl files check', recurring: 'a recurring bill', pools: 'Liquidity Pools', lending: 'Aave lending', telegram: 'a Telegram message', notion: 'a Notion page', cron: 'a Cron flow' };
+export const AUTO_SOURCES = { domain: 'the domain check', ssl: 'the SSL check', health: 'the website health check', email: 'the DNS check', crawl: 'the crawl files check', recurring: 'a recurring bill', pools: 'Liquidity Pools', lending: 'Aave lending', 'linkedin-followers': 'LinkedIn followers', 'linkedin-post': 'a LinkedIn post’s results', 'linkedin-session': 'the LinkedIn session', 'linkedin-signin': 'the LinkedIn sign-in', telegram: 'a Telegram message', notion: 'a Notion page', cron: 'a Cron flow' };
 
 // Where a rule's task leads back to: the page that shows what the check found, with the icon and name of that page.
 // Telegram and Cron tasks have their own links on the task.
@@ -43,6 +52,10 @@ export function autoSourceLink({ auto, projectId }) {
     recurring: ['#/money', 'wallet', 'Money'],
     pools: ['#/positions?tab=positions&filter=out', 'droplet', 'Liquidity Pools'],
     lending: ['#/positions?tab=lending', 'droplet', 'Aave lending'],
+    'linkedin-followers': ['#/monitoring?tab=socials', 'linkedin', 'Monitoring → Socials'],
+    'linkedin-post': ['#/monitoring?tab=socials', 'linkedin', 'Monitoring → Socials'],
+    'linkedin-session': ['#/settings?section=linkedin', 'linkedin', 'Settings → LinkedIn'],
+    'linkedin-signin': ['#/settings?section=linkedin', 'linkedin', 'Settings → LinkedIn'],
   };
   const link = auto ? links[auto] : null;
   return link ? { href: link[0], icon: link[1], label: link[2] } : null;
@@ -112,6 +125,54 @@ export function runRules(store) {
         count(makeAuto(store, { kind: 'recurring', ref: `${r.id}:${next}`, due: next, priority: 'medium', text: `Pay ${r.name}`, why: `this recurring expense is due on ${next}.` }));
       }
     }
+  }
+  return made + linkedinRules(store);
+}
+
+// The LinkedIn rules. Each ref names one event (an account's week, a post, a sign-out, a sign-in), and a task done
+// for it is not made again while the event lasts.
+/** @param {DataStore} store */
+function linkedinRules(store) {
+  let made = 0;
+  /** @param {Parameters<typeof makeAuto>[1]} task */
+  const once = (task) => {
+    if (store.get('todos').items.some((t) => t.auto === task.kind && t.autoRef === task.ref)) return;
+    if (makeAuto(store, task)) made += 1;
+  };
+  const socials = store.get(SOCIALS);
+  const li = store.get(LINKEDIN);
+  const followers = ruleOf(store, 'linkedin-followers');
+  if (followers.on) {
+    // The Monday of this week: one task per account and week.
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    for (const a of (socials.accounts ?? []).filter((x) => x.network === 'linkedin')) {
+      const ch = followerChange(socials.history?.[a.id], 7);
+      if (!ch || -ch.change < followers.drop) continue;
+      const name = a.name || handleLabel(a);
+      once({ kind: 'linkedin-followers', ref: `${a.id}:${dayKey(monday)}`, projectId: a.projectId ?? null, priority: 'medium', text: `${name} lost ${-ch.change} LinkedIn followers this week`, why: `${name} went from ${ch.before} followers on ${ch.since} to ${ch.now}.` });
+    }
+  }
+  const standout = ruleOf(store, 'linkedin-post');
+  if (standout.on) {
+    const posts = li.posts ?? [];
+    for (const p of posts) {
+      const s = postStandout(p, posts);
+      // Only recent posts: an old one first read after the rule is switched on is no longer worth a task.
+      if (!s || Date.now() - Number(p.postedAt) > 8 * DAY_MS || s.median <= 0 || s.reactions < standout.times * s.median) continue;
+      const line = p.text.replace(/\s+/g, ' ').trim();
+      const short = line.length > 60 ? `${line.slice(0, 60)}…` : line;
+      once({ kind: 'linkedin-post', ref: p.id, projectId: p.projectId ?? null, priority: 'medium', text: `Answer the comments on your LinkedIn post doing well: “${short}”`, why: `it has ${s.reactions} reactions after ${s.age === '1h' ? 'an hour' : s.age === '24h' ? 'a day' : 'a week'}, ${Math.round((s.reactions / s.median) * 10) / 10}× the median of ${s.median} of your ${s.compared} earlier post${s.compared === 1 ? '' : 's'} at that age.${p.url ? ` ${p.url}` : ''}` });
+    }
+  }
+  if (ruleOf(store, 'linkedin-session').on && li.session?.expiredAt) {
+    once({ kind: 'linkedin-session', ref: `session:${li.session.expiredAt}`, due: todayISO(), text: 'Save the LinkedIn session again', why: `LinkedIn signed the saved session out${li.session.error ? ` (${li.session.error})` : ''}. Paste the li_at and JSESSIONID cookies again in Settings → LinkedIn.` });
+  }
+  const signin = ruleOf(store, 'linkedin-signin');
+  const auth = li.auth;
+  if (signin.on && auth?.token && auth.expires - Date.now() <= signin.days * DAY_MS) {
+    const until = dayKey(auth.expires);
+    once({ kind: 'linkedin-signin', ref: `auth:${auth.expires}`, due: until, priority: 'medium', text: 'Sign in to LinkedIn again', why: `the official sign-in ${auth.expires > Date.now() ? 'stops working' : 'stopped working'} on ${until}. Sign in again in Settings → LinkedIn to keep posting.` });
   }
   return made;
 }

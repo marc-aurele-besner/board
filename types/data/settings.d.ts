@@ -261,6 +261,10 @@ export interface AutomationRule {
   days?: number;
   // The Aave health factor a task is made below.
   factor?: number;
+  // LinkedIn followers lost over 7 days before a task is made.
+  drop?: number;
+  // How many times the median reactions of earlier posts a LinkedIn post needs before a task is made.
+  times?: number;
 }
 
 // An AI task and the model pinned to it.
