@@ -719,7 +719,7 @@ async function listWorktrees(path) {
 // Removes the worktree `claude --worktree <name>` made in the repo at `cwd` (.claude/worktrees/<name>) once its task
 // is completed, or, given `path`, any worktree but the main checkout (Dev's Worktrees panel). The task's session is
 // stopped first, since claude runs inside the worktree. git refuses a worktree with changes or untracked files, so
-// nothing unsaved is lost; its branch is kept.
+// nothing unsaved is lost, unless `force` is set (the panel's Force remove), which discards them; its branch is kept.
 // Answers { removed: path }, or { missing: true } when the folder or the worktree is already gone.
 /** @param {IncomingMessage} req @param {ServerResponse} res @param {Cors} cors */
 async function removeWorktree(req, res, cors) {
@@ -730,6 +730,7 @@ async function removeWorktree(req, res, cors) {
   if (!path && !WORKTREE_NAME.test(name)) return res.writeHead(400, cors).end('No worktree name.');
   const reply = (/** @type {object} */ data) => res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(data));
   const id = String(body.session ?? '');
+  const force = body.force === true;
   // Without a folder, the repo is the one the session's first command started in.
   let cwd = String(body.cwd ?? '');
   if (SESSION_ID.test(id) && (sessions.has(id) || (await stat(logFile(id)).catch(() => null)))) {
@@ -766,11 +767,11 @@ async function removeWorktree(req, res, cors) {
       await git(top, ['worktree', 'unlock', tree.worktree]);
     }
     // A worktree whose folder is gone only needs git to forget it.
-    await git(top, 'prunable' in tree ? ['worktree', 'prune'] : ['worktree', 'remove', tree.worktree]);
+    await git(top, 'prunable' in tree ? ['worktree', 'prune'] : ['worktree', 'remove', ...(force ? ['--force'] : []), tree.worktree]);
   } catch (err) {
     return res.writeHead(409, cors).end(/** @type {Error} */ (err).message);
   }
-  log.info(`removed worktree ${tree.worktree}`);
+  log.info(`removed worktree ${tree.worktree}${force ? ' (forced)' : ''}`);
   reply({ removed: tree.worktree });
 }
 
