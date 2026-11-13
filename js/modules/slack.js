@@ -1087,11 +1087,13 @@ function composer(store, key, { threadTs = '', label }) {
     field.style.height = '';
     field.style.height = `${Math.min(field.scrollHeight, 200)}px`;
   });
+  // One box, as Slack's: the field, then a thin row with the hint (or the broadcast tick) and the send button.
   return h('form', { class: 'slack-composer', onsubmit: (/** @type {SubmitEvent} */ e) => { e.preventDefault(); send(); } },
-    field,
-    h('div', { class: 'row between slack-composer-row' },
-      broadcast ? h('label', { class: 'check row small' }, broadcast, `Also send to ${label.replace(/^Reply.*/, 'the channel')}`) : h('span', { class: 'muted small' }, 'Enter sends · Shift+Enter adds a line'),
-      h('button', { type: 'submit', class: 'primary btn-small', title: 'Send' }, icon('send'), 'Send')));
+    h('div', { class: 'slack-composer-box' },
+      field,
+      h('div', { class: 'row between slack-composer-row' },
+        broadcast ? h('label', { class: 'check row small' }, broadcast, `Also send to ${label.replace(/^Reply.*/, 'the channel')}`) : h('span', { class: 'muted small' }, 'Enter sends · Shift+Enter adds a line'),
+        h('button', { type: 'submit', class: 'slack-send', title: 'Send', 'aria-label': 'Send' }, icon('send')))));
 }
 
 /** @param {Store} store @param {string} ts */
@@ -1120,7 +1122,7 @@ function threadPane(store) {
   const name = c ? nameOf(store, splitKey(view.open)[0], c) : '';
   return h('aside', { class: 'slack-thread' },
     h('header', { class: 'row between slack-pane-head' },
-      h('div', null, h('strong', null, 'Thread'), h('span', { class: 'muted small' }, ` ${c?.kind === 'im' ? name : `#${name}`}`)),
+      h('div', { class: 'row slack-title' }, h('strong', null, 'Thread'), h('span', { class: 'muted small slack-topic' }, c?.kind === 'im' ? name : `#${name}`)),
       h('button', { type: 'button', class: 'icon-btn', title: 'Close thread', 'aria-label': 'Close thread', onclick: () => { view.thread = ''; store.refresh(); } }, icon('x'))),
     threadMessages(store),
     composer(store, view.open, { threadTs: view.thread, label: `Reply… ${c?.kind === 'im' ? '' : `#${name}`}`.trim() }));
@@ -1135,7 +1137,7 @@ function mainPane(store) {
       h('div', { class: 'stack slack-empty-text' },
         icon('slack'),
         h('p', null, 'Pick a conversation on the left.'),
-        h('p', { class: 'muted small' }, 'Drag conversations to reorder them, drop them on a group, or use their ⋯ menu to mute, group or tie them to a project.')));
+        h('p', { class: 'muted small' }, 'Every workspace in one list. Drag conversations to reorder them or drop them on a group; right-click one to mute it, move it or tie it to a project.')));
   }
   const [team, channel] = splitKey(view.open);
   const w = workspaceOf(store, team);
@@ -1152,9 +1154,8 @@ function mainPane(store) {
     h('header', { class: 'row between slack-pane-head' },
       h('div', { class: 'row slack-title' },
         teamIcon(w),
-        h('div', { class: 'stack-xs' },
-          h('strong', null, c.kind === 'im' || c.kind === 'mpim' ? name : `#${name}`),
-          h('span', { class: 'muted small slack-topic' }, [w.name, c.topic].filter(Boolean).join(' · ')))),
+        h('strong', { class: 'slack-title-name' }, c.kind === 'im' || c.kind === 'mpim' ? name : `#${name}`),
+        h('span', { class: 'muted small slack-topic', title: [w.name, c.topic].filter(Boolean).join(' · ') }, [w.name, c.topic].filter(Boolean).join(' · '))),
       h('div', { class: 'row slack-head-actions' },
         pickChip({
           value: project,
@@ -1259,10 +1260,7 @@ function draw(root, store) {
 
   root.replaceChildren(
     h('div', { class: 'stack slack' },
-      h('header', { class: 'row between' },
-        h('div', null,
-          h('h2', null, 'Slack'),
-          h('p', { class: 'muted small' }, 'Every workspace in one list. Reorder, group and tie conversations to projects; muted ones stay in place.'))),
+      h('header', { class: 'row between slack-page-head' }, h('h2', null, 'Slack')),
       ...banners,
       h('div', { class: !d.workspaces.length ? 'slack-layout alone' : view.thread && view.open ? 'slack-layout with-thread' : 'slack-layout' },
         d.workspaces.length ? sidebar(store) : null,
