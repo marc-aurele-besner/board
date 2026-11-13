@@ -10,7 +10,7 @@
 import { h, icon, notice, uid } from '../ui.js';
 import { toast } from '../toast.js';
 import { openDialog } from '../modal.js';
-import { onContextMenu, copyItem } from '../menu.js';
+import { onContextMenu, copyItem, openMenu } from '../menu.js';
 import { TERMINAL_RUNNER, runnerInfo, listSessions, saveSessionList, listSession, moveSession, attachSession, runCommand, stopCommand, clearSession, closeSession as closeOnRunner, sendInput, saveImage } from '../terminal.js';
 import { imageFiles, dragsFiles } from '../images.js';
 import { createTerminal, styleOf, colorOf } from '../vt.js';
@@ -1250,11 +1250,10 @@ function terminal(store, s) {
   const input = h('input', {
     name: 'command',
     class: 'term-input',
-    placeholder: s.running ? 'Running: type in the terminal above. Stop ends it.' : 'Type a command and press Enter',
+    placeholder: 'Type a command and press Enter',
     autocomplete: 'off',
     autocapitalize: 'off',
     spellcheck: false,
-    disabled: s.running,
     'aria-label': 'Command',
     'data-autofocus': !s.running,
     // Up and Down walk the saved commands, newest first, as in a shell.
@@ -1270,12 +1269,51 @@ function terminal(store, s) {
     },
   });
 
+  const keys = (/** @type {string} */ label, /** @type {string} */ data, /** @type {string} */ title) =>
+    h('button', {
+      type: 'button',
+      class: 'term-key',
+      title,
+      onclick: () => {
+        if (s.pid) sendInput(runnerOf(store), s.pid, { data });
+        /** @type {TermEl} */ (s.el).out.focus({ preventScroll: true });
+      },
+    }, label);
+  const recent = history.length && !s.running
+    ? h('button', {
+      type: 'button',
+      class: 'icon-btn term-history',
+      title: 'Recent commands (Up and Down in the command line walk them too)',
+      'aria-label': 'Recent commands',
+      'aria-haspopup': 'menu',
+      onclick: (/** @type {MouseEvent} */ e) => {
+        e.stopPropagation();
+        openMenu(history.slice(0, RECENT_SHOWN).map((c) => ({
+          label: oneLine(c),
+          icon: () => icon('terminal'),
+          onSelect: () => {
+            input.value = c;
+            input.focus();
+          },
+        })), /** @type {HTMLElement} */ (e.currentTarget));
+      },
+    }, icon('clock'))
+    : null;
+  const state = s.running ? '' : exitText(s.exit);
+
   return h('section', { class: 'card term' },
     h('div', { class: 'term-head' },
       backButton(),
       sessionTabs(store),
-      h('code', { class: 'term-cwd', title: s.cwd }, s.cwd || '…'),
       sessionUsage(store, s),
+      s.cwd
+        ? h('button', {
+          type: 'button',
+          class: 'term-cwd',
+          title: `${s.cwd}\nClick to copy the folder path`,
+          onclick: () => navigator.clipboard.writeText(s.cwd).then(() => toast('Folder path copied'), () => toast('Could not copy')),
+        }, h('span', { dir: 'ltr' }, shortPath(s.cwd)))
+        : null,
       h('div', { class: 'row term-actions' },
         h('button', {
           type: 'button',
@@ -1290,7 +1328,7 @@ function terminal(store, s) {
         h('button', { type: 'button', class: 'icon-btn', title: 'Clear the output (Ctrl+L)', 'aria-label': 'Clear the output', onclick: () => clearTerminal(s) }, icon('trash')))),
     out,
     h('form', {
-      class: 'term-form',
+      class: s.running ? 'term-form running' : 'term-form',
       onsubmit: (/** @type {SubmitEvent} */ e) => {
         e.preventDefault();
         if (s.running) return stopCommand(runnerOf(store), s.id).catch((err) => toast(err.message));
@@ -1300,27 +1338,27 @@ function terminal(store, s) {
         run(store, s, command);
       },
     },
-      h('span', { class: 'term-prompt', 'aria-hidden': 'true' }, '$'),
-      input,
       s.running
-        ? h('button', { type: 'submit', class: 'btn-small danger', title: 'Stop the command and anything it started' }, icon('stop'), 'Stop')
-        : h('button', { type: 'submit', class: 'btn-small primary', disabled: !view.info }, icon('play'), 'Run')),
-    h('div', { class: 'row between term-status' },
-      h('span', { class: 'muted small term-state', title: s.running ? s.command : null }, s.running ? `Running ${oneLine(s.command)}` : exitText(s.exit) || 'Ready'),
-      history.length && !s.running
-        ? h('div', { class: 'term-recent', 'aria-label': 'Recent commands' },
-            history.slice(0, RECENT_SHOWN).map((c) =>
-              h('button', {
-                type: 'button',
-                class: 'chip term-chip',
-                title: `Put “${c}” in the command line`,
-                onclick: () => {
-                  input.value = c;
-                  input.focus();
-                },
-              }, c)))
-        : null));
+        ? h('span', { class: 'term-prompt term-dot', 'aria-hidden': 'true' })
+        : h('span', { class: 'term-prompt', 'aria-hidden': 'true' }, '$'),
+      // While a command runs, keys go to the terminal itself: the bar says what runs and offers the keys a mouse needs.
+      s.running
+        ? h('span', { class: 'term-state', title: s.command }, oneLine(s.command || ''))
+        : input,
+      s.running ? keys('Esc', '\x1b', 'Send Escape (interrupts claude)') : null,
+      s.running ? keys('Ctrl+C', '\x03', 'Send Ctrl+C') : null,
+      state ? h('span', { class: s.exit && !s.exit.stopped && !s.exit.lost && !s.exit.signal && s.exit.code === 0 ? 'term-exit ok' : 'term-exit', title: state }, state) : null,
+      recent,
+      s.running
+        ? h('button', { type: 'submit', class: 'term-run stop', title: 'Stop the command and anything it started' }, icon('stop'), 'Stop')
+        : h('button', { type: 'submit', class: 'term-run', disabled: !view.info }, icon('play'), 'Run')));
 }
+
+// A folder path with the home folder as ~, as a shell shows it.
+const shortPath = (/** @type {string} */ path) => {
+  const home = view.info?.home;
+  return home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path;
+};
 
 /** @param {Store} store */
 function runnerNotice(store) {
@@ -1400,6 +1438,10 @@ function draw(root, store) {
     if (focused) /** @type {TermEl} */ (s.el).out.focus({ preventScroll: true });
     fit(s);
     paint(s);
+    // The tabs scroll sideways on one line, so the active one is brought into view.
+    const tab = /** @type {HTMLElement | null} */ (document.querySelector('.term-tab.active'));
+    const strip = tab?.parentElement;
+    if (tab && strip) strip.scrollLeft = Math.max(Math.min(strip.scrollLeft, tab.offsetLeft - strip.offsetLeft), tab.offsetLeft - strip.offsetLeft + tab.offsetWidth - strip.clientWidth);
   });
 }
 
