@@ -87,7 +87,11 @@
       "skills": { "example-skill": 2, "plugin:other-skill": 1 },
       "mcp": { "mcp__example-server__read_page": 5, "mcp__example-server__navigate": 3 },
       "start": 1762682400000,
-      "end": 1762684800000
+      "end": 1762684800000,
+      "turns": [
+        { "text": "Add an example feature", "at": 1762682380000, "end": 1762683900000, "wait": 120000, "review": 0 },
+        { "text": "Looks good, open the PR", "at": 1762684200000, "end": 1762684800000, "wait": 0, "review": 300000, "interrupted": true }
+      ]
     },
     "sample-worktree-d4e5f6": {
       "name": "sample-worktree-d4e5f6",

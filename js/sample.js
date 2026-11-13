@@ -108,8 +108,15 @@ function collections() {
   const devRecord = (name, taskIds, offset, models, effort, skills = {}, mcp = {}) => {
     const end = Date.now() + offset * 86400000 - 3600000;
     const list = Object.entries(models);
+    // Three prompts, as Monitoring → Development shows them: the task, a question answered mid-turn, then two follow-ups.
+    const min = 60000;
+    const turns = [
+      { text: 'Work on this task', at: end - 40 * min, end: end - 22 * min, wait: 3 * min, review: 0 },
+      { text: 'The spacing looks off on phones, can you check?', at: end - 14 * min, end: end - 6 * min, wait: 0, review: 8 * min, ...(offset === -3 ? { interrupted: true } : {}) },
+      { text: 'Looks good, open the PR and merge it', at: end - 4 * min, end, wait: 0, review: 2 * min },
+    ];
     return {
-      name, cwd: '', added: at, taskIds, sessions: 1, start: end - 40 * 60000, end, duration: 38 * 60000, apiDuration: 21 * 60000,
+      name, cwd: '', added: at, taskIds, sessions: 1, start: end - 40 * 60000, end, duration: 38 * 60000, apiDuration: 21 * 60000, turns,
       linesAdded: 214, linesRemoved: 37, replies: 60, efforts: { [effort]: 60 }, skills, mcp,
       cost: list.reduce((sum, [, m]) => sum + m[4], 0),
       models: Object.fromEntries(list.map(([id, [input, output, cacheRead, cacheWrite, cost]]) => [id, { provider: 'Anthropic', input, output, thinking: 0, cacheRead, cacheWrite, cost }])),
