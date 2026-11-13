@@ -362,12 +362,17 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 }
 
 /* Monitoring layout: section tabs on their own row, period buttons on a second row */
-.mon-head h2 { margin: 0; }
-.mon-head p { margin: 2px 0 0; }
 .sub-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--border); overflow: visible; }
 .sub-tab { background: none; border: none; border-radius: 0; min-height: 0; padding: 8px 14px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; }
 .sub-tab:hover { background: none; color: var(--text); }
 .sub-tab.active { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+/* Tabs with controls at the end of their row (Tools): the row carries the line under the tabs. */
+/* When they do not fit, the tabs scroll sideways and the controls stay at the end. */
+.sub-tabs-bar { display: flex; align-items: flex-end; gap: 12px; border-bottom: 1px solid var(--border); }
+.sub-tabs-bar > .sub-tabs { flex: 0 1 auto; min-width: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; border-bottom: none; }
+.sub-tabs-bar .sub-tab { flex: none; margin-bottom: 0; padding-inline: 12px; white-space: nowrap; }
+.sub-tabs-bar > .sub-tabs-tools { flex: none; flex-wrap: nowrap; gap: 6px; margin-left: auto; align-self: center; padding-block: 4px; }
+.sub-tabs-tools select { field-sizing: content; width: auto; min-width: 0; min-height: 30px; padding-block: 2px; font-size: 0.85rem; }
 .period-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 /* Compact density (Settings > Appearance) */
@@ -1345,17 +1350,37 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
 .view:is([data-section="todos"], [data-section="inbox"], [data-section="calendar"], [data-section="projects"], [data-section="money"], [data-section="positions"], [data-section="monitoring"], [data-section="tools"], [data-section="cron"]) {
   padding: 0;
   min-height: calc(100dvh - 54px);
-  & > .stack-lg > :is(header, .row.between, nav.sub-tabs, p, .notice, .period-row, .money-controls) { padding-inline: 16px; }
+  & > .stack-lg > :is(header, .row.between, nav.sub-tabs, .sub-tabs-bar, p, .notice, .period-row, .money-controls) { padding-inline: 16px; }
   & > .stack-lg > :first-child { padding-top: 14px; }
+  /* The side panel and the center panel meet: one border between them, no gap. */
+  & > .split { gap: 0; }
   & > .split > .card { border-radius: 0; border-top: none; }
   & > .split > .card:first-child { border-left: none; }
-  & > .split > .card:last-child { border-right: none; }
+  & > .split > .card.main-pane { border-left: none; border-right: none; }
   & > .split > :is(.side, .side-pane) { top: 54px; height: calc(100dvh - 54px); }
   & > .split > .main-pane { min-height: calc(100dvh - 54px); }
 }
 
+/* A side panel the user resizes (js/side-resize.js): the divider sits on its right edge. */
+.side-resizable { position: relative; }
+:is(.split, .inbox-layout, .cal-layout, .cron-layout).side-resizable { grid-template-columns: var(--side-w) minmax(0, 1fr); }
+.side-resize { position: absolute; top: 0; bottom: 0; left: calc(var(--side-w) - 4px); width: 8px; z-index: 3; cursor: col-resize; touch-action: none; }
+.side-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background 0.15s; }
+.side-resize:hover::after, .side-resizable.resizing .side-resize::after { background: var(--accent); }
+.side-resizable.resizing { cursor: col-resize; user-select: none; }
+@media (max-width: 900px) {
+  :is(.cal-layout, .cron-layout).side-resizable { grid-template-columns: minmax(0, 1fr); }
+  :is(.cal-layout, .cron-layout) > .side-resize { display: none; }
+}
+@media (max-width: 760px) {
+  .inbox-layout.side-resizable { grid-template-columns: minmax(0, 1fr); }
+  .inbox-layout > .side-resize { display: none; }
+}
+
 /* Phones */
 @media (max-width: 720px) {
+  .split.side-resizable { grid-template-columns: minmax(0, 1fr); }
+  .side-resize { display: none; }
   .view { padding: 16px; }
   .split, .split.kitchen { grid-template-columns: 1fr; }
   .side, .side-pane { position: static; height: auto; overflow: visible; }
@@ -2118,8 +2143,14 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 /* Projects: a label's colour beside its name */
 
 /* Cron: flow list beside an editor; the flow is a chain of nodes joined by links */
-.cron-layout { display: grid; grid-template-columns: minmax(330px, 420px) minmax(0, 1fr); gap: var(--gap); align-items: start; }
+.cron-layout { display: grid; grid-template-columns: minmax(330px, 420px) minmax(0, 1fr); gap: 0; align-items: start; }
 .cron-list { display: flex; flex-direction: column; gap: 10px; }
+/* The flow list runs under the tabs to the bottom of the window and meets the editor with one border: the cards on
+   both sides lose their corners and outer edges. */
+.cron:has(> .cron-layout) { gap: 0; }
+.cron-layout > .cron-list { position: sticky; top: 54px; height: calc(100dvh - 54px); overflow-y: auto; border-radius: 0; border-top: none; border-left: none; }
+.cron-layout > .card:not(.cron-list), .cron-editor > .card { border-radius: 0; border-top: none; border-left: none; border-right: none; }
+.cron-layout > .cron-editor { gap: 0; }
 .cron-flows { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
 .cron-flow-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .cron-flow-toggle { flex: none; margin-right: 6px; }
@@ -2332,7 +2363,10 @@ button.json-key:hover { background: color-mix(in srgb, var(--accent) 15%, transp
 .json-string { color: var(--syn-string); }
 .json-number { color: var(--syn-number); }
 .json-boolean, .json-null { color: var(--syn-function); }
-@media (max-width: 900px) { .cron-layout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 900px) {
+  .cron-layout { grid-template-columns: minmax(0, 1fr); }
+  .cron-layout > .cron-list { position: static; height: auto; border-right: none; }
+}
 @media (max-width: 720px) {
   .flow-canvas { flex-direction: column; align-items: stretch; padding: 12px; }
   .flow-node { width: 100%; }
@@ -2651,8 +2685,9 @@ button.json-key:hover { background: color-mix(in srgb, var(--accent) 15%, transp
 
 .cal-weekday { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
 
-.cal-month { padding: 8px; }
+.cal-month { display: flex; flex-direction: column; padding: 0; min-height: max(420px, calc(100dvh - var(--cal-fill-top, 300px))); }
 .cal-month-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.cal-month-grid:not(.cal-month-head) { flex: 1; grid-auto-rows: minmax(104px, 1fr); }
 .cal-month-head span { padding: 4px 6px; color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
 .cal-cell { display: flex; flex-direction: column; gap: 3px; min-height: 104px; padding: 4px; border-top: 1px solid var(--border); min-width: 0; }
 .cal-cell:not(:nth-child(7n + 1)) { border-left: 1px solid var(--border); }
@@ -2712,8 +2747,16 @@ button.sum-line:hover { background: var(--surface-2); }
 .opt-plain .account-avatar { width: 16px; height: 16px; font-size: 0.6rem; }
 
 /* Inbox: folders and project directories in a side column, like a mail client. On a phone they sit above the list. */
-.inbox-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 16px; align-items: start; }
-.inbox-side { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+/* The side column runs from the top bar to the bottom of the window, and meets the mail list with one border. */
+.inbox-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 0; align-items: start; }
+.inbox-side { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 54px; height: calc(100dvh - 54px); overflow-y: auto; padding: 10px 8px 10px 0; background: var(--surface); border-right: 1px solid var(--border); }
+.view[data-section="inbox"] > .stack-lg > .inbox-layout:first-child { padding-top: 0; }
+.inbox-main { gap: 8px; min-width: 0; }
+.inbox-main > :not(.inbox-card) { margin-inline: 12px; }
+.inbox-main > :first-child { margin-top: 10px; }
+.inbox-main > .inbox-search { width: auto; }
+.inbox-main > .inbox-card { border-radius: 0; border-left: none; border-right: none; }
+.inbox-pickers .icon-btn { flex: none; }
 .inbox-layout .inbox-folders { display: flex; flex-direction: column; gap: 2px; }
 .inbox-layout .inbox-folders .lp-chip { border-color: transparent; background: transparent; border-radius: 0 999px 999px 0; padding: 6px 12px; justify-content: flex-start; }
 .inbox-layout .inbox-folders .lp-chip:hover { background: var(--surface-2); }
@@ -2733,19 +2776,28 @@ button.sum-line:hover { background: var(--surface-2); }
 .inbox-dir-btn .chip-count { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 @media (max-width: 760px) {
   .inbox-layout { grid-template-columns: minmax(0, 1fr); }
-  .inbox-side { position: static; max-height: none; overflow: visible; }
+  .inbox-side { position: static; height: auto; overflow: visible; padding: 10px 0 0; border-right: none; background: none; }
   .inbox-layout .inbox-folders { flex-direction: row; overflow-x: auto; scrollbar-width: none; }
   .inbox-layout .inbox-folders .lp-chip { flex: none; border-color: var(--border); border-radius: 999px; }
   .inbox-layout .inbox-folders .lp-chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 }
 
-/* Calendar: a side column (small month, filters) beside a time grid, as in Google Calendar. */
-.cal-layout { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 16px; align-items: start; }
-.cal-side { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 12px; }
+/* Calendar: a side column (small month, filters, the next days) beside a time grid, as in Google Calendar. The column
+   runs from the top bar to the bottom of the window and meets the grid with one border; the grid fills the rest. */
+.cal-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 0; align-items: start; }
+.view[data-section="calendar"] > .stack-lg > .cal-layout:first-child { padding-top: 0; }
+.cal-side { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 54px; height: calc(100dvh - 54px); overflow-y: auto; padding: 12px; background: var(--surface); border-right: 1px solid var(--border); }
 .cal-filters { display: flex; flex-direction: column; gap: 8px; }
 .cal-filters .pick-multi, .cal-filters .cal-project-pick { width: 100%; justify-content: space-between; }
-.cal-main { min-width: 0; }
-.cal-toolbar { gap: 8px; }
+.cal-main { display: flex; flex-direction: column; min-width: 0; }
+.cal-main > .card { border-radius: 0; border-left: none; border-right: none; border-bottom: none; }
+.cal-toolbar { gap: 8px; padding: 8px 12px; }
+.cal-agenda { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
+.cal-agenda h3 { margin: 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.cal-agenda-day { display: flex; flex-direction: column; gap: 3px; }
+.cal-agenda-name { align-self: flex-start; min-height: 0; padding: 0; border: none; background: none; color: var(--text); font-size: 0.82rem; font-weight: 600; }
+button.cal-agenda-name:hover { color: var(--accent); }
+.cal-agenda-name.overdue { color: var(--danger); }
 .cal-toolbar .cal-title { margin: 0 0 0 6px; font-family: var(--display); font-size: 1.25rem; font-weight: 500; }
 .cal-today { border-radius: 999px; padding-inline: 16px; }
 .cal-actions .icon-btn[disabled] { opacity: 0.5; }
@@ -2789,7 +2841,7 @@ button.sum-line:hover { background: var(--surface-2); }
 .cal-bar { display: flex; align-items: center; min-height: 22px; padding: 1px 8px; border: none; border-radius: 4px; background: var(--c); color: var(--surface); font-size: 0.78rem; font-weight: 500; text-align: left; }
 .cal-bar.cut-start { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: 0; }
 .cal-bar.cut-end { border-top-right-radius: 0; border-bottom-right-radius: 0; margin-right: 0; }
-.cal-grid-scroll { max-height: max(420px, calc(100vh - 300px)); overflow-y: auto; scrollbar-gutter: stable; }
+.cal-grid-scroll { height: max(320px, calc(100dvh - var(--cal-fill-top, 300px))); overflow-y: auto; scrollbar-gutter: stable; }
 .cal-grid-body { position: relative; }
 .cal-gutter { position: relative; }
 .cal-hour { position: absolute; right: 8px; transform: translateY(-50%); font-size: 0.68rem; color: var(--muted); white-space: nowrap; }
@@ -2805,7 +2857,8 @@ button.sum-line:hover { background: var(--surface-2); }
 
 @media (max-width: 900px) {
   .cal-layout { grid-template-columns: minmax(0, 1fr); }
-  .cal-side { position: static; }
+  .cal-side { position: static; height: auto; overflow: visible; border-right: none; background: none; }
+  .cal-agenda { display: none; }
   .cal-mini { display: none; }
   .cal-filters { flex-direction: row; flex-wrap: wrap; align-items: center; }
   .cal-filters .pick-multi, .cal-filters .cal-project-pick { width: auto; }

@@ -25,6 +25,7 @@ import { openDialog } from '../modal.js';
 import { buildProfile, profileOf, hasProfileSources, profilesFor } from '../profile.js';
 import { fmtCost } from '../dev-usage.js';
 import { brandBlock } from './project-brand.js';
+import { resizableSide } from '../side-resize.js';
 import { PALETTE, makeProject, createProject } from '../projects-core.js';
 
 export { makeProject, createProject };
@@ -1362,7 +1363,7 @@ function draw(root, store) {
   else detail = projectsRecap(store, projects, items, categories);
 
   root.replaceChildren(
-    h('div', { class: 'split' },
+    resizableSide(h('div', { class: 'split' },
       h('section', { class: 'card side-pane' },
         h('input', {
           type: 'search',
@@ -1412,7 +1413,7 @@ function draw(root, store) {
             }, 'Manage labels'))),
         listBox),
 
-      h('section', { class: 'card main-pane' }, detail)));
+      h('section', { class: 'card main-pane' }, detail)), 'projects', { def: 300, min: 220, max: 560 }));
 }
 
 export default /** @satisfies {import('../../types/data').Module} */ ({

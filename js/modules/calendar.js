@@ -10,6 +10,7 @@ import { makeTask } from '../capture.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import { runJob } from '../runners.js';
+import { resizableSide } from '../side-resize.js';
 /** @import { Store, Task, CalendarAccount, CalendarEvent } from '../../types/data' */
 /**
  * The part of a timed event on one day, in hours from midnight; placeSegments() adds its column and the column count.
@@ -17,7 +18,7 @@ import { runJob } from '../runners.js';
  */
 
 const MODES = [['day', 'Day'], ['week', 'Week'], ['month', 'Month']];
-const MONTH_CELL = 3; // events listed in a month cell before "+N more"
+const AGENDA_DAYS = 7; // the days the side column lists
 
 // View state. date: the day the view is anchored on, YYYY-MM-DD.
 // mini: the month the small calendar shows when paged away from the main view. scroll: the time grid's position, kept
@@ -438,6 +439,10 @@ function monthView(store, from, to, month, events, tasks) {
   /** @type {Date[]} */
   const days = [];
   for (let d = from; d < to; d = addDays(d, 1)) days.push(d);
+  // The month fills the window below the toolbar, so its cells hold as many events as their height leaves room for
+  // (a chip is about 24px, the date 30px), before "+N more".
+  const cellHeight = (window.innerHeight - 190) / (days.length / 7);
+  const perCell = Math.max(2, Math.floor((cellHeight - 30) / 24));
   return h('div', { class: 'card cal-month' },
     h('div', { class: 'cal-month-grid cal-month-head', 'aria-hidden': 'true' },
       days.slice(0, 7).map((d) => h('span', null, d.toLocaleDateString([], { weekday: 'short' })))),
@@ -449,8 +454,8 @@ function monthView(store, from, to, month, events, tasks) {
         const today = d.toDateString() === new Date().toDateString();
         return h('div', { class: ['cal-cell', d.getMonth() === month ? '' : 'outside', today ? 'today' : ''].filter(Boolean).join(' ') },
           h('button', { type: 'button', class: 'cal-cell-date', onclick: openDay(store, d), 'aria-label': d.toLocaleDateString([], { dateStyle: 'full' }) }, d.getDate()),
-          items.slice(0, MONTH_CELL),
-          items.length > MONTH_CELL ? h('button', { type: 'button', class: 'cal-more', onclick: openDay(store, d) }, `+${items.length - MONTH_CELL} more`) : null);
+          items.length > perCell ? items.slice(0, perCell - 1) : items,
+          items.length > perCell ? h('button', { type: 'button', class: 'cal-more', onclick: openDay(store, d) }, `+${items.length - perCell + 1} more`) : null);
       })));
 }
 
@@ -533,6 +538,54 @@ function miniMonth(store, d, from, to) {
         },
       }, x.getDate()))));
 }
+
+// What is coming, under the small month: overdue tasks, then each of the next days with its events and deadlines,
+// whatever the main view shows. A day's name opens it.
+/**
+ * @param {Store} store
+ * @param {(x: { projectId: string | null, labelId?: string | null }) => boolean} byProject
+ */
+function agenda(store, byProject) {
+  const today = midnight(new Date());
+  const end = addDays(today, AGENDA_DAYS);
+  const events = cachedCalendarEvents(store, today, end).events.filter(byProject);
+  const tasks = view.tasks
+    ? store.get('todos').items.filter((t) => t.due && statusOf(t) !== 'done' && t.due < isoOf(end)).filter(byProject)
+    : [];
+  const overdue = tasks.filter((t) => /** @type {string} */ (t.due) < isoOf(today));
+  const days = Array.from({ length: AGENDA_DAYS }, (_, i) => addDays(today, i))
+    .map((d) => ({ d, list: events.filter((e) => onDay(e, d)), due: tasks.filter((t) => t.due === isoOf(d)) }))
+    .filter((x) => x.list.length || x.due.length);
+  /** @param {Date} d */
+  const dayName = (d) => {
+    const n = dayIndex(today, d);
+    return n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' });
+  };
+  return h('section', { class: 'cal-agenda' },
+    h('h3', null, `Next ${AGENDA_DAYS} days`),
+    overdue.length
+      ? h('div', { class: 'cal-agenda-day' },
+          h('span', { class: 'cal-agenda-name overdue' }, 'Overdue'),
+          overdue.map(taskChip))
+      : null,
+    days.map(({ d, list, due }) => h('div', { class: 'cal-agenda-day' },
+      h('button', { type: 'button', class: 'cal-agenda-name', title: 'Show this day', onclick: openDay(store, d) }, dayName(d)),
+      list.map((e) => eventChip(store, e)),
+      due.map(taskChip))),
+    !overdue.length && !days.length ? h('p', { class: 'muted small' }, 'Nothing planned.') : null);
+}
+
+// The time grid and the month run to the bottom of the window, below where they start: that moves with the banners.
+function fillWindow() {
+  const layout = /** @type {HTMLElement | null} */ (document.querySelector('.cal-layout'));
+  const fill = /** @type {HTMLElement | null} */ (layout?.querySelector('.cal-grid-scroll, .cal-month'));
+  if (!layout || !fill) return;
+  // offsetTop, not the bounding box: the entrance animation moves the page while it plays.
+  let top = 0;
+  for (let el = /** @type {HTMLElement | null} */ (fill); el; el = /** @type {HTMLElement | null} */ (el.offsetParent)) top += el.offsetTop;
+  layout.style.setProperty('--cal-fill-top', `${Math.round(top)}px`);
+}
+addEventListener('resize', fillWindow);
 
 // --- Page ---
 
@@ -625,7 +678,8 @@ function draw(root, store) {
           })
         : null,
       h('label', { class: 'check row' },
-        h('input', { type: 'checkbox', checked: view.tasks, onchange: (/** @type {Event} */ e) => { view.tasks = /** @type {HTMLInputElement} */ (e.target).checked; store.refresh(); } }), 'Task deadlines')));
+        h('input', { type: 'checkbox', checked: view.tasks, onchange: (/** @type {Event} */ e) => { view.tasks = /** @type {HTMLInputElement} */ (e.target).checked; store.refresh(); } }), 'Task deadlines')),
+    agenda(store, byProject));
 
   const offline = accounts.filter((a) => !isCalendarConnected(a.email));
   const banners = [
@@ -648,14 +702,12 @@ function draw(root, store) {
 
   root.replaceChildren(
     h('div', { class: 'stack-lg calendar' },
-      h('header', null,
-        h('h2', null, 'Calendar'),
-        h('p', { class: 'muted small' }, 'Your Google calendars side by side, with task deadlines on their days. Read-only.')),
       ...banners,
-      h('div', { class: 'cal-layout' },
+      resizableSide(h('div', { class: 'cal-layout' },
         side,
-        h('div', { class: 'stack cal-main' }, toolbar, body))));
+        h('div', { class: 'cal-main' }, toolbar, body)), 'calendar', { def: 260, min: 220, max: 460 })));
   if (view.mode !== 'month') scrollGrid(root, from, days);
+  requestAnimationFrame(fillWindow);
 }
 
 export default /** @satisfies {import('../../types/data').Module} */ ({

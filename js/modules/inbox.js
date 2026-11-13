@@ -11,6 +11,7 @@ import { makeTask } from '../capture.js';
 import { pickChip } from '../inline.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
+import { resizableSide } from '../side-resize.js';
 /** @import { Store, InboxMessage, Project, GmailAccount, RunnerJobError, IconName } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @typedef {[string, string, IconName, (e: InboxMessage) => unknown]} Folder */
@@ -815,15 +816,12 @@ function draw(root, store) {
   /** @param {Folder} folder */
   const countOf = ([key, , , holds]) => (key === 'inbox' ? unread.length : byProject.filter(holds).length);
 
+  // Where the mail comes from and when it was last read, on the Refresh button now the page has no header.
+  const source = `Emails sent and received through ${[resendKeyed.length ? 'Resend' : '', accounts.length ? 'Gmail' : ''].filter(Boolean).join(' and ') || 'Resend or Gmail'}, for ${keyed.length} project${keyed.length === 1 ? '' : 's'}.${last.at || syncedAt ? ` Read ${dateOf(last.at || syncedAt)}.` : ''}`;
+  const refreshButton = h('button', { type: 'button', class: 'icon-btn', title: read.busy ? 'Reading…' : `Refresh. ${source}`, 'aria-label': 'Refresh', disabled: read.busy || !hasMail, onclick: () => refresh(store) },
+    refreshIcon(read.busy));
+
   root.replaceChildren(h('div', { class: 'stack-lg inbox' },
-    h('div', { class: 'row between' },
-      h('div', null,
-        h('h2', null, 'Inbox'),
-        h('p', { class: 'muted small' },
-          `Emails sent and received through ${[resendKeyed.length ? 'Resend' : '', accounts.length ? 'Gmail' : ''].filter(Boolean).join(' and ') || 'Resend or Gmail'}, for ${keyed.length} project${keyed.length === 1 ? '' : 's'}.`,
-          last.at || syncedAt ? ` Read ${dateOf(last.at || syncedAt)}.` : '')),
-      h('button', { type: 'button', class: 'btn-small', disabled: read.busy || !hasMail, onclick: () => refresh(store) },
-        refreshIcon(read.busy), read.busy ? 'Reading…' : 'Refresh')),
 
     hasMail ? null : setupBanner('resend', 'Add a Resend API key to a project, or a Gmail account, to see emails here.', {
       actions: [h('a', { href: settingsHref('gmail'), class: 'btn-small' }, 'Add a Gmail account')],
@@ -842,7 +840,7 @@ function draw(root, store) {
     })),
 
     hasMail || emails.length
-      ? h('div', { class: 'inbox-layout' },
+      ? resizableSide(h('div', { class: 'inbox-layout' },
           h('aside', { class: 'inbox-side' },
             h('div', { class: 'inbox-folders', role: 'tablist', 'aria-label': 'Folders' },
               FOLDERS.map((f) => chip(view.folder === f[0], [icon(f[2]), h('span', { class: 'inbox-folder-name' }, f[1])], countOf(f), () => set({ folder: f[0], status: 'all' }), {
@@ -897,7 +895,8 @@ function draw(root, store) {
                 ? h('select', { 'aria-label': 'Status', onchange: (/** @type {Event} */ ev) => set({ status: /** @type {HTMLSelectElement} */ (ev.target).value }) },
                     h('option', { value: 'all' }, 'Any status'),
                     statuses.map((s) => h('option', { value: s, selected: view.status === s }, statusLabel(s))))
-                : null)),
+                : null,
+              refreshButton)),
           h('input', {
             type: 'search',
             class: 'inbox-search',
@@ -913,7 +912,7 @@ function draw(root, store) {
           }),
           bar,
           h('section', { class: 'card inbox-card' }, list),
-          more))
+          more)), 'inbox', { def: 230, min: 180, max: 480 })
       : null));
 }
 

@@ -23,6 +23,13 @@ const TABS = [['health', 'Website health', 'globe'], ['ssl', 'SSL and domains', 
 // What "Check all now" looks up on each tab.
 /** @type {Record<string, string[]>} */
 const TAB_PARTS = { health: ['health'], ssl: ['ssl', 'domain'], dns: ['dns'], crawl: ['crawl'] };
+// What each tab does, in its tooltip. The website tabs share the first.
+/** @type {Record<string, string>} */
+const SUBTITLES = {
+  health: 'Checks that run against the website of each project, and the services they rely on. The runners check every 5 minutes, with or without the board open.',
+  contracts: 'Read and write the smart contracts saved in Settings.',
+  requests: 'Build and send HTTP requests, read their answers, and keep them with a project.',
+};
 const EVERY = [[15, '15 minutes'], [60, 'hour'], [360, '6 hours'], [1440, 'day']];
 /** @type {Record<string, [string, string]>} */
 const STATUS = { up: ['Up', 'done'], slow: ['Slow', 'medium'], down: ['Down', 'high'] };
@@ -1089,21 +1096,36 @@ function draw(root, store) {
 
   root.replaceChildren(
     h('div', { class: 'stack-lg tools' },
-      h('header', { class: 'row between' },
-        h('div', null, h('h2', null, 'Tools'), h('p', { class: 'muted small' }, requests ? 'Build and send HTTP requests, read their answers, and keep them with a project.' : contracts ? 'Read and write the smart contracts saved in Settings.' : 'Checks that run against the website of each project, and the services they rely on. The runners check every 5 minutes, with or without the board open.')),
+      // The tabs, with the check controls at the end of their row: the page has no header.
+      h('div', { class: 'sub-tabs-bar' },
+        h('nav', { class: 'sub-tabs', role: 'tablist', 'aria-label': 'Tools' },
+          TABS.map(([key, label, iconName]) =>
+            h('button', {
+              type: 'button',
+              role: 'tab',
+              class: view.tab === key ? 'sub-tab active' : 'sub-tab',
+              'aria-selected': String(view.tab === key),
+              title: SUBTITLES[key] ?? SUBTITLES.health,
+              onclick: () => {
+                view.tab = key;
+                store.refresh();
+              },
+            }, icon(iconName), label))),
         !contracts && !requests && (sites.length || (status && store.get(COLLECTION).providers.length)) && view.tab !== 'meta'
-          ? h('div', { class: 'row' },
-              h('label', { class: 'inline' }, 'Check every',
-                h('select', {
+          ? h('div', { class: 'row sub-tabs-tools' },
+              // "Check every" is in the options, to keep the row short beside the tabs.
+              h('select', {
                   value: String(store.get(COLLECTION).every),
                   'aria-label': 'How often to check',
+                  title: 'How often the runners check',
                   onchange: (/** @type {Event} */ e) => store.update(COLLECTION, (d) => {
                     d.every = Number(/** @type {HTMLSelectElement} */ (e.target).value);
                   }),
-                }, EVERY.map(([v, label]) => h('option', { value: v }, label)))),
+                }, EVERY.map(([v, label]) => h('option', { value: v }, `Every ${label}`))),
               h('button', {
                 type: 'button',
                 class: 'btn-small primary',
+                title: 'Check all now',
                 disabled: all,
                 onclick: () => run(store, 'all', async () => {
                   // The runners check (tools/jobs/monitoring.js); the results arrive through tools.json.
@@ -1117,20 +1139,8 @@ function draw(root, store) {
                   await store.sync();
                   toast(made ? `${made} task${made === 1 ? '' : 's'} created automatically` : 'All sites checked');
                 }),
-              }, refreshIcon(all), all ? 'Checking…' : 'Check all now'))
+              }, refreshIcon(all), all ? 'Checking…' : 'Check now'))
           : null),
-      h('nav', { class: 'sub-tabs', role: 'tablist', 'aria-label': 'Tools' },
-        TABS.map(([key, label, iconName]) =>
-          h('button', {
-            type: 'button',
-            role: 'tab',
-            class: view.tab === key ? 'sub-tab active' : 'sub-tab',
-            'aria-selected': String(view.tab === key),
-            onclick: () => {
-              view.tab = key;
-              store.refresh();
-            },
-          }, icon(iconName), label))),
       body,
       sites.length && without.length && view.tab === 'health'
         ? h('p', { class: 'muted small' }, `Without a website, so not checked: ${without.map((p) => p.name).join(', ')}.`)

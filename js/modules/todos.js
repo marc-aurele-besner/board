@@ -26,6 +26,7 @@ import { systemPrompt } from '../prompts.js';
 import { profilesFor } from '../profile.js';
 import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { taskMatcher, QUERY_HINT } from '../task-query.js';
+import { resizableSide } from '../side-resize.js';
 import { taskStatuses, statusName, statusOptions, statusLook, categoryColor, taskCategoryNames, categoryLabelIds, isReady } from '../task-labels.js';
 
 const COLLECTION = 'todos';
@@ -1898,7 +1899,7 @@ function draw(root, store) {
   const onScreen = visible.filter((i) => order.includes(i.id));
 
   root.replaceChildren(
-    h('div', { class: 'split' },
+    resizableSide(h('div', { class: 'split' },
       h('aside', { class: 'card side' },
         h('div', { class: 'row between' },
           h('h2', null, 'Lists'),
@@ -2089,7 +2090,7 @@ function draw(root, store) {
             showDue ? columnHeader(store, 'due', 'Deadline') : null,
             h('span')),
           columnFilters(store, projects, categories, showDue),
-          listBody))));
+          listBody))), 'todos', { def: 280, min: 200, max: 520 }));
 }
 
 export default /** @satisfies {import('../../types/data').Module} */ ({

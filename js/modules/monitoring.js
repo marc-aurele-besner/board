@@ -645,9 +645,6 @@ function draw(root, store) {
 
   root.replaceChildren(
     h('div', { class: 'stack-lg mon' },
-      h('header', { class: 'mon-head' },
-        h('h2', null, 'Monitoring'),
-        h('p', { class: 'muted small' }, SUBTITLES[view.tab])),
       h('nav', { class: 'sub-tabs', role: 'tablist', 'aria-label': 'Monitoring sections' },
         TABS.map(([key, label]) =>
           h('button', {
@@ -655,6 +652,8 @@ function draw(root, store) {
             role: 'tab',
             class: view.tab === key ? 'sub-tab active' : 'sub-tab',
             'aria-selected': String(view.tab === key),
+            // What the tab shows, now the page has no header to say it.
+            title: SUBTITLES[key],
             onclick: () => {
               view.tab = key;
               store.refresh();
