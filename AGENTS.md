@@ -107,6 +107,7 @@ js/defi/positions-read.js  Liquidity Pools reads without the DOM: positions, fee
 js/defi/wallets-read.js  DeFi → Wallets balances read per chain into pools.json balances
 js/defi/lending-read.js  DeFi → Lending Aave accounts read per chain into pools.json lending
 js/json-extract.js    findJson(): the JSON in a blob of text (prose, fences, wrapped lines, cut off at either end) for Cron's Parse JSON step
+js/meetings.js        upcoming meetings with guests, each guest matched to contacts with their latest emails: Cron's meetings source (no DOM)
 js/capture.js         parseTask(), parseMoney() and makeTask(): one place for a task's shape
 js/palette.js         the Cmd/Ctrl+K search palette: jump, or capture a task, a Money entry or a recipe link
 js/search.js          what the full search page (modules/search.js, hidden) looks through, grouped by kind
