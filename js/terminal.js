@@ -97,7 +97,15 @@ async function readStream(hub, res) {
       // Events from before this attach (a detach the runner had not read yet) are skipped until its replay starts.
       if (event.t === 'session') sub.started = true;
       if (event.t === 'closed') sub.done(true);
-      else if (sub.started) sub.onEvent(event);
+      else if (sub.started) {
+        // One terminal failing to draw an event must not end the stream: every terminal would be read again from
+        // the start, fail again, and Dev would keep showing the runner as gone.
+        try {
+          sub.onEvent(event);
+        } catch (err) {
+          console.error(`Terminal ${id}: could not handle a ${event.t} event`, err);
+        }
+      }
     }
   }
 }
