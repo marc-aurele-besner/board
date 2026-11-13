@@ -12,6 +12,8 @@ import { toast } from '../toast.js';
 import { runJob } from '../runners.js';
 import { resizableSide } from '../side-resize.js';
 import { eventGuests } from './project-contacts.js';
+import { LINKEDIN } from '../linkedin-core.js';
+import { openLinkedinComposer } from '../linkedin-composer.js';
 /** @import { Store, Task, CalendarAccount, CalendarEvent } from '../../types/data' */
 /**
  * The part of a timed event on one day, in hours from midnight; placeSegments() adds its column and the column count.
@@ -24,8 +26,8 @@ const AGENDA_DAYS = 7; // the days the side column lists
 // View state. date: the day the view is anchored on, YYYY-MM-DD.
 // mini: the month the small calendar shows when paged away from the main view. scroll: the time grid's position, kept
 // across redraws.
-/** @type {{ mode: string, date: string, project: string, tasks: boolean, mini: string, scroll: number | null }} */
-const view = { mode: 'week', date: '', project: 'all', tasks: true, mini: '', scroll: null };
+/** @type {{ mode: string, date: string, project: string, tasks: boolean, posts: boolean, mini: string, scroll: number | null }} */
+const view = { mode: 'week', date: '', project: 'all', tasks: true, posts: true, mini: '', scroll: null };
 // Events come from calendar.json, which the runners keep read. key: the range and calendars last checked, so a range
 // the file does not hold yet is asked of the runners once; errors: what that ask, or Refresh, reported.
 /** @type {{ key: string, busy: boolean, errors: string[] }} */
@@ -224,11 +226,46 @@ const copyCount = (e) => {
   return n ? h('span', { class: 'cal-group-count', title: `On ${n + 1} calendars` }, String(n + 1)) : null;
 };
 
+// The LinkedIn layer: posts scheduled or posted from the board (linkedin.json), drawn as half-hour events of their
+// own calendar so they sit in the grid, the month and the agenda like Google's. A click opens the composer.
+const POSTS_CALENDAR = 'linkedin-posts';
+const POST_MINUTES = 30;
+/** @param {Store} store @param {Date} from @param {Date} to @returns {CalendarEvent[]} */
+function postEvents(store, from, to) {
+  if (!view.posts) return [];
+  return store.get(LINKEDIN).posts.flatMap((p) => {
+    const at = p.status === 'posted' ? p.postedAt : p.status === 'scheduled' || p.status === 'missed' ? p.scheduledAt : null;
+    if (typeof at !== 'number' || at < from.getTime() || at >= to.getTime()) return [];
+    const line = p.text.split('\n').find((l) => l.trim())?.trim() ?? '';
+    return [{
+      key: `${POSTS_CALENDAR}|${p.id}`,
+      account: '',
+      calendarId: POSTS_CALENDAR,
+      calendar: p.status === 'posted' ? 'LinkedIn · posted' : p.status === 'missed' ? 'LinkedIn · missed' : 'LinkedIn · scheduled',
+      color: p.status === 'missed' ? 'var(--danger)' : 'var(--info)',
+      projectId: p.projectId ?? null,
+      labelId: null,
+      title: `LinkedIn: ${line.length > 60 ? `${line.slice(0, 60)}…` : line}`,
+      start: new Date(at).toISOString(),
+      end: new Date(at + POST_MINUTES * 60000).toISOString(),
+      allDay: false,
+      location: '',
+      description: '',
+      link: p.url ?? '',
+      meet: '',
+    }];
+  });
+}
+
 /**
  * @param {Store} store
  * @param {CalendarEvent} e
  */
 function openEvent(store, e) {
+  if (e.calendarId === POSTS_CALENDAR) {
+    openLinkedinComposer(store, { postId: e.key.slice(POSTS_CALENDAR.length + 1) });
+    return;
+  }
   const projects = store.get('projects').projects;
   const project = projects.find((p) => p.id === e.projectId);
   const text = plainText(e.description);
@@ -628,7 +665,7 @@ function miniMonth(store, d, from, to) {
 function agenda(store, byProject) {
   const today = midnight(new Date());
   const end = addDays(today, AGENDA_DAYS);
-  const events = regroup(cachedCalendarEvents(store, today, end).events.filter(byProject));
+  const events = regroup([...cachedCalendarEvents(store, today, end).events, ...postEvents(store, today, end)].filter(byProject));
   const tasks = view.tasks
     ? store.get('todos').items.filter((t) => t.due && statusOf(t) !== 'done' && t.due < isoOf(end)).filter(byProject)
     : [];
@@ -694,7 +731,7 @@ function draw(root, store) {
   /** @param {{ projectId: string | null, labelId?: string | null }} x */
   const byProject = (x) => view.project === 'all' ||
     (labelFilter ? underLabel(projects, x.projectId, x.labelId ?? null, labelFilter) : x.projectId === view.project);
-  const events = regroup(cached.events.filter(byProject));
+  const events = regroup([...cached.events, ...postEvents(store, from, to)].filter(byProject));
   const tasks = view.tasks
     ? store.get('todos').items.filter((t) => t.due && statusOf(t) !== 'done' && t.due >= isoOf(from) && t.due < isoOf(to)).filter(byProject)
     : [];
@@ -758,7 +795,9 @@ function draw(root, store) {
           })
         : null,
       h('label', { class: 'check row' },
-        h('input', { type: 'checkbox', checked: view.tasks, onchange: (/** @type {Event} */ e) => { view.tasks = /** @type {HTMLInputElement} */ (e.target).checked; store.refresh(); } }), 'Task deadlines')),
+        h('input', { type: 'checkbox', checked: view.tasks, onchange: (/** @type {Event} */ e) => { view.tasks = /** @type {HTMLInputElement} */ (e.target).checked; store.refresh(); } }), 'Task deadlines'),
+      h('label', { class: 'check row' },
+        h('input', { type: 'checkbox', checked: view.posts, onchange: (/** @type {Event} */ e) => { view.posts = /** @type {HTMLInputElement} */ (e.target).checked; store.refresh(); } }), 'LinkedIn posts')),
     agenda(store, byProject));
 
   const offline = accounts.filter((a) => !isCalendarConnected(a.email));
@@ -796,11 +835,12 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
   icon: 'calendar',
   collection: null,
   render: draw,
-  serialize: () => ({ mode: view.mode === 'week' ? '' : view.mode, date: view.date, project: view.project === 'all' ? '' : view.project, tasks: view.tasks ? '' : '0' }),
+  serialize: () => ({ mode: view.mode === 'week' ? '' : view.mode, date: view.date, project: view.project === 'all' ? '' : view.project, tasks: view.tasks ? '' : '0', posts: view.posts ? '' : '0' }),
   restore: (/** @type {Record<string, string>} */ p = {}) => {
     view.mode = MODES.some(([k]) => k === p.mode) ? p.mode : 'week';
     view.date = /^\d{4}-\d{2}-\d{2}$/.test(p.date ?? '') ? p.date : '';
     view.project = p.project || 'all';
     view.tasks = p.tasks !== '0';
+    view.posts = p.posts !== '0';
   },
 });

@@ -168,6 +168,7 @@ function collections() {
         task('t6', 'Write the install guide', 'review', 'medium', 'p-docs', { due: day(3) }),
         task('t7', 'Book the plumber', 'done', 'none', 'p-reno'),
         task('t8', 'Buy oat milk', 'todo', 'low', null),
+        task('t10', 'Announce the install guide', 'todo', 'medium', 'p-docs', { due: day(1) }),
         task('t9', 'Social posts: the new pricing page', 'todo', 'medium', 'p-atlas', {
           auto: 'cron',
           description: 'The new pricing page\n\n## X\nPricing is now one page, one plan. See it at example.com/pricing\n\n## LinkedIn\nWe rewrote our pricing page from scratch.\n\nThree plans became one, with every feature in it. The page is shorter, and so are the questions we get.\n\nWhat made you pick your last tool: the price, or how clear it was?',
@@ -312,6 +313,7 @@ function collections() {
         liPost('lp4', 'What a week without meetings did to our release.', 2, [[1, 9], [24, 48]]),
         { id: 'lp5', projectId: 'p-atlas', text: 'How we pick what to build next.', status: 'scheduled', scheduledAt: Date.now() + 2 * 86400000, createdAt: Date.now() - 86400000 },
         { id: 'lp6', projectId: 'p-atlas', text: 'A draft about our hiring process.', status: 'draft', createdAt: Date.now() - 3 * 86400000 },
+        { id: 'lp7', taskId: 't10', projectId: 'p-docs', text: 'Atlas Docs now has an install guide for every platform.', link: 'https://docs.example.com', status: 'scheduled', scheduledAt: new Date(new Date(Date.now() + 86400000).setHours(9, 0, 0, 0)).getTime(), createdAt: Date.now() - 3600000 },
       ],
       comments: [
         { id: 'lc1', postId: 'lp4', postUrn: 'urn:li:share:4', author: 'Sam Rivera', text: 'We tried the same, it worked.', at: Date.now() - 86400000, read: false },
