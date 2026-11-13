@@ -12,6 +12,7 @@ import { runnersOnline, runnersKnown } from '../runners.js';
 import { markup } from '../slack-markup.js';
 import { emojiChar } from '../emoji.js';
 import { pickEmoji, frequentEmoji, rememberEmoji } from '../emoji-picker.js';
+import { setAttention, slackMentions, mentionsOf } from '../attention.js';
 import {
   SLACK, SLACK_DEFAULTS, keyOf, splitKey, addWorkspaces, listChannels, ensureUsers, readCounts, readHistory, readThread,
   postMessage, editMessage, deleteMessage, react, markRead, customEmoji, fileData, slackLink,
@@ -182,9 +183,7 @@ const isMuted = (store, key) => data(store).muted.includes(key);
 function unreadOf(store, key) {
   const c = countOf(key);
   if (!c) return { unread: false, mentions: 0 };
-  const dm = /^D/.test(splitKey(key)[1]);
-  const mentions = dm && c.unread ? Math.max(c.mentions, 1) : c.mentions;
-  return { unread: c.unread && !isMuted(store, key), mentions };
+  return { unread: c.unread && !isMuted(store, key), mentions: mentionsOf(splitKey(key)[1], c) };
 }
 
 // ---- reading ----------------------------------------------------------------------------------------------------
@@ -340,6 +339,8 @@ function paint(part) {
   const m = live.mounted;
   if (!m || !m.root.isConnected) return;
   if (part === 'side') {
+    // The nav's Slack pill follows what this tab reads and marks read; before the first read it keeps its own.
+    if (live.counts.size) setAttention('slack', slackMentions(m.store, live.counts));
     const old = m.root.querySelector('.slack-side-list');
     if (old) {
       const fresh = sideList(m.store);
@@ -764,6 +765,7 @@ function sideList(store) {
     if ((words || view.unread) && !keys.length) return null;
     const folded = d.collapsed.includes(s.id) && !words && !view.unread;
     const unreadCount = s.keys.filter((k) => unreadOf(store, k).unread).length;
+    const mentionCount = s.keys.reduce((n, k) => n + unreadOf(store, k).mentions, 0);
     const project = s.projectId ? projectsOf(store).find((p) => p.id === s.projectId) : null;
     const error = s.kind === 'team' ? (s.ws?.error || live.errors.get(s.id) || '') : '';
     return h('section', {
@@ -787,7 +789,9 @@ function sideList(store) {
           s.kind === 'team' && s.ws ? teamIcon(s.ws) : s.project ? projectIcon(s.project) : s.kind === 'group' ? icon('folder') : null,
           h('span', { class: 'slack-section-title' }, s.title),
           project && s.kind !== 'project' ? h('span', { class: 'slack-section-project', title: `Tied to ${project.name}` }, projectIcon(project), project.name) : null,
-          folded && unreadCount ? h('span', { class: 'slack-badge soft' }, String(unreadCount)) : null),
+          mentionCount
+            ? h('span', { class: 'slack-badge', title: `${mentionCount} ${mentionCount === 1 ? 'mention' : 'mentions'}` }, String(mentionCount))
+            : folded && unreadCount ? h('span', { class: 'slack-badge soft' }, String(unreadCount)) : null),
         menuButton({ title: s.kind === 'group' ? 'Group' : s.kind === 'team' ? 'Workspace' : 'Section', className: 'icon-btn slack-item-menu', build: () => sectionMenu(store, s) })),
       () => sectionMenu(store, s)),
       error ? h('p', { class: 'slack-section-error small' }, icon('alert'), error) : null,
