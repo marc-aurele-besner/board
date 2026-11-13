@@ -163,7 +163,7 @@ function accountRow(store, cfg, a, projects) {
   return h('li', { class: 'resend-row has-key' },
     h('div', { class: 'resend-name' }, icon(a.way === 'token' ? 'key' : a.way === 'session' ? 'users' : 'notion'),
       h('strong', { title: accountName(a) }, accountName(a)),
-      h('span', { class: 'muted small' }, `${wayLabel(a)} · ${count} database${count === 1 ? '' : 's'}`)),
+      h('span', { class: 'muted small', title: `${count} database${count === 1 ? '' : 's'}` }, wayLabel(a))),
     h('div', { class: 'resend-key' },
       projectPick(projects, a.projectId ?? null, (projectId) => saveAndMove(store, (c) => ({ ...c, accounts: c.accounts.map((x) => (x.id === a.id ? { ...x, projectId } : x)) }))),
       result(key, 'resend-msg small')),
