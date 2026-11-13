@@ -854,11 +854,14 @@ function sessionUsage(store, s) {
 // Issue and PR links the session prints are added to the tasks in `taskIds`.
 // Returns the terminal's session id, so the tasks can find it again (openSession), and the worktree claude makes
 // ({ name, cwd }: its name and the folder of its repo), so the tasks can remove it once done; null when the command
-// makes none, or names its own.
-/** @param {{ store: Store, prompt: string, projectId?: string, taskIds?: string[], title?: string }} options */
-export function startClaudeSession({ store, prompt, projectId = '', taskIds = [], title = '' }) {
+// makes none, or names its own. `model` and `effort` are the task's picks, added to the command when set.
+/**
+ * @param {{ store: Store, prompt: string, projectId?: string, taskIds?: string[], title?: string, model?: string,
+ *   effort?: string }} options
+ */
+export function startClaudeSession({ store, prompt, projectId = '', taskIds = [], title = '', model = '', effort = '' }) {
   const id = uid();
-  const { command, worktree } = claudeCommand(store, projectId, title, id, rootPath(store, view.workspace));
+  const { command, worktree } = claudeCommand(store, projectId, title, id, rootPath(store, view.workspace), '', { model, effort });
   view.queued = { id, prompt, projectId, taskIds, command };
   showDev();
   return { id, worktree };
