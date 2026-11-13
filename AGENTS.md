@@ -56,6 +56,7 @@ js/socials.js         the X, LinkedIn, GitHub and Instagram accounts, their foll
 js/modules/settings-socials.js  Settings → X / Twitter, LinkedIn, GitHub and Instagram accounts: accounts, their projects, LinkedIn’s session; Read now
 js/modules/monitoring-socials.js  Monitoring → Socials (X, LinkedIn, GitHub, Instagram): followers (and GitHub stars) now, growth over the period, a line per account, Read now
 js/modules/monitoring-ai.js  Monitoring → AI usage overview: board calls and Dev sessions by source and project, a chart and table broken down by project, source, model or feature, against the period before
+js/modules/monitoring-dev.js  Monitoring → AI usage → Dev sessions: a chart and table by project, model, effort or billing, in cost, tokens, time or sessions
 js/chains.js          every chain the board reads: the built-in ones and those added in Settings → Blockchains
 js/abi.js             Solidity ABI encoding and decoding: calls, answers and event logs
 js/contracts.js       saved smart contracts: reads through the node, writes through the browser wallet, activity

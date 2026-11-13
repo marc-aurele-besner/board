@@ -9,7 +9,8 @@ import { analyticsTab, searchTab, sortTable } from './monitoring-web.js';
 import { runnersTab } from './monitoring-runners.js';
 import { socialsTab } from './monitoring-socials.js';
 import { contractsActivityTab, contractsActivitySerialize, contractsActivityRestore } from './monitoring-contracts.js';
-import { usageRecords, sumUsage, modelName, modelsByUse, fmtDuration, tokensOf } from '../dev-usage.js';
+import { usageRecords, sumUsage, modelName, modelsByUse, fmtDuration } from '../dev-usage.js';
+import { devBreakdown } from './monitoring-dev.js';
 import { aiOverview, aiView, devProjectOf, projectShown, sourceShown, SOURCES, BREAKDOWNS, MEASURES } from './monitoring-ai.js';
 import { sessionStatus } from '../terminal.js';
 import { runnerOf } from '../dev-core.js';
@@ -283,23 +284,9 @@ function pollLive(store, ids) {
 /** @param {Store} store @param {PeriodWindow} w */
 function devSessions(store, w) {
   const tasks = store.get('todos').items;
+  const projectName = new Map(store.get('projects').projects.map((p) => [p.id, p.name]));
   const records = usageRecords(store).filter((r) => inWindow(r.end ?? null, w) && projectShown(devProjectOf(tasks, r)));
   const sum = sumUsage(records);
-  const included = w.items.map(() => 0);
-  const extra = w.items.map(() => 0);
-  for (const r of records) {
-    const b = bucketOf(r.end, w);
-    if (b < 0 || !r.cost) continue;
-    const x = Math.min(r.cost, r.extraCost ?? 0);
-    extra[b] += x;
-    included[b] += r.cost - x;
-  }
-  const round = (/** @type {number} */ v) => Number(v.toFixed(4));
-  const series = [
-    { name: 'Included in plan', color: 'var(--accent)', values: included.map(round) },
-    { name: 'Extra, billed', color: 'var(--warn)', values: extra.map(round) },
-  ];
-  const models = modelsByUse(sum).map((id) => ({ id, ...sum.models[id], tokens: tokensOf(sum.models[id]) }));
   // The terminal session of a record: its own, or one of its tasks' (records saved before they named it).
   const sessionOf = (/** @type {DevUsage} */ r) => r.session || tasks.find((t) => r.taskIds?.includes(t.id) && t.devSession)?.devSession || '';
   pollLive(store, [...new Set(records.map(sessionOf).filter(Boolean))]);
@@ -307,7 +294,9 @@ function devSessions(store, w) {
     const one = sumUsage([r]);
     const named = tasks.filter((t) => r.taskIds?.includes(t.id)).map((t) => t.text);
     const state = live.status[sessionOf(r)]?.state;
-    return { label: named.join(', ') || r.name, name: r.name, one, end: r.end, state: LIVE_STATES[/** @type {string} */ (state)] ? state : '' };
+    const projectId = devProjectOf(tasks, r);
+    const project = projectId ? projectName.get(projectId) ?? 'Removed project' : '';
+    return { label: named.join(', ') || r.name, name: r.name, project, one, end: r.end, state: LIVE_STATES[/** @type {string} */ (state)] ? state : '' };
   });
   const running = rows.filter((r) => r.state).length;
   const costCell = /** @param {number | null} v @param {boolean} [partial] */ (v, partial) => (v === null ? '—' : `${partial ? '≥ ' : ''}${usdPrecise(v)}`);
@@ -320,20 +309,13 @@ function devSessions(store, w) {
             stat('Included', costCell(sum.included, sum.costPartial), sum.billing === 'api' ? 'no Claude plan: every token is billed' : 'covered by the Claude plan'),
             stat('Extra', costCell(sum.extraCost), sum.costPartial ? 'some sessions still running' : 'billed beyond the plan'),
             stat('Sessions', String(sum.sessions), `for ${rows.length} task worktree${rows.length === 1 ? '' : 's'}${running ? `, ${running} in progress` : ''}`),
+            stat('Per session', sum.sessions && sum.cost !== null ? usdPrecise(sum.cost / sum.sessions) : '—', `${fmtTokens(sum.sessions ? Math.round(sum.tokens / sum.sessions) : 0)} tokens · ${fmtDuration(sum.sessions ? sum.duration / sum.sessions : 0)}`),
             stat('Tokens', fmtTokens(sum.tokens), 'input, cache and output'),
             stat('Time', fmtDuration(sum.duration), sum.linesAdded || sum.linesRemoved ? `+${sum.linesAdded} −${sum.linesRemoved} lines` : 'worked')),
-          barChart(w.items.map((b) => b.label), series, { format: usdPrecise }),
-          sortTable('dev-models', [
-            { label: 'Model', value: (m) => modelName(m.id), format: (v, m) => h('span', { title: m.id }, v) },
-            { label: 'Provider', value: (m) => m.provider },
-            { label: 'Input', num: true, value: (m) => m.input + m.cacheRead + m.cacheWrite, format: fmtTokens },
-            { label: 'Cached', num: true, value: (m) => m.cacheRead, format: fmtTokens },
-            { label: 'Output', num: true, value: (m) => m.output, format: fmtTokens },
-            { label: 'Cost', num: true, value: (m) => m.cost, format: (v) => costCell(v) },
-            { label: 'Extra', num: true, value: (m) => m.extraCost, format: (v) => costCell(v) },
-          ], models),
+          devBreakdown(store, w, records),
           sortTable('dev-tasks', [
             { label: 'Task', clip: true, value: (r) => r.label, format: (v, r) => h('span', { title: r.name }, v) },
+            { label: 'Project', clip: true, value: (r) => r.project || null },
             { label: 'Status', value: (r) => (r.state ? 0 : 1), format: (v, r) => h('span', { class: `pill dev-state dev-${r.state || 'finished'}`, title: r.state ? 'claude is still running: the numbers keep growing until it quits' : 'claude has quit or nothing is running' }, r.state ? LIVE_STATES[r.state] : 'Finished') },
             { label: 'Model', value: (r) => modelsByUse(r.one).map(modelName).join(', ') },
             { label: 'Effort', value: (r) => r.one.effort || '—' },
@@ -341,6 +323,7 @@ function devSessions(store, w) {
             { label: 'Cost', num: true, value: (r) => r.one.cost, format: (v, r) => costCell(v, r.one.costPartial) },
             { label: 'Extra', num: true, value: (r) => r.one.extraCost, format: (v) => costCell(v) },
             { label: 'Time', num: true, value: (r) => r.one.duration, format: fmtDuration },
+            { label: 'Lines', num: true, value: (r) => r.one.linesAdded + r.one.linesRemoved, format: (_v, r) => (r.one.linesAdded || r.one.linesRemoved ? `+${r.one.linesAdded} −${r.one.linesRemoved}` : '—') },
             { label: 'Last reply', num: true, value: (r) => r.end, format: (v) => new Date(v).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) },
           ], rows.sort((a, b) => /** @type {number} */ (b.end) - /** @type {number} */ (a.end)), (r) => (r.state ? `dev-live dev-${r.state}` : '')),
         ]
