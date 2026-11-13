@@ -163,21 +163,27 @@ export async function readPreviews(target, prs, at = Date.now()) {
   const saved = target.get(GITHUB)?.previews ?? {};
   const found = await Promise.all(prs.map(async (p) => {
     /** @typedef {[PrRef, Pick<PrPreviews, 'items' | 'error' | 'branch'>]} Found */
-    let items;
+    /** @type {PreviewItem[]} */
+    let items = [];
+    // GitHub's refusal, when its token cannot read the repo (an org with no token in Settings).
+    let unread = '';
     try {
       items = previewsFromComments(await issueComments(p.repo, p.number));
     } catch (err) {
-      return /** @type {Found} */ ([p, { error: /** @type {Error} */ (err).message }]);
+      unread = /** @type {Error} */ (err).message;
     }
-    if (!tokens.vercel && !tokens.netlify) return /** @type {Found} */ ([p, { items, error: null }]);
+    if (!tokens.vercel && !tokens.netlify) return /** @type {Found} */ ([p, unread ? { error: unread } : { items, error: null }]);
     const before = saved[previewKey(p.repo, p.number)];
     let branch = before?.branch ?? '';
     try {
-      if (!branch && await deploysRepo(tokens, p.repo, at)) branch = await pullBranch(p.repo, p.number);
+      // A provider's token may reach the repo's project where GitHub's does not: the PR's number then finds its deploy.
+      if (!branch && !unread && await deploysRepo(tokens, p.repo, at)) branch = await pullBranch(p.repo, p.number);
       const api = await prDeployments(tokens, p.repo, p.number, branch, at);
+      if (unread && !api.providers.length) return /** @type {Found} */ ([p, { error: unread }]);
       items = [...items.filter((i) => !api.providers.includes(i.provider)), ...api.items];
       return /** @type {Found} */ ([p, { items, error: null, ...(branch ? { branch } : {}) }]);
     } catch (err) {
+      if (unread) return /** @type {Found} */ ([p, { error: unread }]);
       // The comments were read: keep what the API found last time over their rougher word on the same provider.
       const kept = (before?.items ?? []).filter((i) => i.id);
       items = [...items.filter((i) => !kept.some((k) => k.provider === i.provider)), ...kept];
