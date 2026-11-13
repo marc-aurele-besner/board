@@ -21,7 +21,7 @@ export function createStore(dir, collections) {
   const byName = /** @type {Record<string, object>} */ (/** @type {unknown} */ (data));
   /** @type {Set<CollectionName>} */
   const dirty = new Set();
-  /** @type {Set<(info: { user: boolean }) => void>} */
+  /** @type {Set<(info: { user: boolean, changed: Set<string> | null }) => void>} */
   const dataListeners = new Set();
   /** @type {Set<(status: SaveStatus) => void>} */
   const statusListeners = new Set();
@@ -44,18 +44,30 @@ export function createStore(dir, collections) {
   // for each one made it flash.
   let frame = 0;
   let byUser = false;
-  const notify = () => {
+  // The collections changed on disk since the last notice, or null when anything may have changed (an update or a
+  // refresh), so the shell can skip a redraw no collection on screen asked for.
+  /** @type {Set<string> | null} */
+  let changedNames = new Set();
+  /** @param {string[]} [names] the collections another tab or the runners changed; none means anything */
+  const notify = (names) => {
     // A save made while an event is handled (a click, a key, a submit) is the user's own. Saves from timers and
     // finished loads are not, and the shell holds those while the user is typing.
     if (window.event) byUser = true;
+    if (!names) changedNames = null;
+    else names.forEach((n) => changedNames?.add(n));
     if (frame) return;
     frame = requestAnimationFrame(() => {
       frame = 0;
       const user = byUser;
+      const changed = changedNames;
       byUser = false;
-      dataListeners.forEach((fn) => fn({ user }));
+      changedNames = new Set();
+      dataListeners.forEach((fn) => fn({ user, changed }));
     });
   };
+  // The collections read since forget() was last called: what the page on screen shows.
+  /** @type {Set<string>} */
+  const reads = new Set();
 
   async function writeDirty() {
     clearTimeout(timer);
@@ -65,13 +77,14 @@ export function createStore(dir, collections) {
     dirty.clear();
     setStatus('saving');
     try {
-      let changed = false;
+      /** @type {string[]} */
+      const changed = [];
       for (const name of names) {
-        if (await pull(name)) changed = true;
+        if (await pull(name)) changed.push(name);
         synced[name] = await writeJSON(dir, name, data[name]);
       }
       setStatus('saved');
-      if (changed) notify();
+      if (changed.length) notify(changed);
     } catch (err) {
       names.forEach((name) => dirty.add(name));
       console.error('Save failed', err);
@@ -128,15 +141,16 @@ export function createStore(dir, collections) {
   // Reads every collection's file and merges what changed on disk. Queued behind saves, so the two never overlap.
   function sync() {
     chain = chain.then(async () => {
-      let changed = false;
+      /** @type {string[]} */
+      const changed = [];
       for (const name of Object.keys(collections)) {
         try {
-          if (await pull(name)) changed = true;
+          if (await pull(name)) changed.push(name);
         } catch (err) {
           console.error(`Could not read ${name}`, err);
         }
       }
-      if (changed) notify();
+      if (changed.length) notify(changed);
     });
     return chain;
   }
@@ -176,7 +190,14 @@ export function createStore(dir, collections) {
     files,
     load,
     /** @template {CollectionName} K @param {K} name @returns {Collections[K]} */
-    get: (name) => data[name],
+    get: (name) => {
+      reads.add(name);
+      return data[name];
+    },
+    // Starts a new list of the collections read; the shell calls it before each full redraw.
+    forget: () => reads.clear(),
+    /** @param {Set<string>} names */
+    readAny: (names) => [...names].some((n) => reads.has(n)),
     // Mutate a collection in place, then save and re-render.
     /** @template {CollectionName} K @param {K} name @param {(data: Collections[K]) => void} mutate */
     update(name, mutate) {
@@ -191,8 +212,8 @@ export function createStore(dir, collections) {
       schedule(name);
     },
     // Re-render without saving (for view-state changes such as filters and tabs).
-    refresh: notify,
-    /** @param {(info: { user: boolean }) => void} fn */
+    refresh: () => notify(),
+    /** @param {(info: { user: boolean, changed: Set<string> | null }) => void} fn */
     subscribe(fn) {
       dataListeners.add(fn);
       return () => dataListeners.delete(fn);
