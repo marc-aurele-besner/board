@@ -28,6 +28,11 @@ const STATUS_LABELS = { saved: 'Saved', saving: 'Saving…', error: 'Save failed
 // With sample data nothing reaches the disk, so the status never claims a save.
 /** @param {keyof typeof STATUS_LABELS} status */
 const statusText = (status) => (sample ? 'Not saved' : STATUS_LABELS[status]);
+// The status is an icon shown only while something is not on disk: orange while saving (or with sample data), red when a save failed.
+/** @param {keyof typeof STATUS_LABELS} status */
+const statusClass = (status) => `status ${sample ? 'unsaved' : status}`;
+/** @param {keyof typeof STATUS_LABELS} status */
+const statusHidden = (status) => !sample && status === 'saved';
 
 /** @type {Store | null} */
 let store = null;
@@ -123,7 +128,7 @@ function render({ user = true } = {}) {
           icon('search'), h('span', { class: 'grow' }, 'Search or jump…'), h('kbd', null, isMac ? '⌘K' : 'Ctrl K')),
         h('a', { id: 'runners-offline', class: 'pill tone-high runner-offline', href: '#/settings?section=runners', title: 'The runners are not running, so mail, calendars, wallets and site checks are not refreshed. Start the board with bun start.', hidden: runnersBadgeHidden() },
           icon('alert'), 'Runners offline'),
-        h('span', { id: 'save-status', class: `status ${store.status}` }, statusText(store.status)),
+        h('span', { id: 'save-status', class: statusClass(store.status), role: 'status', title: statusText(store.status), 'aria-label': statusText(store.status), hidden: statusHidden(store.status) }, icon('save')),
         bell(store),
         // Settings lives here as an icon, not in the section tabs.
         h('a', {
@@ -201,8 +206,10 @@ function onRunners({ outcome }) {
 function updateStatus(status) {
   const el = document.getElementById('save-status');
   if (!el) return;
-  el.textContent = statusText(status);
-  el.className = `status ${status}`;
+  el.title = statusText(status);
+  el.setAttribute('aria-label', statusText(status));
+  el.className = statusClass(status);
+  el.hidden = statusHidden(status);
 }
 
 function renderConnect() {
