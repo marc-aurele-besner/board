@@ -16,6 +16,7 @@ import {
   FORMAT_MODES, PARSE_MODES, DEDUPE_MATCH, DEDUPE_SCOPE, SEPARATOR_OPTIONS, LOOP_LIMIT, makeField, loopSpan, loopOf, loopMax, valueOf, listOf, withItem,
 } from '../cron.js';
 import { modelForTask } from '../models.js';
+import { DEV_MODELS, DEV_MODEL_NAMES, DEV_EFFORTS } from '../dev-core.js';
 import { openSession, runnerOf, liveSession, onSessionPaint, exitText, terminalView, terminalBackground, startDevSession } from './dev.js';
 import { runJob } from '../runners.js';
 import { previewChips } from '../previews.js';
@@ -1685,6 +1686,19 @@ function stepForm(store, flow, step) {
           list: folders, name: (p) => (p.localPath ? p.name : `${p.name} (no local folder)`),
         }), 'Projects show here once they have a local folder.'),
         claude ? skillPick(store, projectsOf(store).find((p) => p.id === own)?.localPath ?? '', key('prompt')) : null),
+      claude
+        ? h('div', { class: 'row cron-fields' },
+            field('Model', pickChip({
+              value: step.model || null, nullable: true, nullLabel: 'Default', className: 'field-pick',
+              options: DEV_MODELS.map((v) => ({ value: v, label: DEV_MODEL_NAMES[v] ?? v })),
+              onPick: (v) => set({ model: v || undefined }),
+            })),
+            field('Effort', pickChip({
+              value: step.effort || null, nullable: true, nullLabel: 'Default', className: 'field-pick',
+              options: DEV_EFFORTS.map((v) => ({ value: v, label: v[0].toUpperCase() + v.slice(1) })),
+              onPick: (v) => set({ effort: v || undefined }),
+            }), 'Added to a claude command as --model and --effort; Default keeps the command’s own.'))
+        : null,
       step.mode === 'custom'
         ? field('Dev command', h('input', { value: step.devCommand ?? '', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (/** @type {FieldEvent} */ e) => set({ devCommand: e.target.value }) }),
             'The Dev prompt is passed to it as its last word. A bare --worktree gets a name, as from a task.')

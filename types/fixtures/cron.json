@@ -20,7 +20,7 @@
         { "id": "step-4", "type": "task", "title": "{{flow}} · {{date}}", "description": "{{input}}", "projectId": "", "priority": "none", "due": "", "parent": "{{step2}}" },
         { "id": "step-13", "type": "update", "taskId": "{{step4}}", "description": "Checked on {{date}}.", "mode": "append", "title": "", "priority": "", "status": "doing", "due": "clear" },
         { "id": "step-5", "type": "profile", "projectId": "", "onEdited": "merge", "keepEdited": true },
-        { "id": "step-6", "type": "dev", "from": "step-2", "mode": "claude", "preset": "", "devCommand": "", "projectId": "", "prompt": "{{input}}", "command": "", "waitMinutes": 60, "wait": true, "json": false },
+        { "id": "step-6", "type": "dev", "from": "step-2", "mode": "claude", "preset": "", "devCommand": "", "model": "opus", "effort": "high", "projectId": "", "prompt": "{{input}}", "command": "", "waitMinutes": 60, "wait": true, "json": false },
         { "id": "step-7", "type": "gather", "source": "history", "url": "", "count": 5, "follow": 3, "flowId": "", "text": "" },
         { "id": "step-9", "type": "loop", "items": "{{step2.items}}", "span": 2, "max": 20 },
         { "id": "step-10", "type": "format", "mode": "fields", "text": "{{input}}", "items": "{{input}}", "itemText": "- {{item}}", "separator": "line", "fields": [{ "id": "field-1", "name": "title", "value": "{{item.title}}" }] },

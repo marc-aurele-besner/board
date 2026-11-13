@@ -874,12 +874,12 @@ export function startClaudeSession({ store, prompt, projectId = '', taskIds = []
 // With `claude`, `prompt` goes to claude as a task's Dev button sends it; otherwise `command` runs as typed. The
 // terminal opens in the project's folder, or the board's when there is none. Resolves to { id, n, worktree } once
 // the runner started it; fails when the runner cannot be reached or refuses. `devCommand` replaces the project's Dev
-// command for this one start (a preset or a command typed in Cron).
+// command for this one start (a preset or a command typed in Cron); `model` and `effort` are added to a claude command.
 /**
  * @param {{ store: Store, claude?: boolean, prompt?: string, command?: string, devCommand?: string, projectId?: string,
- *   taskIds?: string[], title?: string }} options
+ *   taskIds?: string[], title?: string, model?: string, effort?: string }} options
  */
-export async function startDevSession({ store, claude = false, prompt = '', command = '', devCommand = '', projectId = '', taskIds = [], title = '' }) {
+export async function startDevSession({ store, claude = false, prompt = '', command = '', devCommand = '', projectId = '', taskIds = [], title = '', model = '', effort = '' }) {
   const base = runnerOf(store);
   const info = view.info ?? await runnerInfo(base);
   const project = store.get('projects').projects.find((p) => p.id === projectId);
@@ -887,7 +887,7 @@ export async function startDevSession({ store, claude = false, prompt = '', comm
   const id = uid();
   let worktree = null;
   if (claude) {
-    ({ command, worktree } = claudeCommand(store, projectId, title, id, cwd, devCommand));
+    ({ command, worktree } = claudeCommand(store, projectId, title, id, cwd, devCommand, { model, effort }));
     command = `${command} -- ${shellQuote(prompt)}`;
   }
   // The terminal is not on the page yet: it starts at a usual size and is fitted once shown.

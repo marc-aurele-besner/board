@@ -79,9 +79,9 @@ export function claudeCommand(store, projectId, title, id, fallbackCwd, override
 // Dev shows it when it opens. For the runners (Cron), which have no Dev page. Resolves to { id, n, worktree }.
 /**
  * @param {{ store: DataStore, claude?: boolean, prompt?: string, command?: string, devCommand?: string, projectId?: string,
- *   taskIds?: string[], title?: string, theme?: string }} options
+ *   taskIds?: string[], title?: string, theme?: string, model?: string, effort?: string }} options
  */
-export async function startRunnerSession({ store, claude = false, prompt = '', command = '', devCommand = '', projectId = '', taskIds = [], title = '', theme = 'light' }) {
+export async function startRunnerSession({ store, claude = false, prompt = '', command = '', devCommand = '', projectId = '', taskIds = [], title = '', theme = 'light', model = '', effort = '' }) {
   const base = runnerOf(store);
   const info = await runnerInfo(base);
   const project = store.get('projects').projects.find((p) => p.id === projectId);
@@ -89,7 +89,7 @@ export async function startRunnerSession({ store, claude = false, prompt = '', c
   const id = uid();
   let worktree = null;
   if (claude) {
-    ({ command, worktree } = claudeCommand(store, projectId, title, id, cwd, devCommand));
+    ({ command, worktree } = claudeCommand(store, projectId, title, id, cwd, devCommand, { model, effort }));
     command = `${command} -- ${shellQuote(prompt)}`;
   }
   // The terminal is not on a page yet: it starts at a usual size and is fitted once shown.
