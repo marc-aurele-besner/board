@@ -13,7 +13,7 @@ import {
   timesOf, monthDaysOf, monthsOf, validTime, cronOf, cronError, upcomingSlots,
   makeFlow, makeStep, makeSource, MAX_FOLLOW, sourcesOf, sourceLabel, flowProjectId, withFlowProject, flowFromTemplate, templateFromFlow, nextRun, scheduleLabel, stopLabel, runFlow, isRunning,
   testStep, testsOf, isTesting, clearTests, resumeDevTests, useDevStarter, varsTree, fillParts, pathTo, parseData, INPUT_NONE, reorderSteps, projectVars, runState, devWaits, DEV_WAIT_MINUTES, devJsonOffered, devJson, DEV_JSON_PROMPT,
-  FORMAT_MODES, PARSE_MODES, SEPARATOR_OPTIONS, LOOP_LIMIT, makeField, loopSpan, loopOf, loopMax, valueOf, listOf, withItem,
+  FORMAT_MODES, PARSE_MODES, DEDUPE_MATCH, DEDUPE_SCOPE, SEPARATOR_OPTIONS, LOOP_LIMIT, makeField, loopSpan, loopOf, loopMax, valueOf, listOf, withItem,
 } from '../cron.js';
 import { modelForTask } from '../models.js';
 import { openSession, runnerOf, liveSession, onSessionPaint, exitText, terminalView, terminalBackground, startDevSession } from './dev.js';
@@ -670,6 +670,10 @@ function stepSummary(store, flow, step) {
     const which = /** @type {Record<string, string>} */ ({ largest: 'Largest', last: 'Last', first: 'First', all: 'All' })[step.mode || 'largest'] ?? 'Largest';
     return `${which} JSON in ${step.text || '{{input}}'}`;
   }
+  if (step.type === 'dedupe') {
+    const scope = /** @type {Record<string, string>} */ ({ flow: 'this flow’s tasks', project: 'the project’s tasks', all: 'every task' })[step.scope || 'flow'] ?? 'this flow’s tasks';
+    return `${step.text || '{{item}}'} not in ${scope}`;
+  }
   if (step.type === 'loop') {
     const n = loopSpan(flow, flow.steps.indexOf(step));
     return n ? `Each of ${step.items || '{{input}}'} · next ${n === 1 ? 'step' : `${n} steps`}` : 'Add the steps to repeat after it';
@@ -1072,6 +1076,12 @@ const DEV_PARTS = [
 ];
 
 // What a step a loop repeats can read of the item it is on.
+// The item variables of a Filter duplicates key.
+const DEDUPE_NAMES = [
+  ['item', 'The item being checked; add a path for a part of it, such as {{item.url}}'],
+  ['index', 'The item’s number, from 1'],
+  ['count', 'How many items the list has'],
+];
 const LOOP_NAMES = [
   ['item', 'The item the loop is on; add a path for a part of it, such as {{item.title}}'],
   ['index', 'The item’s number, from 1'],
@@ -1625,6 +1635,7 @@ function stepForm(store, flow, step) {
   }
   if (step.type === 'format') return formatForm(store, flow, step, set);
   if (step.type === 'parse') return parseForm(store, flow, step, set);
+  if (step.type === 'dedupe') return dedupeForm(store, flow, step, set);
   if (step.type === 'loop') return loopForm(store, flow, step, set);
   if (step.type === 'profile') {
     const own = withFlowProject(flow, step).projectId;
@@ -1811,6 +1822,32 @@ function parseForm(store, flow, step, set) {
     h('p', { class: 'muted small' },
       'Reads the JSON out of text that is not only JSON: a code fence, prose around it, lines a terminal wrapped, or a copy cut off at either end, of which it keeps the whole parts (the items of a list, without the one cut in half). ',
       `Later steps read it as {{step${n}}} and its parts as {{step${n}.title}} or {{step${n}[0].title}}, and a Loop can go over its list. With no JSON in the text, the step fails.`));
+}
+
+/**
+ * @param {Store} store
+ * @param {CronFlow} flow
+ * @param {CronStep} step
+ * @param {(patch: Partial<CronStep>) => void} set
+ */
+function dedupeForm(store, flow, step, set) {
+  const index = flow.steps.indexOf(step);
+  const vars = () => previewVars(store, flow, step);
+  const scope = step.scope || 'flow';
+  return h('div', { class: 'stack' },
+    varField('Items', h('input', { value: step.items ?? '{{input}}', class: 'mono-text', autocomplete: 'off', spellcheck: false, onchange: (/** @type {FieldEvent} */ e) => set({ items: e.target.value.trim() }) }),
+      `${step.id}:items`, varNames(flow, index), ITEMS_HINT, vars),
+    varField('Key of each item', h('input', { value: step.text ?? '{{item}}', class: 'mono-text', autocomplete: 'off', spellcheck: false, placeholder: '{{item.url}}', onchange: (/** @type {FieldEvent} */ e) => set({ text: e.target.value }) }),
+      `${step.id}:text`, varNames(flow, index, loopOf(flow, index) >= 0 ? [] : DEDUPE_NAMES),
+      'What tells two items apart, such as {{item.url}}, or {{item.title}} at {{item.company}} written as the task title will be. Not case-sensitive.', vars),
+    h('div', { class: 'row cron-fields' },
+      field('A task matches when', select(step.match || 'title', DEDUPE_MATCH, (match) => set({ match }))),
+      field('Compare with', select(scope, DEDUPE_SCOPE, (s) => set({ scope: s })),
+        scope === 'project' && !flowProjectId(flow) ? 'The flow has no project, so this is the Personal tasks.' : null)),
+    h('p', { class: 'muted small' },
+      'Keeps the items no task matches yet, done tasks included, so what a past run found is not made again; two items with the same key keep the first. ',
+      'With “title or description”, put the key in the task, such as the link in its description. ',
+      'Its output is the list it kept: a Loop after it makes a task for each, and a “Stop if” on “The data step found nothing” ends the run when every item was already there.'));
 }
 
 /**
