@@ -61,6 +61,10 @@ While working on the board itself, run `bun dev` instead of `bun start`: it star
 
 On first launch, choose a data folder. Pick a folder **outside this repo** (for example `~/Documents/board-data`). The app writes `todos.json`, `recipes.json` and `finance.json` there. On later visits, click **Reconnect** once to re-grant permission.
 
+### Install as an app
+
+In Chrome, use **Install Board** (the icon at the end of the address bar, or ⋮ → Cast, save and share) to get the board in its own window with a Dock icon. Clicking the icon again focuses the open window rather than opening another, and right-clicking it offers Dev, Inbox and Tasks. The Dock icon shows the total of the nav pills (Slack mentions, Dev terminals waiting, unread LinkedIn comments), read even while the window is hidden. Links to other sites open in Chrome itself. There is no service worker: the board needs its local server running either way, and `GET /version` already reloads it on new code.
+
 ### Runners
 
 `bun start` and `bun dev` also start the runners (`tools/worker.js`): a worker on this machine that does the board's background work on a schedule and saves what it finds in the data folder, whether or not a board tab is open. An open tab picks the results up within a few seconds, through the same disk sync that brings in another tab's saves. The worker stops with `bun start`; nothing keeps running once it exits, and nothing runs while the Mac sleeps (jobs that came due run once on wake).
@@ -169,6 +173,7 @@ The typefaces (Inter, Space Grotesk) are in `fonts/`, under the SIL Open Font Li
 
 ```
 index.html            entry point
+manifest.webmanifest  the installed app: name, icons (icons/, from the SVGs there), Dock shortcuts, focus-existing launch
 css/style.css         design tokens (light and dark) and layout
 js/app.js             shell: folder connection, router, top nav
 js/storage.js         File System Access API wrapper (read/write JSON, remember folder)

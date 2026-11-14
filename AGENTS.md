@@ -21,6 +21,7 @@ A personal command center that runs locally. It is plain HTML, CSS and JavaScrip
 
 ```
 index.html            entry point; inline script applies the saved theme before paint
+manifest.webmanifest  the installed app (Chrome's Install): icons in icons/ (PNGs rendered from the SVGs), Dock shortcuts, launch_handler focus-existing; no service worker
 oauth.html            where Google's, Notion's and LinkedIn's sign-ins come back; hands the code to the board's tab
 css/style.css         design tokens (light and dark) and all styles
 js/app.js             shell: folder connection, router, top nav, theme toggle
@@ -36,7 +37,7 @@ js/hover-tip.js       the quick, styled tooltip of the controls inside a contain
 js/modules/index.js   registry of sections (the nav is built from this list)
 js/modules/*.js       one file per section (todos, projects, kitchen, money, tools, ...)
 js/notifications.js   the bell and its drawer
-js/attention.js       the number pills on the nav tabs: Slack mentions and Dev claude terminals waiting on the user (a question, or a turn ended without the done signal), read every 20 s; unread LinkedIn comments on Inbox
+js/attention.js       the number pills on the nav tabs, and their total as the installed app's Dock badge: Slack mentions and Dev claude terminals waiting on the user (a question, or a turn ended without the done signal), read every 20 s; unread LinkedIn comments on Inbox
 js/notify-core.js     notify(), the kinds and their preferences, the deadline check; saved in notifications.json (no DOM)
 js/money-core.js      budgets gone over and recurring due dates (no DOM)
 js/projects-core.js   a project's shape, and createProject() from a #tag (no DOM)
