@@ -14,7 +14,7 @@ import { projectIcon } from './projects.js';
 import { sortTable } from './monitoring-web.js';
 import { devProjectOf, projectLabel, segmented, previous, change, NO_PROJECT } from './monitoring-ai.js';
 import { skillsView, toolsView } from './monitoring-development-tools.js';
-import { dateLocale } from '../locale.js';
+import { dateLocale, daysIntoWeek, weekStart } from '../locale.js';
 /** @import { DevTurn, DevUsage, Project, Store } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 /** @import { Child } from '../../types/ui' */
@@ -26,7 +26,9 @@ export const VIEWS = [['overview', 'Overview'], ['turns', 'Turns'], ['skills', '
 export const KINDS = [['skills', 'Skills'], ['mcp', 'MCP tools'], ['servers', 'MCP servers']];
 const MEASURES = [['time', 'Time'], ['turns', 'Turns']];
 const WHEN = [['hour', 'Hour of day'], ['day', 'Day of week']];
-const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const SHORT_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// The days in week order, starting on Appearance's day.
+const days = () => SHORT_NAMES.map((_, i) => SHORT_NAMES[(i + weekStart()) % 7]);
 const PARTS = /** @type {const} */ ([
   ['work', 'Claude working', 'var(--accent)'],
   ['wait', 'Waiting on you', 'var(--warn)'],
@@ -217,7 +219,7 @@ function overview(ctx) {
 
   // When the prompts go out.
   const byHour = developmentView.when === 'hour';
-  const whenLabels = byHour ? Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')) : DAYS;
+  const whenLabels = byHour ? Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')) : days();
   const when = [
     { name: 'Prompts', color: 'var(--accent)', values: whenLabels.map(() => 0) },
     { name: 'Interrupted', color: 'var(--warn)', values: whenLabels.map(() => 0) },
@@ -225,7 +227,7 @@ function overview(ctx) {
   const whenWork = whenLabels.map(() => 0);
   for (const { t } of turns) {
     const d = new Date(t.at);
-    const i = byHour ? d.getHours() : (d.getDay() + 6) % 7;
+    const i = byHour ? d.getHours() : daysIntoWeek(d);
     when[t.interrupted ? 1 : 0].values[i]++;
     whenWork[i] += workOf(t);
   }

@@ -10,7 +10,7 @@ import { projectIcon } from './projects.js';
 import { barChart, legend } from '../chart.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
-import { dateLocale } from '../locale.js';
+import { dateLocale, daysIntoWeek } from '../locale.js';
 /** @import { Store, FinanceEntry, Recurring, AiContentPart } from '../../types/data' */
 /** @import { PickOption } from '../inline.js' */
 
@@ -121,7 +121,7 @@ function windowFor(range, entries) {
 /** @param {Date} date @param {string} group */
 function bucketKey(date, group) {
   if (group === 'day') return ymd(date);
-  if (group === 'week') return ymd(addDays(date, -((date.getDay() + 6) % 7))); // weeks start on Monday
+  if (group === 'week') return ymd(addDays(date, -daysIntoWeek(date))); // weeks start on Appearance's day
   if (group === 'month') return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
   return String(date.getFullYear());
 }

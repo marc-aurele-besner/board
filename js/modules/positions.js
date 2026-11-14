@@ -12,7 +12,7 @@ import { chainById, explorerUrl, etherscanKey } from '../chains.js';
 import { walletsTab, walletsView } from './defi-wallets.js';
 import { lendingTab, lendingView } from './defi-lending.js';
 import { summaryTab } from './defi-summary.js';
-import { dateLocale, numberLocale } from '../locale.js';
+import { dateLocale, daysIntoWeek, numberLocale, weekStart } from '../locale.js';
 /** @import { Store, PoolsData, CollectEntry, FeeBaseline, IconName } from '../../types/data' */
 /** @import { PositionRow, DefiUi, DefiTab, DefiNotice, LpSummary } from '../../types/defi' */
 /** @import { Child } from '../../types/ui' */
@@ -995,7 +995,7 @@ const localDay = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).to
 /** @param {Date} date @param {string} group */
 function bucketOf(date, group) {
   if (group === 'month') return localDay(date).slice(0, 7);
-  if (group === 'week') return localDay(new Date(date.getFullYear(), date.getMonth(), date.getDate() - ((date.getDay() + 6) % 7))); // its Monday
+  if (group === 'week') return localDay(new Date(date.getFullYear(), date.getMonth(), date.getDate() - daysIntoWeek(date))); // its Monday
   return localDay(date);
 }
 // Every bucket from the first to the last, so quiet days or months show as gaps rather than vanishing.
@@ -1004,7 +1004,7 @@ function bucketsBetween(from, to, group) {
   /** @type {string[]} */
   const keys = [];
   const d = new Date(from.getFullYear(), from.getMonth(), group === 'month' ? 1 : from.getDate());
-  if (group === 'week') d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  if (group === 'week') d.setDate(d.getDate() - daysIntoWeek(d));
   while (d <= to && keys.length < 2000) {
     keys.push(bucketOf(d, group));
     if (group === 'month') d.setMonth(d.getMonth() + 1);
@@ -1714,7 +1714,9 @@ function breakdown(store, ctx) {
     split === 'token' ? h('p', { class: 'muted small' }, 'Each collection\'s value is split between its tokens at the position\'s current prices, or evenly when the amounts or prices are unknown.') : null);
 }
 
-const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+// The days in week order, starting on Appearance's day.
+const weekdays = () => DAY_NAMES.map((_, i) => DAY_NAMES[(i + weekStart()) % 7]);
 // Each day of the last 26 weeks as a square, darker for more fees: streaks and quiet spells at a glance.
 /** @param {FeeCtx} ctx */
 function feeCalendar(ctx) {
@@ -1727,7 +1729,7 @@ function feeCalendar(ctx) {
     daily.set(k, { usd: d.usd + (c.usd ?? 0), n: d.n + 1 });
   }
   const today = new Date(nowMs);
-  const first = new Date(today.getFullYear(), today.getMonth(), today.getDate() - ((today.getDay() + 6) % 7) - 25 * 7);
+  const first = new Date(today.getFullYear(), today.getMonth(), today.getDate() - daysIntoWeek(today) - 25 * 7);
   const keys = bucketsBetween(first, today, 'day');
   const shown = keys.map((k) => daily.get(k)?.usd ?? 0);
   // Four shades by quartile of the days with fees, so one big day does not wash out the rest.
@@ -1736,8 +1738,9 @@ function feeCalendar(ctx) {
   const q = [0.25, 0.5, 0.75].map((p) => sorted[Math.floor(p * (sorted.length - 1))]);
   /** @param {number} v */
   const level = (v) => (v <= 0 ? 0 : v <= q[0] ? 1 : v <= q[1] ? 2 : v <= q[2] ? 3 : 4);
+  const WEEKDAYS = weekdays();
   const byWeekday = WEEKDAYS.map(() => 0);
-  keys.forEach((k, i) => { byWeekday[(new Date(`${k}T00:00`).getDay() + 6) % 7] += shown[i]; });
+  keys.forEach((k, i) => { byWeekday[daysIntoWeek(new Date(`${k}T00:00`))] += shown[i]; });
   const sum = byWeekday.reduce((s, v) => s + v, 0);
   const best = byWeekday.indexOf(Math.max(...byWeekday));
   const grid = h('div', { class: 'fee-cal', role: 'img', 'aria-label': `Fees per day over the last 26 weeks: ${plural(sorted.length, 'day')} with collects` },

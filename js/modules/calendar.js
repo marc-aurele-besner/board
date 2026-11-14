@@ -14,7 +14,7 @@ import { resizableSide } from '../side-resize.js';
 import { eventGuests } from './project-contacts.js';
 import { LINKEDIN } from '../linkedin-core.js';
 import { openLinkedinComposer } from '../linkedin-composer.js';
-import { dateLocale } from '../locale.js';
+import { dateLocale, daysIntoWeek } from '../locale.js';
 /** @import { Store, Task, CalendarAccount, CalendarEvent } from '../../types/data' */
 /**
  * The part of a timed event on one day, in hours from midnight; placeSegments() adds its column and the column count.
@@ -44,9 +44,9 @@ const isoOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDat
  */
 const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const anchor = () => (view.date ? eventDate(view.date) : new Date(new Date().setHours(0, 0, 0, 0)));
-// Weeks start on Monday.
+// Weeks start on Appearance's day (Monday by default).
 /** @param {Date} d */
-const weekStart = (d) => addDays(d, -((d.getDay() + 6) % 7));
+const weekStart = (d) => addDays(d, -daysIntoWeek(d));
 
 // [first day, day after the last] of what is on screen. A month shows whole weeks.
 /**
