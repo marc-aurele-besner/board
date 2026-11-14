@@ -18,6 +18,7 @@ import { jobs } from './jobs/index.js';
 import { taskRoutes } from './worker/tasks.js';
 import { contextRoutes } from './worker/context.js';
 import { sendWire } from '../js/http-request.js';
+import { pageConsole } from './worker/page-console.js';
 import { slackCall, slackFile } from './slack.js';
 import { voyager, queueState } from './linkedin-session.js';
 import { exchangeLinkedinCode, publishPost } from '../js/linkedin-core.js';
@@ -129,6 +130,8 @@ serve({
     ...contextRoutes(() => scheduler.store()),
     // Tools → Requests: sends a request from Node, where CORS does not apply. Needs no data folder.
     'POST /http': (body) => sendWire(/** @type {import('../js/http-request.js').Wire} */ (body)),
+    // Tasks → a PR's preview site: its console, read by loading it once in headless Chrome.
+    'POST /page-console': (body) => pageConsole(/** @type {Parameters<typeof pageConsole>[0]} */ (body)),
     // The Slack tab: Web API calls and session-only files, with the session cookie a page cannot send.
     'POST /slack': (body) => slackCall(body),
     'POST /slack/file': (body) => slackFile(body),
