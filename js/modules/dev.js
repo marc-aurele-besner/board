@@ -90,7 +90,9 @@ function readSide() {
   }
 }
 
-const maxSessions = () => view.info?.max ?? 24;
+const maxSessions = () => view.info?.max ?? 50;
+// Past this many open terminals, Dev suggests closing the ones done with.
+const SOFT_SESSIONS = 25;
 const activeSession = () => view.sessions.find((s) => s.id === view.active) ?? view.sessions[0];
 const projectsWithFolder = (/** @type {Store} */ store) => store.get('projects').projects.filter((p) => p.localPath);
 
@@ -401,7 +403,19 @@ function newSession(store, cwd = rootPath(store, view.workspace), { id, tasks = 
   saveActive();
   listOnRunner(store, s);
   if (view.info) attach(store, s);
+  if (view.sessions.length === SOFT_SESSIONS + 1) toast(`${view.sessions.length} terminals are open. Close the idle and finished ones, and those of tasks in review, from the Terminals panel.`);
   return s;
+}
+
+// The terminals worth closing: nothing runs in them, claude is done, or every task they ran is done or in review.
+/** @param {Store} store */
+function staleSessions(store) {
+  const items = store.get('todos').items;
+  return view.sessions.filter((s) => {
+    if (!s.running || dotOf(s).key === 'done') return true;
+    const statuses = s.tasks.map((id) => items.find((t) => t.id === id)?.status).filter(Boolean);
+    return statuses.length > 0 && statuses.every((st) => st === 'done' || st === 'review');
+  });
 }
 
 // Drops a terminal from this page: closed here, or in another browser.
@@ -1302,6 +1316,7 @@ function terminalsPanel(store, picker, switcher) {
     }, view.sessions.length >= maxSessions())),
     h('div', { class: 'ide-explorer-head' }, picker),
     list.length ? h('div', { class: 'tree-root muted small' }, `${list.length} OPEN · ${running} RUNNING`) : null,
+    list.length > SOFT_SESSIONS ? crowdedNotice(store) : null,
     list.length
       ? h('div', { class: 'stack wt' },
         h('div', { class: 'row wt-actions' },
@@ -1309,6 +1324,17 @@ function terminalsPanel(store, picker, switcher) {
           h('button', { type: 'button', class: 'btn-small danger', title: 'Stop every running command and close every terminal', onclick: () => confirmClose(store, list, 'Close all terminals') }, icon('trash'), 'Close all')),
         h('div', { class: 'tree scm-list', role: 'list' }, list.map(row)))
       : h('p', { class: 'muted small' }, 'No terminals open.'));
+}
+
+// Past SOFT_SESSIONS open terminals: a nudge to close the idle and finished ones and those of tasks in review.
+/** @param {Store} store */
+function crowdedNotice(store) {
+  const stale = staleSessions(store);
+  return notice({
+    tone: 'info',
+    text: `${view.sessions.length} of ${maxSessions()} terminals are open. ${stale.length ? `${stale.length} ${stale.length === 1 ? 'is' : 'are'} idle, finished or for a task done or in review.` : 'Close the ones you are done with.'}`,
+    actions: stale.length ? [h('button', { type: 'button', class: 'btn-small', onclick: () => confirmClose(store, stale, 'Clean up terminals') }, icon('trash'), `Clean up (${stale.length})`)] : [],
+  });
 }
 
 // The bar names the terminal shown; the Terminals panel lists them all, so a click on the name opens it.
