@@ -1,5 +1,6 @@
 // A page shown in a frame inside the board: a task's artifact page or its PR's preview site (js/task-work.js). Its bar
-// shows it at a browser's, a tablet's or a phone's width (a narrower frame, scaled down when the room is smaller) and
+// shows it at a browser's, a tablet's or a phone's width (a narrower frame, scaled down when the room is smaller), in
+// the system's, a light or a dark theme (the frame's color-scheme, which the page reads as prefers-color-scheme), and
 // opens its console. A page the board writes into the frame itself sends its console up live, through a script
 // added at its top. A site from elsewhere cannot be read by another page, so its console is read by the runners,
 // which load it once in headless Chrome at the same size (tools/worker/page-console.js).
@@ -9,6 +10,7 @@ import { workerCall } from './runners.js';
 
 /** @typedef {{ level: string, text: string, source?: string }} ConsoleEntry */
 /** @typedef {'browser' | 'tablet' | 'mobile'} Device */
+/** @typedef {'system' | 'light' | 'dark'} Theme */
 
 /** @type {Record<Device, { label: string, icon: IconName, width: number, height: number }>} */
 const DEVICES = {
@@ -17,6 +19,9 @@ const DEVICES = {
   mobile: { label: 'Phone', icon: 'smartphone', width: 390, height: 844 },
 };
 const DEVICE_KEY = 'board:preview-device';
+/** @type {Record<Theme, string>} */
+const THEMES = { system: 'System', light: 'Light', dark: 'Dark' };
+const THEME_KEY = 'board:preview-theme';
 const ENTRIES_MAX = 500;
 
 // The device every frame shows, remembered in this browser.
@@ -27,6 +32,16 @@ let device = (() => {
     return d === 'tablet' || d === 'mobile' ? d : 'browser';
   } catch {
     return 'browser';
+  }
+})();
+// The theme every frame shows, remembered in this browser.
+/** @type {Theme} */
+let theme = (() => {
+  try {
+    const t = localStorage.getItem(THEME_KEY);
+    return t === 'light' || t === 'dark' ? t : 'system';
+  } catch {
+    return 'system';
   }
 })();
 let consoleOpen = false;
@@ -109,7 +124,7 @@ export function previewFrame({ head, actions, load, site = '' }) {
     const size = d.width ? { width: d.width, height: d.height, mobile: device === 'mobile' } : { width: 1280, height: 800, mobile: false };
     try {
       /** @type {{ entries: ConsoleEntry[], truncated: boolean, width: number, height: number, ms: number }} */
-      const answer = await workerCall('POST', '/page-console', { url: site, ...size }, 60000);
+      const answer = await workerCall('POST', '/page-console', { url: site, ...size, ...(theme === 'system' ? {} : { colorScheme: theme }) }, 60000);
       entries.push(...answer.entries);
       siteRead = `Read at ${answer.width}×${answer.height} for ${answer.ms / 1000} s${answer.truncated ? ', the first ones only' : ''}`;
     } catch (err) {
@@ -131,10 +146,13 @@ export function previewFrame({ head, actions, load, site = '' }) {
       if (consoleOpen) paintList();
       frame.paintBar();
     },
-    // The device's width, scaled down to the room there is; the browser fills it.
+    // The device's width, scaled down to the room there is; the browser fills it. The theme is the frame's color-scheme:
+    // "light dark" follows the system's.
     layout: () => {
+      box.style.colorScheme = theme === 'system' ? 'light dark' : theme;
       const f = frame.iframe;
       if (!f) return;
+      f.style.colorScheme = box.style.colorScheme;
       const d = DEVICES[device];
       stage.classList.toggle('framed', !!d.width);
       if (!d.width) {
@@ -160,6 +178,14 @@ export function previewFrame({ head, actions, load, site = '' }) {
           'aria-pressed': String(device === k),
           onclick: () => setDevice(k),
         }, icon(DEVICES[k].icon)))),
+        h('select', {
+          class: 'preview-theme',
+          value: theme,
+          title: 'The theme the page is shown in (its prefers-color-scheme)',
+          'aria-label': 'Theme',
+          /** @param {{ target: HTMLSelectElement }} e */
+          onchange: (e) => setTheme(/** @type {Theme} */ (e.target.value)),
+        }, /** @type {Theme[]} */ (['system', 'light', 'dark']).map((k) => h('option', { value: k }, THEMES[k]))),
         h('button', {
           type: 'button',
           class: `preview-console-btn${consoleOpen ? ' on' : ''}${errors ? ' errors' : warnings ? ' warnings' : ''}`,
@@ -207,6 +233,18 @@ function setDevice(d) {
   device = d;
   try {
     localStorage.setItem(DEVICE_KEY, d);
+  } catch {}
+  for (const f of live) {
+    f.layout();
+    f.paintBar();
+  }
+}
+
+/** @param {Theme} t */
+function setTheme(t) {
+  theme = t;
+  try {
+    localStorage.setItem(THEME_KEY, t);
   } catch {}
   for (const f of live) {
     f.layout();

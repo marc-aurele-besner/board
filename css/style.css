@@ -1751,13 +1751,14 @@ button.work-session.on { background: color-mix(in srgb, var(--accent) 9%, var(--
 .preview-stage { display: flex; flex: 1 1 360px; min-height: 160px; overflow: hidden; }
 .preview-stage.framed { justify-content: center; padding: 8px 12px; background: var(--surface-2); }
 .preview-device { display: flex; flex: 1; min-width: 0; }
-.preview-stage.framed .preview-device { flex: none; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.preview-stage.framed .preview-device { flex: none; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: Canvas; }
 .preview-stage.framed .work-preview-frame { flex: none; transform-origin: top left; }
 .preview-tools { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
 .preview-devices { display: inline-flex; gap: 1px; }
 .work-preview-head .preview-devices .icon-btn { border-radius: 4px; }
 .work-preview-head .preview-devices .icon-btn .icon { width: 14px; height: 14px; }
 .work-preview-head .preview-devices .icon-btn.on { background: var(--surface-2); color: var(--text); }
+.work-preview-head select.preview-theme { field-sizing: content; width: auto; min-width: 0; min-height: 22px; padding: 1px 4px; font-size: 0.78rem; }
 button.preview-console-btn { display: inline-flex; align-items: center; gap: 4px; min-height: 22px; padding: 1px 6px; border: none; border-radius: 4px; background: none; color: var(--muted); font-size: 0.78rem; font-weight: 500; }
 button.preview-console-btn .icon { width: 13px; height: 13px; }
 button.preview-console-btn.on { background: var(--surface-2); color: var(--text); }
