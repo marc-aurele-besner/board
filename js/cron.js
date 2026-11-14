@@ -9,7 +9,7 @@ import { calendarEvents, calendarAccounts, eventDate } from './gcal.js';
 import { sitesOf, siteData } from './automations.js';
 import { readPageText } from './sitecheck.js';
 import { openPositions } from './defi/positions-read.js';
-import { devPresets, devCommandOf, runnerOf, startRunnerSession, withDevOptions, devHarnesses } from './dev-core.js';
+import { devAgents, devCommandOf, runnerOf, startRunnerSession, withDevOptions, devHarnesses } from './dev-core.js';
 import { sessionStatus, sessionOutcome, exitClaude } from './terminal.js';
 import { forgetWorktree } from './task-worktrees.js';
 import { findGithubLinks, plainOutput, addTaskLinks, prsOf } from './task-links.js';
@@ -20,7 +20,7 @@ import { SOCIALS, handleLabel } from './socials.js';
 import { upcomingMeetings } from './meetings.js';
 import { findCompanies, companyByHandle, companyPeople, companyRef, readProfile, PEOPLE_PAGE, PEOPLE_MAX, COMPANY_TOP_MAX } from './linkedin-search.js';
 import { addContacts, findByLinkedin, findByEmail, linkedinHandle } from './contacts-core.js';
-/** @import { DataStore, Store, CronStep, CronSource, CronFlow, CronSchedule, CronTemplate, CronRun, CronRunStep, CronRunCurrent, CronTest, CronPr, CronFormatField, LinkedinPost, Project, Task, DevPreset, SiteLogEntry, TaskLink, IconName } from '../types/data' */
+/** @import { DataStore, Store, CronStep, CronSource, CronFlow, CronSchedule, CronTemplate, CronRun, CronRunStep, CronRunCurrent, CronTest, CronPr, CronFormatField, LinkedinPost, Project, Task, SiteLogEntry, TaskLink, IconName } from '../types/data' */
 // The variables a step's templates read; $data holds what a name reads into with a path.
 /** @typedef {{ [name: string]: unknown, $data?: Record<string, unknown> }} Vars */
 // A step's result: what a test saves, with the variables the step saw.
@@ -77,14 +77,14 @@ export const STEP_TYPES = [
   ['save-contacts', 'Save contacts', 'save', 'Saves the people of a list to Contacts in the flow’s project, merged with those already there by LinkedIn handle or address.', 'LinkedIn'],
 ];
 
-// What a "Run in Dev" step starts: the project's Dev command ('claude'), a preset from Settings → Dev environment
-// ('preset', step.preset), a Dev command typed on the step ('custom', step.devCommand), each with the Dev prompt,
+// What a "Run in Dev" step starts: the project's agent ('claude'), an agent from Settings → Dev environment
+// ('preset', step.preset; agents took the presets' place and ids), a Dev command typed on the step ('custom', step.devCommand), each with the Dev prompt,
 // or a plain shell command with no prompt ('command').
 /** @param {DataStore} store */
 export function devRunOptions(store) {
   return [
-    ['claude', 'Project’s Dev command'],
-    ...devPresets(store).map((/** @type {DevPreset} */ p) => [`preset:${p.id}`, `Preset: ${p.name}`]),
+    ['claude', 'Project’s agent'],
+    ...devAgents(store).map((p) => [`preset:${p.id}`, `Agent: ${p.name}`]),
     ['custom', 'Custom Dev command'],
     ['command', 'Shell command (no prompt)'],
   ];
@@ -103,8 +103,8 @@ function stepDevCommand(store, step) {
     return step.devCommand;
   }
   if (step.mode !== 'preset') return '';
-  const preset = devPresets(store).find((/** @type {DevPreset} */ p) => p.id === step.preset);
-  if (!preset?.command?.trim()) throw new Error('The preset of this step was removed. Choose another in Settings → Dev environment.');
+  const preset = devAgents(store).find((p) => p.id === step.preset);
+  if (!preset?.command?.trim()) throw new Error('The agent of this step was removed. Choose another in Settings → Dev environment.');
   return preset.command;
 }
 

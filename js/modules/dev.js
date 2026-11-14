@@ -27,7 +27,7 @@ import { projectIcon } from './projects.js';
 import { linkWatcher, moveToReview } from '../task-links.js';
 import { watchDevSessions } from './todos.js';
 import { recordOfSession, sumUsage, usageLine, usageTitle, mcpTool } from '../dev-usage.js';
-import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand, claudeState, devHarnesses, withPrompt } from '../dev-core.js';
+import { runnerOf, devAgents, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand, claudeState, devHarnesses, withPrompt } from '../dev-core.js';
 import { sessionTools, toolGroup, fmtSpan, pct } from '../dev-turns.js';
 import { cronRunOf, cronRunHref } from '../cron.js';
 /** @import { Store, DevSessionList, IconName } from '../../types/data' */
@@ -48,7 +48,7 @@ import { cronRunOf, cronRunHref } from '../cron.js';
  *   pickup?: { key: string, ok: boolean | null } }} Session
  */
 
-export { runnerOf, devPresets, DEFAULT_DEV_COMMAND, devCommandOf };
+export { runnerOf, devAgents, DEFAULT_DEV_COMMAND, devCommandOf };
 
 const COLLECTION = 'dev';
 // presets: commands named in Settings → Dev environment ({ id, name, command }), which projects pick instead of

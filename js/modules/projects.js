@@ -19,7 +19,8 @@ import { withoutLabel } from '../task-labels.js';
 import { connectedGmailOf } from '../gmail.js';
 import { connectedCalendarsOf } from '../gcal.js';
 import { resendSettings } from '../resend.js';
-import { DEFAULT_DEV_COMMAND, devPresets, runnerOf } from './dev.js';
+import { runnerOf } from './dev.js';
+import { projectAgentField } from './dev-agent-field.js';
 import { pickFolder } from '../folder-picker.js';
 import { menuButton } from '../menu.js';
 import { openDialog } from '../modal.js';
@@ -1203,31 +1204,13 @@ function projectView(store, p, items, categories) {
     triageBlock(store, p));
 }
 
-// The command a task goes to Dev with: a preset from Settings → Dev environment, or the project's own.
+// The agent a task goes to Dev with, from Settings → Dev environment, or the project's own command.
 /** @param {Store} store @param {Project} p */
 function devCommandBlock(store, p) {
-  const presets = devPresets(store);
-  const preset = presets.find((x) => x.id === p.devPreset);
   return h('section', { class: 'pp-block' },
-    h('h3', null, 'Dev command'),
-    presets.length
-      ? pickChip({
-          value: preset ? preset.id : null,
-          options: presets.map((x) => ({ value: x.id, label: x.name })),
-          nullable: true,
-          nullLabel: 'Own command',
-          onPick: (/** @type {string | null} */ devPreset) => updateProject(store, p.id, { devPreset: devPreset ?? '' }),
-        })
-      : null,
-    preset
-      ? h('code', { class: 'muted small' }, preset.command)
-      : editText({
-          value: p.devCommand ?? '',
-          placeholder: DEFAULT_DEV_COMMAND,
-          allowEmpty: true,
-          onSave: (/** @type {string} */ devCommand) => updateProject(store, p.id, { devCommand: devCommand.trim() }),
-        }),
-    h('span', { class: 'muted small' }, 'Runs with the task as its prompt when a task goes to Dev. Empty uses the default. Presets are set in ',
+    h('h3', null, 'Dev agent'),
+    projectAgentField(store, p, (patch) => updateProject(store, p.id, patch)),
+    h('span', { class: 'muted small' }, 'Runs with the task as its prompt when a task goes to Dev. Agents are set in ',
       h('a', { href: '#/settings?section=dev' }, 'Settings → Dev environment'), '.'));
 }
 

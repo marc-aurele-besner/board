@@ -1,13 +1,12 @@
-// Dev without the DOM: the runner's address, command presets, the command a project's tasks run, and starting a
+// Dev without the DOM: the runner's address, the agents, the command a project's tasks run, and starting a
 // terminal through the command runner. The Dev section and the runners (Cron's Run in Dev step) both use it.
-/** @import { DataStore, Project, DevProvider, DevHarness } from '../types/data' */
+/** @import { DataStore, Project, DevProvider, DevHarness, DevData } from '../types/data' */
 import { uid } from './ui.js';
 import { TERMINAL_RUNNER, runnerInfo, runCommand, listSession } from './terminal.js';
 
 const COLLECTION = 'dev';
 
 export const runnerOf = (/** @type {DataStore} */ store) => store.get(COLLECTION)?.runner || TERMINAL_RUNNER;
-export const devPresets = (/** @type {DataStore} */ store) => store.get(COLLECTION)?.presets ?? [];
 
 // A shell word: single quotes keep newlines, quotes and $ in the prompt as typed.
 export const shellQuote = (/** @type {string} */ text) => `'${text.replace(/'/g, `'\\''`)}'`;
@@ -19,8 +18,9 @@ export const DEFAULT_DEV_COMMAND = 'claude --dangerously-skip-permissions --work
 export const DEV_MODELS = ['fable', 'opus', 'sonnet', 'haiku'];
 export const DEV_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
-// The AI providers until Settings → Dev environment edits them. MiniMax runs claude itself with MiniMax's
-// Anthropic-compatible API in its place; the key comes from MINIMAX_API_KEY in the runner's environment, and
+// The agents until Settings → Dev environment edits them. An agent is a coding harness's command, with the
+// variables that connect it to a provider before it, and the models a task can pick. MiniMax runs claude itself with
+// MiniMax's Anthropic-compatible API in its place; the key comes from MINIMAX_API_KEY in the runner's environment, and
 // claude's own aliases (opus, sonnet, haiku, which subagents use) point at MiniMax's model too.
 export const CLAUDE_PROVIDER = 'claude';
 const MINIMAX_MODEL = 'MiniMax-M3';
@@ -41,23 +41,61 @@ export const DEFAULT_PROVIDERS = [
     models: [MINIMAX_MODEL, 'MiniMax-M2.7'],
   },
 ];
-export const devProviders = (/** @type {DataStore} */ store) => store.get(COLLECTION)?.providers ?? DEFAULT_PROVIDERS;
 
-// The provider whose command a task's session runs instead of its project's: one other than Claude it picked a
-// model of. A provider that was removed is skipped, so the task falls back to its project's command.
-/** @param {DataStore} store @param {string | undefined} id */
-export function taskProvider(store, id) {
-  if (!id || id === CLAUDE_PROVIDER) return null;
-  return devProviders(store).find((p) => p.id === id && p.command.trim()) ?? null;
+// The agents of dev.json: its providers (the built-in ones until edited), then the command presets saved before
+// agents replaced them, as agents with no models under the same id, so projects and Cron steps that picked one
+// still find it. Settings' first change saves them as agents.
+/** @param {Partial<DevData> | undefined} data @returns {DevProvider[]} */
+export function agentsOf(data) {
+  const agents = data?.providers ?? DEFAULT_PROVIDERS;
+  const legacy = (data?.presets ?? []).filter((p) => !agents.some((a) => a.id === p.id));
+  return legacy.length ? [...agents, ...legacy.map((p) => ({ id: p.id, name: p.name, command: p.command, models: [] }))] : agents;
+}
+export const devAgents = (/** @type {DataStore} */ store) => agentsOf(store.get(COLLECTION));
+
+// The agent of projects that pick none: the one chosen in Settings, else Claude, else the first.
+/** @param {DataStore} store @returns {DevProvider} */
+export function defaultAgent(store) {
+  const agents = devAgents(store);
+  const id = store.get(COLLECTION)?.defaultAgent || CLAUDE_PROVIDER;
+  return agents.find((a) => a.id === id) ?? agents.find((a) => a.id === CLAUDE_PROVIDER) ?? agents[0] ?? DEFAULT_PROVIDERS[0];
 }
 
-// The command a project's tasks are handed to: its preset's, else its own Dev command, else Claude's provider
-// command, else the default. A preset that was removed is skipped, so the project falls back to its own command.
+// The agent a project runs: the one it picked, else none when it has a command of its own, else the default. An
+// agent that was removed is skipped.
+/** @param {DataStore} store @param {Project | null | undefined} project @returns {DevProvider | null} */
+export function projectAgent(store, project) {
+  const picked = project?.devPreset ? devAgents(store).find((a) => a.id === project.devPreset) : null;
+  if (picked) return picked;
+  return project?.devCommand?.trim() ? null : defaultAgent(store);
+}
+
+// The command a project's tasks are handed to: its agent's, else its own Dev command, else the default agent's.
 /** @param {DataStore} store @param {Project | null | undefined} project */
 export function devCommandOf(store, project) {
-  const preset = project?.devPreset ? devPresets(store).find((x) => x.id === project.devPreset) : null;
-  const claude = devProviders(store).find((p) => p.id === CLAUDE_PROVIDER);
-  return preset?.command?.trim() || project?.devCommand?.trim() || claude?.command?.trim() || DEFAULT_DEV_COMMAND;
+  return projectAgent(store, project)?.command.trim() || project?.devCommand?.trim() || defaultAgent(store).command.trim() || DEFAULT_DEV_COMMAND;
+}
+
+// The agent a task picked in its right-click menu: devProvider, or Claude for a model picked before agents named
+// theirs. null for its project's own; an agent that was removed is skipped too.
+/** @param {DataStore} store @param {{ devProvider?: string, devModel?: string } | null | undefined} task */
+export function taskAgent(store, task) {
+  const id = task?.devProvider || (task?.devModel ? CLAUDE_PROVIDER : '');
+  return id ? devAgents(store).find((a) => a.id === id && a.command.trim()) ?? null : null;
+}
+
+// The command a task's session runs in place of its project's, or '' to keep the project's. The project's is kept
+// when it already runs the picked agent's harness through the same connection (same variables before it): it keeps
+// its own flags and worktree, and only the model is added. Otherwise the agent's own command runs, so a model never
+// goes to a program that does not know it (a Claude model to a project that runs Codex).
+/** @param {DataStore} store @param {Project | null | undefined} project @param {DevProvider | null} agent */
+export function taskAgentCommand(store, project, agent) {
+  if (!agent) return '';
+  const own = devCommandOf(store, project);
+  const harnesses = devHarnesses(store);
+  const ownHarness = harnessOf(harnesses, own);
+  const same = ownHarness && ownHarness.id === harnessOf(harnesses, agent.command)?.id && splitEnv(own).env === splitEnv(agent.command).env;
+  return same ? '' : agent.command;
 }
 
 // A worktree flag with no name: claude would pick a random one, which the tasks could not find again.

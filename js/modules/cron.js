@@ -1706,8 +1706,8 @@ function stepForm(store, flow, step) {
     const hasTask = flow.steps.slice(0, flow.steps.indexOf(step)).some((s) => s.type === 'task' || s.type === 'update');
     const options = devRunOptions(store);
     const value = devRunValue(step);
-    // A preset removed in Settings still shows as chosen, so the step does not silently change what it runs.
-    if (!options.some(([v]) => v === value)) options.splice(1, 0, [value, 'Removed preset']);
+    // An agent removed in Settings still shows as chosen, so the step does not silently change what it runs.
+    if (!options.some(([v]) => v === value)) options.splice(1, 0, [value, 'Removed agent']);
     /** @param {string} v */
     const run = (v) => {
       if (v.startsWith('preset:')) return set({ mode: 'preset', preset: v.slice(7) });

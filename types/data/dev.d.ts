@@ -1,16 +1,16 @@
 // dev.json: the Dev section's command history and favorites, its command runner and the command presets (js/modules/dev.js).
 
-// A command named in Settings → Dev environment, which projects pick (project.devPreset) instead of typing it.
+// A command preset, as saved before agents replaced them: each is read as an agent with no models, under its id
+// (agentsOf in js/dev-core.js), until Settings saves it as one.
 export interface DevPreset {
   id: string;
   name: string;
   command: string;
 }
 
-// An AI provider in Settings → Dev environment: the command its sessions run and the models a task can pick. The
-// command's program picks its harness, so a provider is routed to Claude Code, Codex or another by its command.
-// Claude's command is the default for projects without their own; another's (MiniMax runs claude with its API
-// in place of Anthropic's) replaces the project's command for a task that picks one of its models.
+// An agent in Settings → Dev environment: a coding harness's command, with the variables that connect it to a
+// provider before it (its program picks the harness), and the models a task's right-click menu offers (none: the
+// harness's default). A project picks one (project.devPreset); a task can pick another's model (task.devProvider).
 export interface DevProvider {
   id: string;
   name: string;
@@ -37,9 +37,12 @@ export interface DevData {
   favorites?: string[];
   // The command runner's address; '' means the default (TERMINAL_RUNNER).
   runner: string;
+  // Saved before agents; emptied once Settings saves the agents.
   presets: DevPreset[];
-  // Missing until one is edited: the built-in Claude and MiniMax (DEFAULT_PROVIDERS in js/dev-core.js).
+  // The agents. Missing until one is edited: the built-in Claude and MiniMax (DEFAULT_PROVIDERS in js/dev-core.js).
   providers?: DevProvider[];
+  // The agent of projects that pick none; '' or missing means Claude.
+  defaultAgent?: string;
   // Missing until one is edited: the built-in harnesses (DEFAULT_HARNESSES in js/dev-core.js).
   harnesses?: DevHarness[];
   schemaVersion?: number;
