@@ -56,6 +56,14 @@
   --syn-attr: #8a6100;
   --syn-meta: #7a4fb5;
   --syn-variable: #b5312a;
+  --brand-claude: #d97757;
+  --brand-openai: #10a37f;
+  --brand-gemini: #4285f4;
+  --brand-minimax: #e2167e;
+  --brand-qwen: #615ced;
+  --brand-deepseek: #4d6bfe;
+  --brand-openrouter: #6467f2;
+  --brand-mistral: #fa520f;
   --radius: 8px;
   --gap: 12px;
   --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -110,6 +118,14 @@
     --syn-attr: #e6c06a;
     --syn-meta: #b99af0;
     --syn-variable: #ff8b80;
+    --brand-claude: #e8957a;
+    --brand-openai: #3fcf9f;
+    --brand-gemini: #7baaf7;
+    --brand-minimax: #f25aa6;
+    --brand-qwen: #8f8bf5;
+    --brand-deepseek: #8199ff;
+    --brand-openrouter: #9496f7;
+    --brand-mistral: #ff8a52;
     color-scheme: dark;
   }
 }
@@ -160,6 +176,14 @@
   --syn-attr: #e6c06a;
   --syn-meta: #b99af0;
   --syn-variable: #ff8b80;
+  --brand-claude: #e8957a;
+  --brand-openai: #3fcf9f;
+  --brand-gemini: #7baaf7;
+  --brand-minimax: #f25aa6;
+  --brand-qwen: #8f8bf5;
+  --brand-deepseek: #8199ff;
+  --brand-openrouter: #9496f7;
+  --brand-mistral: #ff8a52;
   color-scheme: dark;
 }
 
@@ -3550,6 +3574,49 @@ code.tool-fail-call { font-size: 0.76rem; }
 .dev-preset-add input[name="command"] { flex-grow: 2; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .dev-preset-add input[name="env"] { flex-grow: 2; }
 .dev-preset-add select { flex: 0 1 auto; min-width: 0; }
+/* Provider, harness and preset cards: logo and name, then their commands. */
+.dev-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.dev-card { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); min-width: 0; }
+.dev-cards > .empty { padding: 4px 0; }
+.dev-card-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.dev-card-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.dev-card-title > .editable { font-weight: 600; align-self: flex-start; }
+.dev-card-tools { display: flex; align-items: center; gap: 6px; flex: none; }
+.dev-runs-on { white-space: nowrap; }
+.chip-pick.dev-harness-pick { min-height: 34px; padding: 4px 10px; font-size: 0.9rem; }
+.dev-logo { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 34px; height: 34px; border-radius: 9px; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); }
+.dev-logo .icon { width: 20px; height: 20px; }
+.opt-plain .dev-logo { width: 20px; height: 20px; border-radius: 5px; border: none; background: none; }
+.opt-plain .dev-logo .icon { width: 15px; height: 15px; }
+.dev-logo.is-ai-claude { color: var(--brand-claude); }
+.dev-logo.is-ai-openai { color: var(--brand-openai); }
+.dev-logo.is-ai-gemini { color: var(--brand-gemini); }
+.dev-logo.is-ai-minimax { color: var(--brand-minimax); }
+.dev-logo.is-ai-qwen { color: var(--brand-qwen); }
+.dev-logo.is-ai-deepseek { color: var(--brand-deepseek); }
+.dev-logo.is-ai-openrouter { color: var(--brand-openrouter); }
+.dev-logo.is-ai-mistral { color: var(--brand-mistral); }
+.dev-models { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.dev-model { padding: 1px 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+.dev-flag-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+/* A command field: the text typed over its own colours, so it reads like an editor. Both layers share font,
+   padding and wrapping, so every character sits on its colour. */
+.cmd-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cmd-field-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
+.cmd-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cmd-editor { display: grid; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.cmd-editor[hidden], .cmd-preview-wrap[hidden] { display: none; }
+.cmd-editor:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent); }
+.cmd-editor > .cmd-layer, .cmd-editor > .cmd-input { grid-area: 1 / 1; margin: 0; padding: 8px 10px; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88rem; line-height: 1.5; letter-spacing: normal; white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; tab-size: 2; }
+.cmd-editor > .cmd-layer { pointer-events: none; color: var(--text); }
+.cmd-editor > .cmd-input { resize: none; overflow: hidden; height: 100%; min-height: 0; border: none; border-radius: 8px; background: transparent; color: transparent; caret-color: var(--text); box-shadow: none; outline: none; }
+.cmd-editor > .cmd-input::placeholder { color: var(--muted); }
+.cmd-editor > .cmd-input::selection { color: transparent; background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.cmd-var { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 3px; }
+.cmd-preview { margin: 0; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface-2); }
+.cmd-preview-wrap { display: flex; flex-direction: column; gap: 4px; }
+.cmd-preview-wrap p { margin: 0; }
+code.cmd-code { background: none; padding: 0; }
 /* Narrow screens: one column per row. */
 @media (max-width: 720px) {
   .dev-project-row { grid-template-columns: minmax(0, 1fr); padding: 12px 0; }
@@ -3558,6 +3625,10 @@ code.tool-fail-call { font-size: 0.76rem; }
   .dev-preset-row .dev-env-command { grid-area: command; }
   .dev-preset-row > button { grid-area: remove; }
   .dev-preset-row .dev-provider-fields { grid-area: command; }
+  .dev-flag-grid { grid-template-columns: minmax(0, 1fr); }
+  .dev-card-head { flex-wrap: wrap; }
+  .dev-card-tools { width: 100%; justify-content: flex-end; }
+  .cmd-editor > .cmd-layer, .cmd-editor > .cmd-input { font-size: 16px; }
 }
 
 /* Tools → Requests */

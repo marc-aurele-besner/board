@@ -1,12 +1,16 @@
-// Settings → Dev environment: the AI providers and the coding harness each runs on, the harnesses, command presets, then each project's folder and the command its tasks go to Dev
-// with. The same fields as a project's page, in one list, so a preset is picked instead of pasting a command again.
+// Settings → Dev environment: the AI providers and the coding harness each runs on, the harnesses, command presets,
+// then each project's folder and the command its tasks go to Dev with. Commands are edited in colour, with the
+// variables they take as chips and a Preview of what a task runs.
 import { h, icon, notice, uid } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { pickFolder } from '../folder-picker.js';
+import { commandField, codeLine } from '../command-field.js';
 import { projectIcon, projectTree, cleanLocalPath, LOCAL_PATH_ERROR } from './projects.js';
 import { DEFAULT_DEV_COMMAND, devPresets, runnerOf } from './dev.js';
-import { CLAUDE_PROVIDER, DEFAULT_PROVIDERS, DEFAULT_HARNESSES, devProviders, devHarnesses, harnessOf, splitEnv } from '../dev-core.js';
+import { CLAUDE_PROVIDER, DEFAULT_PROVIDERS, DEFAULT_HARNESSES, DEV_MODEL_NAMES, devProviders, devHarnesses, devTemplate, harnessOf, splitEnv, brandOf } from '../dev-core.js';
 /** @import { Store, DevPreset, DevProvider, DevHarness, Project } from '../../types/data' */
+/** @import { Child } from '../../types/ui' */
+/** @import { IconName } from '../ui.js' */
 
 // The last problem shown above the cards.
 const devEnvView = { error: '' };
@@ -17,6 +21,7 @@ const fail = (/** @type {Store} */ store, /** @type {string} */ message) => {
 };
 
 const plural = (/** @type {number} */ n, /** @type {string} */ one) => `${n} ${one}${n === 1 ? '' : 's'}`;
+
 
 /** @param {Store} store @param {string} id @param {Partial<DevPreset>} patch */
 function updatePreset(store, id, patch) {
@@ -55,8 +60,38 @@ function updateProject(store, id, patch) {
   });
 }
 
-/** @param {Store} store @param {DevPreset[]} presets @param {Project[]} projects */
-function presetsPanel(store, presets, projects) {
+
+// A provider's, harness's or preset's logo, by the brand it names; `fallback` for another.
+/** @param {string} brand @param {IconName} fallback */
+const logo = (brand, fallback) => h('span', { class: `dev-logo${brand ? ` is-${brand}` : ''}` }, icon(/** @type {IconName} */ (brand || fallback)));
+
+// The variables a Dev command can place itself, offered as chips under it.
+/** @type {[string, string][]} */
+const COMMAND_VARS = [
+  ['model', 'The model the task picked. Without one, the variable goes, with the flag just before it.'],
+  ['effort', 'The effort the task picked. Without one, the variable goes, with the flag just before it.'],
+  ['prompt', 'The task, as the prompt. Without it in the command, the harness’s prompt flag hands it over.'],
+];
+const EXAMPLE_PROMPT = 'Fix the login bug';
+
+// A card's head: logo, name with a line under it, the controls on the right.
+/** @param {Child} mark @param {Child} name @param {Child} meta @param {...Child} controls */
+const cardHead = (mark, name, meta, ...controls) => h('div', { class: 'dev-card-head' },
+  mark,
+  h('div', { class: 'dev-card-title' }, name, h('span', { class: 'muted small' }, meta)),
+  h('div', { class: 'dev-card-tools' }, ...controls));
+
+/** @param {string} title @param {() => void} onclick @param {string} label */
+const removeButton = (title, onclick, label) => h('button', { type: 'button', class: 'icon-btn', title, 'aria-label': label, onclick }, icon('trash'));
+
+/** @param {string} title @param {string} about @param {...Child} body */
+const panel = (title, about, ...body) => h('section', { class: 'card panel' },
+  h('header', { class: 'panel-head' },
+    h('div', null, h('h2', null, title), h('p', { class: 'muted' }, about))),
+  ...body);
+
+/** @param {Store} store @param {DevPreset[]} presets @param {Project[]} projects @param {DevHarness[]} harnesses */
+function presetsPanel(store, presets, projects, harnesses) {
   const add = (/** @type {SubmitEvent} */ e) => {
     e.preventDefault();
     // The form below, with its two fields.
@@ -70,17 +105,15 @@ function presetsPanel(store, presets, projects) {
       (d.presets ??= []).push({ id: uid(), name, command });
     });
   };
-  return h('section', { class: 'card panel' },
-    h('header', { class: 'panel-head' },
-      h('div', null,
-        h('h2', null, 'Command presets'),
-        h('p', { class: 'muted' }, 'Commands you use for several projects. Pick one for a project below; editing a preset changes it for every project that uses it.'))),
-    h('ul', { class: 'dev-env-list' },
+  return panel('Command presets', 'Commands you use for several projects. Pick one for a project below; editing a preset changes it for every project that uses it.',
+    h('ul', { class: 'dev-cards' },
       presets.length
         ? presets.map((preset) => {
             const users = projects.filter((p) => p.devPreset === preset.id).length;
-            return h('li', { class: 'dev-env-row dev-preset-row' },
-              h('div', { class: 'dev-env-name' },
+            const harness = harnessOf(harnesses, preset.command);
+            return h('li', { class: 'dev-card' },
+              cardHead(
+                logo(brandOf(harness?.name ?? '', preset.command), 'terminal'),
                 editText({
                   value: preset.name,
                   placeholder: 'Name',
@@ -91,24 +124,23 @@ function presetsPanel(store, presets, projects) {
                     updatePreset(store, preset.id, { name: clean });
                   },
                 }),
-                h('span', { class: 'muted small' }, users ? `Used by ${plural(users, 'project')}` : 'Not used yet')),
-              editText({
+                `${harness ? harness.name : 'Other program'} · ${users ? `used by ${plural(users, 'project')}` : 'not used yet'}`,
+                removeButton(users ? `Remove this preset. Its ${plural(users, 'project')} keep the command as their own.` : 'Remove this preset',
+                  () => removePreset(store, preset), `Remove the preset ${preset.name}`)),
+              commandField({
+                key: `preset-${preset.id}`,
+                label: 'Command',
                 value: preset.command,
                 placeholder: DEFAULT_DEV_COMMAND,
-                className: 'dev-env-command',
+                vars: COMMAND_VARS,
+                preview: (v) => devTemplate(harnesses, v),
+                examples: { model: 'opus', effort: 'high', prompt: EXAMPLE_PROMPT },
+                previewHint: 'What a task with a model and effort picked runs.',
                 onSave: (command) => {
-                  const clean = command.trim();
-                  if (!clean) return fail(store, 'A preset needs a command.');
-                  updatePreset(store, preset.id, { command: clean });
+                  if (!command) return fail(store, 'A preset needs a command.');
+                  updatePreset(store, preset.id, { command });
                 },
-              }),
-              h('button', {
-                type: 'button',
-                class: 'icon-btn',
-                title: users ? `Remove this preset. Its ${plural(users, 'project')} keep the command as their own.` : 'Remove this preset',
-                'aria-label': `Remove the preset ${preset.name}`,
-                onclick: () => removePreset(store, preset),
-              }, icon('trash')));
+              }));
           })
         : h('li', { class: 'empty' }, 'No preset yet.')),
     h('form', { class: 'dev-preset-add', onsubmit: add },
@@ -130,6 +162,12 @@ function updateProviders(store, mutate) {
 // "opus, sonnet" or one per line, as a list without blanks or repeats.
 const parseModels = (/** @type {string} */ text) => [...new Set(text.split(/[\s,]+/).filter(Boolean))];
 
+/** @param {string} text */
+const modelPills = (text) => h('span', { class: 'dev-models' }, parseModels(text).map((m) => h('span', { class: 'dev-model' }, DEV_MODEL_NAMES[m] ?? m)));
+
+/** @param {DevHarness[]} harnesses */
+const harnessOptions = (harnesses) => harnesses.map((x) => ({ value: x.id, label: x.name, plainIcon: () => logo(brandOf(x.name, x.command), 'terminal') }));
+
 // Tasks that picked a removed provider's model go back to their project's command (taskProvider skips it).
 /** @param {Store} store @param {DevProvider[]} providers @param {DevHarness[]} harnesses */
 function providersPanel(store, providers, harnesses) {
@@ -149,68 +187,67 @@ function providersPanel(store, providers, harnesses) {
     if (providers.some((x) => x.name.toLowerCase() === name.toLowerCase())) return fail(store, `A provider named "${name}" already exists.`);
     updateProviders(store, (list) => { list.push({ id: uid(), name, command, models }); });
   };
-  return h('section', { class: 'card panel' },
-    h('header', { class: 'panel-head' },
-      h('div', null,
-        h('h2', null, 'AI providers'),
-        h('p', { class: 'muted' }, 'The models a task’s right-click menu offers, by provider, and the harness each runs on. Claude’s command runs for projects without their own; picking another provider’s model runs that provider’s command instead of the project’s. MiniMax runs Claude Code with its API in place of Anthropic’s, with the key from MINIMAX_API_KEY in the runner’s environment. Picking a harness keeps the variables at the start of the command and replaces the rest with the harness’s command.'))),
-    h('ul', { class: 'dev-env-list' },
-      providers.map((provider) => h('li', { class: 'dev-env-row dev-preset-row' },
-        h('div', { class: 'dev-env-name' },
-          editText({
-            value: provider.name,
-            placeholder: 'Name',
-            onSave: (name) => {
-              const clean = name.trim();
-              if (!clean) return fail(store, 'A provider needs a name.');
-              if (providers.some((x) => x.id !== provider.id && x.name.toLowerCase() === clean.toLowerCase())) return fail(store, `A provider named "${clean}" already exists.`);
-              patch(provider.id, { name: clean });
-            },
-          }),
-          h('span', { class: 'muted small' }, provider.id === CLAUDE_PROVIDER ? 'Default' : plural(provider.models.length, 'model'))),
-        h('div', { class: 'dev-env-field dev-provider-fields' },
-          h('span', { class: 'dev-env-label small' }, 'Harness'),
-          pickChip({
-            value: harnessOf(harnesses, provider.command)?.id ?? null,
-            options: harnesses.map((x) => ({ value: x.id, label: x.name })),
-            placeholder: 'Other program',
-            onPick: (id) => {
-              const harness = harnesses.find((x) => x.id === id);
-              if (!harness) return;
-              patch(provider.id, { command: [splitEnv(provider.command).env, harness.command.trim()].filter(Boolean).join(' ') });
-            },
-          }),
-          h('span', { class: 'dev-env-label small' }, 'Command'),
-          editText({
+  return panel('AI providers',
+    'The models a task’s right-click menu offers, by provider, and the harness each runs on. Claude’s command runs for projects without their own; picking another provider’s model runs that provider’s command instead of the project’s. MiniMax runs Claude Code with its API in place of Anthropic’s, with the key from MINIMAX_API_KEY in the runner’s environment. Picking a harness keeps the variables at the start of the command and replaces the rest.',
+    h('ul', { class: 'dev-cards' },
+      providers.map((provider) => {
+        const harness = harnessOf(harnesses, provider.command);
+        return h('li', { class: 'dev-card' },
+          cardHead(
+            logo(brandOf(provider.name, provider.id, provider.command), 'cpu'),
+            editText({
+              value: provider.name,
+              placeholder: 'Name',
+              onSave: (name) => {
+                const clean = name.trim();
+                if (!clean) return fail(store, 'A provider needs a name.');
+                if (providers.some((x) => x.id !== provider.id && x.name.toLowerCase() === clean.toLowerCase())) return fail(store, `A provider named "${clean}" already exists.`);
+                patch(provider.id, { name: clean });
+              },
+            }),
+            provider.id === CLAUDE_PROVIDER ? 'Default' : plural(provider.models.length, 'model'),
+            h('span', { class: 'dev-runs-on muted small' }, 'Runs on'),
+            pickChip({
+              value: harness?.id ?? null,
+              options: harnessOptions(harnesses),
+              placeholder: 'Other program',
+              className: 'field-pick dev-harness-pick',
+              onPick: (id) => {
+                const next = harnesses.find((x) => x.id === id);
+                if (next) patch(provider.id, { command: [splitEnv(provider.command).env, next.command.trim()].filter(Boolean).join(' ') });
+              },
+            }),
+            provider.id === CLAUDE_PROVIDER
+              ? null
+              : removeButton('Remove this provider. Tasks that picked its models go back to their project’s command.',
+                  () => updateProviders(store, (list) => list.splice(list.findIndex((x) => x.id === provider.id), 1)), `Remove the provider ${provider.name}`)),
+          commandField({
+            key: `provider-${provider.id}`,
+            label: 'Command',
             value: provider.command,
             placeholder: DEFAULT_DEV_COMMAND,
-            className: 'dev-env-command',
+            vars: COMMAND_VARS,
+            preview: (v) => devTemplate(harnesses, v),
+            examples: { model: provider.models[0] ?? '', effort: 'high', prompt: EXAMPLE_PROMPT },
+            previewHint: `What a task runs with ${provider.models[0] ?? 'a model'} and high effort picked.`,
             onSave: (command) => {
-              const clean = command.trim();
-              if (!clean) return fail(store, 'A provider needs a command.');
-              patch(provider.id, { command: clean });
+              if (!command) return fail(store, 'A provider needs a command.');
+              patch(provider.id, { command });
             },
           }),
-          h('span', { class: 'dev-env-label small' }, 'Models'),
-          editText({
-            value: provider.models.join(', '),
-            placeholder: 'model-a, model-b',
-            className: 'dev-env-command',
-            onSave: (text) => {
-              const models = parseModels(text);
-              if (!models.length) return fail(store, 'A provider needs at least one model.');
-              patch(provider.id, { models });
-            },
-          })),
-        provider.id === CLAUDE_PROVIDER
-          ? h('span')
-          : h('button', {
-              type: 'button',
-              class: 'icon-btn',
-              title: 'Remove this provider. Tasks that picked its models go back to their project’s command.',
-              'aria-label': `Remove the provider ${provider.name}`,
-              onclick: () => updateProviders(store, (list) => list.splice(list.findIndex((x) => x.id === provider.id), 1)),
-            }, icon('trash'))))),
+          h('div', { class: 'cmd-field' },
+            h('span', { class: 'dev-env-label small' }, 'Models'),
+            editText({
+              value: provider.models.join(', '),
+              placeholder: 'model-a, model-b',
+              display: modelPills,
+              onSave: (text) => {
+                const models = parseModels(text);
+                if (!models.length) return fail(store, 'A provider needs at least one model.');
+                patch(provider.id, { models });
+              },
+            })));
+      })),
     h('form', { class: 'dev-preset-add', onsubmit: add },
       h('input', { name: 'name', placeholder: 'Name, such as MiniMax', 'aria-label': 'Provider name', autocomplete: 'off' }),
       h('select', { name: 'harness', 'aria-label': 'Provider harness' }, harnesses.map((x) => h('option', { value: x.id }, x.name))),
@@ -229,12 +266,12 @@ function updateHarnesses(store, mutate) {
   });
 }
 
-// The flags a harness takes, each a template with its value's placeholder.
-/** @type {[keyof DevHarness & ('model' | 'effort' | 'prompt'), string, string][]} */
+// The flags a harness takes, each a template with its value's variable.
+/** @type {['model' | 'effort' | 'prompt', string, string, string][]} */
 const HARNESS_FLAGS = [
-  ['model', 'Model flag', '--model {model}'],
-  ['effort', 'Effort flag', 'No flag'],
-  ['prompt', 'Prompt', '-- {prompt}'],
+  ['model', 'Model flag', '--model {{model}}', 'The model the task picked, quoted'],
+  ['effort', 'Effort flag', 'No flag', 'The effort the task picked, quoted'],
+  ['prompt', 'Prompt', '-- {{prompt}}', 'The task, as the prompt, quoted'],
 ];
 
 // Providers and commands that run a removed harness's program are left as they are, run without its flags.
@@ -255,19 +292,17 @@ function harnessesPanel(store, harnesses, providers) {
     const program = harnessOf(harnesses, command);
     if (program) return fail(store, `${program.name} already runs this program.`);
     updateHarnesses(store, (list) => {
-      list.push({ id: uid(), name, command, model: form.elements.model.value.trim(), effort: '', prompt: form.elements.prompt.value.trim() || '-- {prompt}' });
+      list.push({ id: uid(), name, command, model: form.elements.model.value.trim(), effort: '', prompt: form.elements.prompt.value.trim() || '-- {{prompt}}' });
     });
   };
-  return h('section', { class: 'card panel' },
-    h('header', { class: 'panel-head' },
-      h('div', null,
-        h('h2', null, 'Coding harnesses'),
-        h('p', { class: 'muted' }, 'The coding agents a Dev session can run. A command runs the harness that starts with the same program, so a task’s model, effort and prompt reach it the way it takes them: {model}, {effort} and {prompt} stand for the value. Leave a flag empty when the harness has none. Status, done signal and usage are read for Claude Code only.'))),
-    h('ul', { class: 'dev-env-list' },
+  return panel('Coding harnesses',
+    'The coding agents a Dev session can run. A command runs the harness that starts with the same program, so a task’s model, effort and prompt reach it the way it takes them. Leave a flag empty when the harness has none. Status, done signal and usage are read for Claude Code only.',
+    h('ul', { class: 'dev-cards' },
       harnesses.map((harness) => {
-        const users = providers.filter((p) => harnessOf(harnesses, p.command)?.id === harness.id).length;
-        return h('li', { class: 'dev-env-row dev-preset-row' },
-          h('div', { class: 'dev-env-name' },
+        const users = providers.filter((p) => harnessOf(harnesses, p.command)?.id === harness.id);
+        return h('li', { class: 'dev-card' },
+          cardHead(
+            logo(brandOf(harness.name, harness.command), 'terminal'),
             editText({
               value: harness.name,
               placeholder: 'Name',
@@ -278,46 +313,41 @@ function harnessesPanel(store, harnesses, providers) {
                 patch(harness.id, { name: clean });
               },
             }),
-            h('span', { class: 'muted small' }, users ? `Used by ${plural(users, 'provider')}` : 'No provider yet')),
-          h('div', { class: 'dev-env-field dev-provider-fields' },
-            h('span', { class: 'dev-env-label small' }, 'Command'),
-            editText({
-              value: harness.command,
-              placeholder: 'program --flags',
-              className: 'dev-env-command',
-              onSave: (command) => {
-                const clean = command.trim();
-                if (!clean) return fail(store, 'A harness needs a command.');
-                const other = harnessOf(harnesses.filter((x) => x.id !== harness.id), clean);
-                if (other) return fail(store, `${other.name} already runs this program.`);
-                patch(harness.id, { command: clean });
-              },
-            }),
-            HARNESS_FLAGS.map(([field, label, placeholder]) => [
-              h('span', { class: 'dev-env-label small' }, label),
-              editText({
-                value: harness[field] ?? '',
-                placeholder,
-                allowEmpty: true,
-                className: 'dev-env-command',
-                onSave: (text) => patch(harness.id, { [field]: text.trim() }),
-              }),
-            ])),
-          harness.id === CLAUDE_PROVIDER
-            ? h('span')
-            : h('button', {
-                type: 'button',
-                class: 'icon-btn',
-                title: 'Remove this harness. Providers that run its program keep their command, without its flags.',
-                'aria-label': `Remove the harness ${harness.name}`,
-                onclick: () => updateHarnesses(store, (list) => list.splice(list.findIndex((x) => x.id === harness.id), 1)),
-              }, icon('trash')));
+            users.length ? `Runs ${users.map((p) => p.name).join(', ')}` : 'No provider yet',
+            harness.id === CLAUDE_PROVIDER
+              ? null
+              : removeButton('Remove this harness. Providers that run its program keep their command, without its flags.',
+                  () => updateHarnesses(store, (list) => list.splice(list.findIndex((x) => x.id === harness.id), 1)), `Remove the harness ${harness.name}`)),
+          commandField({
+            key: `harness-${harness.id}`,
+            label: 'Command',
+            value: harness.command,
+            placeholder: 'program --flags',
+            preview: (v) => devTemplate([{ ...harness, command: v }], v),
+            examples: { model: harness.id === CLAUDE_PROVIDER ? 'opus' : 'model-name', effort: 'high', prompt: EXAMPLE_PROMPT },
+            previewHint: 'What a task with a model and effort picked runs.',
+            onSave: (command) => {
+              if (!command) return fail(store, 'A harness needs a command.');
+              const other = harnessOf(harnesses.filter((x) => x.id !== harness.id), command);
+              if (other) return fail(store, `${other.name} already runs this program.`);
+              patch(harness.id, { command });
+            },
+          }),
+          h('div', { class: 'dev-flag-grid' },
+            HARNESS_FLAGS.map(([field, label, placeholder, about]) => commandField({
+              key: `harness-${harness.id}-${field}`,
+              label,
+              value: (harness[field] ?? '').replace(/\{\{?(\w+)\}\}?/g, '{{$1}}'),
+              placeholder,
+              vars: [[field, about]],
+              onSave: (text) => patch(harness.id, { [field]: text }),
+            }))));
       })),
     h('form', { class: 'dev-preset-add', onsubmit: add },
       h('input', { name: 'name', placeholder: 'Name, such as Qwen Code', 'aria-label': 'Harness name', autocomplete: 'off' }),
       h('input', { name: 'command', placeholder: 'qwen --yolo', 'aria-label': 'Harness command', autocomplete: 'off', spellcheck: false }),
-      h('input', { name: 'model', class: 'dev-env-command', placeholder: '--model {model}', 'aria-label': 'Harness model flag', autocomplete: 'off', spellcheck: false }),
-      h('input', { name: 'prompt', class: 'dev-env-command', placeholder: '-- {prompt}', 'aria-label': 'How the harness takes its prompt', autocomplete: 'off', spellcheck: false }),
+      h('input', { name: 'model', class: 'dev-env-command', placeholder: '--model {{model}}', 'aria-label': 'Harness model flag', autocomplete: 'off', spellcheck: false }),
+      h('input', { name: 'prompt', class: 'dev-env-command', placeholder: '-- {{prompt}}', 'aria-label': 'How the harness takes its prompt', autocomplete: 'off', spellcheck: false }),
       h('button', { type: 'submit' }, icon('plus'), 'Add harness')));
 }
 
@@ -356,12 +386,13 @@ function projectRow(store, p, depth, presets) {
           })
         : null,
       preset
-        ? h('code', { class: 'dev-env-preview muted small' }, preset.command)
+        ? codeLine(preset.command, 'dev-env-preview')
         : editText({
             value: p.devCommand ?? '',
             placeholder: DEFAULT_DEV_COMMAND,
             allowEmpty: true,
             className: 'dev-env-command',
+            display: (v) => codeLine(v),
             onSave: (devCommand) => updateProject(store, p.id, { devCommand: devCommand.trim() }),
           })));
 }
@@ -369,17 +400,15 @@ function projectRow(store, p, depth, presets) {
 /** @param {Store} store */
 export function devEnvironmentCard(store) {
   const presets = devPresets(store);
+  const harnesses = devHarnesses(store);
+  const providers = devProviders(store);
   const { projects } = store.get('projects');
   return h('div', { class: 'stack-lg' },
     devEnvView.error ? notice({ text: devEnvView.error }) : null,
-    providersPanel(store, devProviders(store), devHarnesses(store)),
-    harnessesPanel(store, devHarnesses(store), devProviders(store)),
-    presetsPanel(store, presets, projects),
-    h('section', { class: 'card panel' },
-      h('header', { class: 'panel-head' },
-        h('div', null,
-          h('h2', null, 'Projects'),
-          h('p', { class: 'muted' }, 'Where each project’s terminals open, and the command a task’s Dev button runs with the task as its prompt. An empty command uses the default.'))),
+    providersPanel(store, providers, harnesses),
+    harnessesPanel(store, harnesses, providers),
+    presetsPanel(store, presets, projects, harnesses),
+    panel('Projects', 'Where each project’s terminals open, and the command a task’s Dev button runs with the task as its prompt. An empty command uses the default.',
       h('ul', { class: 'dev-env-list' },
         projects.length
           ? projectTree(projects).map(({ project, depth }) => projectRow(store, project, depth, presets))
