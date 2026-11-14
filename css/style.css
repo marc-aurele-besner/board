@@ -1697,21 +1697,18 @@ button.work-seg.is-asks { background: var(--warn); color: var(--bg); animation: 
 .work-head { display: flex; align-items: center; gap: 2px; padding: 2px 4px 2px 6px; border-bottom: 1px solid var(--border); }
 .work-head .icon-btn { min-height: 24px; min-width: 24px; padding: 0 4px; border-radius: 4px; font-size: 1rem; }
 .work-tabs { flex: 1; min-width: 0; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
-.work-filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 10px 4px; }
+.work-filters { display: flex; flex-wrap: wrap; gap: 2px; padding: 2px 4px 2px 6px; border-bottom: 1px solid var(--border); }
 button.work-tab { display: inline-flex; align-items: center; gap: 4px; min-height: 22px; padding: 1px 6px; border: none; border-radius: 4px; background: none; color: var(--muted); font-size: 0.82rem; font-weight: 500; }
 button.work-tab b { font-weight: 600; }
 button.work-tab .icon { width: 13px; height: 13px; flex: none; }
 button.work-tab.on { background: var(--surface-2); color: var(--text); }
-button.work-filter { min-height: 22px; padding: 0 8px; border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 0.78rem; }
-button.work-filter.on { background: var(--surface-2); color: var(--text); border-color: var(--muted); }
-button.work-filter { display: inline-flex; align-items: center; gap: 4px; }
+/* The PR filters look like the tabs above them: square-ish, no border, the one picked filled. */
+button.work-filter { display: inline-flex; align-items: center; gap: 4px; min-height: 22px; padding: 1px 6px; border: none; border-radius: 4px; background: none; color: var(--muted); font-size: 0.78rem; font-weight: 500; }
+button.work-filter.on { background: var(--surface-2); color: var(--text); }
 button.work-filter .icon { width: 12px; height: 12px; flex: none; }
 button.work-filter.gh-open .icon { color: var(--gh-open); }
 button.work-filter.gh-merged .icon { color: var(--gh-merged); }
 button.work-filter.gh-closed .icon { color: var(--gh-closed); }
-button.work-filter.gh-open.on { border-color: color-mix(in srgb, var(--gh-open) 55%, var(--border)); }
-button.work-filter.gh-merged.on { border-color: color-mix(in srgb, var(--gh-merged) 55%, var(--border)); }
-button.work-filter.gh-closed.on { border-color: color-mix(in srgb, var(--gh-closed) 55%, var(--border)); }
 .work-body { overflow: auto; min-height: 0; flex: 0 1 auto; }
 .work-pop.big .work-body { flex: none; max-height: 30vh; }
 .work-lines { display: flex; flex-direction: column; padding: 2px 0; }
