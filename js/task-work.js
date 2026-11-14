@@ -17,6 +17,7 @@ import { openDeployPanel, stateDot, PROVIDER_NAMES, STATE_NAMES } from './deploy
 import { claudeState } from './dev-core.js';
 import { terminalView, liveSession, onSessionPaint, terminalBackground, openSession, exitText, keyData, wheelData, runnerOf, pickUp, resumeSession, followClaude, fitTerminal, imagePaths } from './modules/dev.js';
 import { attachSession, sendInput, stopCommand, readFile } from './terminal.js';
+import { workerCall } from './runners.js';
 import { createTerminal } from './vt.js';
 import { imageFiles, dragsFiles } from './images.js';
 
@@ -154,16 +155,16 @@ export function workPill(store, item, options) {
  * @type {{ id: string, tab: WorkTab, filter: string, shut: Set<string>, big: boolean, session: string,
  *   store: Store | null, options: WorkOptions | null, el: HTMLElement | null, head: HTMLElement | null,
  *   body: HTMLElement | null, slot: HTMLElement | null, foot: HTMLElement | null, unsub: (() => void) | null, frame: number,
- *   term: TermView | null, preview: string }}
+ *   term: TermView | null, preview: string, site: string }}
  */
-const pop = { id: '', tab: 'prs', filter: 'all', shut: new Set(), big: false, session: '', store: null, options: null, el: null, head: null, body: null, slot: null, foot: null, unsub: null, frame: 0, term: null, preview: '' };
+const pop = { id: '', tab: 'prs', filter: 'all', shut: new Set(), big: false, session: '', store: null, options: null, el: null, head: null, body: null, slot: null, foot: null, unsub: null, frame: 0, term: null, preview: '', site: '' };
 
 /** @param {Store} store @param {string} id @param {WorkTab} tab @param {WorkOptions} options */
 function toggleWork(store, id, tab, options) {
   if (pop.id === id && pop.tab === tab) return closeWork();
   if (pop.id !== id) {
     closeWork();
-    Object.assign(pop, { id, filter: 'all', shut: new Set(), big: false, session: '', preview: '' });
+    Object.assign(pop, { id, filter: 'all', shut: new Set(), big: false, session: '', preview: '', site: '' });
   }
   Object.assign(pop, { tab, store, options });
   if (!pop.el) build(store);
@@ -302,7 +303,8 @@ function paint() {
       : pop.tab === 'issues' ? linkLines(store, issues, false, [])
         : pop.tab === 'previews' ? previewList(store, previews)
           : artifactList(store, artifacts)));
-    showPreview(store, pop.tab === 'artifacts' ? artifacts : []);
+    if (pop.tab === 'previews') showSite(previews);
+    else showPreview(store, pop.tab === 'artifacts' ? artifacts : []);
   }
 
   const summary = [
@@ -396,6 +398,16 @@ function previewList(store, previews) {
       h('span', { class: 'work-title', title: `${PROVIDER_NAMES[p.provider] ?? 'Preview'}${p.name ? ` · ${p.name}` : ''} · ${p.pr.repo} #${p.pr.number}${p.error ? `\n${p.error}` : ''}` },
         host || p.name || 'Preview', state && p.state !== 'ready' ? h('span', { class: 'muted' }, ` · ${state}`) : null),
       h('span', { class: 'work-actions' },
+        p.url ? h('button', {
+          type: 'button',
+          class: `btn-small${pop.site === p.url ? ' on' : ''}`,
+          'aria-pressed': String(pop.site === p.url),
+          title: `Show ${p.url} here`,
+          onclick: () => {
+            pop.site = pop.site === p.url ? '-' : p.url;
+            paint();
+          },
+        }, icon('eye'), 'Preview') : null,
         p.url ? h('a', { class: 'btn-small', href: p.url, target: '_blank', rel: 'noopener noreferrer' }, icon('globe'), 'Open site') : null,
         p.id ? h('button', { type: 'button', class: 'btn-small', onclick: () => openLog(store, p) }, icon('list'), 'Build log') : null));
     }))];
@@ -419,6 +431,71 @@ const artifactList = (store, artifacts) => h('div', { class: 'work-lines' }, [..
       },
     }, icon('eye'), 'Preview') : null,
     h('a', { class: 'btn-small', href: a.url, target: '_blank', rel: 'noopener' }, 'Open')))));
+
+// A preview deployment's site, shown below the list in a frame: the newest ready one first, '-' for none. Before it
+// is framed, the runners read its headers: a site that forbids being framed (X-Frame-Options, or a CSP
+// frame-ancestors that leaves the board out), or that asks to sign in first (Vercel's Deployment Protection), says
+// so instead of showing a blank frame. Without the runners, it is framed as it is.
+/** @param {PrPreview[]} previews */
+function showSite(previews) {
+  if (!pop.slot) return;
+  const sites = [...previews].reverse().filter((p) => p.url);
+  if (pop.site !== '-' && !sites.some((p) => p.url === pop.site)) pop.site = (sites.find((p) => p.state === 'ready') ?? sites[0])?.url ?? '';
+  const p = sites.find((x) => x.url === pop.site);
+  if (!p) {
+    if (pop.slot.querySelector('.work-preview')) pop.slot.replaceChildren();
+    return;
+  }
+  const key = `site:${p.url}`;
+  let frame = frames.get(key);
+  if (!frame) {
+    const body = h('div', { class: 'work-preview-body' }, h('p', { class: 'muted small work-empty' }, 'Opening the site…'));
+    const host = p.url.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    const el = h('div', { class: 'work-preview' },
+      h('div', { class: 'work-preview-head' },
+        stateDot(p.state),
+        h('span', { class: 'work-title', title: p.url }, host),
+        h('span', { class: 'muted small work-preview-note' }, `${PROVIDER_NAMES[p.provider] ?? 'Preview'} · #${p.pr.number}`),
+        h('a', { class: 'icon-btn', href: p.url, target: '_blank', rel: 'noopener noreferrer', title: 'Open the site in a new tab', 'aria-label': 'Open the site in a new tab' }, icon('globe')),
+        h('button', { type: 'button', class: 'icon-btn', title: 'Load the site again', 'aria-label': 'Load the site again', onclick: () => {
+          frames.delete(key);
+          paint();
+        } }, icon('refresh'))),
+      body);
+    frame = { el, at: Date.now() };
+    frames.set(key, frame);
+    const url = p.url;
+    framable(url).then((refused) => body.replaceChildren(refused
+      ? h('div', { class: 'work-empty work-preview-refused' },
+        h('p', { class: 'muted small' }, refused),
+        h('a', { class: 'btn-small', href: url, target: '_blank', rel: 'noopener noreferrer' }, icon('globe'), 'Open site'))
+      : h('iframe', { class: 'work-preview-frame', src: url, sandbox: 'allow-scripts allow-same-origin allow-forms allow-popups', title: `Preview of ${host}` })));
+  }
+  if (pop.slot.firstChild !== frame.el) pop.slot.replaceChildren(frame.el);
+}
+
+// Why a site cannot be shown in a frame here, or '' when it can (or the runners could not tell).
+/** @param {string} url */
+async function framable(url) {
+  /** @type {{ status: number, url: string, headers: [string, string][] }} */
+  let answer;
+  try {
+    answer = await workerCall('POST', '/http', { method: 'GET', url, headers: [] }, 20000);
+  } catch {
+    return '';
+  }
+  const header = (/** @type {string} */ name) => answer.headers.find(([k]) => k.toLowerCase() === name)?.[1] ?? '';
+  if (answer.status === 401 || answer.status === 403 || /vercel\.com\/(login|sso)/.test(answer.url)) {
+    return 'This preview asks to sign in first (Vercel’s Deployment Protection, or a password), which cannot happen inside the board. Open it in a tab, or turn the protection off for previews.';
+  }
+  const xfo = header('x-frame-options').toLowerCase();
+  if (xfo.includes('deny') || xfo.includes('sameorigin')) return 'This site does not allow being shown inside another page (X-Frame-Options).';
+  const ancestors = /frame-ancestors([^;]*)/i.exec(header('content-security-policy'))?.[1].trim().split(/\s+/) ?? null;
+  if (ancestors && !ancestors.some((a) => a === '*' || a.replace(/^https?:\/\//, '').split('/')[0] === location.host || /^https?:\/\/localhost:\*$/.test(a))) {
+    return 'This site does not allow being shown inside another page (its frame-ancestors policy).';
+  }
+  return '';
+}
 
 // The preview of an artifact: the local page it was last published from, read through the runner and drawn in a
 // sandboxed frame (its scripts run, with no access to the board). claude.ai's own page refuses to be framed, and a
