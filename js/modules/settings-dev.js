@@ -1,7 +1,7 @@
 // Settings → Coding Agents, in two tabs: the agents (the program they run, the connection to a provider, the models
 // a task can pick, and how the program takes them), and each project's folder and agent. Commands are edited in colour, with the variables they take as chips and a Preview of what a task runs.
 import { h, icon, notice, uid } from '../ui.js';
-import { editText, pickChip } from '../inline.js';
+import { editText } from '../inline.js';
 import { pickFolder } from '../folder-picker.js';
 import { commandField, codeLine } from '../command-field.js';
 import { projectIcon, projectTree, cleanLocalPath, LOCAL_PATH_ERROR } from './projects.js';
@@ -10,15 +10,37 @@ import { DEFAULT_DEV_COMMAND, runnerOf } from './dev.js';
 import { boardSkill, installBoardSkill } from '../terminal.js';
 import { agentLogo, modelLabel, programName, projectAgentField, COMMAND_VARS, EXAMPLE_PROMPT } from './dev-agent-field.js';
 import {
-  DEV_MODEL_NAMES, agentEfforts, agentsOf, defaultAgent, devAgents, devHarnesses, devTemplate,
+  CLAUDE_PROVIDER, withDevOptions, withPrompt, withTaskPointer,
+  DEV_MODEL_NAMES, agentEfforts, agentsOf, defaultAgent, devAgents, devHarnesses,
   harnessOf, splitEnv,
 } from '../dev-core.js';
 /** @import { Store, DevProvider, DevHarness, Project } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 
-// The last problem shown above the cards, the tab shown (agents or projects), and the agents whose flags are unfolded.
-/** @type {{ error: string, tab: string, flags: Set<string>, skill?: import('../terminal.js').BoardSkill | null, skillAsked?: boolean }} */
+// The last problem shown above the cards, the tab shown (agents, projects or skills), the agents whose flags are
+// unfolded, and the agent card that is open (undefined: the default agent's; '': none).
+/** @type {{ error: string, tab: string, flags: Set<string>, open?: string, skill?: import('../terminal.js').BoardSkill | null, skillAsked?: boolean }} */
 const devEnvView = { error: '', tab: 'agents', flags: new Set() };
+
+/** @param {Store} store */
+const openAgent = (store) => devEnvView.open ?? defaultAgent(store).id;
+
+// A task's id in the previews.
+const EXAMPLE_TASK = 'k3x9q2';
+
+// What a task runs with this command: the model and effort in the harness's way, the pointer to the board-tasks
+// skill, then the prompt, as startRunnerSession builds it.
+/** @param {DevHarness[]} harnesses @param {string} command @param {string} model @param {string} effort */
+function taskRuns(harnesses, command, model, effort) {
+  const pointed = withTaskPointer(harnesses, withDevOptions(harnesses, command, { model, effort }), EXAMPLE_PROMPT, [EXAMPLE_TASK]);
+  return withPrompt(harnesses, pointed.command, pointed.prompt);
+}
+
+// Under a chips list: which one is the default, or that the program decides.
+/** @param {number} n @param {string} def @param {string} program */
+const defaultLine = (n, def, program) => (n
+  ? h('p', { class: 'muted small' }, def ? `Default: ${def}. Click a chip to change it, or again to unset.` : `Default not set: ${program} decides. Click a chip to make it the default.`)
+  : null);
 
 const fail = (/** @type {Store} */ store, /** @type {string} */ message) => {
   devEnvView.error = message;
@@ -65,7 +87,8 @@ function howItWorks(store) {
   return h('ol', { class: 'dev-how' },
     step('1', 'Agents', 'A coding agent program (Claude Code, Codex…), connected to a provider, with the models you can pick.'),
     step('2', 'Projects', `Each runs its agent in its folder; ${defaultAgent(store).name} unless you pick another.`),
-    step('3', 'Tasks', 'The Dev button runs the project’s agent. Right-click it to pick another agent’s model for that task.'));
+    step('3', 'Tasks', 'The Dev button runs the project’s agent. Right-click it to pick another agent’s model for that task.'),
+    step('4', 'Skills', 'With board-tasks, a session started on a task files its own follow-ups as subtasks, with a Dev badge.'));
 }
 
 // The agents as saved; the first change saves the built-in ones, and the presets saved before agents, with it.
@@ -89,8 +112,9 @@ let chipDrag = null;
 // A list edited as chips (an agent's models or efforts): each the value passed to the program (a claude alias names
 // its model in its tooltip), with × to remove it, then a field that adds one (Enter, or a comma, adds; several may be
 // pasted). Their order is the task menu's: drag a chip, or focus it and press the left and right arrows.
-/** @param {{ key: string, values: string[], what: string, empty: string, save: (values: string[]) => void }} options */
-function chipsEditor({ key, values, what, empty, save }) {
+// A click on a chip makes it the default (def), or unsets it when it already is.
+/** @param {{ key: string, values: string[], what: string, empty: string, def?: string, onDefault?: (value: string) => void, save: (values: string[]) => void }} options */
+function chipsEditor({ key, values, what, empty, def = '', onDefault, save }) {
   const add = (/** @type {HTMLInputElement} */ input) => {
     const added = parseModels(input.value).filter((m) => !values.includes(m));
     input.value = '';
@@ -111,7 +135,7 @@ function chipsEditor({ key, values, what, empty, save }) {
   const clear = (el) => el.classList.remove('drop-before', 'drop-after');
   return h('div', { class: 'dev-models' },
     values.map((m) => h('span', {
-      class: 'dev-model',
+      class: m === def ? 'dev-model is-default' : 'dev-model',
       title: `${DEV_MODEL_NAMES[m] ? `${m} runs ${DEV_MODEL_NAMES[m]} today. ` : ''}Drag, or press the left and right arrows, to reorder`,
       draggable: 'true',
       tabindex: '0',
@@ -157,7 +181,15 @@ function chipsEditor({ key, values, what, empty, save }) {
         requestAnimationFrame(() => /** @type {HTMLElement | null} */ (document.querySelector(`[data-chip="${CSS.escape(`${key}:${m}`)}"]`))?.focus());
       },
     },
-      h('code', null, m),
+      onDefault
+        ? h('button', {
+            type: 'button',
+            class: 'dev-model-pick',
+            'aria-pressed': String(m === def),
+            title: m === def ? `${m} is the default: click to unset it` : `Make ${m} the default`,
+            onclick: () => onDefault(m === def ? '' : m),
+          }, m === def ? h('span', { class: 'dev-model-star', 'aria-hidden': 'true' }, '★') : null, h('code', null, m))
+        : h('code', null, m),
       h('button', {
         type: 'button',
         class: 'dev-model-x',
@@ -220,8 +252,18 @@ function agentsPanel(store, agents, harnesses, projects) {
         const harness = harnessOf(harnesses, agent.command);
         const isDefault = agent.id === fallback.id;
         const users = projects.filter((p) => p.devPreset === agent.id || (isDefault && !p.devPreset && !p.devCommand?.trim())).length;
-        return h('li', { class: `dev-card${isDefault ? ' is-default' : ''}`, ...order.row(agent.id) },
-          cardHead(
+        const efforts = agentEfforts(store, agent);
+        const defModel = agent.defaultModel && agent.models.includes(agent.defaultModel) ? agent.defaultModel : '';
+        const defEffort = agent.defaultEffort && efforts.includes(agent.defaultEffort) ? agent.defaultEffort : '';
+        // The example a card's preview runs: the agent's defaults, else its first model and high effort.
+        const exModel = defModel || agent.models[0] || '';
+        const exEffort = defEffort || (efforts.includes('high') ? 'high' : efforts[0] ?? '');
+        const open = openAgent(store) === agent.id;
+        const toggle = () => {
+          devEnvView.open = open ? '' : agent.id;
+          store.refresh();
+        };
+        const head = cardHead(
             [order.grip(agent.id, agent.name), agentLogo(store, agent)],
             editText({
               value: agent.name,
@@ -238,6 +280,7 @@ function agentsPanel(store, agents, harnesses, projects) {
               agent.models.length ? plural(agent.models.length, 'model') : 'no models listed',
               users ? plural(users, 'project') : 'no project',
             ].join(' · '),
+            h('button', { type: 'button', class: 'btn-ghost btn-small', 'aria-expanded': String(open), onclick: toggle }, open ? 'Close' : 'Edit'),
             isDefault
               ? h('span', { class: 'dev-default-badge', title: 'Projects that pick no agent run this one' }, 'Default')
               : h('button', {
@@ -249,18 +292,27 @@ function agentsPanel(store, agents, harnesses, projects) {
             isDefault
               ? null
               : removeButton('Remove this agent. Projects that run it keep its command as their own; tasks that picked it go back to their project’s.',
-                  () => remove(agent), `Remove the agent ${agent.name}`)),
+                  () => remove(agent), `Remove the agent ${agent.name}`));
+        const li = { class: `dev-card${isDefault ? ' is-default' : ''}${open ? '' : ' is-folded'}`, ...order.row(agent.id) };
+        // A folded card shows its models and efforts on one line; Edit unfolds it.
+        if (!open) {
+          return h('li', li, head,
+            h('button', { type: 'button', class: 'dev-card-summary', 'aria-expanded': 'false', onclick: toggle },
+              agent.models.map((m) => h('span', { class: m === defModel ? 'dev-model is-default' : 'dev-model' }, m === defModel ? '★ ' : '', h('code', null, m))),
+              h('span', { class: 'muted small' }, [
+                agent.models.length ? '' : `${programName(store, agent)} picks its model`,
+                efforts.length ? `efforts ${efforts.join(', ')}${defEffort ? ` (${defEffort} by default)` : ''}` : 'no Effort menu',
+              ].filter(Boolean).join(' · '))));
+        }
+        return h('li', li, head,
           commandField({
             key: `agent-${agent.id}`,
             label: 'Command',
             value: agent.command,
             placeholder: DEFAULT_DEV_COMMAND,
             vars: COMMAND_VARS,
-            preview: (v) => devTemplate(harnesses, v),
-            examples: { model: agent.models[0] ?? '', effort: 'high', prompt: EXAMPLE_PROMPT },
-            previewHint: agent.models.length
-              ? `What a task runs with ${agent.models[0]} and high effort picked (examples; each task passes its own).`
-              : 'What a task runs with high effort picked (an example; each task passes its own).',
+            runs: (v) => taskRuns(harnesses, v, exModel, exEffort),
+            runsHint: `An example: ${exModel || `no model (${programName(store, agent)} picks)`}, ${exEffort ? `${exEffort} effort` : 'no effort'}, and “${EXAMPLE_PROMPT}” as a task. ${harness?.id === CLAUDE_PROVIDER ? 'Claude Code is pointed at the board-tasks skill in its system prompt, which a compaction keeps.' : 'The pointer to the board-tasks skill goes at the end of the prompt.'} Each task passes its own.`,
             onSave: (command) => {
               if (!command) return fail(store, 'An agent needs a command.');
               patch(agent.id, { command });
@@ -270,34 +322,16 @@ function agentsPanel(store, agents, harnesses, projects) {
             h('div', { class: 'cmd-field' },
               h('span', { class: 'dev-env-label small' }, 'Models in a task’s menu'),
               chipsEditor({ key: `models-${agent.id}`, values: agent.models, what: 'a model', empty: `none: ${programName(store, agent)} decides`,
+                def: defModel, onDefault: (m) => patch(agent.id, { defaultModel: m }),
                 // A default that was removed is unset: nothing is passed.
                 save: (models) => patch(agent.id, { models, ...(models.includes(agent.defaultModel ?? '') ? {} : { defaultModel: '' }) }) }),
-              agent.models.length
-                ? h('div', { class: 'dev-default-pick' },
-                    h('span', { class: 'muted small' }, 'Default'),
-                    pickChip({
-                      value: agent.defaultModel && agent.models.includes(agent.defaultModel) ? agent.defaultModel : null,
-                      options: agent.models.map((m) => ({ value: m, label: modelLabel(m) })),
-                      nullable: true,
-                      nullLabel: `Not set: ${programName(store, agent)} decides`,
-                      onPick: (v) => patch(agent.id, { defaultModel: v ?? '' }),
-                    }))
-                : null),
+              defaultLine(agent.models.length, defModel ? modelLabel(defModel) : '', programName(store, agent))),
             h('div', { class: 'cmd-field' },
               h('span', { class: 'dev-env-label small' }, 'Efforts in a task’s menu'),
-              chipsEditor({ key: `efforts-${agent.id}`, values: agentEfforts(store, agent), what: 'an effort', empty: 'none: no Effort menu',
-                save: (efforts) => patch(agent.id, { efforts, ...(efforts.includes(agent.defaultEffort ?? '') ? {} : { defaultEffort: '' }) }) }),
-              agentEfforts(store, agent).length
-                ? h('div', { class: 'dev-default-pick' },
-                    h('span', { class: 'muted small' }, 'Default'),
-                    pickChip({
-                      value: agent.defaultEffort && agentEfforts(store, agent).includes(agent.defaultEffort) ? agent.defaultEffort : null,
-                      options: agentEfforts(store, agent).map((e) => ({ value: e, label: e })),
-                      nullable: true,
-                      nullLabel: `Not set: ${programName(store, agent)} decides`,
-                      onPick: (v) => patch(agent.id, { defaultEffort: v ?? '' }),
-                    }))
-                : null)),
+              chipsEditor({ key: `efforts-${agent.id}`, values: efforts, what: 'an effort', empty: 'none: no Effort menu',
+                def: defEffort, onDefault: (e) => patch(agent.id, { defaultEffort: e }),
+                save: (list) => patch(agent.id, { efforts: list, ...(list.includes(agent.defaultEffort ?? '') ? {} : { defaultEffort: '' }) }) }),
+              defaultLine(efforts.length, defEffort, programName(store, agent)))),
           agentFlags(store, agent, harness, agents));
       })),
     h('form', { class: 'dev-preset-add', onsubmit: add },
@@ -412,43 +446,118 @@ function projectRow(store, p, depth) {
 }
 
 // The board-tasks skill: Claude Code sessions started in Dev read it to list, add and edit their subtasks
-// (tools/board.js). Read once from the command runner; Install links it into ~/.claude/skills.
-/** @param {Store} store */
-function skillPanel(store) {
-  const base = runnerOf(store);
-  if (!devEnvView.skillAsked) {
-    devEnvView.skillAsked = true;
-    boardSkill(base).then((s) => { devEnvView.skill = s; }, () => { devEnvView.skill = null; }).finally(() => store.refresh());
-  }
-  const skill = devEnvView.skill;
-  const install = () => installBoardSkill(base).then((s) => {
-    devEnvView.skill = s;
-    if (s.state !== 'installed') fail(store, `${s.path} already exists${s.points ? ` and points at ${s.points}` : ''}. Remove it, then install again.`);
-    store.refresh();
-  }, (err) => fail(store, `Could not install the skill: ${err.message}`));
-  /** @type {Child} */
-  let state = h('span', { class: 'muted small' }, 'Checking…');
-  if (skill === null) state = h('span', { class: 'muted small' }, 'The command runner did not answer. One started before this update needs a restart (bun dev).');
-  else if (skill?.state === 'installed') state = h('span', { class: 'small' }, icon('check'), ` Installed: ${skill.path}`);
-  else if (skill?.state === 'other') state = h('span', { class: 'small' }, `${skill.path} holds another copy${skill.points ? ` (${skill.points})` : ''}.`);
-  else if (skill) state = h('button', { type: 'button', class: 'btn-small primary', onclick: install }, 'Install');
-  return panel('Board tasks skill',
-    h('span', null, 'Lets Claude Code sessions started on a task list, add and edit its subtasks (', h('code', null, 'board-tasks'), '). Linked into ', h('code', null, '~/.claude/skills'), ', so a pull updates it.'),
-    h('div', { class: 'row' }, state));
+// (tools/board.js). Its state is read once from the command runner (Check again asks again); Install links it into
+// ~/.claude/skills.
+/** @param {Store} store @param {boolean} [again] */
+function askSkill(store, again = false) {
+  if (devEnvView.skillAsked && !again) return;
+  devEnvView.skillAsked = true;
+  if (again) devEnvView.skill = undefined;
+  boardSkill(runnerOf(store)).then((s) => { devEnvView.skill = s; }, () => { devEnvView.skill = null; }).finally(() => store.refresh());
 }
 
-// The two tabs: the agents with their harnesses under them, and each project's folder and agent.
-const DEV_TABS = [['agents', 'Agents'], ['projects', 'Projects']];
+/** @param {Store} store */
+const installSkill = (store) => installBoardSkill(runnerOf(store)).then((s) => {
+  devEnvView.skill = s;
+  if (s.state !== 'installed') fail(store, `${s.path} already exists${s.points ? ` and points at ${s.points}` : ''}. Remove it, then install again.`);
+  store.refresh();
+}, (err) => fail(store, `Could not install the skill: ${err.message}`));
+
+const SKILL_CAN = [
+  'Read the session’s task, every task under it, and every task the session made.',
+  'Add subtasks under them; they show on the board with a Dev badge.',
+  'Edit those subtasks (status, title, priority, due date). Never delete: parking or done instead.',
+  'At most 100 tasks per session, subagents included.',
+];
+const SKILL_COMMANDS = [
+  'node "$BOARD_CLI" task list',
+  'node "$BOARD_CLI" task list --q "rate limit"',
+  'node "$BOARD_CLI" task add "Title" --description "Why, and what done means" --priority medium',
+  'node "$BOARD_CLI" task add "Title" --parent <id>',
+  'node "$BOARD_CLI" task edit <id> --status done',
+];
+
+// Above the tabs while the skill is not installed: why it matters, and Install (or a way to the Skills tab).
+/** @param {Store} store */
+function skillNudge(store) {
+  const skill = devEnvView.skill;
+  if (skill === undefined || skill?.state === 'installed' || devEnvView.tab === 'skills') return null;
+  const text = skill === null
+    ? 'The command runner did not answer, so the board-tasks skill could not be checked. One started before this update needs a restart (bun dev).'
+    : skill.state === 'other'
+      ? `${skill.path} holds another copy of the board-tasks skill, which a pull here does not update.`
+      : 'Sessions started on a task can file their own follow-ups as subtasks once the board-tasks skill is installed.';
+  return h('div', { class: 'skill-nudge', role: 'status' },
+    icon('sparkle'),
+    h('span', { class: 'grow small' }, text),
+    skill?.state === 'missing'
+      ? h('button', { type: 'button', class: 'btn-small primary', onclick: () => installSkill(store) }, 'Install')
+      : h('button', { type: 'button', class: 'btn-small', onclick: () => { devEnvView.tab = 'skills'; store.refresh(); } }, 'See skills'));
+}
+
+// The Skills tab: what the board ships for the agents it starts, and whether each is linked in.
+/** @param {Store} store */
+function skillsPanel(store) {
+  const skill = devEnvView.skill;
+  const recheck = h('button', { type: 'button', class: 'btn-small', onclick: () => askSkill(store, true) }, 'Check again');
+  const pill = (/** @type {string} */ text, /** @type {string} */ tone) => h('span', { class: `pill tone-${tone}` }, text);
+  /** @type {[Child, Child]} */
+  const [badge, state] = skill === undefined
+    ? [pill('Checking…', 'plain'), h('span', { class: 'muted small' }, 'Asking the command runner…')]
+    : skill === null
+      ? [pill('Runner offline', 'high'), h('div', { class: 'skill-state is-warn' }, h('span', { class: 'grow small' }, 'The command runner did not answer. One started before this update needs a restart (bun dev).'), recheck)]
+      : skill.state === 'installed'
+        ? [pill('Installed', 'done'), h('div', { class: 'skill-state is-ok' }, h('span', { class: 'grow small' }, icon('check'), ' Installed: ', h('code', null, skill.path), ' → ', h('code', null, skill.source)), recheck)]
+        : skill.state === 'other'
+          ? [pill('Another copy', 'high'), h('div', { class: 'skill-state is-warn' }, h('span', { class: 'grow small' }, h('code', null, skill.path), ` holds another copy${skill.points ? ` (${skill.points})` : ''}. Sessions read that one, which a pull here does not update. Remove it, then install again.`), recheck)]
+          : [pill('Not installed', 'plain'), h('div', { class: 'skill-state' },
+              h('span', { class: 'grow small' }, 'Install links ', h('code', null, skill.path), ' to ', h('code', null, skill.source), '. The same as ', h('code', null, 'bun run install-skill'), '.'),
+              h('button', { type: 'button', class: 'btn-small primary', onclick: () => installSkill(store) }, 'Install'))];
+  const open = devEnvView.flags.has('skill:board-tasks');
+  return panel('Skills',
+    h('span', null, 'Skills the board ships for the coding agents it starts. Each is linked from ', h('code', null, '~/.claude/skills'), ' to this checkout, so a pull updates it.'),
+    h('ul', { class: 'dev-cards' },
+      h('li', { class: 'dev-card' },
+        cardHead(h('span', { class: 'dev-logo' }, icon('check-square')), h('strong', null, 'Board tasks ', h('code', { class: 'small' }, 'board-tasks')),
+          'Lets Claude Code sessions started on a task list, add and edit its subtasks.', badge),
+        state,
+        h('div', { class: 'skill-grid' },
+          h('div', null,
+            h('span', { class: 'dev-env-label small' }, 'What a session can do'),
+            h('ul', { class: 'skill-can' }, SKILL_CAN.map((t) => h('li', { class: 'small' }, t)))),
+          h('div', null,
+            h('span', { class: 'dev-env-label small' }, 'When it is used'),
+            h('p', { class: 'small' }, 'Every session started on a task is pointed at it: Claude Code in its system prompt (', h('code', null, '--append-system-prompt'), '), another program at the end of its prompt. See “A task runs” on each agent.'))),
+        h('div', { class: 'dev-flags' },
+          h('button', {
+            type: 'button',
+            class: 'dev-flags-toggle',
+            'aria-expanded': String(open),
+            onclick: () => {
+              if (open) devEnvView.flags.delete('skill:board-tasks');
+              else devEnvView.flags.add('skill:board-tasks');
+              store.refresh();
+            },
+          }, icon(open ? 'chevron-down' : 'chevron-right'), h('span', { class: 'dev-env-label small' }, 'Commands a session runs')),
+          open ? h('div', { class: 'cmd-preview skill-cmds' }, SKILL_COMMANDS.map((c) => codeLine(c))) : null))));
+}
+
+// The tabs: the agents with their harnesses under them, each project's folder and agent, and the board's skills.
+const DEV_TABS = [['agents', 'Agents'], ['projects', 'Projects'], ['skills', 'Skills']];
 
 /** @param {Store} store */
 export function devEnvironmentCard(store) {
   const agents = devAgents(store);
   const harnesses = devHarnesses(store);
   const { projects } = store.get('projects');
-  const tab = devEnvView.tab === 'projects' ? 'projects' : 'agents';
+  const tab = DEV_TABS.some(([id]) => id === devEnvView.tab) ? devEnvView.tab : 'agents';
+  askSkill(store);
+  const skills = devEnvView.skill?.state === 'installed' ? '1/1' : '0/1';
+  /** @type {Record<string, string>} */
+  const counts = { agents: String(agents.length), projects: String(projects.length), skills };
   return h('div', { class: 'stack-lg' },
     howItWorks(store),
-    skillPanel(store),
+    skillNudge(store),
     h('div', { class: 'sub-tabs', role: 'tablist', 'aria-label': 'Coding Agents' },
       DEV_TABS.map(([id, label]) => h('button', {
         type: 'button',
@@ -456,13 +565,15 @@ export function devEnvironmentCard(store) {
         class: `sub-tab${tab === id ? ' active' : ''}`,
         'aria-selected': String(tab === id),
         onclick: () => { devEnvView.tab = id; devEnvView.error = ''; store.refresh(); },
-      }, label, id === 'agents' ? h('span', { class: 'seg-count' }, String(agents.length)) : h('span', { class: 'seg-count' }, String(projects.length))))),
+      }, label, h('span', { class: 'seg-count' }, counts[id])))),
     devEnvView.error ? notice({ text: devEnvView.error }) : null,
     tab === 'agents'
       ? agentsPanel(store, agents, harnesses, projects)
-      : panel('Projects', 'Where each project’s terminals open, and the agent its tasks run with the task as the prompt.',
-          h('ul', { class: 'dev-env-list' },
-            projects.length
-              ? projectTree(projects).map(({ project, depth }) => projectRow(store, project, depth))
-              : h('li', { class: 'empty' }, 'No project yet. Create one in ', h('a', { href: '#/projects' }, 'Projects'), '.'))));
+      : tab === 'skills'
+        ? skillsPanel(store)
+        : panel('Projects', 'Where each project’s terminals open, the agent its tasks run, and the command that makes, with the task as the prompt.',
+            h('ul', { class: 'dev-env-list' },
+              projects.length
+                ? projectTree(projects).map(({ project, depth }) => projectRow(store, project, depth))
+                : h('li', { class: 'empty' }, 'No project yet. Create one in ', h('a', { href: '#/projects' }, 'Projects'), '.'))));
 }

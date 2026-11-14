@@ -100,12 +100,13 @@ const previewing = new Set();
 
 /**
  * A command field. `vars` are the variables offered as chips, `preview` gives the template the Preview tab fills
- * with `examples` (no Preview tab without it). Saved on blur or Enter; Escape puts the saved text back.
+ * with `examples` (no Preview tab without it). `runs` instead shows, always and as it is typed, the whole command a
+ * task would run (`runsHint` under it). Saved on blur or Enter; Escape puts the saved text back.
  * @param {{ key: string, label?: string, value: string, placeholder?: string, vars?: [string, string][],
  *   preview?: (value: string) => string, examples?: Record<string, string>, previewHint?: string,
- *   onSave: (value: string) => void }} options
+ *   runs?: (value: string) => string, runsHint?: string, onSave: (value: string) => void }} options
  */
-export function commandField({ key, label = '', value, placeholder = '', vars = [], preview, examples = {}, previewHint = '', onSave }) {
+export function commandField({ key, label = '', value, placeholder = '', vars = [], preview, examples = {}, previewHint = '', runs, runsHint = '', onSave }) {
   const code = h('pre', { class: 'cmd-code cmd-layer', 'aria-hidden': 'true' });
   const input = /** @type {HTMLTextAreaElement} */ (h('textarea', {
     class: 'cmd-input',
@@ -118,7 +119,11 @@ export function commandField({ key, label = '', value, placeholder = '', vars = 
     'aria-label': label || placeholder,
   }));
   input.value = value;
-  const paint = () => code.replaceChildren(...runNodes(shellRuns(input.value)), '\u200b');
+  const runsBox = runs ? h('pre', { class: 'cmd-code cmd-preview' }) : null;
+  const paint = () => {
+    code.replaceChildren(...runNodes(shellRuns(input.value)), '\u200b');
+    runsBox?.replaceChildren(...runNodes(shellRuns(/** @type {(v: string) => string} */ (runs)(input.value.replace(/\s*\n\s*/g, ' ').trim() || placeholder))));
+  };
   paint();
   let saved = value;
   const save = () => {
@@ -169,7 +174,8 @@ export function commandField({ key, label = '', value, placeholder = '', vars = 
   if (!preview) {
     return h('div', { class: 'cmd-field' },
       label ? h('span', { class: 'dev-env-label small' }, label) : null,
-      editor, chips);
+      editor, chips,
+      runsBox ? [h('span', { class: 'dev-env-label small' }, 'A task runs'), runsBox, runsHint ? h('p', { class: 'muted small' }, runsHint) : null] : null);
   }
   const fill = preview;
   const box = h('div', { class: 'cmd-preview-wrap' });

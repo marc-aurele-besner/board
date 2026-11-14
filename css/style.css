@@ -3642,7 +3642,8 @@ code.tool-fail-call { font-size: 0.76rem; }
 .dev-logo.is-ai-mistral { color: var(--brand-mistral); }
 .dev-models { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .dev-model { padding: 1px 4px 1px 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
-.dev-how { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dev-how { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 1200px) { .dev-how { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .dev-how li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .dev-how li > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .dev-how-n { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-weight: 700; font-size: 0.85rem; }
@@ -3662,9 +3663,31 @@ code.tool-fail-call { font-size: 0.76rem; }
 .dev-model.drop-before { box-shadow: -3px 0 0 var(--accent); }
 .dev-model.drop-after { box-shadow: 3px 0 0 var(--accent); }
 .dev-model:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dev-model.is-default { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.dev-model-pick { display: inline-flex; align-items: center; gap: 4px; min-height: 0; padding: 0; border: none; background: none; color: inherit; font: inherit; cursor: pointer; }
+.dev-model-pick:hover code { color: var(--accent); }
+.dev-model-star { color: var(--accent); font-size: 0.75rem; }
+/* A folded agent card: its models and efforts on one line, which unfolds it. */
+.dev-card.is-folded { gap: 6px; }
+.dev-card-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 0; padding: 0 0 0 56px; border: none; background: none; color: inherit; text-align: left; cursor: pointer; }
+.dev-card-summary:hover { background: none; }
+.dev-card-summary .dev-model { cursor: pointer; padding: 1px 10px; }
+/* Coding Agents → Skills, and the reminder above the tabs while board-tasks is not installed. */
+.skill-nudge { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.skill-nudge > .icon { color: var(--accent); flex: none; }
+.skill-state { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 12px; border-radius: 8px; background: var(--surface-2); }
+.skill-state.is-ok { background: color-mix(in srgb, var(--income) 10%, var(--surface)); }
+.skill-state.is-warn { background: color-mix(in srgb, var(--warn) 12%, var(--surface)); }
+.skill-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.skill-grid p { margin: 4px 0 0; }
+.skill-can { list-style: disc; margin: 4px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
+.skill-cmds { display: flex; flex-direction: column; gap: 2px; align-self: stretch; }
+@media (max-width: 720px) {
+  .skill-grid { grid-template-columns: minmax(0, 1fr); }
+  .dev-card-summary { padding-left: 0; }
+}
 .dev-model-x { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; min-height: 0; min-width: 0; padding: 0; border: none; border-radius: 50%; background: none; color: var(--muted); font-size: 0.75rem; }
 .dev-model-x:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
-.dev-default-pick { display: flex; align-items: center; gap: 6px; }
 .dev-model-picks { display: flex; flex-wrap: wrap; gap: 6px; }
 .dev-chip-fields { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; }
 .dev-model-add { flex: 1 1 10rem; min-width: 8rem; min-height: 0; padding: 3px 8px; border: 1px dashed var(--border); border-radius: 999px; background: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }

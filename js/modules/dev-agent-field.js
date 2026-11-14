@@ -3,7 +3,7 @@
 import { h, icon } from '../ui.js';
 import { pickChip } from '../inline.js';
 import { commandField, codeLine } from '../command-field.js';
-import { DEV_MODEL_NAMES, agentEfforts, brandOf, defaultAgent, devAgents, devCommandOf, devHarnesses, devTemplate, harnessOf } from '../dev-core.js';
+import { DEV_MODEL_NAMES, agentEfforts, brandOf, defaultAgent, devAgents, devCommandOf, devHarnesses, devTemplate, effortFor, harnessOf, withDevOptions } from '../dev-core.js';
 /** @import { Store, DataStore, DevProvider, Project } from '../../types/data' */
 /** @import { IconName } from '../ui.js' */
 
@@ -93,7 +93,11 @@ export function projectAgentField(store, p, update) {
     }),
     shown ? modelEffortPicks(store, p, shown, update) : null,
     shown
-      ? codeLine(shown.command, 'dev-env-preview')
+      // The command its tasks run: the agent's, with the project's model and effort (else the agent's defaults).
+      ? codeLine(withDevOptions(devHarnesses(store), shown.command, {
+          model: p.devModel && shown.models.includes(p.devModel) ? p.devModel : shown.defaultModel ?? '',
+          effort: effortFor(store, shown, p.devEffort || shown.defaultEffort || ''),
+        }), 'dev-env-preview')
       : commandField({
           key: `project-${p.id}`,
           value: p.devCommand ?? '',
