@@ -1,15 +1,15 @@
 // Settings → Dev environment, in two tabs: the agents (the program they run, the connection to a provider, the models
 // a task can pick, and how the program takes them), and each project's folder and agent. Commands are edited in colour, with the variables they take as chips and a Preview of what a task runs.
 import { h, icon, notice, uid } from '../ui.js';
-import { editText, pickChip } from '../inline.js';
+import { editText } from '../inline.js';
 import { pickFolder } from '../folder-picker.js';
 import { commandField, codeLine } from '../command-field.js';
 import { projectIcon, projectTree, cleanLocalPath, LOCAL_PATH_ERROR } from './projects.js';
 import { DEFAULT_DEV_COMMAND, runnerOf } from './dev.js';
-import { agentLogo, brandLogo, projectAgentField, COMMAND_VARS, EXAMPLE_PROMPT } from './dev-agent-field.js';
+import { agentLogo, projectAgentField, COMMAND_VARS, EXAMPLE_PROMPT } from './dev-agent-field.js';
 import {
   DEFAULT_HARNESSES, DEV_MODEL_NAMES, agentsOf, defaultAgent, devAgents, devHarnesses, devTemplate,
-  harnessOf, splitEnv, brandOf,
+  harnessOf, splitEnv,
 } from '../dev-core.js';
 /** @import { Store, DevProvider, DevHarness, Project } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
@@ -83,9 +83,6 @@ const parseModels = (/** @type {string} */ text) => [...new Set(text.split(/[\s,
 const modelPills = (text) => h('span', { class: 'dev-models' }, parseModels(text).map((m) =>
   h('span', { class: 'dev-model', title: DEV_MODEL_NAMES[m] ? `Runs as ${m}` : m }, h('code', null, m), DEV_MODEL_NAMES[m] ? h('span', { class: 'muted' }, DEV_MODEL_NAMES[m]) : null)));
 
-/** @param {DevHarness[]} harnesses */
-const harnessOptions = (harnesses) => harnesses.map((x) => ({ value: x.id, label: x.name, plainIcon: () => brandLogo(brandOf(x.name, x.command), 'terminal') }));
-
 // Projects that ran a removed agent keep its command as their own; tasks that picked it go back to their project's.
 /** @param {Store} store @param {DevProvider[]} agents @param {DevHarness[]} harnesses @param {Project[]} projects */
 function agentsPanel(store, agents, harnesses, projects) {
@@ -108,12 +105,12 @@ function agentsPanel(store, agents, harnesses, projects) {
     const name = form.elements.name.value.trim();
     const harness = harnesses.find((x) => x.id === form.elements.harness.value);
     const command = [form.elements.env.value.trim(), harness?.command.trim() ?? ''].filter(Boolean).join(' ');
-    if (!name || !harness) return fail(store, 'An agent needs a name and a harness.');
+    if (!name || !harness) return fail(store, 'An agent needs a name and a program.');
     if (agents.some((x) => x.name.toLowerCase() === name.toLowerCase())) return fail(store, `An agent named "${name}" already exists.`);
     updateAgents(store, (list) => { list.push({ id: uid(), name, command, models: parseModels(form.elements.models.value) }); });
   };
   return panel('Agents',
-    'What a task can run. Pick the program it runs on; put the variables that connect it to a provider (an API address, a key from the runner’s environment) at the start of its command. MiniMax runs Claude Code with MiniMax’s API, with the key from MINIMAX_API_KEY.',
+    'What a task can run: a program’s command (claude, codex, gemini, opencode…), with the variables that connect it to a provider (an API address, a key from the runner’s environment) at the start of its command. MiniMax runs Claude Code with MiniMax’s API, with the key from MINIMAX_API_KEY.',
     h('ul', { class: 'dev-cards' },
       agents.map((agent) => {
         const harness = harnessOf(harnesses, agent.command);
@@ -133,7 +130,8 @@ function agentsPanel(store, agents, harnesses, projects) {
               },
             }),
             [
-              agent.models.length ? plural(agent.models.length, 'model') : 'Harness’s default model',
+              harness?.name ?? 'Another program',
+              agent.models.length ? plural(agent.models.length, 'model') : 'its default model',
               users ? plural(users, 'project') : 'no project',
             ].join(' · '),
             isDefault
@@ -144,17 +142,6 @@ function agentsPanel(store, agents, harnesses, projects) {
                   title: 'Projects that pick no agent will run this one',
                   onclick: () => store.update('dev', (d) => { d.defaultAgent = agent.id; }),
                 }, 'Make default'),
-            h('span', { class: 'dev-runs-on muted small' }, 'Runs on'),
-            pickChip({
-              value: harness?.id ?? null,
-              options: harnessOptions(harnesses),
-              placeholder: 'Another program',
-              className: 'field-pick dev-harness-pick',
-              onPick: (id) => {
-                const next = harnesses.find((x) => x.id === id);
-                if (next) patch(agent.id, { command: [splitEnv(agent.command).env, next.command.trim()].filter(Boolean).join(' ') });
-              },
-            }),
             isDefault
               ? null
               : removeButton('Remove this agent. Projects that run it keep its command as their own; tasks that picked it go back to their project’s.',

@@ -3582,8 +3582,6 @@ code.tool-fail-call { font-size: 0.76rem; }
 .dev-card-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
 .dev-card-title > .editable { font-weight: 600; align-self: flex-start; }
 .dev-card-tools { display: flex; align-items: center; gap: 6px; flex: none; }
-.dev-runs-on { white-space: nowrap; }
-.chip-pick.dev-harness-pick { min-height: 34px; padding: 4px 10px; font-size: 0.9rem; }
 .dev-logo { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 34px; height: 34px; border-radius: 9px; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); }
 .dev-logo .icon { width: 20px; height: 20px; }
 .opt-plain .dev-logo { width: 20px; height: 20px; border-radius: 5px; border: none; background: none; }
