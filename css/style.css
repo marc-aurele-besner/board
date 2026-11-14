@@ -1744,10 +1744,37 @@ button.work-session.on { background: color-mix(in srgb, var(--accent) 9%, var(--
 .work-preview-head .icon-btn { min-height: 24px; min-width: 24px; font-size: 1rem; display: inline-flex; align-items: center; justify-content: center; }
 .work-preview-refused { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .work-preview-refused p { margin: 0; }
-.work-preview-body { display: flex; flex: 1 1 360px; min-height: 160px; }
 /* The artifacts stay readable above a preview; a long list scrolls. */
 .work-pop:has(.work-preview) .work-body { flex: none; max-height: 30%; }
 .work-preview-frame { flex: 1; width: 100%; border: 0; background: #fff; }
+/* A preview at a device's size (js/preview-frame.js): the frame keeps the device's width, scaled down to the room. */
+.preview-stage { display: flex; flex: 1 1 360px; min-height: 160px; overflow: hidden; }
+.preview-stage.framed { justify-content: center; padding: 8px 12px; background: var(--surface-2); }
+.preview-device { display: flex; flex: 1; min-width: 0; }
+.preview-stage.framed .preview-device { flex: none; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.preview-stage.framed .work-preview-frame { flex: none; transform-origin: top left; }
+.preview-tools { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+.preview-devices { display: inline-flex; gap: 1px; }
+.work-preview-head .preview-devices .icon-btn { border-radius: 4px; }
+.work-preview-head .preview-devices .icon-btn .icon { width: 14px; height: 14px; }
+.work-preview-head .preview-devices .icon-btn.on { background: var(--surface-2); color: var(--text); }
+button.preview-console-btn { display: inline-flex; align-items: center; gap: 4px; min-height: 22px; padding: 1px 6px; border: none; border-radius: 4px; background: none; color: var(--muted); font-size: 0.78rem; font-weight: 500; }
+button.preview-console-btn .icon { width: 13px; height: 13px; }
+button.preview-console-btn.on { background: var(--surface-2); color: var(--text); }
+button.preview-console-btn b { font-weight: 600; }
+button.preview-console-btn.errors b { color: var(--danger); }
+button.preview-console-btn.warnings b { color: var(--warn); }
+.preview-console { display: flex; flex-direction: column; flex: 0 1 35%; min-height: 110px; border-top: 1px solid var(--border); }
+.preview-console[hidden] { display: none; }
+.preview-console-head { display: flex; align-items: center; gap: 6px; padding: 2px 6px 2px 10px; border-bottom: 1px solid var(--border); font-size: 0.78rem; }
+.preview-console-head .btn-small { min-height: 22px; padding: 1px 6px; display: inline-flex; align-items: center; gap: 4px; }
+.preview-console-list { flex: 1; min-height: 0; overflow: auto; font: 0.74rem ui-monospace, SFMono-Regular, Menlo, monospace; }
+.preview-log { display: flex; gap: 10px; padding: 2px 10px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.preview-log-text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.preview-log-source { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preview-log.error { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
+.preview-log.warning { color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.preview-log.debug, .preview-log.verbose { color: var(--muted); }
 .work-actions .btn-small.on { border-color: var(--accent); color: var(--accent); }
 .work-term { display: flex; flex-direction: column; min-height: 0; flex: 1; border-top: 1px solid var(--border); }
 .work-term > .term-out.term-view { flex: 1 1 340px; height: auto; max-height: none; min-height: 120px; font-size: 0.74rem; }
