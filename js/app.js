@@ -24,6 +24,7 @@ import { sampleFolder } from './sample.js';
 import { toast } from './toast.js';
 import { watchKeepAwake } from './wake-lock.js';
 import { markDrawn, snapshot, restore, holding, watchCommits } from './keep-fields.js';
+import { watchAppVersion, takeCarried } from './app-version.js';
 
 /** @import { Store, Module } from '../types/data' */
 
@@ -293,6 +294,7 @@ async function open(handle) {
   connectError = '';
   currentModule().restore?.(readRoute().params);
   render();
+  restoreCarried();
   if (!sample) {
     // The runners report the folderId they read, so Settings can tell when they write to another folder.
     if (!store.get('settings').folderId) store.update('settings', (d) => { d.folderId = uid(); });
@@ -304,6 +306,22 @@ async function open(handle) {
 }
 
 const SYNC_MS = 3000;
+
+// After a reload for a new version: the fields typed in this section, and the scroll position. The page may still
+// grow as the section draws what it loads, so the scroll is tried again a little later.
+function restoreCarried() {
+  const carry = takeCarried();
+  const main = app.querySelector('main.view');
+  if (!carry || !main) return;
+  restore(main, /** @type {ReturnType<typeof snapshot>} */ (carry.fields));
+  const scroll = () => window.scrollY < carry.scrollY && window.scrollTo(0, carry.scrollY);
+  requestAnimationFrame(scroll);
+  setTimeout(scroll, 400);
+}
+
+// Something a reload would cut short: a field being typed in, a dialog or a picker, a save not on disk yet.
+const busy = () => Boolean(store?.pending) || holding(app.querySelector('main.view'))
+  || Boolean(document.querySelector('.modal-overlay, .palette-overlay, .drawer-overlay'));
 
 const CHORD_MS = 1500;
 let chordAt = 0; // when "g" was pressed, waiting for the letter of a section
@@ -382,6 +400,15 @@ async function boot() {
   window.addEventListener('focus', () => store?.sync());
   document.addEventListener('keydown', onShortcut);
   watchCommits(app, settle);
+  watchAppVersion({
+    busy,
+    memoryOnly: () => sample,
+    beforeReload: async () => store?.flush(),
+    fields: () => {
+      const main = app.querySelector('main.view');
+      return store && main ? snapshot(main) : [];
+    },
+  });
   // Background renders skipped while the tab was hidden are drawn once it shows again.
   document.addEventListener('visibilitychange', settle);
   document.addEventListener('visibilitychange', () => (document.hidden ? store?.flush() : store?.sync()));
