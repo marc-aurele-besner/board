@@ -1,7 +1,7 @@
 // What waits on the user in sections they may not have open, as a number on the nav tab: Slack mentions (a DM with
 // unread messages counts once), claude terminals in Dev that wait on the user (a question, a plan, a permission, or a
 // turn that ended without the done signal), and unread comments on the member's LinkedIn posts on the Inbox tab.
-// Read every 20 s while the page is visible. The Slack tab reads counts itself while open and reports them here,
+// Read every 20 s while the page is visible (always in the installed app, for its Dock badge). The Slack tab reads counts itself while open and reports them here,
 // so they are not read twice.
 import { runnersOnline } from './runners.js';
 import { runnerOf } from './dev-core.js';
@@ -41,11 +41,19 @@ export function setAttention(id, n) {
   if (id === 'slack') slackAt = Date.now();
   if (counts[id] === n) return;
   counts[id] = n;
+  setBadge();
   const pill = /** @type {HTMLElement | null} */ (document.querySelector(`.tab[data-id="${id}"] .tab-pill`));
   if (!pill) return;
   pill.textContent = n > 99 ? '99+' : String(n);
   pill.hidden = !n;
   pill.title = attentionTitle(id);
+}
+
+// The installed app's Dock icon shows the pills' total. A browser tab has no badge and ignores it.
+function setBadge() {
+  if (!('setAppBadge' in navigator)) return;
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  (total ? navigator.setAppBadge(total) : navigator.clearAppBadge()).catch(() => {});
 }
 
 // Mentions over the conversations the board lists, from counts by team id.
@@ -102,7 +110,8 @@ async function readDev(store) {
 export function watchAttention(store) {
   // Checked often, read only when due: the runners' heartbeat is not known yet when the page opens.
   const tick = () => {
-    if (document.hidden) return;
+    // The installed app keeps reading while hidden or minimized: its Dock badge is what shows then.
+    if (document.hidden && !matchMedia('(display-mode: standalone)').matches) return;
     const now = Date.now();
     // Already in the store (the runners write it): counted on every tick, no read.
     setAttention('inbox', (store.get(LINKEDIN)?.comments ?? []).filter((c) => !c.read).length);

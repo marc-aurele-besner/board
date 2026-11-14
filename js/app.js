@@ -382,7 +382,8 @@ async function boot() {
   applyAppearance();
   // Appearance can open links to other sites in this tab instead of a new one.
   document.addEventListener('click', (e) => {
-    if (linksInNewTab() || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    // In the installed app a new tab is the normal browser, which keeps other sites out of the app's window.
+    if (linksInNewTab() || matchMedia('(display-mode: standalone)').matches || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const a = /** @type {Element} */ (e.target).closest?.('a[target="_blank"]');
     const href = a?.getAttribute('href') ?? '';
     if (!/^https?:/i.test(href)) return;
@@ -390,6 +391,12 @@ async function boot() {
     location.href = href;
   });
   watchKeepAwake();
+  // The installed app focuses its open window instead of opening another (the manifest's launch_handler), so a Dock
+  // shortcut's section only arrives here, as the launch's target URL.
+  window.launchQueue?.setConsumer(({ targetURL }) => {
+    const hash = targetURL ? new URL(targetURL).hash : '';
+    if (hash && hash !== location.hash) location.hash = hash;
+  });
   // A link or the back button changed the route: load that section's view from the URL, then render.
   window.addEventListener('hashchange', () => {
     if (!store) return;
