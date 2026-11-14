@@ -16,7 +16,7 @@
       "1": { "enabled": true, "node": "", "explorer": "" },
       "8453": { "enabled": false, "node": "https://rpc.example.test https://rpc2.example.test", "explorer": "https://explorer.example.test" }
     },
-    "v3ids": [{ "chainId": 1, "tokenId": "1001" }],
+    "v3ids": [{ "chainId": 1, "tokenId": "1001" }, { "chainId": 56, "tokenId": "3003", "dex": "pancakeswap" }],
     "v4ids": [{ "chainId": 8453, "tokenId": "2002" }],
     "v2ids": [{ "chainId": 1, "tokenId": "0x0000000000000000000000000000000000000002" }],
     "node": "",

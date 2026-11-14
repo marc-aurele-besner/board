@@ -34,6 +34,15 @@ export interface Chain {
   positions: string;
   // Uniswap v2's factory. Missing where Uniswap has no v2.
   v2?: string;
+  // Set on another exchange's deployment on the chain (pancakeOf in js/uniswap.js), which puts its own contracts in
+  // place of Uniswap's: its id ('pancakeswap'), its farm, its v3 Swap event, its v2 fee and what liquidity keeps of
+  // it (pips), and its v2 pair token's symbol.
+  dex?: string;
+  chef?: string;
+  v3swap?: string;
+  v2fee?: number;
+  v2lp?: number;
+  v2symbol?: string;
   // Missing where Uniswap has no v4.
   v4?: V4Deployment;
   // false where Etherscan's API does not cover the chain.
@@ -68,6 +77,10 @@ export interface Position {
   owed1: bigint;
   // The fees include those earned since the last poke (a simulated collect).
   feesFull?: boolean;
+  // Staked in a farm: the farm holding the token, the reward it can harvest (raw) and the reward token.
+  via?: string;
+  reward?: bigint;
+  rewardToken?: string;
 }
 
 // A pool's current price (sqrt, as a float) and tick; pool is the v2 pair or v3 pool address, or the v4 pool id.
@@ -75,6 +88,8 @@ export interface PoolState {
   pool: string;
   sqrtPrice: number;
   tick: number;
+  // PancakeSwap: what liquidity keeps of each swap fee, in pips, once the protocol's share is taken.
+  lpFee?: number;
 }
 
 // One swap, kept small (parseSwap in js/uniswap.js).
