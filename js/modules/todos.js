@@ -22,7 +22,7 @@ import { LINKEDIN } from '../linkedin-core.js';
 import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startDevSession, openSession, runnerOf } from './dev.js';
-import { DEV_MODELS, DEV_MODEL_NAMES, DEV_EFFORTS, ASK_LABELS, claudeState } from '../dev-core.js';
+import { DEV_MODEL_NAMES, DEV_EFFORTS, ASK_LABELS, CLAUDE_PROVIDER, claudeState, devProviders, taskProvider } from '../dev-core.js';
 import { DONE_ASK } from '../dev-done.js';
 import { openMenu, copyItem } from '../menu.js';
 import { sessionStatus, runnerInfo, listSkills } from '../terminal.js';
@@ -916,11 +916,16 @@ async function devTasks(store, items) {
   const folder = items.map((i) => projects.find((p) => p.id === i.projectId)).find((p) => p?.localPath);
   const ids = items.map((i) => i.id);
   // Several tasks share one session: the first one that picked a model (or effort) sets it.
-  const model = items.find((i) => i.devModel)?.devModel ?? '';
+  const picked = items.find((i) => i.devModel);
   const effort = items.find((i) => i.devEffort)?.devEffort ?? '';
+  // A model of a provider other than Claude runs with that provider's command, in place of the project's. A
+  // removed provider's model would mean nothing to the project's command: the session takes its default.
+  const provider = taskProvider(store, picked?.devProvider);
+  const model = picked?.devProvider && !provider ? '' : picked?.devModel ?? '';
+  const devCommand = provider?.command ?? '';
   let started;
   try {
-    started = await startDevSession({ store, claude: true, prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}\n\n${DONE_ASK}`, projectId: folder?.id, taskIds: ids, title: items[0].text, model, effort });
+    started = await startDevSession({ store, claude: true, prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}\n\n${DONE_ASK}`, projectId: folder?.id, taskIds: ids, title: items[0].text, model, effort, devCommand });
   } catch (err) {
     // The runner did not answer, or refused: the tasks stay where they are.
     toast(`Not started: ${/** @type {Error} */ (err).message}`);
@@ -1021,23 +1026,36 @@ function devControl(store, item) {
 function devOptionEntries(store, item) {
   const model = item.devModel ?? '';
   const effort = item.devEffort ?? '';
-  /** @param {'devModel' | 'devEffort'} field @param {string} value */
-  const set = (field, value) => store.update(COLLECTION, (d) => {
+  // Claude's models keep the project's command; another provider's run its own command (devProvider).
+  const provider = taskProvider(store, item.devProvider)?.id ?? CLAUDE_PROVIDER;
+  /** @param {Partial<Pick<Task, 'devModel' | 'devEffort' | 'devProvider'>>} patch */
+  const set = (patch) => store.update(COLLECTION, (d) => {
     const t = d.items.find((x) => x.id === item.id);
     if (!t) return;
-    if (value) t[field] = value;
-    else delete t[field];
+    for (const [field, value] of /** @type {['devModel' | 'devEffort' | 'devProvider', string | undefined][]} */ (Object.entries(patch))) {
+      if (value) t[field] = value;
+      else delete t[field];
+    }
   });
   const name = (/** @type {string} */ v) => DEV_MODEL_NAMES[v] ?? v[0].toUpperCase() + v.slice(1);
-  /** @param {'devModel' | 'devEffort'} field @param {string[]} values @param {string} now @returns {MenuEntry[]} */
-  const rows = (field, values, now) => [
-    { label: 'Default', checked: !now, onSelect: () => set(field, '') },
-    '-',
-    ...values.map((v) => ({ label: name(v), checked: now === v, onSelect: () => set(field, v) })),
+  const providers = devProviders(store).filter((p) => p.models.length);
+  /** @type {MenuEntry[]} */
+  const modelRows = [
+    { label: 'Default', checked: !model, onSelect: () => set({ devModel: '', devProvider: '' }) },
+    ...providers.flatMap((p) => /** @type {MenuEntry[]} */ (['-', ...p.models.map((v) => ({
+      label: name(v),
+      hint: p.name,
+      checked: model === v && provider === p.id,
+      onSelect: () => set({ devModel: v, devProvider: p.id === CLAUDE_PROVIDER ? '' : p.id }),
+    }))])),
   ];
   return [
-    { label: 'Model', hint: model ? name(model) : 'Default', items: rows('devModel', DEV_MODELS, model) },
-    { label: 'Effort', hint: effort || 'Default', items: rows('devEffort', DEV_EFFORTS, effort) },
+    { label: 'Model', hint: model ? name(model) : 'Default', items: modelRows },
+    { label: 'Effort', hint: effort || 'Default', items: [
+      { label: 'Default', checked: !effort, onSelect: () => set({ devEffort: '' }) },
+      '-',
+      ...DEV_EFFORTS.map((v) => ({ label: name(v), checked: effort === v, onSelect: () => set({ devEffort: v }) })),
+    ] },
     '-',
     { label: 'Start a new session', icon: icon('terminal'), onSelect: () => devTasks(store, [item]) },
   ];
