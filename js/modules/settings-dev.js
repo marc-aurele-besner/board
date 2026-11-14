@@ -88,7 +88,7 @@ function howItWorks(store) {
     step('1', 'Agents', 'A coding agent program (Claude Code, Codex…), connected to a provider, with the models you can pick.'),
     step('2', 'Projects', `Each runs its agent in its folder; ${defaultAgent(store).name} unless you pick another.`),
     step('3', 'Tasks', 'The Dev button runs the project’s agent. Right-click it to pick another agent’s model for that task.'),
-    step('4', 'Skills', 'With board-tasks, a session started on a task files its own follow-ups as subtasks, with a Dev badge.'));
+    step('4', 'Skills', 'With board-tasks, a session started on a task sees other sessions on it, reads its project, brand and images, and files its own follow-ups as subtasks.'));
 }
 
 // The agents as saved; the first change saves the built-in ones, and the presets saved before agents, with it.
@@ -445,7 +445,8 @@ function projectRow(store, p, depth) {
       projectAgentField(store, p, (patch) => updateProject(store, p.id, patch))));
 }
 
-// The board-tasks skill: Claude Code sessions started in Dev read it to list, add and edit their subtasks
+// The board-tasks skill: Claude Code sessions started in Dev read it to see other sessions on their tasks, read the
+// tasks' project, brand and images, and list, add and edit their subtasks
 // (tools/board.js). Its state is read once from the command runner (Check again asks again); Install links it into
 // ~/.claude/skills.
 /** @param {Store} store @param {boolean} [again] */
@@ -468,6 +469,9 @@ const SKILL_CAN = [
   'Add subtasks under them; they show on the board with a Dev badge.',
   'Edit those subtasks (status, title, priority, due date). Never delete: parking or done instead.',
   'At most 100 tasks per session, subagents included.',
+  'See the other terminals on those tasks: worktree, branch, last commit, uncommitted files.',
+  'Read the task’s project (profile, repos, folder, links) and its brand as CSS or JSON.',
+  'Read the tasks’ images, and attach one (PNG, JPEG, GIF or WebP, 5 MB at most).',
 ];
 const SKILL_COMMANDS = [
   'node "$BOARD_CLI" task list',
@@ -475,6 +479,11 @@ const SKILL_COMMANDS = [
   'node "$BOARD_CLI" task add "Title" --description "Why, and what done means" --priority medium',
   'node "$BOARD_CLI" task add "Title" --parent <id>',
   'node "$BOARD_CLI" task edit <id> --status done',
+  'node "$BOARD_CLI" session',
+  'node "$BOARD_CLI" project',
+  'node "$BOARD_CLI" brand --css',
+  'node "$BOARD_CLI" image get <id>',
+  'node "$BOARD_CLI" image add <id> shot.png',
 ];
 
 // Above the tabs while the skill is not installed: why it matters, and Install (or a way to the Skills tab).
@@ -486,7 +495,7 @@ function skillNudge(store) {
     ? 'The command runner did not answer, so the board-tasks skill could not be checked. One started before this update needs a restart (bun dev).'
     : skill.state === 'other'
       ? `${skill.path} holds another copy of the board-tasks skill, which a pull here does not update.`
-      : 'Sessions started on a task can file their own follow-ups as subtasks once the board-tasks skill is installed.';
+      : 'Sessions started on a task can see other sessions on it, read its project, brand and images, and file their own follow-ups once the board-tasks skill is installed.';
   return h('div', { class: 'skill-nudge', role: 'status' },
     icon('sparkle'),
     h('span', { class: 'grow small' }, text),
@@ -519,7 +528,7 @@ function skillsPanel(store) {
     h('ul', { class: 'dev-cards' },
       h('li', { class: 'dev-card' },
         cardHead(h('span', { class: 'dev-logo' }, icon('check-square')), h('strong', null, 'Board tasks ', h('code', { class: 'small' }, 'board-tasks')),
-          'Lets Claude Code sessions started on a task list, add and edit its subtasks.', badge),
+          'Lets Claude Code sessions started on a task see other sessions on it, read its project, brand and images, and list, add and edit its subtasks.', badge),
         state,
         h('div', { class: 'skill-grid' },
           h('div', null,
