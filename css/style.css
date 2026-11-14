@@ -3468,8 +3468,14 @@ code.tool-fail-call { font-size: 0.76rem; }
 .term-new { background: none; border: none; min-height: 0; padding: 4px 6px; border-radius: 6px; color: var(--muted); }
 .term-new:hover { background: var(--surface-2); color: var(--text); }
 .term-new .icon { width: 14px; height: 14px; }
-.term-usage { flex: none; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-.term-usage .icon { width: 14px; height: 14px; flex: none; }
+.term-usage { white-space: nowrap; }
+.usage-lines { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* A terminal's project logo, before its name on the bar and in the Terminals panel. */
+.term-name .term-logo, .term-list-name .term-logo { width: 14px; height: 14px; }
+.term-list-name { display: flex; align-items: center; gap: 6px; }
+.term-list-name > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The quick tooltip of js/hover-tip.js. */
+.hover-tip { position: fixed; z-index: 1000; max-width: min(360px, calc(100vw - 16px)); padding: 5px 8px; border-radius: 6px; background: var(--text); color: var(--bg); font-size: 0.75rem; line-height: 1.35; white-space: pre-line; overflow-wrap: anywhere; pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); animation: popIn 0.1s ease both; }
 /* The path is cut at its start, so the folder's own name stays in view. */
 .term-cwd { flex: 0 1 auto; min-width: 4rem; max-width: 34%; min-height: 0; padding: 3px 6px; border: none; border-radius: 6px; background: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; font: 0.78rem ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); cursor: copy; }
 .term-cwd:hover { background: var(--surface-2); color: var(--text); }
