@@ -22,7 +22,7 @@ export function makeProject(existingCount, fields = {}) {
     localPath: '',
     // What Dev runs when a task is handed to it; empty uses DEFAULT_DEV_COMMAND.
     devCommand: '',
-    // A command preset from Settings → Dev environment; when set, it runs instead of devCommand.
+    // A command preset from Settings → Coding Agents; when set, it runs instead of devCommand.
     devPreset: '',
     labels: [],
     parentId: null,

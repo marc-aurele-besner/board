@@ -1595,7 +1595,7 @@ createServer(async (req, res) => {
     }
     return;
   }
-  // Settings → Dev environment: whether the board-tasks skill is linked into ~/.claude/skills.
+  // Settings → Coding Agents: whether the board-tasks skill is linked into ~/.claude/skills.
   if (req.method === 'GET' && path === '/board-skill') {
     res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(await skillStatus()));
     return;

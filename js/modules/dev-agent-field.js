@@ -1,4 +1,4 @@
-// A project's agent, picked from Settings → Dev environment's agents, or a command of its own; shared by Settings
+// A project's agent, picked from Settings → Coding Agents's agents, or a command of its own; shared by Settings
 // and a project's page. Also the agents' logos and the variables a Dev command can place.
 import { h, icon } from '../ui.js';
 import { pickChip } from '../inline.js';

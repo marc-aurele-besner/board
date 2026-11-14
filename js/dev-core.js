@@ -18,7 +18,7 @@ export const DEFAULT_DEV_COMMAND = 'claude --dangerously-skip-permissions --work
 export const DEV_MODELS = ['fable', 'opus', 'sonnet', 'haiku'];
 export const DEV_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
-// The agents until Settings → Dev environment edits them. An agent is a coding harness's command, with the
+// The agents until Settings → Coding Agents edits them. An agent is a coding harness's command, with the
 // variables that connect it to a provider before it, and the models a task can pick. MiniMax runs claude itself with
 // MiniMax's Anthropic-compatible API in its place; the key comes from MINIMAX_API_KEY in the runner's environment, and
 // claude's own aliases (opus, sonnet, haiku, which subagents use) point at MiniMax's model too.
@@ -158,7 +158,7 @@ function worktreeName(title, id) {
 /** @type {Record<string, string>} */
 export const DEV_MODEL_NAMES = { fable: 'Fable 5.2', opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', haiku: 'Haiku 5.5' };
 
-// The coding harnesses (CLIs that run an agent in a terminal) until Settings → Dev environment edits them. Each says
+// The coding harnesses (CLIs that run an agent in a terminal) until Settings → Coding Agents edits them. Each says
 // how a task's model, effort and prompt reach it; {{model}}, {{effort}} and {{prompt}} are replaced by the quoted
 // value. A command runs the harness whose own command starts with the same program, after any variables set before it.
 /** @type {DevHarness[]} */

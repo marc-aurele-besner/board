@@ -1,6 +1,6 @@
 // A shell command line coloured as an editor would (variables set before it, the program, flags, strings, $VARS,
 // {{variables}}), and the field that edits one: the text typed over its own colours, the variables it takes as chips
-// under it, and a Preview tab with each {{variable}} filled with an example. Settings → Dev environment uses it.
+// under it, and a Preview tab with each {{variable}} filled with an example. Settings → Coding Agents uses it.
 import { h } from './ui.js';
 import { shellQuote } from './dev-core.js';
 /** @import { Child } from '../types/ui' */
