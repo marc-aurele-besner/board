@@ -25,8 +25,9 @@ import { pickChip } from '../inline.js';
 import { resizableSide } from '../side-resize.js';
 import { projectIcon } from './projects.js';
 import { linkWatcher, moveToReview } from '../task-links.js';
+import { hoverTips } from '../hover-tip.js';
 import { watchDevSessions } from './todos.js';
-import { recordOfSession, sumUsage, usageLine, usageTitle, mcpTool } from '../dev-usage.js';
+import { recordOfSession, sumUsage, usageLine, usageTitle, mcpTool, fmtCost } from '../dev-usage.js';
 import { runnerOf, devAgents, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand, claudeState, devHarnesses, withPrompt, withTaskPointer } from '../dev-core.js';
 import { sessionTools, toolGroup, fmtSpan, pct } from '../dev-turns.js';
 import { cronRunOf, cronRunHref } from '../cron.js';
@@ -97,6 +98,38 @@ const maxSessions = () => view.info?.max ?? 50;
 const SOFT_SESSIONS = 25;
 const activeSession = () => view.sessions.find((s) => s.id === view.active) ?? view.sessions[0];
 const projectsWithFolder = (/** @type {Store} */ store) => store.get('projects').projects.filter((p) => p.localPath);
+
+// The project a terminal works for: its task's, or the one whose local folder holds the terminal's folder (the
+// deepest, so a project inside another's folder wins).
+/** @param {Store} store @param {Session} s */
+function projectOfSession(store, s) {
+  const projects = store.get('projects').projects;
+  const tasks = store.get('todos').items;
+  const fromTask = s.tasks.map((id) => tasks.find((t) => t.id === id)?.projectId).find(Boolean);
+  const byTask = fromTask ? projects.find((p) => p.id === fromTask) : undefined;
+  if (byTask || !s.cwd) return byTask ?? null;
+  const home = view.info?.home ?? '';
+  const full = (/** @type {string} */ path) => (home && (path === '~' || path.startsWith('~/')) ? home + path.slice(1) : path).replace(/\/+$/, '');
+  const cwd = full(s.cwd);
+  let best = null;
+  let bestLen = -1;
+  for (const p of projects) {
+    if (!p.localPath) continue;
+    const root = full(p.localPath);
+    if ((cwd === root || cwd.startsWith(`${root}/`)) && root.length > bestLen) {
+      best = p;
+      bestLen = root.length;
+    }
+  }
+  return best;
+}
+
+// The logo of a terminal's project before its name, when it has one.
+/** @param {Store} store @param {Session} s */
+const sessionLogo = (store, s) => {
+  const p = projectOfSession(store, s);
+  return p ? projectIcon(p, 'project-icon term-logo') : null;
+};
 
 // Where a workspace is: 'board', 'home', or 'p:<project id>'.
 /** @param {Store} store @param {string} root */
@@ -957,7 +990,34 @@ function sessionUsage(store, s) {
   const record = recordOfSession(store, s.id);
   if (!record) return null;
   const sum = sumUsage([record]);
-  return h('span', { class: 'muted small term-usage', title: usageTitle(sum) }, icon('cpu'), usageLine(sum));
+  const isOpen = () => turnsPop?.s === s && turnsPop.kind === 'usage';
+  const cost = sum.cost !== null ? `${sum.costPartial ? '≥ ' : ''}${fmtCost(sum.cost)}` : '';
+  return h('button', {
+    type: 'button',
+    class: 'term-tool term-usage',
+    title: `${usageLine(sum)}\nShow the model, tokens and cost`,
+    'aria-label': 'Model and cost',
+    'aria-haspopup': 'dialog',
+    'aria-expanded': String(isOpen()),
+    onclick: (/** @type {MouseEvent} */ e) => {
+      e.stopPropagation();
+      if (isOpen()) return closeTurns();
+      openTurns(store, /** @type {HTMLElement} */ (e.currentTarget), s, 'usage');
+    },
+  }, icon('cpu'), cost ? h('span', null, cost) : null);
+}
+
+// The usage popover: the line the bar used to show, then each model's tokens and cost.
+/** @param {HTMLElement} el @param {Store} store @param {ClaudeTarget} s */
+function drawUsage(el, store, s) {
+  const record = recordOfSession(store, s.id);
+  if (!record) return closeTurns();
+  const sum = sumUsage([record]);
+  el.replaceChildren(
+    h('div', { class: 'turns-head' },
+      h('div', { class: 'turns-title' }, icon('cpu'), h('strong', null, 'Model and cost')),
+      h('div', { class: 'small' }, usageLine(sum))),
+    h('div', { class: 'usage-lines small' }, usageTitle(sum).split('\n').map((line) => h('div', null, line))));
 }
 
 // Starts a command in a new Dev terminal and stays on the page shown: a task's Dev button, and work the board
@@ -1407,7 +1467,7 @@ function terminalsPanel(store, picker, switcher) {
       },
         dot(s, 'wt-dot'),
         h('span', { class: 'term-list-text' },
-          h('span', { class: 'tree-name' }, `${numberOf(s)} · ${s.cwd ? baseName(s.cwd) : 'board'}`),
+          h('span', { class: 'tree-name term-list-name' }, sessionLogo(store, s), h('span', null, `${numberOf(s)} · ${s.cwd ? baseName(s.cwd) : 'board'}`)),
           h('span', { class: 'term-list-sub muted' }, titles[0] ? `${titles[0]}${titles.length > 1 ? ` +${titles.length - 1}` : ''}` : what))),
       cronLink(store, { session: s.id, runId: s.tasks.map((id) => tasks.find((t) => t.id === id)?.cronRun).find(Boolean) }, `terminal ${numberOf(s)}`),
       h('button', {
@@ -1465,7 +1525,7 @@ function sessionTitle(store, s) {
         } catch {}
         store.refresh();
       },
-    }, s.running || dots.status[s.id] ? dot(s, 'term-dot') : icon('terminal'), h('span', null, `${numberOf(s)} · ${s.cwd ? baseName(s.cwd) : 'board'}`)), () => sessionMenu(store, s)),
+    }, s.running || dots.status[s.id] ? dot(s, 'term-dot') : icon('terminal'), sessionLogo(store, s), h('span', null, `${numberOf(s)} · ${s.cwd ? baseName(s.cwd) : 'board'}`)), () => sessionMenu(store, s)),
     h('span', { class: 'term-claude' }, claudeButtons(store, s)),
     h('button', {
       type: 'button',
@@ -1602,7 +1662,7 @@ function phasesOf(t, live, now) {
 // stretches, and their times. It follows the data while open, and the clock for the turn still going. The
 // subagents panel opens in its place, under the subagents button (kind 'agents'), and so do the tools, skills and
 // MCP panels under theirs.
-/** @typedef {'turns' | 'agents' | 'tools' | 'skills' | 'mcp'} PopKind */
+/** @typedef {'usage' | 'turns' | 'agents' | 'tools' | 'skills' | 'mcp'} PopKind */
 /** @type {{ el: HTMLElement, s: ClaudeTarget, timer: number, kind: PopKind, store: Store } | null} */
 let turnsPop = null;
 
@@ -1629,7 +1689,7 @@ function onTurnsKey(e) {
   closeTurns();
 }
 
-const POP_LABELS = { turns: 'Claude turns', agents: 'Claude subagents', tools: 'Claude tools', skills: 'Claude skills', mcp: 'Claude MCP calls' };
+const POP_LABELS = { usage: 'Model and cost', turns: 'Claude turns', agents: 'Claude subagents', tools: 'Claude tools', skills: 'Claude skills', mcp: 'Claude MCP calls' };
 /** @param {Store} store @param {HTMLElement} anchor @param {ClaudeTarget} s @param {PopKind} [kind] */
 function openTurns(store, anchor, s, kind = 'turns') {
   closeMenu();
@@ -1650,6 +1710,7 @@ function openTurns(store, anchor, s, kind = 'turns') {
 function drawTurns() {
   if (!turnsPop) return;
   const { el, s } = turnsPop;
+  if (turnsPop.kind === 'usage') return followed() === s && el.isConnected ? drawUsage(el, turnsPop.store, s) : closeTurns();
   const data = turnsView.id === s.id ? turnsView.data : null;
   if (!data || followed() !== s || !el.isConnected) return closeTurns();
   if (turnsPop.kind === 'agents') return drawAgents(el, data.agents ?? []);
@@ -2108,6 +2169,8 @@ function terminal(store, s) {
       },
     }, icon('star'));
 
+  // Every control on the bar names what it does a moment after the pointer rests on it.
+  hoverTips('.term-head');
   return h('section', { class: 'card term' },
     h('div', { class: 'term-head' },
       backButton(),

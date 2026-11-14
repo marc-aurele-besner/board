@@ -32,6 +32,7 @@ js/app-version.js     asks GET /version, offers a reload when the files changed,
 js/app-version-core.js  APP_EPOCH and the rules: current, reload offered or required, snooze, quiet reload, loop guard (no DOM)
 js/ui.js              h() DOM helper, icon(), ids, dates, money formatting
 js/menu.js            context menus with submenus: on a right click, or under a ⋯ button
+js/hover-tip.js       the quick, styled tooltip of the controls inside a container (Dev's terminal bar), from their title
 js/modules/index.js   registry of sections (the nav is built from this list)
 js/modules/*.js       one file per section (todos, projects, kitchen, money, tools, ...)
 js/notifications.js   the bell and its drawer
