@@ -549,9 +549,9 @@ function showTerm(store, item, sessions, options) {
     openSession({ id: s.id, cwd: s.cwd || options.status(s.id)?.cwd || '', taskIds: taskIds.length ? taskIds : [item.id] });
   };
   if (head) {
-    // Expanded, the head has what Dev's bar shows of claude: its turns, subagents, tools, skills and MCP calls, and on
-    // the right its model and cost.
-    const claude = pop.big ? term.claude : null;
+    // The head has what Dev's bar shows of claude: its turns, subagents, tools, skills and MCP calls, and on the right
+    // its model and cost.
+    const claude = term.claude;
     patch(head, h('div', null,
       h('span', { class: `work-dot is-${look.key}`, 'aria-hidden': 'true' }),
       h('span', { class: 'work-term-state' }, look.label),
@@ -565,7 +565,10 @@ function showTerm(store, item, sessions, options) {
       h('span', { class: 'grow' }),
       claude ? term.usage : null,
       h('button', { type: 'button', class: 'icon-btn', title: 'Copy the output', 'aria-label': 'Copy the output', onclick: () => copyOutput(/** @type {TermView} */ (pop.term)) }, icon('copy')),
-      h('button', { type: 'button', class: 'btn-small', title: 'Open this terminal in Dev', onclick: openDev }, icon('terminal'), 'Open in Dev')));
+      // Under the row, where the head is narrow, Open in Dev is its icon alone.
+      pop.big
+        ? h('button', { type: 'button', class: 'btn-small', title: 'Open this terminal in Dev', onclick: openDev }, icon('terminal'), 'Open in Dev')
+        : h('button', { type: 'button', class: 'icon-btn', title: 'Open this terminal in Dev', 'aria-label': 'Open in Dev', onclick: openDev }, icon('terminal'))));
     if (claude) {
       const c = current(term.reader);
       followClaude(store, claude, /** @type {HTMLElement} */ (term.usage), {
