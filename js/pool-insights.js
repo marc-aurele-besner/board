@@ -4,7 +4,7 @@ import { h, icon, money, notice, uid } from './ui.js';
 import { ask, parseJson } from './ai.js';
 import { systemPrompt } from './prompts.js';
 import { setupBanner, hasOpenRouter } from './integrations.js';
-import { CHAINS } from './uniswap.js';
+import { CHAINS, dexName } from './uniswap.js';
 /** @import { Store, PoolInsightItem, PoolInsightPosition, PoolInsightRun } from '../types/data' */
 /** @import { PositionRow } from '../types/defi' */
 /** @import { Child } from '../types/ui' */
@@ -62,7 +62,10 @@ function factsOf(r, side) {
     id: r.ref,
     pair: r.pair,
     chain: r.chain,
+    exchange: dexName(r.dex),
     version: r.version,
+    // Staked in PancakeSwap's farm: the reward it can harvest, besides the fees.
+    farming: r.staked ? { rewardToken: r.rewardSym ?? 'CAKE', pendingRewardUsd: r.rewardUsd ?? null } : null,
     feeTierPct: r.feePct,
     status: r.inRange ? 'in range' : below ? 'out of range, price below the range' : 'out of range, price above the range',
     fullRange: r.full,
