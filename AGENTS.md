@@ -142,7 +142,7 @@ types/                .d.ts files: browser APIs missing from lib.dom, and the sh
 .githooks/pre-commit  runs bun run check before each commit
 tools/start.js        one command for the board: starts serve.js, terminal.js and worker.js together
 tools/dev.js          bun dev: the command runner unwatched, the rest of start.js under bun --watch
-tools/login-agent.js  `bun run login-agent [install|uninstall|status|print]`: a launchd agent (macOS) that runs start.js at login and restarts it when it exits; logs to ~/Library/Logs/board.log
+tools/login-agent.js  `bun run login-agent install [dev|start]|restart|stop|start|logs|status|print|uninstall` (`bun run restart`, `bun run logs`): a launchd agent (macOS) that runs dev.js (or start.js) at login and restarts it when it exits; logs to ~/Library/Logs/board.log
 tools/log.js          terminal lines prefixed with each runner's name
 tools/serve.js        local static server with no-cache headers; GET /version fingerprints the page's files for open tabs; no dependencies
 tools/slack.js        POST /slack and /slack/file: Slack calls from Node, which can send the session's d cookie

@@ -65,7 +65,16 @@ On first launch, choose a data folder. Pick a folder **outside this repo** (for 
 
 In Chrome, use **Install Board** (the icon at the end of the address bar, or ⋮ → Cast, save and share) to get the board in its own window with a Dock icon. Clicking the icon again focuses the open window rather than opening another, and right-clicking it offers Dev, Inbox and Tasks. The Dock icon shows the total of the nav pills (Slack mentions, Dev terminals waiting, unread LinkedIn comments), read even while the window is hidden. Links to other sites open in Chrome itself. There is no service worker: the board needs its local server running either way, and `GET /version` already reloads it on new code.
 
-The installed app does not start the servers, so it shows an error page while `bun start` is not running. To keep them running, run `bun run login-agent` once from the checkout the board runs from (macOS). It installs a launchd agent, `~/Library/LaunchAgents/local.board.start.plist`, that runs `bun start` now and at every login, and starts it again within 10 seconds if it exits. It logs to `~/Library/Logs/board.log`. Stop any `bun start` or `bun dev` already running first, since they hold the same ports. The agent keeps the `PATH` and `SHELL` of the terminal you install it from, because launchd reads no shell profile. Install it again after that `PATH` changes. `bun run login-agent status` shows whether it is running, and `bun run login-agent uninstall` stops and removes it. For code changes to take effect, restart it with `launchctl kickstart -k gui/$(id -u)/local.board.start`, or run `bun dev` in a terminal instead.
+The installed app does not start the servers, so it shows an error page while `bun dev` or `bun start` is not running. To keep them running, run `bun run login-agent install` once from the checkout the board runs from (macOS). It installs a launchd agent, `~/Library/LaunchAgents/local.board.start.plist`, that runs `bun dev` now and at every login, and starts it again within 10 seconds if it exits (`install start` runs `bun start` instead). Stop any `bun start` or `bun dev` already running first, since they hold the same ports. The agent keeps the `PATH` and `SHELL` of the terminal you install it from, because launchd reads no shell profile. Install it again after that `PATH` changes.
+
+After a `git pull`, `bun dev` reloads the static server and the runners by itself. Only a change to the command runner (`tools/terminal.js`) needs a restart: `bun run restart`. A restart ends every command running in Dev's terminals, claude sessions included, so do it when they are idle. The other commands:
+
+| Command | What it does |
+| --- | --- |
+| `bun run logs` | follows `~/Library/Logs/board.log` |
+| `bun run login-agent status` | whether it runs, which command, from which folder |
+| `bun run login-agent stop` / `start` | stops it until the next login or `start`, to run `bun dev` in a terminal for a while |
+| `bun run login-agent uninstall` | stops it and removes the agent |
 
 To bring the window forward from anywhere, give it a global hotkey: in Shortcuts, make a shortcut with **Open App → Board** and add a keyboard shortcut in its details. In Raycast, assign a hotkey to the Board app in Extensions.
 
