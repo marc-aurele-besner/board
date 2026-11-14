@@ -363,6 +363,19 @@ function autoBadge(item) {
   if (item.auto === 'notion' && item.notion?.url) {
     return h('a', { class: 'auto-badge', href: item.notion.url, target: '_blank', rel: 'noopener', title: 'Imported from Notion. Open the page' }, icon('notion'), 'Notion');
   }
+  // A Dev session made it with tools/board.js: opens that session's terminal.
+  if (item.auto === 'dev') {
+    return h('button', {
+      type: 'button',
+      class: 'auto-badge',
+      title: `Created by a Dev session${item.autoRef ? ` (${item.autoRef}). Open its terminal` : ''}`,
+      'aria-label': `Open the Dev session that created "${item.text}"`,
+      onclick: (/** @type {MouseEvent} */ e) => {
+        e.stopPropagation();
+        if (item.autoRef) openSession({ id: item.autoRef });
+      },
+    }, icon('terminal'), 'Dev');
+  }
   const telegram = item.auto === 'telegram';
   return h('span', { class: 'auto-badge', title: `Created automatically by ${/** @type {Record<string, string>} */ (AUTO_SOURCES)[item.auto] ?? 'a rule'}` }, icon(telegram ? 'send' : 'zap'), telegram ? 'Telegram' : 'Auto');
 }

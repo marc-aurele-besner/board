@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { logger } from './log.js';
 import { createTerminal } from '../js/vt.js';
 import { sessionTranscript, worktreeActivity, worktreeUsage } from './usage.js';
+import { installSkill, skillStatus } from './board-skill.js';
 
 const PORT = Number(process.env.TERMINAL_PORT) || 8419;
 const MAX = Number(process.env.TERMINAL_MAX) || 50;
@@ -1594,6 +1595,11 @@ createServer(async (req, res) => {
     }
     return;
   }
+  // Settings → Dev environment: whether the board-tasks skill is linked into ~/.claude/skills.
+  if (req.method === 'GET' && path === '/board-skill') {
+    res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(await skillStatus()));
+    return;
+  }
   if (req.method === 'GET' && path === '/skills') {
     try {
       const body = await listSkills(new URL(/** @type {string} */ (req.url), 'http://terminal').searchParams.get('path') ?? '');
@@ -1634,6 +1640,14 @@ createServer(async (req, res) => {
   if (req.method === 'POST' && path === '/sessions/update' && json) return updateList(req, res, cors);
   if (req.method === 'POST' && ['/stop', '/clear', '/close'].includes(path) && json) return control(req, res, cors, path.slice(1));
   if (req.method === 'POST' && path === '/scope' && json) return scopeOf(req, res, cors);
+  if (req.method === 'POST' && path === '/board-skill/install' && json) {
+    try {
+      res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(await installSkill()));
+    } catch (err) {
+      res.writeHead(500, cors).end(/** @type {Error} */ (err).message);
+    }
+    return;
+  }
   if (req.method === 'POST' && path === '/worktree/remove' && json) return removeWorktree(req, res, cors);
   if (req.method === 'POST' && path === '/claude/exit' && json) return exitClaude(req, res, cors);
   if (req.method === 'POST' && path === '/reveal' && json) {

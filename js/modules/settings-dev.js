@@ -7,6 +7,7 @@ import { commandField, codeLine } from '../command-field.js';
 import { projectIcon, projectTree, cleanLocalPath, LOCAL_PATH_ERROR } from './projects.js';
 import { sortable } from './settings-labels.js';
 import { DEFAULT_DEV_COMMAND, runnerOf } from './dev.js';
+import { boardSkill, installBoardSkill } from '../terminal.js';
 import { agentLogo, modelLabel, programName, projectAgentField, COMMAND_VARS, EXAMPLE_PROMPT } from './dev-agent-field.js';
 import {
   DEV_MODEL_NAMES, agentEfforts, agentsOf, defaultAgent, devAgents, devHarnesses, devTemplate,
@@ -16,6 +17,7 @@ import {
 /** @import { Child } from '../../types/ui' */
 
 // The last problem shown above the cards, the tab shown (agents or projects), and the agents whose flags are unfolded.
+/** @type {{ error: string, tab: string, flags: Set<string>, skill?: import('../terminal.js').BoardSkill | null, skillAsked?: boolean }} */
 const devEnvView = { error: '', tab: 'agents', flags: new Set() };
 
 const fail = (/** @type {Store} */ store, /** @type {string} */ message) => {
@@ -409,6 +411,32 @@ function projectRow(store, p, depth) {
       projectAgentField(store, p, (patch) => updateProject(store, p.id, patch))));
 }
 
+// The board-tasks skill: Claude Code sessions started in Dev read it to list, add and edit their subtasks
+// (tools/board.js). Read once from the command runner; Install links it into ~/.claude/skills.
+/** @param {Store} store */
+function skillPanel(store) {
+  const base = runnerOf(store);
+  if (!devEnvView.skillAsked) {
+    devEnvView.skillAsked = true;
+    boardSkill(base).then((s) => { devEnvView.skill = s; }, () => { devEnvView.skill = null; }).finally(() => store.refresh());
+  }
+  const skill = devEnvView.skill;
+  const install = () => installBoardSkill(base).then((s) => {
+    devEnvView.skill = s;
+    if (s.state !== 'installed') fail(store, `${s.path} already exists${s.points ? ` and points at ${s.points}` : ''}. Remove it, then install again.`);
+    store.refresh();
+  }, (err) => fail(store, `Could not install the skill: ${err.message}`));
+  /** @type {Child} */
+  let state = h('span', { class: 'muted small' }, 'Checking…');
+  if (skill === null) state = h('span', { class: 'muted small' }, 'The command runner did not answer. One started before this update needs a restart (bun dev).');
+  else if (skill?.state === 'installed') state = h('span', { class: 'small' }, icon('check'), ` Installed: ${skill.path}`);
+  else if (skill?.state === 'other') state = h('span', { class: 'small' }, `${skill.path} holds another copy${skill.points ? ` (${skill.points})` : ''}.`);
+  else if (skill) state = h('button', { type: 'button', class: 'btn-small primary', onclick: install }, 'Install');
+  return panel('Board tasks skill',
+    h('span', null, 'Lets Claude Code sessions started on a task list, add and edit its subtasks (', h('code', null, 'board-tasks'), '). Linked into ', h('code', null, '~/.claude/skills'), ', so a pull updates it.'),
+    h('div', { class: 'row' }, state));
+}
+
 // The two tabs: the agents with their harnesses under them, and each project's folder and agent.
 const DEV_TABS = [['agents', 'Agents'], ['projects', 'Projects']];
 
@@ -420,6 +448,7 @@ export function devEnvironmentCard(store) {
   const tab = devEnvView.tab === 'projects' ? 'projects' : 'agents';
   return h('div', { class: 'stack-lg' },
     howItWorks(store),
+    skillPanel(store),
     h('div', { class: 'sub-tabs', role: 'tablist', 'aria-label': 'Dev environment' },
       DEV_TABS.map(([id, label]) => h('button', {
         type: 'button',
