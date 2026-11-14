@@ -10,6 +10,8 @@
       "localPath": "~/example/project",
       "devCommand": "",
       "devPreset": "preset-1",
+      "devModel": "opus",
+      "devEffort": "high",
       "labels": ["label-1"],
       "parentId": null,
       "github": { "org": "example-org", "repos": ["example-org/example-repo"] },

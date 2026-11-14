@@ -22,7 +22,7 @@ import { LINKEDIN } from '../linkedin-core.js';
 import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startDevSession, openSession, runnerOf } from './dev.js';
-import { DEV_MODEL_NAMES, DEV_EFFORTS, ASK_LABELS, claudeState, devAgents, taskAgent, taskAgentCommand, projectAgent, agentEfforts } from '../dev-core.js';
+import { DEV_MODEL_NAMES, DEV_EFFORTS, ASK_LABELS, claudeState, devAgents, taskAgent, taskAgentCommand, projectAgent, agentEfforts, devDefaults, taskRunOptions } from '../dev-core.js';
 import { agentLogo } from './dev-agent-field.js';
 import { DONE_ASK } from '../dev-done.js';
 import { openMenu, copyItem } from '../menu.js';
@@ -926,17 +926,13 @@ async function devTasks(store, items) {
   const list = items.map((i) => taskMarkdown(store, i, projects, images.get(i.id))).join('\n');
   const folder = items.map((i) => projects.find((p) => p.id === i.projectId)).find((p) => p?.localPath);
   const ids = items.map((i) => i.id);
-  // Several tasks share one session: the first one that picked an agent or model (or effort) sets it.
+  // Several tasks share one session: the first one that picked an agent or model (or effort) sets it. Unpicked, the
+  // project's model and effort run, else its agent's defaults (taskRunOptions).
   const picked = items.find((i) => i.devModel || i.devProvider);
   const pickedEffort = items.find((i) => i.devEffort)?.devEffort ?? '';
-  // A picked agent runs its own command in place of the project's, unless the project already runs it
-  // (taskAgentCommand). A removed agent's model would mean nothing to the project's command: it takes its default.
-  const agent = taskAgent(store, picked);
-  const model = agent ? picked?.devModel ?? '' : '';
+  const { agent, model, effort } = taskRunOptions(store, folder, { ...picked, devEffort: pickedEffort });
+  // A picked agent runs its own command in place of the project's, unless the project already runs it.
   const devCommand = taskAgentCommand(store, folder, agent);
-  // An effort the agent that runs does not take (MiniMax's) is left out.
-  const runs = agent ?? projectAgent(store, folder);
-  const effort = runs && !agentEfforts(store, runs).includes(pickedEffort) ? '' : pickedEffort;
   let started;
   try {
     started = await startDevSession({ store, claude: true, prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}\n\n${DONE_ASK}`, projectId: folder?.id, taskIds: ids, title: items[0].text, model, effort, devCommand });
@@ -1056,6 +1052,8 @@ function devOptionEntries(store, item) {
   // A project with a command of its own may run anything: every level is offered.
   const runs = agent ?? own;
   const efforts = runs ? agentEfforts(store, runs) : DEV_EFFORTS;
+  // What Default runs: the project's pick, else its agent's.
+  const defaults = devDefaults(store, project, agent);
   /** @type {MenuEntry[]} */
   const agentRows = devAgents(store).flatMap((a) => /** @type {MenuEntry[]} */ (a.models.length
     ? ['-', { label: a.name, icon: () => agentLogo(store, a), heading: true }, ...a.models.map((v) => ({
@@ -1066,12 +1064,12 @@ function devOptionEntries(store, item) {
     // An agent with no models is one row, run with the model its program picks.
     : ['-', { label: a.name, icon: () => agentLogo(store, a), hint: 'Its default model', checked: agent?.id === a.id && !model, onSelect: () => set({ devModel: '', devProvider: a.id }) }]));
   return [
-    { label: 'Project default', icon: own ? () => agentLogo(store, own) : icon('terminal'), hint: own ? own.name : 'Its own command', checked: !agent, onSelect: () => set({ devModel: '', devProvider: '' }) },
+    { label: 'Project default', icon: own ? () => agentLogo(store, own) : icon('terminal'), hint: own ? [own.name, devDefaults(store, project).model].filter(Boolean).map((x, i) => (i ? name(x) : x)).join(' · ') : 'Its own command', checked: !agent, onSelect: () => set({ devModel: '', devProvider: '' }) },
     ...agentRows,
     '-',
     efforts.length
       ? { label: 'Effort', hint: effort && efforts.includes(effort) ? name(effort) : 'Default', items: [
-          { label: 'Default', checked: !effort || !efforts.includes(effort), onSelect: () => set({ devEffort: '' }) },
+          { label: 'Default', hint: defaults.effort && efforts.includes(defaults.effort) ? name(defaults.effort) : '', checked: !effort || !efforts.includes(effort), onSelect: () => set({ devEffort: '' }) },
           '-',
           ...efforts.map((v) => ({ label: name(v), checked: effort === v, onSelect: () => set({ devEffort: v }) })),
         ] }

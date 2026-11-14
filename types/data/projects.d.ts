@@ -60,6 +60,9 @@ export interface Project {
   localPath?: string;
   // What Dev runs for a task when the project picks no agent; '' uses the default agent.
   devCommand?: string;
+  // The model and effort its tasks run with when a task picks none; '' or missing: its agent's defaults.
+  devModel?: string;
+  devEffort?: string;
   // The id of its agent in Settings → Dev environment (a preset's, before agents); runs instead of devCommand.
   devPreset?: string;
   // Project label ids. Older files have `categoryId` instead; migrateProjectShape() fills it.

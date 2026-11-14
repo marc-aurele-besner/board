@@ -19,6 +19,10 @@ export interface DevProvider {
   // The efforts a task can pick for it; missing: every level when its program takes one and no variables connect it
   // to another provider, else none (agentEfforts in js/dev-core.js).
   efforts?: string[];
+  // The model and effort its sessions run with when neither the task nor its project picks one; '' or missing: the
+  // program's own.
+  defaultModel?: string;
+  defaultEffort?: string;
 }
 
 // A coding harness in Settings → Dev environment: a CLI that runs an agent in a terminal (Claude Code, Codex CLI…).
