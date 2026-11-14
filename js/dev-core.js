@@ -70,6 +70,34 @@ export function agentEfforts(store, agent) {
   return harness?.effort?.trim() && !splitEnv(agent.command).env ? DEV_EFFORTS : [];
 }
 
+// The model and effort a session runs with when the task picks none: for the project's own agent (or its own
+// command), the project's picks, else the agent's defaults; for another agent the task picked, that agent's
+// defaults. '' leaves the program's own.
+/** @param {DataStore} store @param {Project | null | undefined} project @param {DevProvider | null} [agent] the task's pick */
+export function devDefaults(store, project, agent = null) {
+  const own = projectAgent(store, project);
+  const runs = agent ?? own;
+  const isOwn = !agent || agent.id === own?.id;
+  return {
+    model: (isOwn && project?.devModel) || runs?.defaultModel || '',
+    effort: (isOwn && project?.devEffort) || runs?.defaultEffort || '',
+  };
+}
+
+// The effort, or '' when the agent that runs takes none of that level (MiniMax's API takes none). A command of a
+// project's own (no agent) keeps it.
+/** @param {DataStore} store @param {DevProvider | null} agent @param {string} effort */
+export const effortFor = (store, agent, effort) => (agent && !agentEfforts(store, agent).includes(effort) ? '' : effort);
+
+// The model and effort a task's session runs with: the task's picks, else devDefaults.
+/** @param {DataStore} store @param {Project | null | undefined} project @param {{ devProvider?: string, devModel?: string, devEffort?: string } | null | undefined} task */
+export function taskRunOptions(store, project, task) {
+  const agent = taskAgent(store, task);
+  const runs = agent ?? projectAgent(store, project);
+  const d = devDefaults(store, project, agent);
+  return { agent, model: (agent ? task?.devModel : '') || d.model, effort: effortFor(store, runs, task?.devEffort || d.effort) };
+}
+
 // The agent of projects that pick none: the one chosen in Settings, else Claude, else the first.
 /** @param {DataStore} store @returns {DevProvider} */
 export function defaultAgent(store) {

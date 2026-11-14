@@ -7,7 +7,7 @@
     { "id": "preset-2", "name": "Shell", "command": "bash" }
   ],
   "providers": [
-    { "id": "claude", "name": "Claude", "command": "claude --worktree", "models": ["opus", "sonnet"] },
+    { "id": "claude", "name": "Claude", "command": "claude --worktree", "models": ["opus", "sonnet"], "defaultModel": "opus", "defaultEffort": "high" },
     { "id": "minimax", "name": "MiniMax", "command": "ANTHROPIC_BASE_URL=https://api.example.com claude --worktree", "models": ["MiniMax-M3"], "efforts": [] }
   ],
   "defaultAgent": "claude",

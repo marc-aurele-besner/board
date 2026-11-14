@@ -3622,6 +3622,8 @@ code.tool-fail-call { font-size: 0.76rem; }
 .dev-model:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .dev-model-x { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; min-height: 0; min-width: 0; padding: 0; border: none; border-radius: 50%; background: none; color: var(--muted); font-size: 0.75rem; }
 .dev-model-x:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.dev-default-pick { display: flex; align-items: center; gap: 6px; }
+.dev-model-picks { display: flex; flex-wrap: wrap; gap: 6px; }
 .dev-chip-fields { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; }
 .dev-model-add { flex: 1 1 10rem; min-width: 8rem; min-height: 0; padding: 3px 8px; border: 1px dashed var(--border); border-radius: 999px; background: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
 .dev-model-add:focus { border-style: solid; border-color: var(--accent); }
