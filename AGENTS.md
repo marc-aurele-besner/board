@@ -138,6 +138,7 @@ tools/terminal.js     the Dev section's runner: terminal sessions that outlive t
 tools/worker.js       the runners: one worker that runs the background jobs on a schedule and writes into the data folder; localhost API on 8420
 tools/worker/store.js the store for Node (get, update, save over node:fs), merged with what the tabs write through js/merge.js
 tools/worker/schedule.js  intervals, no overlap, timeouts, backoff, and the runners.json heartbeat
+tools/board.js        `node "$BOARD_CLI" task list|show|add|edit`: a Dev session's own tasks from inside its terminal, through the runners (BOARD_API, BOARD_SESSION_TOKEN)
 tools/worker/tasks.js  a Dev session's own tasks (POST /tasks/list, show, add, edit) by its terminal's token: its roots read-only, what is under them and what it made; 100 per session
 tools/worker/http.js  the worker's localhost API: status, Run now, data folder
 tools/jobs/*.js       one file per job: { id, timeout, delay, setup(store), run(ctx) }; listed in tools/jobs/index.js

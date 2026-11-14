@@ -58,6 +58,8 @@ const IMAGES = join(STATE, 'images');
 const IMAGE_MAX = 20 * 1024 * 1024;
 // The runners' API (tools/worker.js), which tools/board.js calls from inside a terminal.
 const WORKER_API = `http://127.0.0.1:${Number(process.env.WORKER_PORT) || 8420}`;
+// That command, by its full path: claude runs it from another project's folder.
+const BOARD_CLI = join(ROOT, 'tools', 'board.js');
 /** @type {Record<string, string>} */
 const IMAGE_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
 const log = logger('terminal');
@@ -101,7 +103,7 @@ async function folderOf(path) {
 /** @param {string} dir @param {unknown} theme */
 function commandEnv(dir, theme) {
   /** @type {NodeJS.ProcessEnv} */
-  const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: theme === 'dark' ? '15;0' : '0;15', PAGER: 'cat', GIT_PAGER: 'cat', BOARD_RUN_DIR: dir, BOARD_API: WORKER_API };
+  const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: theme === 'dark' ? '15;0' : '0;15', PAGER: 'cat', GIT_PAGER: 'cat', BOARD_RUN_DIR: dir, BOARD_API: WORKER_API, BOARD_CLI };
   delete env.NO_COLOR;
   return env;
 }
