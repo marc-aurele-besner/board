@@ -265,8 +265,64 @@ function pasteAsTodo(store, e) {
 }
 
 // Every edit to a todo goes through here, one task or a batch. A status change also drops the legacy `done` flag.
+// Marking done a task whose subtasks are not all done asks first (see confirmOpenSubtasks).
 /** @param {Store} store @param {string[]} ids @param {Partial<Task>} patch */
 function updateItems(store, ids, patch) {
+  if (patch.status === 'done') {
+    const open = openSubtasks(store.get(COLLECTION).items, ids);
+    if (open.length) {
+      confirmOpenSubtasks(ids, open, (withSubtasks) => writeItems(store, withSubtasks ? [...ids, ...open.map((i) => i.id)] : ids, patch));
+      return;
+    }
+  }
+  writeItems(store, ids, patch);
+}
+
+// The subtasks, at any depth, of the tasks `ids` that are not done and not in `ids` themselves.
+/** @param {Task[]} items @param {string[]} ids @returns {Task[]} */
+function openSubtasks(items, ids) {
+  const pick = new Set(ids);
+  const under = new Set(ids);
+  /** @type {Task[]} */
+  const out = [];
+  // Level by level; `under` also stops a parent chain that loops.
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const i of items) {
+      if (under.has(i.id) || !i.parentId || !under.has(i.parentId)) continue;
+      under.add(i.id);
+      grew = true;
+      if (!pick.has(i.id) && statusOf(i) !== 'done') out.push(i);
+    }
+  }
+  return out;
+}
+
+// Asks whether to mark done a task (or tasks) with subtasks still open: with them, alone, or not at all.
+/** @param {string[]} ids @param {Task[]} open @param {(withSubtasks: boolean) => void} onDone */
+function confirmOpenSubtasks(ids, open, onDone) {
+  const n = open.length;
+  const one = ids.length === 1;
+  /** @param {boolean} withSubtasks */
+  const pick = (withSubtasks) => {
+    dialog.close();
+    onDone(withSubtasks);
+  };
+  const dialog = openDialog({
+    title: 'Subtasks not done',
+    body: h('div', { class: 'stack' },
+      h('p', null, `${one ? 'This task still has' : 'Some of these tasks still have'} ${n === 1 ? '1 subtask' : `${n} subtasks`} not done:`),
+      h('ul', { class: 'muted' }, ...open.slice(0, 8).map((i) => h('li', null, i.text || 'Untitled')),
+        n > 8 ? h('li', null, `and ${n - 8} more`) : null),
+      h('div', { class: 'row end' },
+        h('button', { type: 'button', onclick: () => dialog.close() }, 'Cancel'),
+        h('button', { type: 'button', onclick: () => pick(false) }, one ? 'Mark only this done' : 'Mark only these done'),
+        h('button', { type: 'button', class: 'primary', onclick: () => pick(true) }, n === 1 ? 'Mark the subtask done too' : 'Mark subtasks done too'))),
+  });
+}
+
+/** @param {Store} store @param {string[]} ids @param {Partial<Task>} patch */
+function writeItems(store, ids, patch) {
   const pick = new Set(ids);
   store.update(COLLECTION, (d) => {
     for (const item of d.items) {
