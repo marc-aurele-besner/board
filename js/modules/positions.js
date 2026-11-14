@@ -7,7 +7,7 @@ import { positionFields, positionError } from '../position-input.js';
 import { insightsPanel } from '../pool-insights.js';
 import { WINDOWS, refOf, shortAddress, baselineOf, coversCollect, collectKey, levelOf, mergeCollects, cachedRows, enabledChains, openPositions, knownTokens } from '../defi/positions-read.js';
 import { runJob, jobState } from '../runners.js';
-import { readPositions, poolState, tokenMeta, isAddressSymbol, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, tokenList, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey, nodeUrls, dexName, scanKey } from '../uniswap.js';
+import { readPositions, poolState, tokenMeta, isAddressSymbol, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, tokenList, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey, nodeUrls, dexName, dexLogo, scanKey } from '../uniswap.js';
 import { chainById, explorerUrl, etherscanKey } from '../chains.js';
 import { walletsTab, walletsView } from './defi-wallets.js';
 import { lendingTab, lendingView } from './defi-lending.js';
@@ -439,13 +439,24 @@ const unclaimed = (r) => (r.version === 'v2'
 // The reward as tokens, and its value when the token is priced.
 /** @param {PositionRow} r */
 const rewardText = (r) => `${amount(r.reward ?? 0)} ${r.rewardSym ?? 'CAKE'}${r.rewardUsd != null ? ` (${cash(r.rewardUsd)})` : ''}`;
-// The exchange and version of a row, and whether it is staked in a farm. Uniswap's rows name only the version.
+// The exchange of a row with its logo and version.
 /** @param {PositionRow} r */
-const versionPills = (r) => [
-  r.dex ? h('span', { class: 'dex-pill', title: dexName(r.dex) }, dexName(r.dex)) : null,
-  h('span', { class: 'version-pill', title: `${dexName(r.dex)} ${r.version}` }, r.version),
-  r.staked ? h('span', { class: 'farm-pill', title: `Staked in ${dexName(r.dex)}'s farm, earning ${r.rewardSym ?? 'CAKE'}` }, 'Farming') : null,
-];
+const platformTag = (r) => h('span', { class: 'lp-venue', title: `${dexName(r.dex)} ${r.version}` },
+  logo(dexLogo(r.dex), dexName(r.dex), 'xs'), `${dexName(r.dex)} ${r.version}`);
+// A leaf when the position is staked in its exchange's farm.
+/** @param {PositionRow} r */
+const farmTag = (r) => (r.staked
+  ? h('span', { class: 'lp-farm', title: `Staked in ${dexName(r.dex)}'s farm, earning ${r.rewardSym ?? 'CAKE'}` }, icon('leaf'), 'Farming')
+  : null);
+// A chain with its logo, in the same quiet style.
+/** @param {string} name @param {string | null | undefined} src */
+const chainTag = (name, src) => h('span', { class: 'lp-venue' }, logo(src ?? null, name, 'xs'), name);
+// The exchange and version with the pool's fee tier: one quiet line, a dot between them, no pills.
+/** @param {PositionRow} r @param {Child} [more] */
+const venueLine = (r, more = null) => h('div', { class: 'pool-meta' },
+  platformTag(r),
+  h('span', { class: 'lp-venue', title: 'The pool\'s fee tier' }, `${r.feePct}% fee`),
+  more);
 
 // The exchange and version of a collect, read from its position's ref (see refOf in js/defi/positions-read.js).
 // A ref of two parts is Uniswap v3; else its second part is "v2", "v4" or "pancakeswap-v3". null when unknown.
@@ -471,9 +482,12 @@ function kindPills(keys, current, label, count, total, allLabel, pick) {
     class: current === key ? 'lp-chip active' : 'lp-chip',
     'aria-pressed': String(current === key),
     onclick: () => pick(key),
-  }, text, h('span', { class: 'chip-count' }, n));
+  }, label === dexName && key !== 'all' ? logo(dexLogo(key), text, 'xs') : null, text, h('span', { class: 'chip-count' }, n));
   return h('div', { class: 'row lp-filters lp-chains' }, pill('all', allLabel, total), keys.map((k) => pill(k, label(k), count(k))));
 }
+// The exchange and version pickers side by side on one row, when either shows.
+/** @param {(HTMLElement | null)[]} groups */
+const kindRow = (groups) => (groups.some(Boolean) ? h('div', { class: 'row lp-kinds' }, groups) : null);
 
 // Fetches today's rate once a day when CAD is picked, then draws again.
 /** @param {Store} store */
@@ -671,7 +685,7 @@ function rangeView(r, store) {
   return h('div', { class: 'range' },
     h('div', { class: 'range-head' },
       h('span', { class: 'muted small' }, r.full ? 'Price range' : `${p.unit} per ${p.base}`),
-      r.full ? null : flipButton(store, r, flip)),
+      h('span', { class: 'range-side' }, statusPill(r), r.full ? null : flipButton(store, r, flip))),
     h('div', { class: r.full ? 'range-track full' : 'range-track' },
       h('span', { class: 'range-band' }),
       r.full ? null : h('span', { class: `range-marker ${r.inRange ? 'in' : 'out'}`, style: { left: `${p.marker}%` } })),
@@ -753,13 +767,11 @@ function poolCard(r, i, collected, store) {
         logo(tokenLogoOf(r, r.addr0), r.sym0, 'token'),
         logo(tokenLogoOf(r, r.addr1), r.sym1, 'token second')),
       h('div', { class: 'pool-title' },
-        h('button', { type: 'button', class: 'link-btn pool-name', title: 'See this position', onclick: () => openDetail(store, r.ref) }, r.pair),
-        h('div', { class: 'pool-meta' },
-          h('span', { class: 'chain-chip' }, logo(chain?.logo, r.chain, 'xs'), r.chain),
-          versionPills(r),
-          h('span', { class: 'fee-pill' }, `${r.feePct}%`),
-          statusPill(r),
-          outdatedPill(r))),
+        h('div', { class: 'pool-name-row' },
+          h('button', { type: 'button', class: 'link-btn pool-name', title: 'See this position', onclick: () => openDetail(store, r.ref) }, r.pair),
+          farmTag(r)),
+        venueLine(r),
+        outdatedPill(r)),
       r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn pool-open', title: `Open on ${dexName(r.dex)}`, 'aria-label': `Open position ${r.tokenId} on ${dexName(r.dex)}` }, icon('link')) : null),
     rangeView(r, store),
     h('div', { class: r.closed ? 'pool-stats' : 'pool-stats four' },
@@ -771,7 +783,7 @@ function poolCard(r, i, collected, store) {
             poolStat(`Movement · ${WINDOWS[view.window][1]}`, moveView(r), moveTitle(r))]),
     distribution(r),
     h('footer', { class: 'pool-foot muted small' },
-      h('span', null, r.owner),
+      h('span', { class: 'pool-meta' }, chainTag(r.chain, chain?.logo), h('span', { class: 'lp-venue' }, r.owner)),
       h('span', null, numberOf(r))));
 }
 
@@ -846,7 +858,8 @@ function poolTable(rows, store) {
         },
           h('td', null, h('div', { class: 'row' },
             h('div', { class: 'pair' }, logo(tokenLogoOf(r, r.addr0), r.sym0, 'token'), logo(tokenLogoOf(r, r.addr1), r.sym1, 'token second')),
-            h('div', null, h('button', { type: 'button', class: 'link-btn', title: 'See this position', onclick: () => openDetail(store, r.ref) }, r.pair), ' ', versionPills(r), outdatedPill(r), h('div', { class: 'muted small' }, `${r.owner} · ${numberOf(r)}`)))),
+            h('div', null, h('button', { type: 'button', class: 'link-btn', title: 'See this position', onclick: () => openDetail(store, r.ref) }, r.pair), ' ', outdatedPill(r),
+              h('div', { class: 'pool-meta muted small' }, platformTag(r), farmTag(r), h('span', { class: 'lp-venue' }, `${r.owner} · ${numberOf(r)}`))))),
           h('td', null, h('span', { class: 'chain-chip' }, logo(chainOf(r.chainId)?.logo, r.chain, 'xs'), r.chain), h('div', { class: 'muted small' }, `${r.feePct}% fee`)),
           h('td', null, rangeCell(r, store)),
           h('td', null, distribution(r)),
@@ -1370,7 +1383,7 @@ function feeKindFilters(store, inRange) {
   const kinds = inRange.map((c) => kindOfRef(c.ref));
   const dexes = kindsIn(kinds.map((k) => k?.dex));
   const versions = kindsIn(kinds.map((k) => k?.version));
-  return [
+  return kindRow([
     kindPills(dexes, view.feeDex, dexName, (d) => kinds.filter((k) => k?.dex === d).length, inRange.length, 'All platforms', (d) => {
       view.feeDex = d;
       store.refresh();
@@ -1379,7 +1392,7 @@ function feeKindFilters(store, inRange) {
       view.feeVersion = v;
       store.refresh();
     }),
-  ];
+  ]);
 }
 
 // A share as a percent that only reads 100% when the search is complete.
@@ -2204,10 +2217,9 @@ function detailView(store, ref) {
         r ? logo(tokenLogoOf(r, r.addr1), r.sym1, 'token second') : logo(symbolLogo(syms[1]), syms[1] ?? '?', 'token second')),
       h('div', { class: 'pool-title' },
         h('h2', null, known.pair ?? 'Position'),
+        r ? venueLine(r, [chainTag(r.chain, chain?.logo), farmTag(r)])
+          : known.chain ? h('div', { class: 'pool-meta' }, chainTag(known.chain, chain?.logo)) : null,
         h('div', { class: 'pool-meta' },
-          known.chain ? h('span', { class: 'chain-chip' }, logo(chain?.logo, known.chain, 'xs'), known.chain) : null,
-          r ? versionPills(r) : null,
-          r ? h('span', { class: 'fee-pill' }, `${r.feePct}%`) : null,
           r ? statusPill(r) : h('span', { class: 'status-pill closed' }, h('span', { class: 'dot' }), 'Not read'),
           r ? outdatedPill(r) : null,
           h('span', { class: 'muted small' }, `${numberOf(r ?? known)}${r ? ` · ${r.owner}` : ''}`)))),
@@ -2533,7 +2545,7 @@ function draw(root, store) {
           chainChip('all', 'All chains', null, all.filter((r) => !!r.closed === showClosed).length),
           chainsWithRows.map((c) => chainChip(c.id, c.name, c.logo, all.filter((r) => r.chainId === c.id && !!r.closed === showClosed).length)))
       : null,
-    kindPills(dexes, view.dex, dexName, (k) => chainRows.filter((r) => dexOf(r) === k && !!r.closed === showClosed).length,
+    kindRow([kindPills(dexes, view.dex, dexName, (k) => chainRows.filter((r) => dexOf(r) === k && !!r.closed === showClosed).length,
       chainRows.filter((r) => !!r.closed === showClosed).length, 'All platforms', (k) => {
         view.dex = k;
         store.refresh();
@@ -2542,7 +2554,7 @@ function draw(root, store) {
       dexRows.filter((r) => !!r.closed === showClosed).length, 'All versions', (k) => {
         view.version = k;
         store.refresh();
-      }),
+      })]),
 
     h('div', { class: 'row between' },
       h('div', { class: 'row lp-filters' },
