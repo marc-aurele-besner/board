@@ -214,11 +214,17 @@ const BRANDS = [
   ['ai-openrouter', /openrouter/i],
   ['ai-mistral', /mistral/i],
 ];
+// Within one text the brand named first wins: "MiniMax in Claude Code" is MiniMax's.
 /** @param {...string} texts the most telling first: a name before a command */
 export function brandOf(...texts) {
   for (const text of texts) {
-    const found = BRANDS.find(([, re]) => /** @type {RegExp} */ (re).test(text ?? ''));
-    if (found) return /** @type {string} */ (found[0]);
+    let best = '';
+    let at = Infinity;
+    for (const [brand, re] of BRANDS) {
+      const i = (text ?? '').search(/** @type {RegExp} */ (re));
+      if (i >= 0 && i < at) [best, at] = [/** @type {string} */ (brand), i];
+    }
+    if (best) return best;
   }
   return '';
 }
