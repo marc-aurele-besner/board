@@ -13,7 +13,7 @@ A personal command center that runs locally. It is plain HTML, CSS and JavaScrip
 - Run `bun install` once after cloning. It installs TypeScript as a dev-only tool (it never ships to the browser) and turns on `.githooks/pre-commit`.
 - Syntax check every module before committing:
   `for f in js/*.js js/modules/*.js tools/*.js tools/*/*.js; do node --experimental-default-type=module --check "$f" || echo "FAIL $f"; done`
-- Type check with `bun run typecheck`. `tools/typecheck.js` runs `tsc` over the JSDoc with two configs: `jsconfig.json` for the browser code (`js/`, `types/`) and `tools/jsconfig.json` for the Node runner, which sees neither `window` nor `document`. The runner's modules from `js/` are checked by the browser config, so only errors in `tools/` count in the second run. Every `.js` file is checked in strict mode, with no opt-in: a new file is checked as soon as it exists. `bun run check` runs the syntax loop, the import, merge, Dev session task and LinkedIn queue checks and the type check together; the pre-commit hook runs it.
+- Type check with `bun run typecheck`. `tools/typecheck.js` runs `tsc` over the JSDoc with two configs: `jsconfig.json` for the browser code (`js/`, `types/`) and `tools/jsconfig.json` for the Node runner, which sees neither `window` nor `document`. The runner's modules from `js/` are checked by the browser config, so only errors in `tools/` count in the second run. Every `.js` file is checked in strict mode, with no opt-in: a new file is checked as soon as it exists. `bun run check` runs the syntax loop, the import, merge, Dev session task, LinkedIn queue and app version checks and the type check together; the pre-commit hook runs it.
 - The worker imports modules from `js/` under Node, so those must not touch `document`, `window`, `localStorage` or `location` when they load, nor import a module that does. `node tools/check-imports.js` loads every job and catches both a missing import and a DOM call at load time. `node tools/check-merge.js` checks that the worker's writes and a tab's merge without losing either.
 - Test real behavior in the browser when you can. Folder picking needs a user click, so ask the user to drive that step if you cannot.
 
@@ -28,6 +28,8 @@ js/storage.js         File System Access API wrapper; remembers the folder in In
 js/store.js           in-memory state; debounced, serialized saves merged with what other tabs saved; disk sync; subscriptions
 js/merge.js           three-way merge of a collection (last read, this tab, on disk), item by item by id
 js/keep-fields.js     keeps unsubmitted fields across re-renders; holds background re-renders while typing
+js/app-version.js     asks GET /version, offers a reload when the files changed, forces one on a new APP_EPOCH; carries typed fields and scroll over
+js/app-version-core.js  APP_EPOCH and the rules: current, reload offered or required, snooze, quiet reload, loop guard (no DOM)
 js/ui.js              h() DOM helper, icon(), ids, dates, money formatting
 js/menu.js            context menus with submenus: on a right click, or under a ⋯ button
 js/modules/index.js   registry of sections (the nav is built from this list)
@@ -132,7 +134,7 @@ types/                .d.ts files: browser APIs missing from lib.dom, and the sh
 tools/start.js        one command for the board: starts serve.js, terminal.js and worker.js together
 tools/dev.js          bun dev: the command runner unwatched, the rest of start.js under bun --watch
 tools/log.js          terminal lines prefixed with each runner's name
-tools/serve.js        local static server with no-cache headers; no dependencies
+tools/serve.js        local static server with no-cache headers; GET /version fingerprints the page's files for open tabs; no dependencies
 tools/slack.js        POST /slack and /slack/file: Slack calls from Node, which can send the session's d cookie
 tools/terminal.js     the Dev section's runner: terminal sessions that outlive the page (output and the list of open terminals kept on disk), typed keys, read-only file reads, git for Source control, listing worktrees and removing one (a done task's, or any from Dev's Worktrees panel), ending a done claude with /exit and answering its worktree question, saving images for claude, showing a path in Finder, each terminal's token for the board's tasks (POST /scope); localhost only
 tools/worker.js       the runners: one worker that runs the background jobs on a schedule and writes into the data folder; localhost API on 8420
@@ -164,6 +166,7 @@ tools/check-merge.js  the worker and a tab change two fields of one file; both m
 tools/check-board-tasks.js  a Dev session's tasks: what it may read and change, the limit, a tab's write meanwhile
 tools/linkedin-session.js  the LinkedIn session's queue (runners only): 20–40 s gap, daily limit, cache in linkedin.json, stop on sign-out; POST /linkedin/voyager runs it for a tab
 tools/check-linkedin.js  the LinkedIn queue against a stubbed fetch: gap, limit, cache, sign-out
+tools/check-app-version.js  the app version rules: when a tab is current, offered a reload or made to reload
 tools/usage.js        reads Claude Code's transcripts for the runner: a task worktree's models, tokens, cost and effort, and each turn's tools (calls, failures, time), skills and output tokens
 ```
 
@@ -179,6 +182,7 @@ tools/usage.js        reads Claude Code's transcripts for the runner: a task wor
 - **Outside services.** A new lookup that leaves the browser is listed in the README under "Outside services", with what it sends.
 - **LinkedIn's session.** Every call with the saved `li_at` / `JSESSIONID` goes through `linkedinCall()` in `js/linkedin-session.js` (or `voyager()` in `tools/linkedin-session.js` from a job), never a `fetch` of its own: the queue keeps the pace, the daily limit and the stop after a sign-out. Give each repeatable read a `cacheKey`. Never test with the real session; stub `fetch` as `tools/check-linkedin.js` does.
 - **Cross-section data.** A section may read another section's collection through the store (todos read projects). Write to the other collection with its own `store.update` call.
+- **Old tabs.** An open tab learns from `GET /version` that the files changed and offers a reload. When a change must not meet a tab still running the old code (a data file's new shape that an old tab would save back in its old one), bump `APP_EPOCH` in `js/app-version-core.js` in the same commit: every older tab then reloads by itself.
 - **Typed data.** Each JSON file's shape is in `types/data/<name>.d.ts`, collected in `Collections` in `types/data.d.ts`, so `store.get('todos')` is typed in every file. To add a field: add it to the interface (optional, `field?: T`, since older files lack it), add it to the matching `types/fixtures/<name>.json`, then run `bun run typecheck`; every file that is checked and misuses the field fails. A new collection needs its own `.d.ts`, an entry in `Collections` (and `WorkerCollections` if only the runners write it), a fixture and a line in `types/fixtures.check.js`. Stored enum-like fields stay `string`; narrow them in code.
 - **JSDoc types.** Annotate exported functions and their parameters, and let inference do the rest. Import shared shapes with `/** @import { Task, Store } from '../types/data' */`. No `@ts-ignore`; an `any` or `@ts-expect-error` carries its reason on the same line (`// any: <reason>`). Fix a real bug the checker finds in its own commit; do not change code only to please the checker.
 - **Theme.** Use the CSS variables in `:root`. Never hard-code colors in components. Dark values appear in two places (the `prefers-color-scheme` block and `:root[data-theme="dark"]`); update both when you change a token.
