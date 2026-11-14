@@ -20,7 +20,7 @@
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { appendFile, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -56,6 +56,8 @@ const WORKTREE_NAME = /^[\w.-]{1,64}$/;
 // Images the page hands to claude (pasted into a terminal, or kept on a task) are saved here, as files claude can read.
 const IMAGES = join(STATE, 'images');
 const IMAGE_MAX = 20 * 1024 * 1024;
+// The runners' API (tools/worker.js), which tools/board.js calls from inside a terminal.
+const WORKER_API = `http://127.0.0.1:${Number(process.env.WORKER_PORT) || 8420}`;
 /** @type {Record<string, string>} */
 const IMAGE_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
 const log = logger('terminal');
@@ -99,7 +101,7 @@ async function folderOf(path) {
 /** @param {string} dir @param {unknown} theme */
 function commandEnv(dir, theme) {
   /** @type {NodeJS.ProcessEnv} */
-  const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: theme === 'dark' ? '15;0' : '0;15', PAGER: 'cat', GIT_PAGER: 'cat', BOARD_RUN_DIR: dir };
+  const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: theme === 'dark' ? '15;0' : '0;15', PAGER: 'cat', GIT_PAGER: 'cat', BOARD_RUN_DIR: dir, BOARD_API: WORKER_API };
   delete env.NO_COLOR;
   return env;
 }
@@ -497,7 +499,8 @@ async function run(req, res, cors) {
     : `stty cols ${cols} rows ${rows} 2>/dev/null; tty > "$BOARD_RUN_DIR/tty" 2>/dev/null\n${command}\n__board_status=$?; pwd > "$BOARD_RUN_DIR/cwd" 2>/dev/null; exit $__board_status`;
   const [file, args] = WINDOWS ? [SHELL, ['/d', '/s', '/c', script]] : ptyArgs(script);
   const started = performance.now();
-  const child = spawn(file, args, { cwd, detached: !WINDOWS, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...commandEnv(dir, body.theme), BOARD_SCRIPT: script } });
+  const env = { ...commandEnv(dir, body.theme), BOARD_SCRIPT: script, BOARD_SESSION: s.id, BOARD_SESSION_TOKEN: tokenOf(s.id) };
+  const child = spawn(file, args, { cwd, detached: !WINDOWS, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env });
   Object.assign(job, { child, dir });
   running.set(child.pid, /** @type {Job & { child: Child }} */ (job)); // its child is set just above
   log.info(`started pid ${child.pid} in ${cwd} (${running.size} running)`);
@@ -557,6 +560,7 @@ async function control(req, res, cors, action) {
     for (const listener of s.listeners) listener.write(lineOf({ t: 'closed', s: s.id }));
     s.listeners.clear();
     s.disk.then(() => rm(logFile(s.id), { force: true })).catch(() => {});
+    dropToken(s.id);
     // Every browser drops it from its terminals on its next read of the list.
     await editList((list) => {
       list.sessions = list.sessions.filter((x) => x.id !== s.id);
@@ -642,6 +646,62 @@ async function addToList(req, res, cors) {
   } catch (err) {
     res.writeHead(500, cors).end(`Could not save the terminal list: ${/** @type {Error} */ (err).message}`);
   }
+}
+
+// --- Each terminal's token, for the board's tasks (tools/board.js) ---
+// A command gets BOARD_SESSION_TOKEN, a secret only its terminal knows. The runners (tools/worker/tasks.js) ask
+// POST /scope which terminal a token belongs to and which tasks it was started for, so a session reaches only its
+// own tasks whatever it claims. One token per terminal, kept until it closes and across restarts.
+const TOKENS_FILE = join(STATE, 'tokens.json');
+/** @type {Record<string, string> | null} */
+let tokens = null;
+/** @returns {Record<string, string>} */
+function readTokens() {
+  if (tokens) return tokens;
+  try {
+    const saved = JSON.parse(readFileSync(TOKENS_FILE, 'utf8'));
+    tokens = saved && typeof saved === 'object' ? saved : {};
+  } catch {
+    tokens = {};
+  }
+  return /** @type {Record<string, string>} */ (tokens);
+}
+function writeTokens() {
+  try {
+    writeFileSync(TOKENS_FILE, JSON.stringify(readTokens()), { mode: 0o600 });
+  } catch (err) {
+    log.error(`Could not save the terminals' tokens: ${/** @type {Error} */ (err).message}`);
+  }
+}
+/** @param {string} id */
+function tokenOf(id) {
+  const all = readTokens();
+  if (!all[id]) {
+    all[id] = randomBytes(24).toString('hex');
+    writeTokens();
+  }
+  return all[id];
+}
+/** @param {string} id */
+function dropToken(id) {
+  const all = readTokens();
+  if (!all[id]) return;
+  delete all[id];
+  writeTokens();
+}
+
+// The terminal a token belongs to and the tasks it was started for (its entry in the list of open terminals);
+// 404 for a token no open terminal holds.
+/** @param {IncomingMessage} req @param {ServerResponse} res @param {Cors} cors */
+async function scopeOf(req, res, cors) {
+  const body = await jsonBody(req, res, cors);
+  if (!body) return;
+  const token = String(body.token ?? '');
+  const all = readTokens();
+  const id = token ? Object.keys(all).find((k) => all[k] === token) : '';
+  if (!id) return res.writeHead(404, cors).end('This terminal is not open on the board.');
+  const entry = (await readList()).sessions?.find((/** @type {DevSession} */ x) => x.id === id);
+  res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify({ session: id, tasks: entry?.tasks ?? [] }));
 }
 
 // A listed terminal's folder changed (cd in it, or a command started in another folder).
@@ -1571,6 +1631,7 @@ createServer(async (req, res) => {
   if (req.method === 'POST' && path === '/sessions/add' && json) return addToList(req, res, cors);
   if (req.method === 'POST' && path === '/sessions/update' && json) return updateList(req, res, cors);
   if (req.method === 'POST' && ['/stop', '/clear', '/close'].includes(path) && json) return control(req, res, cors, path.slice(1));
+  if (req.method === 'POST' && path === '/scope' && json) return scopeOf(req, res, cors);
   if (req.method === 'POST' && path === '/worktree/remove' && json) return removeWorktree(req, res, cors);
   if (req.method === 'POST' && path === '/claude/exit' && json) return exitClaude(req, res, cors);
   if (req.method === 'POST' && path === '/reveal' && json) {
