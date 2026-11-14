@@ -50,9 +50,10 @@ const dropAfter = (e) => {
 const clearDrop = (el) => el.classList.remove('drop-before', 'drop-after');
 
 // Row props and grip for a reorderable list. `keys` is the list's order; `save(nextKeys)` stores a new one.
-// The grip also moves its row with the up and down arrow keys, and keeps focus after the re-render.
+// The grip also moves its row with the up and down arrow keys, and keeps focus after the re-render. Settings → Dev
+// environment orders its agents with it too.
 /** @param {string} list @param {string[]} keys @param {(keys: string[]) => void} save */
-function sortable(list, keys, save) {
+export function sortable(list, keys, save) {
   /** @param {string} from @param {string} to @param {boolean} after */
   const move = (from, to, after) => {
     const next = moveKey(keys, from, to, after);
