@@ -10,6 +10,7 @@ import { readFile } from '../terminal.js';
 import { runnerOf } from '../dev-core.js';
 import { fmtCost } from '../dev-usage.js';
 import { BRAND_LISTS, brandOf, hasBrand, hasBrandSources, findBrand, cleanItems, isUrl, nameOf } from '../brand.js';
+import { dateLocale } from '../locale.js';
 
 /** @type {Record<BrandList, { title: string, placeholder: string }>} */
 const LISTS = {
@@ -225,7 +226,7 @@ function brandForm(store, p, brand) {
 function brandMeta(store, brand) {
   const call = brand.usageId ? store.get('usage').entries.find((e) => e.id === brand.usageId) : null;
   return [
-    brand.updated ? `Found with AI ${new Date(brand.updated).toLocaleDateString()}` : '',
+    brand.updated ? `Found with AI ${new Date(brand.updated).toLocaleDateString(dateLocale())}` : '',
     call?.model ?? '',
     call && call.cost !== null && call.cost !== undefined ? fmtCost(call.cost) : '',
   ].filter(Boolean).join(' · ');

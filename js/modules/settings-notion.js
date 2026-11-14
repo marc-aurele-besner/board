@@ -6,6 +6,7 @@ import { pickChip } from '../inline.js';
 import { runJob } from '../runners.js';
 import { notionSettings, normalizeNotion, checkNotion, checkNotionSession, readNotionDatabase, finishNotionSignIn, wayLabel, accountName, linkProject } from '../notion.js';
 import { projectIcon, projectTree } from './projects.js';
+import { dateLocale } from '../locale.js';
 
 /** @import { Store, Project, NotionAccount, NotionLink, NotionSettings } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
@@ -149,7 +150,7 @@ async function signIn(store) {
 }
 
 /** @param {string} iso */
-const when = (iso) => new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+const when = (iso) => new Date(iso).toLocaleString(dateLocale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 /** @param {Store} store @param {Cfg} cfg @param {NotionAccount} a @param {Project[]} projects */
 function accountRow(store, cfg, a, projects) {

@@ -14,6 +14,7 @@ import { resizableSide } from '../side-resize.js';
 import { eventGuests } from './project-contacts.js';
 import { LINKEDIN } from '../linkedin-core.js';
 import { openLinkedinComposer } from '../linkedin-composer.js';
+import { dateLocale, daysIntoWeek } from '../locale.js';
 /** @import { Store, Task, CalendarAccount, CalendarEvent } from '../../types/data' */
 /**
  * The part of a timed event on one day, in hours from midnight; placeSegments() adds its column and the column count.
@@ -43,9 +44,9 @@ const isoOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDat
  */
 const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const anchor = () => (view.date ? eventDate(view.date) : new Date(new Date().setHours(0, 0, 0, 0)));
-// Weeks start on Monday.
+// Weeks start on Appearance's day (Monday by default).
 /** @param {Date} d */
-const weekStart = (d) => addDays(d, -((d.getDay() + 6) % 7));
+const weekStart = (d) => addDays(d, -daysIntoWeek(d));
 
 // [first day, day after the last] of what is on screen. A month shows whole weeks.
 /**
@@ -74,11 +75,11 @@ function step(dir) {
  * @param {Date} d
  */
 function titleOf(mode, d) {
-  if (mode === 'day') return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-  if (mode === 'month') return d.toLocaleDateString([], { month: 'long', year: 'numeric' });
+  if (mode === 'day') return d.toLocaleDateString(dateLocale(), { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  if (mode === 'month') return d.toLocaleDateString(dateLocale(), { month: 'long', year: 'numeric' });
   const [from, to] = rangeOf('week', d);
   const end = addDays(to, -1);
-  const short = (/** @type {Date} */ x) => x.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  const short = (/** @type {Date} */ x) => x.toLocaleDateString(dateLocale(), { month: 'short', day: 'numeric' });
   // "Nov 9 – 15, 2026", or "Nov 30 – Dec 6, 2026" across months.
   return `${short(from)} – ${from.getMonth() === end.getMonth() ? end.getDate() : short(end)}, ${end.getFullYear()}`;
 }
@@ -89,11 +90,11 @@ function ago(t) {
   if (min < 1) return 'just now';
   if (min < 60) return `${min} min ago`;
   const hours = Math.round(min / 60);
-  return hours < 24 ? `${hours} h ago` : new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return hours < 24 ? `${hours} h ago` : new Date(t).toLocaleDateString(dateLocale(), { month: 'short', day: 'numeric' });
 }
 
 /** @param {Date} d */
-const clock = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const clock = (d) => d.toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' });
 /** @param {CalendarEvent} e */
 const timeLabel = (e) => (e.allDay ? 'All day' : clock(eventDate(e.start)));
 
@@ -102,7 +103,7 @@ const timeLabel = (e) => (e.allDay ? 'All day' : clock(eventDate(e.start)));
 function whenOf(e) {
   const start = eventDate(e.start);
   const end = eventDate(e.end || e.start);
-  const day = (/** @type {Date} */ d) => d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  const day = (/** @type {Date} */ d) => d.toLocaleDateString(dateLocale(), { weekday: 'short', month: 'short', day: 'numeric' });
   if (e.allDay) {
     const last = addDays(end, -1);
     return last > start ? `${day(start)} – ${day(last)}` : `${day(start)} · All day`;
@@ -388,10 +389,10 @@ const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
  */
 const dayIndex = (from, d) => Math.round((midnight(d).getTime() - from.getTime()) / DAY_MS);
 /** @param {number} hour */
-const hourLabel = (hour) => new Date(2000, 0, 1, hour).toLocaleTimeString([], { hour: 'numeric' });
+const hourLabel = (hour) => new Date(2000, 0, 1, hour).toLocaleTimeString(dateLocale(), { hour: 'numeric' });
 // "2 PM" or "2:30 PM": the minutes only when there are some, as Google's grid shows them.
 /** @param {Date} d */
-const shortClock = (d) => d.toLocaleTimeString([], { hour: 'numeric', ...(d.getMinutes() ? { minute: '2-digit' } : {}) });
+const shortClock = (d) => d.toLocaleTimeString(dateLocale(), { hour: 'numeric', ...(d.getMinutes() ? { minute: '2-digit' } : {}) });
 
 // The part of each timed event that falls on day `d`, in hours from midnight.
 /**
@@ -507,7 +508,7 @@ function gridView(store, from, days, events, tasks) {
         onclick: openDay(store, d),
         title: 'Show this day',
       },
-        h('span', { class: 'cal-weekday' }, d.toLocaleDateString([], { weekday: 'short' })),
+        h('span', { class: 'cal-weekday' }, d.toLocaleDateString(dateLocale(), { weekday: 'short' })),
         h('span', { class: 'cal-grid-date' }, d.getDate())))),
     bars.length || due.length
       ? h('div', { class: 'cal-grid-row cal-grid-strip', style: cols },
@@ -562,7 +563,7 @@ function monthView(store, from, to, month, events, tasks) {
   const perCell = Math.max(2, Math.floor((cellHeight - 30) / 24));
   return h('div', { class: 'card cal-month' },
     h('div', { class: 'cal-month-grid cal-month-head', 'aria-hidden': 'true' },
-      days.slice(0, 7).map((d) => h('span', null, d.toLocaleDateString([], { weekday: 'short' })))),
+      days.slice(0, 7).map((d) => h('span', null, d.toLocaleDateString(dateLocale(), { weekday: 'short' })))),
     h('div', { class: 'cal-month-grid' },
       days.map((d) => {
         const list = events.filter((e) => onDay(e, d));
@@ -570,7 +571,7 @@ function monthView(store, from, to, month, events, tasks) {
         const items = [...list.map((e) => eventChip(store, e, { time: false })), ...taskChips(store, due, isoOf(d))];
         const today = d.toDateString() === new Date().toDateString();
         return h('div', { class: ['cal-cell', d.getMonth() === month ? '' : 'outside', today ? 'today' : ''].filter(Boolean).join(' ') },
-          h('button', { type: 'button', class: 'cal-cell-date', onclick: openDay(store, d), 'aria-label': d.toLocaleDateString([], { dateStyle: 'full' }) }, d.getDate()),
+          h('button', { type: 'button', class: 'cal-cell-date', onclick: openDay(store, d), 'aria-label': d.toLocaleDateString(dateLocale(), { dateStyle: 'full' }) }, d.getDate()),
           items.length > perCell ? items.slice(0, perCell - 1) : items,
           items.length > perCell ? h('button', { type: 'button', class: 'cal-more', onclick: openDay(store, d) }, `+${items.length - perCell + 1} more`) : null);
       })));
@@ -633,11 +634,11 @@ function miniMonth(store, d, from, to) {
   };
   return h('div', { class: 'cal-mini' },
     h('div', { class: 'cal-mini-head' },
-      h('strong', null, month.toLocaleDateString([], { month: 'long', year: 'numeric' })),
+      h('strong', null, month.toLocaleDateString(dateLocale(), { month: 'long', year: 'numeric' })),
       h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Previous month', onclick: page(-1) }, icon('chevron-left')),
       h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Next month', onclick: page(1) }, icon('chevron-right'))),
     h('div', { class: 'cal-mini-grid', 'aria-hidden': 'true' },
-      days.slice(0, 7).map((x) => h('span', { class: 'muted' }, x.toLocaleDateString([], { weekday: 'narrow' })))),
+      days.slice(0, 7).map((x) => h('span', { class: 'muted' }, x.toLocaleDateString(dateLocale(), { weekday: 'narrow' })))),
     h('div', { class: 'cal-mini-grid' },
       days.map((x) => h('button', {
         type: 'button',
@@ -647,7 +648,7 @@ function miniMonth(store, d, from, to) {
           x.toDateString() === today ? 'today' : '',
           x >= from && x < to ? 'in-range' : '',
         ].filter(Boolean).join(' '),
-        'aria-label': x.toLocaleDateString([], { dateStyle: 'full' }),
+        'aria-label': x.toLocaleDateString(dateLocale(), { dateStyle: 'full' }),
         onclick: () => {
           view.date = isoOf(x);
           view.mini = '';
@@ -676,7 +677,7 @@ function agenda(store, byProject) {
   /** @param {Date} d */
   const dayName = (d) => {
     const n = dayIndex(today, d);
-    return n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' });
+    return n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : d.toLocaleDateString(dateLocale(), { weekday: 'long', day: 'numeric', month: 'short' });
   };
   return h('section', { class: 'cal-agenda' },
     h('h3', null, `Next ${AGENDA_DAYS} days`),
@@ -757,7 +758,7 @@ function draw(root, store) {
       h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Next', title: 'Next', onclick: go(() => step(1)) }, icon('chevron-right')),
       h('h3', { class: 'cal-title' }, titleOf(view.mode, d))),
     h('div', { class: 'row cal-actions' },
-      cached.at ? h('span', { class: 'muted small', title: new Date(cached.at).toLocaleString() }, `Updated ${ago(cached.at)}`) : null,
+      cached.at ? h('span', { class: 'muted small', title: new Date(cached.at).toLocaleString(dateLocale()) }, `Updated ${ago(cached.at)}`) : null,
       h('button', {
         type: 'button',
         class: 'icon-btn',

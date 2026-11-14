@@ -3,6 +3,7 @@
 /** @import { LinkedinData, LinkedinAuth, LinkedinPost, DataStore } from '../types/data' */
 import { notify } from './notify-core.js';
 import { uid } from './ui.js';
+import { dateLocale } from './locale.js';
 
 export const LINKEDIN = 'linkedin';
 /** @type {LinkedinData} */
@@ -45,7 +46,7 @@ export async function exchangeLinkedinCode({ clientId, clientSecret, code, redir
 export function checkLinkedinExpiry(store) {
   const auth = store.get(LINKEDIN)?.auth;
   if (!auth?.token || auth.expires - Date.now() > EXPIRY_WARNING) return false;
-  const day = new Date(auth.expires).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const day = new Date(auth.expires).toLocaleDateString(dateLocale(), { month: 'short', day: 'numeric' });
   return notify(store, {
     kind: 'linkedin',
     text: auth.expires > Date.now()

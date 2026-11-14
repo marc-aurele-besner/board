@@ -10,6 +10,7 @@ import { projectLabel } from './monitoring-ai.js';
 import { sortTable } from './monitoring-web.js';
 import { readNow, isReading } from './settings-socials.js';
 import { postMarks, postsCard } from './monitoring-linkedin-posts.js';
+import { dateLocale, numberLocale } from '../locale.js';
 /** @import { Store, SocialAccount, Project } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 
@@ -19,7 +20,7 @@ const DAY = 86400000;
 const SETTINGS_KEY = { x: 'x', linkedin: 'linkedin', github: 'githubAccounts', instagram: 'instagram' };
 // A day's period still draws a week, since the counts are read once or a few times a day.
 const MIN_DAYS = 7;
-const count = new Intl.NumberFormat();
+const count = { format: (/** @type {number} */ n) => n.toLocaleString(numberLocale()) };
 const signed = (/** @type {number} */ n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${count.format(Math.abs(n))}`;
 const percent = (/** @type {number | null} */ p) => (p === null ? '' : `${p > 0 ? '+' : p < 0 ? '−' : ''}${Math.abs(p * 100).toFixed(Math.abs(p) < 0.1 ? 1 : 0)}%`);
 
@@ -101,7 +102,7 @@ function accountCard(store, row, labels, days) {
     row.stars && row.stars.values.filter((v) => v !== null).length > 1
       ? lineChart(labels, [{ name: 'Stars', color: 'var(--warn)', values: row.stars.values, area: true }], { fit: true, format: (v) => count.format(Math.round(v)) })
       : null,
-    a.at ? h('p', { class: 'muted small' }, `Read ${new Date(a.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`) : null);
+    a.at ? h('p', { class: 'muted small' }, `Read ${new Date(a.at).toLocaleString(dateLocale(), { dateStyle: 'medium', timeStyle: 'short' })}`) : null);
 }
 
 /** @param {Store} store @param {PeriodWindow} w */
@@ -159,7 +160,7 @@ export function socialsTab(store, w) {
         text: `${handleLabel(a)} (${NETWORKS[a.network] ?? a.network}): ${a.error}`,
         actions: [h('a', { href: settingsHref(SETTINGS_KEY[a.network] ?? 'linkedin'), class: 'btn-small primary-link' }, 'Open Settings')],
       }))),
-      h('span', { class: 'muted small' }, lastAt ? `Last read ${new Date(lastAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}` : 'Not read yet'),
+      h('span', { class: 'muted small' }, lastAt ? `Last read ${new Date(lastAt).toLocaleString(dateLocale(), { dateStyle: 'medium', timeStyle: 'short' })}` : 'Not read yet'),
       h('button', { type: 'button', class: 'btn-small', disabled: busy, onclick: () => readNow(store, accounts.map((a) => a.id)) },
         refreshIcon(busy), busy ? 'Reading…' : 'Read all now')),
     h('div', { class: 'summary' },

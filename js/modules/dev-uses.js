@@ -7,6 +7,7 @@ import { toast } from '../toast.js';
 import { onContextMenu, copyItem } from '../menu.js';
 import { sessionSkills, sessionMcp, sessionTools, fmtSpan, pct } from '../dev-turns.js';
 import { baseName, openFile } from './dev-files.js';
+import { dateLocale } from '../locale.js';
 /** @import { DevContext } from '../../types/dev' */
 /** @import { RunnerTurns, RunnerSkills, RunnerSkill } from '../../types/terminal' */
 /** @import { MenuEntry } from '../menu.js' */
@@ -15,7 +16,7 @@ import { baseName, openFile } from './dev-files.js';
 // How many of the project's skills not run yet the skills panel lists.
 const UNUSED_SHOWN = 6;
 
-const clock = (/** @type {number} */ at) => (at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
+const clock = (/** @type {number} */ at) => (at ? new Date(at).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' }) : '');
 const plural = (/** @type {number} */ n, /** @type {string} */ one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 // Most calls answer in well under a second.
 const perCall = (/** @type {number} */ t) => (t < 1000 ? `${Math.max(1, Math.round(t))} ms` : fmtSpan(t));

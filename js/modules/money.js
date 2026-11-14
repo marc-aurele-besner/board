@@ -10,6 +10,8 @@ import { projectIcon } from './projects.js';
 import { barChart, legend } from '../chart.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
+import { dateLocale, daysIntoWeek } from '../locale.js';
+import { removeWithUndo } from '../remove.js';
 /** @import { Store, FinanceEntry, Recurring, AiContentPart } from '../../types/data' */
 /** @import { PickOption } from '../inline.js' */
 
@@ -120,7 +122,7 @@ function windowFor(range, entries) {
 /** @param {Date} date @param {string} group */
 function bucketKey(date, group) {
   if (group === 'day') return ymd(date);
-  if (group === 'week') return ymd(addDays(date, -((date.getDay() + 6) % 7))); // weeks start on Monday
+  if (group === 'week') return ymd(addDays(date, -daysIntoWeek(date))); // weeks start on Appearance's day
   if (group === 'month') return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
   return String(date.getFullYear());
 }
@@ -133,7 +135,7 @@ function bucketLabel(key, group) {
   }
   if (group === 'month') {
     const [y, m] = key.split('-').map(Number);
-    return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+    return new Date(y, m - 1, 1).toLocaleDateString(dateLocale(), { month: 'short', year: '2-digit' });
   }
   return key;
 }
@@ -1090,9 +1092,15 @@ function updateRecurring(store, id, patch) {
 // Stops future entries. The entries it already added stay, as one-off lines.
 /** @param {Store} store @param {string} id */
 function removeRecurring(store, id) {
-  if (!confirm('Stop this recurring expense? The entries it already added stay in Money.')) return;
-  store.update(COLLECTION, (d) => {
-    d.recurring = d.recurring.filter((r) => r.id !== id);
+  removeWithUndo(store, {
+    ask: 'Stop this recurring expense? The entries it already added stay in Money.',
+    done: 'Recurring expense stopped',
+    collections: ['finance'],
+    run: () => {
+      store.update(COLLECTION, (d) => {
+        d.recurring = d.recurring.filter((r) => r.id !== id);
+      });
+    },
   });
 }
 
@@ -1293,7 +1301,7 @@ function draw(root, store) {
     { name: 'Expenses', color: 'var(--expense)', values: keys.map((k) => round2(expenseByBucket.get(k) ?? 0)) },
   ];
   const month = shownMonth(view.range);
-  const monthName = month ? parseYmd(`${month}-01`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : '';
+  const monthName = month ? parseYmd(`${month}-01`).toLocaleDateString(dateLocale(), { month: 'long', year: 'numeric' }) : '';
   const rangeLabel = RANGES.find(([k]) => k === view.range)?.[1] ?? monthName;
   const stepTo = (/** @type {number} */ delta) => () => {
     view.range = stepMonth(view.range, delta);

@@ -1,5 +1,6 @@
 // Plain SVG bar charts with a tooltip. Only numbers and escaped labels go into the markup.
 import { h } from './ui.js';
+import { numberLocale } from './locale.js';
 /** @import { Child } from '../types/ui' */
 
 /**
@@ -22,7 +23,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => /** @type {Record<string
  * @param {BarSeries[]} series
  * @param {{ grouped?: boolean, format?: (v: number) => string, tip?: ChartTip | null }} [options]
  */
-export function barChart(labels, series, { grouped = false, format = (v) => v.toLocaleString(), tip = null } = {}) {
+export function barChart(labels, series, { grouped = false, format = (v) => v.toLocaleString(numberLocale()), tip = null } = {}) {
   const MIN_W = Math.max(360, labels.length * (grouped ? 30 : 16));
   // Matches the CSS height, so one SVG unit is one pixel and the axis text keeps its size.
   const H = 200;
@@ -93,7 +94,7 @@ export function barChart(labels, series, { grouped = false, format = (v) => v.to
  * @param {LineSeries[]} series
  * @param {{ format?: (v: number) => string, tip?: ChartTip | null, fit?: boolean, marks?: number[] }} [options]
  */
-export function lineChart(labels, series, { format = (v) => v.toLocaleString(), tip = null, fit = false, marks = [] } = {}) {
+export function lineChart(labels, series, { format = (v) => v.toLocaleString(numberLocale()), tip = null, fit = false, marks = [] } = {}) {
   const MIN_W = 360;
   const H = 200;
   const PAD = 24;

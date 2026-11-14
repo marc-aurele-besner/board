@@ -14,6 +14,7 @@ import { projectIcon } from './projects.js';
 import { sortTable } from './monitoring-web.js';
 import { devProjectOf, projectLabel, segmented, previous, change, NO_PROJECT } from './monitoring-ai.js';
 import { skillsView, toolsView } from './monitoring-development-tools.js';
+import { dateLocale, daysIntoWeek, weekStart } from '../locale.js';
 /** @import { DevTurn, DevUsage, Project, Store } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 /** @import { Child } from '../../types/ui' */
@@ -25,7 +26,9 @@ export const VIEWS = [['overview', 'Overview'], ['turns', 'Turns'], ['skills', '
 export const KINDS = [['skills', 'Skills'], ['mcp', 'MCP tools'], ['servers', 'MCP servers']];
 const MEASURES = [['time', 'Time'], ['turns', 'Turns']];
 const WHEN = [['hour', 'Hour of day'], ['day', 'Day of week']];
-const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const SHORT_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// The days in week order, starting on Appearance's day.
+const days = () => SHORT_NAMES.map((_, i) => SHORT_NAMES[(i + weekStart()) % 7]);
 const PARTS = /** @type {const} */ ([
   ['work', 'Claude working', 'var(--accent)'],
   ['wait', 'Waiting on you', 'var(--warn)'],
@@ -216,7 +219,7 @@ function overview(ctx) {
 
   // When the prompts go out.
   const byHour = developmentView.when === 'hour';
-  const whenLabels = byHour ? Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')) : DAYS;
+  const whenLabels = byHour ? Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')) : days();
   const when = [
     { name: 'Prompts', color: 'var(--accent)', values: whenLabels.map(() => 0) },
     { name: 'Interrupted', color: 'var(--warn)', values: whenLabels.map(() => 0) },
@@ -224,7 +227,7 @@ function overview(ctx) {
   const whenWork = whenLabels.map(() => 0);
   for (const { t } of turns) {
     const d = new Date(t.at);
-    const i = byHour ? d.getHours() : (d.getDay() + 6) % 7;
+    const i = byHour ? d.getHours() : daysIntoWeek(d);
     when[t.interrupted ? 1 : 0].values[i]++;
     whenWork[i] += workOf(t);
   }
@@ -335,7 +338,7 @@ function turnsView(ctx) {
         { label: 'Failed', num: true, value: (r) => r.failed, format: count },
         { label: 'Output', num: true, value: (r) => r.tokens, format: fmtTokens },
         { label: 'Task time', num: true, value: (r) => r.elapsed, format: fmtSpan },
-        { label: 'Last reply', num: true, value: (r) => r.last, format: (v) => new Date(v).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) },
+        { label: 'Last reply', num: true, value: (r) => r.last, format: (v) => new Date(v).toLocaleString(dateLocale(), { dateStyle: 'short', timeStyle: 'short' }) },
       ], [...rows].sort((a, b) => b.last - a.last)),
       h('p', { class: 'muted small' }, 'Each task counts all its turns, also those before the period. Per turn is the median; Output is the tokens claude wrote.')),
     h('section', { class: 'card stack' },
@@ -344,7 +347,7 @@ function turnsView(ctx) {
         const all = callsOf(t);
         const mcp = callsOf(t, isMcp);
         return h('li', null,
-          h('span', { class: 'muted small time' }, new Date(t.at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })),
+          h('span', { class: 'muted small time' }, new Date(t.at).toLocaleString(dateLocale(), { dateStyle: 'short', timeStyle: 'short' })),
           h('span', { class: 'grow cell-clip', title: t.text }, h('span', null, t.text || '—'), h('span', { class: 'muted small' }, ' ·', turnIcon(project), ` ${labelOf.get(r.name) ?? r.name}`)),
           Object.keys(t.skills ?? {}).map((name) => h('span', { class: 'pill tone-doing', title: 'A skill this turn ran' }, `/${name}`)),
           mcp.calls ? h('span', { class: 'pill tone-plain', title: mcpTitle(t) }, `MCP ${mcp.calls}`) : null,

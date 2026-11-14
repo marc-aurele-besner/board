@@ -14,6 +14,7 @@ import { uid } from '../ui.js';
 import { readPositions, poolState, tokenMeta, isAddressSymbol, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, MAX_TICK, chainSettings, addedPositions, scanV4, readV4Position, readV3Position, readV2Pair, walletV2Pairs, readStaked, pancakeOf, deploymentOf, scanKey, positionUrl, dexName, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey, nodeUrls } from '../uniswap.js';
 import { etherscanKey } from '../chains.js';
 import { poolsChanged } from '../automations.js';
+import { dateLocale, numberLocale } from '../locale.js';
 /** @import { DataStore, UniswapSettings, Wallet, PoolsData, PoolRow, PoolCachePart, ChainPrices, FeeBaseline, CollectEntry, EarnedHours, V4Scan, V2Scan, AprEntry, PositionsReadState, PositionHistory } from '../../types/data' */
 /** @import { PositionRow } from '../../types/defi' */
 /** @import { Chain, Position, PoolState } from '../../types/uniswap' */
@@ -686,7 +687,7 @@ async function eachLimit(items, width, fn) {
 // short range shows the hour too.
 /** @param {number} chainId @param {number} from @param {number} to */
 function blockSpan(chainId, from, to) {
-  const blocks = `blocks ${from.toLocaleString()}–${to.toLocaleString()}`;
+  const blocks = `blocks ${from.toLocaleString(numberLocale())}–${to.toLocaleString(numberLocale())}`;
   const clock = clocks.get(chainId);
   if (!clock) return blocks;
   /** @param {number} b */
@@ -696,7 +697,7 @@ function blockSpan(chainId, from, to) {
   /** @type {Intl.DateTimeFormatOptions} */
   // @ts-expect-error Date minus Date is their distance in ms, which TypeScript does not allow
   const opts = b - a < 2 * DAY_MS ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric', year: 'numeric' };
-  return `${a.toLocaleString(undefined, opts)} – ${b.toLocaleString(undefined, opts)} (${blocks})`;
+  return `${a.toLocaleString(dateLocale(), opts)} – ${b.toLocaleString(dateLocale(), opts)} (${blocks})`;
 }
 
 // One position's collects from the node. step names it among the chain's positions ("2 of 7"). lanes: how many
@@ -724,7 +725,7 @@ async function nodeCollects(store, chain, node, r, step, lanes = 1) {
       .filter(([tx]) => !checked.has(tx) && wanted(store, r.ref, tx, 3));
     let read = 0;
     await eachLimit(txs, lanes, async ([tx, time]) => {
-      say(`${label} · reading what transaction ${++read} of ${txs.length} collected (${new Date(time * 1000).toLocaleString()})`);
+      say(`${label} · reading what transaction ${++read} of ${txs.length} collected (${new Date(time * 1000).toLocaleString(dateLocale())})`);
       const res = await collectTx(chain, nodeSource(node), node, tx, posOf(r));
       if (!res || res.level > 1) checked.add(tx);
       if (res && (res.f0 > 0 || res.f1 > 0) && wanted(store, r.ref, tx, res.level)) found.push(await collectEntry(chain, r, tx, time, res.f0, res.f1, res.level, 'chain'));
@@ -760,7 +761,7 @@ async function etherscanCollects(store, chain, node, key, wallets, rows) {
     const who = `Etherscan: wallet ${shortAddress(wallet)}`;
     while (more && budget > 0) {
       const start = block;
-      tell(chain.id, `${who} · listing its position transactions from block ${start.toLocaleString()}`);
+      tell(chain.id, `${who} · listing its position transactions from block ${start.toLocaleString(numberLocale())}`);
       const page = await walletPositionTxs(key, chain, wallet, start);
       const todo = page.txs.filter((t) => !checked.has(t.tx));
       const count = Math.min(todo.length, budget);
@@ -770,7 +771,7 @@ async function etherscanCollects(store, chain, node, key, wallets, rows) {
           break;
         }
         budget--;
-        tell(chain.id, `${who} · reading transaction ${i + 1} of ${count} (${new Date(t.time * 1000).toLocaleString()})`);
+        tell(chain.id, `${who} · reading transaction ${i + 1} of ${count} (${new Date(t.time * 1000).toLocaleString(dateLocale())})`);
         const receipt = await src.call('eth_getTransactionReceipt', [t.tx]);
         for (const p of await positionsInReceipt(chain, node, receipt)) {
           const r = byRef.get(refOf(p.version, chain.id, p.tokenId, undefined, chain.dex));

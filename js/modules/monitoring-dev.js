@@ -6,6 +6,7 @@ import { sumUsage, modelName, tokensOf, fmtDuration } from '../dev-usage.js';
 import { usdPrecise, fmtTokens } from './monitoring.js';
 import { sortTable } from './monitoring-web.js';
 import { aiView, projectMark, devProjectOf, segmented, PALETTE, OTHER, NO_PROJECT, TOP } from './monitoring-ai.js';
+import { numberLocale } from '../locale.js';
 /** @import { DevUsage, Store } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 /** @import { ChartTip } from '../chart.js' */
@@ -126,7 +127,7 @@ export function devBreakdown(store, w, records) {
   };
   const total = rows.reduce((t, r) => t + r.value, 0);
   const swatch = (/** @type {Row} */ r) => h('span', { class: 'legend-swatch', style: { background: shownKeys.has(r.key) ? r.color : OTHER.color } });
-  const lineCount = (/** @type {number} */ v) => (v ? Math.round(v).toLocaleString() : '—');
+  const lineCount = (/** @type {number} */ v) => (v ? Math.round(v).toLocaleString(numberLocale()) : '—');
 
   return [
     h('div', { class: 'row ai-chart-controls' },

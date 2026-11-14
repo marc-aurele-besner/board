@@ -20,6 +20,7 @@ import { SOCIALS, handleLabel } from './socials.js';
 import { upcomingMeetings } from './meetings.js';
 import { findCompanies, companyByHandle, companyPeople, companyRef, readProfile, PEOPLE_PAGE, PEOPLE_MAX, COMPANY_TOP_MAX } from './linkedin-search.js';
 import { addContacts, findByLinkedin, findByEmail, linkedinHandle } from './contacts-core.js';
+import { dateLocale, weekStart } from './locale.js';
 /** @import { DataStore, Store, CronStep, CronSource, CronFlow, CronSchedule, CronTemplate, CronRun, CronRunStep, CronRunCurrent, CronTest, CronPr, CronFormatField, LinkedinPost, Project, Task, SiteLogEntry, TaskLink, IconName } from '../types/data' */
 // The variables a step's templates read; $data holds what a name reads into with a path.
 /** @typedef {{ [name: string]: unknown, $data?: Record<string, unknown> }} Vars */
@@ -1017,8 +1018,9 @@ function daysLabel(days) {
   if (key === '06') return 'Weekends';
   if (key === '0123456') return 'Every day';
   if (days.length === 1) return `${WEEKDAYS[days[0]]}s`;
-  // Monday first.
-  return [...days].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((d) => SHORT_DAYS[d]).join(', ');
+  // In week order, from Appearance's first day.
+  const at = (/** @type {number} */ d) => (d - weekStart() + 7) % 7;
+  return [...days].sort((a, b) => at(a) - at(b)).map((d) => SHORT_DAYS[d]).join(', ');
 }
 
 /** @param {CronSchedule} s */
@@ -1529,10 +1531,10 @@ async function gatherCalendar(store, days) {
     throw new Error(waiting.length ? `Sign in again to ${waiting.join(', ')} in Calendar.` : errors.join(' · '));
   }
   /** @param {string} v */
-  const clock = (v) => eventDate(v).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const clock = (v) => eventDate(v).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' });
   // Over several days each event says its day.
   /** @param {string} v */
-  const day = (v) => (days > 1 ? `${eventDate(v).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} ` : '');
+  const day = (v) => (days > 1 ? `${eventDate(v).toLocaleDateString(dateLocale(), { weekday: 'short', month: 'short', day: 'numeric' })} ` : '');
   return events.map((e) => `- ${day(e.start)}${e.allDay ? 'All day' : `${clock(e.start)}–${clock(e.end)}`}: ${e.title}${e.location ? ` (${e.location})` : ''}`).join('\n');
 }
 

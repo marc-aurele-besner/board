@@ -30,6 +30,7 @@ import { recordOfSession, sumUsage, usageLine, usageTitle, mcpTool } from '../de
 import { runnerOf, devAgents, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand, claudeState, devHarnesses, withPrompt, withTaskPointer } from '../dev-core.js';
 import { sessionTools, toolGroup, fmtSpan, pct } from '../dev-turns.js';
 import { cronRunOf, cronRunHref } from '../cron.js';
+import { dateLocale } from '../locale.js';
 /** @import { Store, DevSessionList, IconName } from '../../types/data' */
 /** @import { RunnerInfo, RunnerEvent, RunnerTurns, RunnerStatus, SessionTurn, SessionAgent, ToolFailure } from '../../types/terminal' */
 /** @import { DevContext } from '../../types/dev' */
@@ -1467,7 +1468,7 @@ const turnLine = (/** @type {string} */ text) => {
   const line = oneLine(text);
   return line.length > 70 ? `${line.slice(0, 69)}…` : line;
 };
-const clock = (/** @type {number} */ at) => (at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
+const clock = (/** @type {number} */ at) => (at ? new Date(at).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' }) : '');
 const took = (/** @type {number} */ ms) => {
   if (ms < 60000) return `${Math.max(1, Math.round(ms / 1000))} s`;
   const min = Math.round(ms / 60000);
@@ -1885,7 +1886,7 @@ function drawTools(el, data) {
     const list = failed.get(r.key) ?? [];
     const missing = r.errors - list.length;
     const today = new Date().toDateString();
-    const when = (/** @type {number} */ at) => (!at ? '' : new Date(at).toDateString() === today ? clock(at) : `${new Date(at).toLocaleDateString([], { month: 'short', day: 'numeric' })} ${clock(at)}`);
+    const when = (/** @type {number} */ at) => (!at ? '' : new Date(at).toDateString() === today ? clock(at) : `${new Date(at).toLocaleDateString(dateLocale(), { month: 'short', day: 'numeric' })} ${clock(at)}`);
     return h('div', { class: 'small tool-fails' },
       list.map((f) => h('div', { class: 'tool-fail' },
         h('div', { class: 'muted' }, [when(f.at), named ? (f.name.startsWith('mcp__') ? mcpTool(f.name).tool || f.name : f.name) : '', f.agent ? `by subagent ${f.agent}` : ''].filter(Boolean).join(' · ')),

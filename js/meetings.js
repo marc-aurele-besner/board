@@ -3,6 +3,7 @@
 /** @import { DataStore, CalendarEvent, InboxMessage } from '../types/data' */
 import { calendarEvents, calendarAccounts, eventDate } from './gcal.js';
 import { findByEmail, cleanEmail, linkedinUrl } from './contacts-core.js';
+import { dateLocale } from './locale.js';
 
 // Emails listed per guest, and how long an event description may be.
 export const MEETING_EMAILS = 3;
@@ -26,7 +27,7 @@ const plain = (html) => String(html ?? '').replace(/<br\s*\/?>/gi, '\n').replace
   .replace(/\n{3,}/g, '\n\n').trim();
 
 /** @param {string} v */
-const whenOf = (v) => eventDate(v).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const whenOf = (v) => eventDate(v).toLocaleString(dateLocale(), { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 // The latest emails sent to or received from an address, newest first.
 /** @param {InboxMessage[]} emails @param {string} address @param {number} max @returns {MeetingEmail[]} */

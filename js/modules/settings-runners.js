@@ -6,6 +6,7 @@ import { JOBS, jobConfig } from '../runner-jobs.js';
 import { heartbeat, runnersOnline, jobState, runJob, workerStatus, setWorkerFolder, findWorkerFolder, readRunnersNow } from '../runners.js';
 import { pickFolder } from '../folder-picker.js';
 import { runnerOf } from '../dev-core.js';
+import { dateLocale } from '../locale.js';
 /** @import { Store, RunnerJobState, RunnerWorker } from '../../types/data' */
 /** @typedef {typeof JOBS[number]} Job */
 // GET /status of the runners (tools/worker/http.js), as far as it is read here. null when they do not answer.
@@ -40,7 +41,7 @@ export function when(at) {
   return diff > 0 ? `in ${n} ${unit}` : `${n} ${unit} ago`;
 }
 /** @param {string | null | undefined} at */
-export const exact = (at) => (at ? new Date(at).toLocaleString() : '');
+export const exact = (at) => (at ? new Date(at).toLocaleString(dateLocale()) : '');
 
 /** @param {Store} store */
 function loadStatus(store) {

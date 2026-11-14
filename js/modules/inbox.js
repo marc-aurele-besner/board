@@ -14,6 +14,7 @@ import { toast } from '../toast.js';
 import { resizableSide } from '../side-resize.js';
 import { contactChip, contactOfSender } from './project-contacts.js';
 import { linkedinPane, hasComments, unreadComments } from './inbox-linkedin.js';
+import { dateLocale } from '../locale.js';
 /** @import { Store, InboxMessage, Project, GmailAccount, RunnerJobError, IconName } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @typedef {[string, string, IconName, (e: InboxMessage) => unknown]} Folder */
@@ -88,11 +89,11 @@ function dateOf(at) {
   if (!at) return '';
   const d = new Date(at);
   const today = new Date();
-  if (d.toDateString() === today.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric', ...(d.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }) });
+  if (d.toDateString() === today.toDateString()) return d.toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString(dateLocale(), { month: 'short', day: 'numeric', ...(d.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }) });
 }
 /** @param {string} at */
-const fullDate = (at) => (at ? new Date(at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '');
+const fullDate = (at) => (at ? new Date(at).toLocaleString(dateLocale(), { dateStyle: 'medium', timeStyle: 'short' }) : '');
 
 // Emails of one conversation share a project and a subject, once "Re:" and "Fwd:" are taken off.
 /** @param {string} subject */
@@ -174,7 +175,7 @@ function groupOf(at) {
   if (days === 1) return 'Yesterday';
   if (days < 7) return 'This week';
   if (d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear()) return 'This month';
-  return d.toLocaleDateString([], { month: 'long', year: 'numeric' });
+  return d.toLocaleDateString(dateLocale(), { month: 'long', year: 'numeric' });
 }
 
 /**

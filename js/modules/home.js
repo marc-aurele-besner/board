@@ -13,6 +13,7 @@ import { hostOf, daysUntil } from '../sitecheck.js';
 import { overBudget } from './money.js';
 import { outOfRange } from './positions.js';
 import { unreadCount } from './inbox.js';
+import { dateLocale } from '../locale.js';
 /** @import { Store, Task, Project, ProjectLabel, CalendarEvent, IconName } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 
@@ -80,11 +81,11 @@ function planPanel(store) {
 const cal = { status: 'idle', error: '' };
 
 /** @param {CalendarEvent} e */
-const timeLabel = (e) => (e.allDay ? 'All day' : eventDate(e.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+const timeLabel = (e) => (e.allDay ? 'All day' : eventDate(e.start).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' }));
 /** @param {CalendarEvent} e */
 const dayLabel = (e) => {
   const d = eventDate(e.start);
-  return d.toDateString() === new Date().toDateString() ? '' : d.toLocaleDateString([], { weekday: 'short' });
+  return d.toDateString() === new Date().toDateString() ? '' : d.toLocaleDateString(dateLocale(), { weekday: 'short' });
 };
 
 // Whole days are read, so the cache of Calendar's week or month covers them; events already over are left out.
@@ -401,7 +402,7 @@ function draw(root, store) {
     .filter((i) => statusOf(i) === 'doing' || i.priority === 'high' || (i.due && i.due <= todayISO()))
     .sort((a, b) => (PRIORITY_RANK[a.priority ?? 'none'] - PRIORITY_RANK[b.priority ?? 'none']) || a.created.localeCompare(b.created))
     .slice(0, 6);
-  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const today = new Date().toLocaleDateString(dateLocale(), { weekday: 'long', month: 'long', day: 'numeric' });
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
 

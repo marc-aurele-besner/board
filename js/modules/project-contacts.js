@@ -6,6 +6,7 @@ import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import { CONTACTS, addContacts, findByEmail, contactsOf, linkedinHandle, linkedinUrl, nameFromHandle, cleanEmail } from '../contacts-core.js';
 import { projectIcon, projectTree } from './projects.js';
+import { removeWithUndo } from '../remove.js';
 
 // The full list's search, kept across redraws.
 const listView = { query: '' };
@@ -139,9 +140,13 @@ export function openContactDialog(store, contact, { projectId = null, prefill = 
             type: 'button',
             class: 'btn-small danger',
             onclick: () => {
-              if (!confirm(`Delete ${contact.name} from contacts?`)) return;
-              store.update(CONTACTS, (d) => { d.contacts = d.contacts.filter((x) => x.id !== contact.id); });
-              dialog.close();
+              const removed = removeWithUndo(store, {
+                ask: `Delete ${contact.name} from contacts?`,
+                done: `Deleted ${contact.name}`,
+                collections: [CONTACTS],
+                run: () => store.update(CONTACTS, (d) => { d.contacts = d.contacts.filter((x) => x.id !== contact.id); }),
+              });
+              if (removed) dialog.close();
             },
           }, icon('trash'), 'Delete')
         : h('span'),

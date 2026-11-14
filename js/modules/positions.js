@@ -12,6 +12,7 @@ import { chainById, explorerUrl, etherscanKey } from '../chains.js';
 import { walletsTab, walletsView } from './defi-wallets.js';
 import { lendingTab, lendingView } from './defi-lending.js';
 import { summaryTab } from './defi-summary.js';
+import { dateLocale, daysIntoWeek, numberLocale, weekStart } from '../locale.js';
 /** @import { Store, PoolsData, CollectEntry, FeeBaseline, IconName } from '../../types/data' */
 /** @import { PositionRow, DefiUi, DefiTab, DefiNotice, LpSummary } from '../../types/defi' */
 /** @import { Child } from '../../types/ui' */
@@ -409,7 +410,7 @@ function named(c) {
 }
 
 /** @param {number} n */
-const amount = (n) => (n >= 1000 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toFixed(2) : n.toPrecision(4));
+const amount = (n) => (n >= 1000 ? n.toLocaleString(numberLocale(), { maximumFractionDigits: 0 }) : n >= 1 ? n.toFixed(2) : n.toPrecision(4));
 /** @param {number} n */
 const price = (n) => (n === Infinity ? '∞' : n === 0 ? '0' : amount(n));
 // Amounts are read in USD. In CAD they use today's rate, the same for every amount, and stay in USD until it is known.
@@ -994,7 +995,7 @@ const localDay = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).to
 /** @param {Date} date @param {string} group */
 function bucketOf(date, group) {
   if (group === 'month') return localDay(date).slice(0, 7);
-  if (group === 'week') return localDay(new Date(date.getFullYear(), date.getMonth(), date.getDate() - ((date.getDay() + 6) % 7))); // its Monday
+  if (group === 'week') return localDay(new Date(date.getFullYear(), date.getMonth(), date.getDate() - daysIntoWeek(date))); // its Monday
   return localDay(date);
 }
 // Every bucket from the first to the last, so quiet days or months show as gaps rather than vanishing.
@@ -1003,7 +1004,7 @@ function bucketsBetween(from, to, group) {
   /** @type {string[]} */
   const keys = [];
   const d = new Date(from.getFullYear(), from.getMonth(), group === 'month' ? 1 : from.getDate());
-  if (group === 'week') d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  if (group === 'week') d.setDate(d.getDate() - daysIntoWeek(d));
   while (d <= to && keys.length < 2000) {
     keys.push(bucketOf(d, group));
     if (group === 'month') d.setMonth(d.getMonth() + 1);
@@ -1013,14 +1014,14 @@ function bucketsBetween(from, to, group) {
 }
 /** @param {string} key @param {string} group */
 const bucketLabel = (key, group) => (group === 'month'
-  ? new Date(`${key}-01T00:00`).toLocaleDateString(undefined, { month: 'short', year: '2-digit' })
-  : new Date(`${key}T00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+  ? new Date(`${key}-01T00:00`).toLocaleDateString(dateLocale(), { month: 'short', year: '2-digit' })
+  : new Date(`${key}T00:00`).toLocaleDateString(dateLocale(), { month: 'short', day: 'numeric' }));
 
 // The full name of a bucket, for the chart's tooltip.
 /** @param {string} key @param {string} group */
 function bucketName(key, group) {
-  if (group === 'month') return new Date(`${key}-01T00:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-  const date = new Date(`${key}T00:00`).toLocaleDateString(undefined, { weekday: group === 'day' ? 'short' : undefined, month: 'short', day: 'numeric', year: 'numeric' });
+  if (group === 'month') return new Date(`${key}-01T00:00`).toLocaleDateString(dateLocale(), { month: 'long', year: 'numeric' });
+  const date = new Date(`${key}T00:00`).toLocaleDateString(dateLocale(), { weekday: group === 'day' ? 'short' : undefined, month: 'short', day: 'numeric', year: 'numeric' });
   return group === 'week' ? `Week of ${date}` : date;
 }
 
@@ -1481,7 +1482,7 @@ function nextMilestone(total) {
   return null;
 }
 /** @param {number} ms */
-const shortDate = (ms) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: new Date(ms).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+const shortDate = (ms) => new Date(ms).toLocaleDateString(dateLocale(), { month: 'short', day: 'numeric', year: new Date(ms).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
 
 // The outlook tiles: how this range compares with the one before, what the month and year should end on, the
 // next round total, and how often fees get collected.
@@ -1713,7 +1714,9 @@ function breakdown(store, ctx) {
     split === 'token' ? h('p', { class: 'muted small' }, 'Each collection\'s value is split between its tokens at the position\'s current prices, or evenly when the amounts or prices are unknown.') : null);
 }
 
-const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+// The days in week order, starting on Appearance's day.
+const weekdays = () => DAY_NAMES.map((_, i) => DAY_NAMES[(i + weekStart()) % 7]);
 // Each day of the last 26 weeks as a square, darker for more fees: streaks and quiet spells at a glance.
 /** @param {FeeCtx} ctx */
 function feeCalendar(ctx) {
@@ -1726,7 +1729,7 @@ function feeCalendar(ctx) {
     daily.set(k, { usd: d.usd + (c.usd ?? 0), n: d.n + 1 });
   }
   const today = new Date(nowMs);
-  const first = new Date(today.getFullYear(), today.getMonth(), today.getDate() - ((today.getDay() + 6) % 7) - 25 * 7);
+  const first = new Date(today.getFullYear(), today.getMonth(), today.getDate() - daysIntoWeek(today) - 25 * 7);
   const keys = bucketsBetween(first, today, 'day');
   const shown = keys.map((k) => daily.get(k)?.usd ?? 0);
   // Four shades by quartile of the days with fees, so one big day does not wash out the rest.
@@ -1735,8 +1738,9 @@ function feeCalendar(ctx) {
   const q = [0.25, 0.5, 0.75].map((p) => sorted[Math.floor(p * (sorted.length - 1))]);
   /** @param {number} v */
   const level = (v) => (v <= 0 ? 0 : v <= q[0] ? 1 : v <= q[1] ? 2 : v <= q[2] ? 3 : 4);
+  const WEEKDAYS = weekdays();
   const byWeekday = WEEKDAYS.map(() => 0);
-  keys.forEach((k, i) => { byWeekday[(new Date(`${k}T00:00`).getDay() + 6) % 7] += shown[i]; });
+  keys.forEach((k, i) => { byWeekday[daysIntoWeek(new Date(`${k}T00:00`))] += shown[i]; });
   const sum = byWeekday.reduce((s, v) => s + v, 0);
   const best = byWeekday.indexOf(Math.max(...byWeekday));
   const grid = h('div', { class: 'fee-cal', role: 'img', 'aria-label': `Fees per day over the last 26 weeks: ${plural(sorted.length, 'day')} with collects` },
@@ -1851,10 +1855,10 @@ function feesView(store) {
         feeSortHead(store, 'value', 'Value', { class: 'num' }),
         h('th', null, ''))),
       h('tbody', null, sortCollects([...list], view.feeSort, view.feeDir).map((c) => h('tr', null,
-        h('td', { title: c.since ? `Collected between ${new Date(c.since).toLocaleString()} and ${new Date(c.at).toLocaleString()}` : null },
-          new Date(c.at).toLocaleDateString(),
+        h('td', { title: c.since ? `Collected between ${new Date(c.since).toLocaleString(dateLocale())} and ${new Date(c.at).toLocaleString(dateLocale())}` : null },
+          new Date(c.at).toLocaleDateString(dateLocale()),
           // One logged by hand is set to noon, a placeholder, so it shows no time.
-          c.source === 'manual' ? null : h('span', { class: 'muted' }, ` ${new Date(c.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`),
+          c.source === 'manual' ? null : h('span', { class: 'muted' }, ` ${new Date(c.at).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' })}`),
           c.level === 1 ? h('div', { class: 'muted small' }, `The ${c.sym0} part could not be read`) : null),
         h('td', null, c.chain
           ? h('span', { class: 'chain-chip' }, logo(CHAINS.find((x) => x.name === c.chain)?.logo, c.chain, 'xs'), c.chain)
@@ -1875,7 +1879,7 @@ function feesView(store) {
           type: 'button',
           class: 'icon-btn',
           title: 'Remove',
-          'aria-label': `Remove the collection of ${new Date(c.at).toLocaleDateString()}`,
+          'aria-label': `Remove the collection of ${new Date(c.at).toLocaleDateString(dateLocale())}`,
           onclick: () => removeCollect(store, c),
         }, icon('trash'))))))));
 
@@ -2148,14 +2152,14 @@ function detailFacts(store, r) {
   /** @type {[string, Child][]} */
   const facts = [
     ['Chain', h('span', { class: 'chain-chip' }, logo(chainOf(r.chainId)?.logo, r.chain, 'xs'), r.chain)],
-    ['Protocol', `${dexName(r.dex)} ${r.version} · ${r.feePct}% fee tier${r.feePips !== r.feePct * 10000 ? ` (${(r.feePips / 10000).toLocaleString(undefined, { maximumSignificantDigits: 3 })}% to liquidity)` : ''}`],
+    ['Protocol', `${dexName(r.dex)} ${r.version} · ${r.feePct}% fee tier${r.feePips !== r.feePct * 10000 ? ` (${(r.feePips / 10000).toLocaleString(numberLocale(), { maximumSignificantDigits: 3 })}% to liquidity)` : ''}`],
     ['Position', r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener' }, numberOf(r)) : numberOf(r)],
     ['Owner', r.owner],
     ['Wallet', address('address', r.wallet)],
     [r.version === 'v4' ? 'Pool ID' : r.version === 'v2' ? 'Pair' : 'Pool', r.pool ? (r.version === 'v4' ? copyable(r.pool, { label: `${r.pool.slice(0, 10)}…${r.pool.slice(-6)}` }) : address('address', r.pool)) : '—'],
     [r.sym0, address('token', r.addr0)],
     [r.sym1, address('token', r.addr1)],
-    ['Liquidity', BigInt(r.liq ?? '0').toLocaleString()],
+    ['Liquidity', BigInt(r.liq ?? '0').toLocaleString(numberLocale())],
     ['Read', r.staleAt ? `${ago(r.staleAt)} (outdated)` : state.at ? ago(state.at) : '—'],
     ['Prices', r.pricesAt ? `from ${ago(r.pricesAt)}` : 'Current'],
     ['Collect search', h('span', { class: 'row lp-search', title: COVERAGE_TITLE }, h('div', { class: 'meter', role: 'presentation' }, h('span', { style: { width: `${share * 100}%` } })), coveragePct(share))],
@@ -2163,7 +2167,7 @@ function detailFacts(store, r) {
   // A v2 pair has no collects to search for. What it holds is its share of the pair's own token.
   if (r.version === 'v2') {
     const part = Number(r.supply) > 0 ? Number(r.liq) / Number(r.supply) : 0;
-    facts.splice(-1, 1, ['Share of the pair', `${(part * 100).toLocaleString(undefined, { maximumSignificantDigits: 3 })}%`]);
+    facts.splice(-1, 1, ['Share of the pair', `${(part * 100).toLocaleString(numberLocale(), { maximumSignificantDigits: 3 })}%`]);
   }
   return panel('Details', null,
     h('dl', { class: 'lp-facts' }, facts.map(([k, v]) => h('div', null, h('dt', { class: 'muted small' }, k), h('dd', null, v)))));
@@ -2178,7 +2182,7 @@ function detailCollections(collects) {
       ? h('div', { class: 'mon-scroll' }, h('table', { class: 'mon-table' },
           h('thead', null, h('tr', null, h('th', null, 'Date'), h('th', null, 'Tokens'), h('th', null, 'Source'), h('th', { class: 'num' }, 'Value'))),
           h('tbody', null, collects.map((c) => h('tr', null,
-            h('td', null, new Date(c.at).toLocaleDateString()),
+            h('td', null, new Date(c.at).toLocaleDateString(dateLocale())),
             h('td', { class: 'small' }, tokenCell(c)),
             h('td', { class: 'small muted', title: c.tx ?? null }, SOURCE_NAMES[sourceOf(c)]),
             h('td', { class: 'num' }, usdOrDash(c.usd ?? null)))))))

@@ -8,6 +8,7 @@ import { highlight, languageOf } from '../highlight.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import { pickChip } from '../inline.js';
+import { numberLocale } from '../locale.js';
 /** @import { ApiRequest, RequestPair, Store } from '../../types/data' */
 /** @import { Wire, WireAnswer, SchemaField } from '../http-request.js' */
 
@@ -473,7 +474,7 @@ function answerView(store, r) {
       h('div', { class: 'row req-stats' },
         h('span', { class: `pill tone-${toneOf(d.status)}` }, `${d.status} ${d.statusText}`.trim()),
         errors.length ? h('span', { class: 'pill tone-high', title: errors.join('\n') }, `${errors.length} GraphQL error${errors.length === 1 ? '' : 's'}`) : null,
-        h('span', { class: 'small' }, `${d.ms.toLocaleString()} ms`),
+        h('span', { class: 'small' }, `${d.ms.toLocaleString(numberLocale())} ms`),
         h('span', { class: 'small' }, sizeOf(d.size)),
         h('span', { class: 'small muted' }, a.via === 'browser' ? 'sent by the browser' : 'sent by the runners')),
       d.body ? h('button', { type: 'button', class: 'btn-small', onclick: () => copy(d.body, 'Body') }, icon('copy'), 'Copy body') : null),

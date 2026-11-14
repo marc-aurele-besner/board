@@ -5,6 +5,7 @@ import { h, icon } from '../ui.js';
 import { gitPullRequest, gitDiff } from '../terminal.js';
 import { languageOf } from '../highlight.js';
 import { openView, openDiff, openFile, splitDiff, diffRows, baseName } from './dev-files.js';
+import { dateLocale } from '../locale.js';
 /** @import { DevContext } from '../../types/dev' */
 /** @import { GitPullRequest } from '../../types/terminal' */
 /** @import { DiffFile, FileTab } from './dev-files.js' */
@@ -203,7 +204,7 @@ function draw(ctx, path, tab) {
       pr.commits.map((c) => h('button', {
         type: 'button',
         class: 'tree-item',
-        title: `${c.subject}\n${c.author} · ${new Date(c.at).toLocaleString()}`,
+        title: `${c.subject}\n${c.author} · ${new Date(c.at).toLocaleString(dateLocale())}`,
         onclick: () => openDiff(ctx, { key: `git:commit:${c.hash}`, name: c.short, title: c.subject, load: () => gitDiff(ctx.base(), { path, commit: c.hash }) }),
       }, icon('git-commit'), h('span', { class: 'tree-name' }, c.subject), h('code', { class: 'scm-dir muted' }, c.short))),
       pr.count > pr.commits.length ? h('p', { class: 'muted small' }, `${pr.count - pr.commits.length} older commits not listed.`) : null) : null,

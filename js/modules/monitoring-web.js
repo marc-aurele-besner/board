@@ -8,6 +8,7 @@ import { hostOf } from '../sitecheck.js';
 import { barChart, legend } from '../chart.js';
 import { stat } from './monitoring.js';
 import { projectLabel } from './monitoring-ai.js';
+import { numberLocale } from '../locale.js';
 /** @import { Project, Store } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @import { MonitoringView, PeriodWindow, SortColumn } from '../../types/monitoring' */
@@ -21,7 +22,7 @@ const ymd = (/** @type {number} */ ms) => {
   const d = new Date(ms);
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 };
-const fmt = (/** @type {number} */ n) => Math.round(n).toLocaleString();
+const fmt = (/** @type {number} */ n) => Math.round(n).toLocaleString(numberLocale());
 const pct = (/** @type {number} */ n) => `${(n * 100).toFixed(1)}%`;
 const duration = (/** @type {number} */ s) => (s >= 60 ? `${Math.floor(s / 60)} min ${Math.round(s % 60)} s` : `${Math.round(s)} s`);
 

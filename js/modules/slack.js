@@ -18,6 +18,9 @@ import {
   SLACK, SLACK_DEFAULTS, keyOf, splitKey, addWorkspaces, listChannels, ensureUsers, readCounts, readHistory, readThread,
   postMessage, editMessage, deleteMessage, react, markRead, customEmoji, fileData, slackLink,
 } from '../slack.js';
+import { dateLocale } from '../locale.js';
+import { removeWithUndo } from '../remove.js';
+import { askBeforeRemoving } from '../appearance.js';
 /** @import { Store, SlackData, SlackWorkspace, SlackChannel, SlackGroup, Project } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @import { MenuEntry } from '../menu.js' */
@@ -517,7 +520,7 @@ function emojiNode(team, name) {
 /** @param {string} ts */
 const dateOf = (ts) => new Date(Number(ts) * 1000);
 /** @param {string} ts */
-const timeOf = (ts) => dateOf(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const timeOf = (ts) => dateOf(ts).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' });
 /** @param {string} ts */
 function dayOf(ts) {
   const d = dateOf(ts);
@@ -525,7 +528,7 @@ function dayOf(ts) {
   const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
   if (d.toDateString() === today.toDateString()) return 'Today';
   if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
-  return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', ...(d.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) });
+  return d.toLocaleDateString(dateLocale(), { weekday: 'long', month: 'long', day: 'numeric', ...(d.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) });
 }
 
 // A small dialog with one text field.
@@ -814,6 +817,25 @@ function sectionMenu(store, section) {
 
 /** @param {Store} store @param {SlackWorkspace} w */
 export function confirmRemove(store, w) {
+  const remove = () => {
+    const prefix = `${w.id}|`;
+    if (view.open.startsWith(prefix)) view.open = '';
+    change(store, (d) => {
+      d.workspaces = d.workspaces.filter((x) => x.id !== w.id);
+      delete d.channels[w.id];
+      delete d.users[w.id];
+      d.muted = d.muted.filter((k) => !k.startsWith(prefix));
+      d.order = d.order.filter((k) => !k.startsWith(prefix));
+      d.collapsed = d.collapsed.filter((k) => k !== w.id);
+      for (const k of Object.keys(d.projects)) if (k.startsWith(prefix)) delete d.projects[k];
+      for (const g of d.groups) g.items = g.items.filter((k) => !k.startsWith(prefix));
+    });
+  };
+  // With Appearance's "Ask before removing" off: at once, with Undo.
+  if (!askBeforeRemoving()) {
+    removeWithUndo(store, { ask: '', done: `Removed ${w.name}`, collections: ['slack'], run: remove });
+    return;
+  }
   const dialog = openDialog({
     title: `Remove ${w.name}?`,
     body: h('div', { class: 'stack' },
@@ -825,18 +847,7 @@ export function confirmRemove(store, w) {
           class: 'danger',
           onclick: () => {
             dialog.close();
-            const prefix = `${w.id}|`;
-            if (view.open.startsWith(prefix)) view.open = '';
-            change(store, (d) => {
-              d.workspaces = d.workspaces.filter((x) => x.id !== w.id);
-              delete d.channels[w.id];
-              delete d.users[w.id];
-              d.muted = d.muted.filter((k) => !k.startsWith(prefix));
-              d.order = d.order.filter((k) => !k.startsWith(prefix));
-              d.collapsed = d.collapsed.filter((k) => k !== w.id);
-              for (const k of Object.keys(d.projects)) if (k.startsWith(prefix)) delete d.projects[k];
-              for (const g of d.groups) g.items = g.items.filter((k) => !k.startsWith(prefix));
-            });
+            remove();
           },
         }, 'Remove'))),
   });
@@ -1231,7 +1242,7 @@ function messageRow(store, key, m, { compact, inThread }) {
   const ctx = markupContext(store, team);
   if (SYSTEM.test(m.subtype)) {
     return h('div', { class: 'slack-msg system', 'data-ts': m.ts },
-      h('span', { class: 'slack-time', title: dateOf(m.ts).toLocaleString() }, timeOf(m.ts)),
+      h('span', { class: 'slack-time', title: dateOf(m.ts).toLocaleString(dateLocale()) }, timeOf(m.ts)),
       h('span', { class: 'muted small' }, markup(m.text, ctx)));
   }
   const reactions = m.reactions.length
@@ -1275,13 +1286,13 @@ function messageRow(store, key, m, { compact, inThread }) {
     h('a', { class: 'icon-btn', href: slackLink(w, channel, m.ts), target: '_blank', rel: 'noopener noreferrer', title: 'Open in Slack', 'aria-label': 'Open in Slack' }, icon('link')));
   const row = h('div', { class: compact ? 'slack-msg compact' : 'slack-msg', 'data-ts': m.ts },
     compact
-      ? h('span', { class: 'slack-time slack-gutter', title: dateOf(m.ts).toLocaleString() }, timeOf(m.ts))
+      ? h('span', { class: 'slack-time slack-gutter', title: dateOf(m.ts).toLocaleString(dateLocale()) }, timeOf(m.ts))
       : avatar(name, person?.avatar || m.avatar),
     h('div', { class: 'slack-msg-body' },
       compact ? null : h('div', { class: 'slack-msg-meta' },
         h('strong', null, name),
         person?.bot || (!m.user && m.username) ? h('span', { class: 'pill tone-plain' }, 'App') : null,
-        h('span', { class: 'slack-time', title: dateOf(m.ts).toLocaleString() }, timeOf(m.ts))),
+        h('span', { class: 'slack-time', title: dateOf(m.ts).toLocaleString(dateLocale()) }, timeOf(m.ts))),
       m.text ? markup(m.text, ctx) : null,
       m.edited ? h('span', { class: 'muted small' }, '(edited)') : null,
       files,

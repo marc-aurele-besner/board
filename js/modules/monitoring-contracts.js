@@ -7,6 +7,7 @@ import { barChart, legend } from '../chart.js';
 import { stat } from './monitoring.js';
 import { sortTable } from './monitoring-web.js';
 import { logo } from './positions.js';
+import { dateLocale, numberLocale } from '../locale.js';
 /** @import { Store, Settings, Contract } from '../../types/data' */
 /** @import { Activity } from '../contracts.js' */
 /** @import { BarSeries } from '../chart.js' */
@@ -20,9 +21,9 @@ const cache = new Map();
 
 // One color per contract in the "All" chart, from the theme's tokens.
 const COLORS = ['var(--accent)', 'var(--info)', 'var(--income)', 'var(--warn)', 'var(--ai)', 'var(--expense)'];
-const fmt = (/** @type {number} */ n) => Math.round(n).toLocaleString();
+const fmt = (/** @type {number} */ n) => Math.round(n).toLocaleString(numberLocale());
 const short = (/** @type {string} */ a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
-const timeOf = (/** @type {number} */ ms) => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const timeOf = (/** @type {number} */ ms) => new Date(ms).toLocaleString(dateLocale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 /** @param {Store} store @param {Settings} settings @param {Contract} c @param {PeriodWindow} w @param {string} period */
 function load(store, settings, c, w, period) {

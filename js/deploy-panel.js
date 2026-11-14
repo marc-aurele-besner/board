@@ -4,6 +4,7 @@ import { h, icon, copyable } from './ui.js';
 import { openDialog } from './modal.js';
 import { deployLog } from './deployments.js';
 import { runJob } from './runners.js';
+import { dateLocale } from './locale.js';
 /** @import { Store, PreviewItem } from '../types/data' */
 /** @import { DeployLog } from './deployments.js' */
 /** @typedef {PreviewItem & { pr: { repo: string, number: number } }} PrPreview */
@@ -24,7 +25,7 @@ function span(ms) {
 /** @param {number} at */
 const ago = (at) => (Date.now() - at < 45000 ? 'just now' : `${span(Date.now() - at).split(' ')[0]} ago`);
 /** @param {number} at */
-const clock = (at) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const clock = (at) => new Date(at).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 /** @param {string} state */
 export const stateDot = (state) => h('span', { class: `deploy-dot deploy-${state || 'unknown'}`, 'aria-hidden': 'true' });
@@ -41,7 +42,7 @@ function facts(i) {
       h('dt', null, 'Pull request'),
       h('dd', null, h('a', { href: `https://github.com/${i.pr.repo}/pull/${i.pr.number}`, target: '_blank', rel: 'noopener' }, `${i.pr.repo} #${i.pr.number}`)),
       i.sha ? [h('dt', null, 'Commit'), h('dd', null, h('a', { class: 'mono', href: `https://github.com/${i.pr.repo}/commit/${i.sha}`, target: '_blank', rel: 'noopener' }, i.sha.slice(0, 7)))] : null,
-      i.created ? [h('dt', null, 'Started'), h('dd', { title: new Date(i.created).toLocaleString() }, ago(i.created))] : null,
+      i.created ? [h('dt', null, 'Started'), h('dd', { title: new Date(i.created).toLocaleString(dateLocale()) }, ago(i.created))] : null,
       took ? [h('dt', null, isLive(i.state) ? 'Running for' : 'Took'), h('dd', null, span(took))] : null,
       i.url ? [h('dt', null, 'Preview'), h('dd', { class: 'deploy-url' }, copyable(i.url))] : null),
     i.error ? h('p', { class: 'deploy-error', role: 'alert' }, icon('alert'), h('span', null, i.error)) : null,

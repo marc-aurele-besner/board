@@ -8,11 +8,12 @@ import { METRIC_STEPS, stepOf } from '../linkedin-reads.js';
 import { dayKey, isOrganization } from '../socials.js';
 import { sortTable } from './monitoring-web.js';
 import { projectLabel } from './monitoring-ai.js';
+import { dateLocale, numberLocale } from '../locale.js';
 /** @import { Store, SocialAccount, LinkedinPost, LinkedinPostMetrics, Project } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 /** @import { Child } from '../../types/ui' */
 
-const count = new Intl.NumberFormat();
+const count = { format: (/** @type {number} */ n) => n.toLocaleString(numberLocale()) };
 // Posts being read now, so their button shows it.
 /** @type {Set<string>} */
 const reading = new Set();
@@ -89,7 +90,7 @@ const readAt = (p, step) => (p.metrics ?? []).filter((m) => stepOf(p, m) === ste
 
 /** @param {LinkedinPostMetrics | null} m */
 const stepCell = (m) => (m
-  ? h('span', { title: `${resultsText(m)}, read ${new Date(m.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}` }, count.format(m.reactions ?? 0))
+  ? h('span', { title: `${resultsText(m)}, read ${new Date(m.at).toLocaleString(dateLocale(), { dateStyle: 'medium', timeStyle: 'short' })}` }, count.format(m.reactions ?? 0))
   : h('span', { class: 'muted' }, '—'));
 
 // The Posts card: the posts published in the period with their last read results and the reactions at each step.
@@ -112,7 +113,7 @@ export function postsCard(store, w, projects) {
     h('p', { class: 'muted small' }, 'Results are read through the saved session about 1 hour, 24 hours and 7 days after posting. The 1h, 24h and 7d columns are reactions at each read.'),
     rows.length
       ? sortTable('linkedin-posts', [
-        { label: 'Date', value: (r) => Number(r.post.postedAt), format: (v) => new Date(v).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) },
+        { label: 'Date', value: (r) => Number(r.post.postedAt), format: (v) => new Date(v).toLocaleString(dateLocale(), { dateStyle: 'medium', timeStyle: 'short' }) },
         {
           label: 'Post',
           clip: true,
