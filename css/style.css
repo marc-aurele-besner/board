@@ -1059,7 +1059,7 @@ select { width: auto; min-width: 0; }
 
 /* Positions added by hand, in Settings → Uniswap: striped rows, with the status as a coloured edge. */
 .added-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-.added-row { --edge: var(--border); display: grid; grid-template-columns: 10rem minmax(0, 1fr) 9rem 10rem auto; align-items: center; gap: 6px 14px; padding: 8px 12px; border-left: 3px solid var(--edge); }
+.added-row { --edge: var(--border); display: grid; grid-template-columns: 10rem minmax(0, 1fr) 11rem 10rem auto; align-items: center; gap: 6px 14px; padding: 8px 12px; border-left: 3px solid var(--edge); }
 .added-row:nth-child(even) { background: var(--surface-2); }
 .added-head { border-left-color: transparent; font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .added-row.tone-in { --edge: var(--income); }
@@ -1669,6 +1669,9 @@ button.run-chip.preview-link { min-height: 28px; padding: 3px 10px; border-radiu
 /* .row sets display, which would otherwise keep the pickers on screen once a link has named the chain. */
 .lp-pickers[hidden], .lp-detected[hidden] { display: none; }
 .lp-detected { margin: 0; }
+.dex-pill, .farm-pill { font-size: 0.72rem; font-weight: 600; padding: 1px 7px; border-radius: 6px; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); }
+.farm-pill { color: var(--income); background: color-mix(in srgb, var(--income) 12%, transparent); border-color: transparent; }
+.lp-with-reward { display: inline-flex; flex-direction: column; align-items: inherit; gap: 2px; }
 .fee-pill { font-size: 0.72rem; font-weight: 600; padding: 1px 7px; border-radius: 6px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); font-variant-numeric: tabular-nums; }
 .status-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
 .status-pill.in { color: var(--income); background: color-mix(in srgb, var(--income) 12%, transparent); }

@@ -7,7 +7,7 @@ import { positionFields, positionError } from '../position-input.js';
 import { insightsPanel } from '../pool-insights.js';
 import { WINDOWS, refOf, shortAddress, baselineOf, coversCollect, collectKey, levelOf, mergeCollects, cachedRows, enabledChains, openPositions, knownTokens } from '../defi/positions-read.js';
 import { runJob, jobState } from '../runners.js';
-import { readPositions, poolState, tokenMeta, isAddressSymbol, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, tokenList, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey, nodeUrls } from '../uniswap.js';
+import { readPositions, poolState, tokenMeta, isAddressSymbol, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, chainSettings, tokenLogos, tokenList, scanV4, readV4Position, readV3Position, addedPositions, parsePosition, addPosition, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey, nodeUrls, dexName, scanKey } from '../uniswap.js';
 import { chainById, explorerUrl, etherscanKey } from '../chains.js';
 import { walletsTab, walletsView } from './defi-wallets.js';
 import { lendingTab, lendingView } from './defi-lending.js';
@@ -311,7 +311,7 @@ function loadHistory(store, only = null) {
 /** @param {PositionRow} r @param {Partial<PoolsData>} d @param {string} key */
 function searchShare(r, d, key) {
   const ether = key && chainOf(r.chainId)?.etherscan !== false;
-  if (ether && d.etherscan?.[r.chainId]?.[r.wallet]?.caughtUp) return 1;
+  if (ether && d.etherscan?.[scanKey({ id: r.chainId, dex: r.dex })]?.[r.wallet]?.caughtUp) return 1;
   const s = d.history?.[r.ref];
   if (!s) return 0;
   const floor = s.floor ?? (r.version === 'v4' ? chainOf(r.chainId)?.v4?.start ?? 0 : 0);
@@ -422,8 +422,25 @@ const usdOrDash = (n) => (n === null ? '—' : cash(n));
 const numberOf = (r) => (r.version === 'v2' && r.tokenId ? shortAddress(r.tokenId) : `#${r.tokenId ?? '—'}`);
 // v2 has no unclaimed fees: they are in the pair's reserves, so in the value.
 const V2_FEES = 'Uniswap v2 adds the fees to the pool as they are paid: they are part of the value, and nothing waits to be claimed.';
+// A staked position's fees, with the farm's reward it can harvest below them.
 /** @param {PositionRow} r */
-const unclaimed = (r) => (r.version === 'v2' ? h('span', { class: 'muted', title: V2_FEES }, 'In the pool') : usdOrDash(r.fees));
+const unclaimed = (r) => (r.version === 'v2'
+  ? h('span', { class: 'muted', title: V2_FEES }, 'In the pool')
+  : r.staked
+    // Its value alone fits a card; the tokens are in the tooltip.
+    ? h('span', { class: 'lp-with-reward' }, usdOrDash(r.fees), h('span', { class: 'muted small', title: `${rewardText(r)}: the farm's reward, waiting to be harvested` },
+        `+ ${r.rewardUsd != null ? cash(r.rewardUsd) : amount(r.reward ?? 0)} ${r.rewardSym ?? 'CAKE'}`))
+    : usdOrDash(r.fees));
+// The reward as tokens, and its value when the token is priced.
+/** @param {PositionRow} r */
+const rewardText = (r) => `${amount(r.reward ?? 0)} ${r.rewardSym ?? 'CAKE'}${r.rewardUsd != null ? ` (${cash(r.rewardUsd)})` : ''}`;
+// The exchange and version of a row, and whether it is staked in a farm. Uniswap's rows name only the version.
+/** @param {PositionRow} r */
+const versionPills = (r) => [
+  r.dex ? h('span', { class: 'dex-pill', title: dexName(r.dex) }, dexName(r.dex)) : null,
+  h('span', { class: 'version-pill', title: `${dexName(r.dex)} ${r.version}` }, r.version),
+  r.staked ? h('span', { class: 'farm-pill', title: `Staked in ${dexName(r.dex)}'s farm, earning ${r.rewardSym ?? 'CAKE'}` }, 'Farming') : null,
+];
 
 // Fetches today's rate once a day when CAD is picked, then draws again.
 /** @param {Store} store */
@@ -706,11 +723,11 @@ function poolCard(r, i, collected, store) {
         h('button', { type: 'button', class: 'link-btn pool-name', title: 'See this position', onclick: () => openDetail(store, r.ref) }, r.pair),
         h('div', { class: 'pool-meta' },
           h('span', { class: 'chain-chip' }, logo(chain?.logo, r.chain, 'xs'), r.chain),
-          h('span', { class: 'version-pill', title: `Uniswap ${r.version}` }, r.version),
+          versionPills(r),
           h('span', { class: 'fee-pill' }, `${r.feePct}%`),
           statusPill(r),
           outdatedPill(r))),
-      r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn pool-open', title: 'Open on Uniswap', 'aria-label': `Open position ${r.tokenId} on Uniswap` }, icon('link')) : null),
+      r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn pool-open', title: `Open on ${dexName(r.dex)}`, 'aria-label': `Open position ${r.tokenId} on ${dexName(r.dex)}` }, icon('link')) : null),
     rangeView(r, store),
     h('div', { class: r.closed ? 'pool-stats' : 'pool-stats four' },
       poolStat('Value', usdOrDash(r.value)),
@@ -796,7 +813,7 @@ function poolTable(rows, store) {
         },
           h('td', null, h('div', { class: 'row' },
             h('div', { class: 'pair' }, logo(tokenLogoOf(r, r.addr0), r.sym0, 'token'), logo(tokenLogoOf(r, r.addr1), r.sym1, 'token second')),
-            h('div', null, h('button', { type: 'button', class: 'link-btn', title: 'See this position', onclick: () => openDetail(store, r.ref) }, r.pair), ' ', h('span', { class: 'version-pill', title: `Uniswap ${r.version}` }, r.version), outdatedPill(r), h('div', { class: 'muted small' }, `${r.owner} · ${numberOf(r)}`)))),
+            h('div', null, h('button', { type: 'button', class: 'link-btn', title: 'See this position', onclick: () => openDetail(store, r.ref) }, r.pair), ' ', versionPills(r), outdatedPill(r), h('div', { class: 'muted small' }, `${r.owner} · ${numberOf(r)}`)))),
           h('td', null, h('span', { class: 'chain-chip' }, logo(chainOf(r.chainId)?.logo, r.chain, 'xs'), r.chain), h('div', { class: 'muted small' }, `${r.feePct}% fee`)),
           h('td', null, rangeCell(r, store)),
           h('td', null, distribution(r)),
@@ -805,7 +822,7 @@ function poolTable(rows, store) {
           h('td', { class: 'num', title: aprTitle(r) }, aprText(r)),
           h('td', { class: 'num' }, moveView(r)),
           h('td', null, r.url
-            ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn', title: 'Open on Uniswap', 'aria-label': `Open position ${r.tokenId} on Uniswap` }, icon('link'))
+            ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'icon-btn', title: `Open on ${dexName(r.dex)}`, 'aria-label': `Open position ${r.tokenId} on ${dexName(r.dex)}` }, icon('link'))
             : null))))));
 }
 
@@ -842,7 +859,7 @@ function addForm(store) {
   const message = h('div', { 'aria-live': 'polite' });
   /** @param {'error' | 'ok'} tone @param {string} text */
   const say = (tone, text) => message.replaceChildren(notice({ tone, text }));
-  const f = positionFields({ placeholder: 'https://app.uniswap.org/positions/v3/base/556505 or 556505' });
+  const f = positionFields({ placeholder: 'A link from app.uniswap.org or pancakeswap.finance, or a number' });
   /** @param {SubmitEvent} e */
   const submit = (e) => {
     e.preventDefault();
@@ -858,8 +875,8 @@ function addForm(store) {
     const chain = chainOf(/** @type {Entry} */ (entry).chainId)?.name ?? `Chain ${/** @type {Entry} */ (entry).chainId}`;
     const added = /** @type {Entry} */ (entry);
     say('ok', added.version === 'v2'
-      ? `Added the ${chain} v2 pair ${numberOf(added)}. Each wallet that holds it shows here once it is read.`
-      : `Added ${chain} ${added.version} ${numberOf(added)}. It shows here once it is read.`);
+      ? `Added the ${chain} ${dexName(added.dex)} v2 pair ${numberOf(added)}. Each wallet that holds it shows here once it is read.`
+      : `Added ${chain} ${dexName(added.dex)} ${added.version} ${numberOf(added)}. It shows here once it is read.`);
     form.elements.position.value = '';
     form.elements.position.dispatchEvent(new Event('input'));
     form.elements.position.focus();
@@ -867,7 +884,7 @@ function addForm(store) {
   };
   addEl = /** @type {AddForm} */ (h('form', { class: 'card panel stack lp-add', onsubmit: submit },
     h('h3', null, 'Add a position'),
-    h('p', { class: 'muted small' }, 'For a position the board does not find: a v3 position held by an address not in your wallets, or a v4 position older than the node keeps. Paste its link from app.uniswap.org and the chain and version are read from it. A plain number needs both picked.'),
+    h('p', { class: 'muted small' }, 'For a position the board does not find: a v3 position held by an address not in your wallets, or a v4 position older than the node keeps. Paste its link from app.uniswap.org or pancakeswap.finance and the chain, exchange and version are read from it. A plain number needs them picked. Positions staked in PancakeSwap\'s farm are found by themselves.'),
     h('p', { class: 'muted small' }, 'A v2 position is a share of a pair: paste its link, or the pair\'s address with its chain picked, and it is read for every wallet. With an Etherscan key in Settings → Blockchains, the pairs your wallets hold are found by themselves.'),
     f.input,
     f.hint,
@@ -2062,7 +2079,7 @@ function detailFacts(store, r) {
   /** @type {[string, Child][]} */
   const facts = [
     ['Chain', h('span', { class: 'chain-chip' }, logo(chainOf(r.chainId)?.logo, r.chain, 'xs'), r.chain)],
-    ['Protocol', `Uniswap ${r.version} · ${r.feePct}% fee tier`],
+    ['Protocol', `${dexName(r.dex)} ${r.version} · ${r.feePct}% fee tier${r.feePips !== r.feePct * 10000 ? ` (${(r.feePips / 10000).toLocaleString(undefined, { maximumSignificantDigits: 3 })}% to liquidity)` : ''}`],
     ['Position', r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener' }, numberOf(r)) : numberOf(r)],
     ['Owner', r.owner],
     ['Wallet', address('address', r.wallet)],
@@ -2133,7 +2150,7 @@ function detailView(store, ref) {
         h('h2', null, known.pair ?? 'Position'),
         h('div', { class: 'pool-meta' },
           known.chain ? h('span', { class: 'chain-chip' }, logo(chain?.logo, known.chain, 'xs'), known.chain) : null,
-          r ? h('span', { class: 'version-pill', title: `Uniswap ${r.version}` }, r.version) : null,
+          r ? versionPills(r) : null,
           r ? h('span', { class: 'fee-pill' }, `${r.feePct}%`) : null,
           r ? statusPill(r) : h('span', { class: 'status-pill closed' }, h('span', { class: 'dot' }), 'Not read'),
           r ? outdatedPill(r) : null,
@@ -2141,7 +2158,7 @@ function detailView(store, ref) {
     h('div', { class: 'lp-hero-side' },
       r ? h('div', { class: 'lp-hero-value' }, h('span', { class: 'muted small' }, 'Value'), h('strong', null, usdOrDash(r.value))) : null,
       h('div', { class: 'row' },
-        r?.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'btn-small' }, icon('link'), 'Uniswap') : null,
+        r?.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'btn-small' }, icon('link'), dexName(r.dex)) : null,
         r && explorerLink(store, r.chainId, 'address', r.wallet)
           ? h('a', { href: explorerLink(store, r.chainId, 'address', r.wallet), target: '_blank', rel: 'noopener', class: 'btn-small', title: 'Open the wallet in the block explorer' }, icon('globe'), 'Wallet')
           : null)));
@@ -2151,9 +2168,11 @@ function detailView(store, ref) {
     hero,
     !r ? notice({ tone: 'info', text: 'This position is not among those read, and no saved read has it: it was burned, or its wallet was removed before it was read. Below is what the fee log holds for it.' }) : null,
     r?.closed ? notice({ tone: 'info', text: 'Closed: this position holds no liquidity now. Its range, its last prices and its fee history are shown as read.' }) : null,
-    v2 ? notice({ tone: 'info', text: 'A Uniswap v2 position is a share of the whole pair, over the full range. Its fees are added to the pool as they are paid: they grow the value and come out with the liquidity, so there is nothing to claim or collect. Fee APR is read from the pair\'s swaps.' }) : null,
+    r?.staked ? notice({ tone: 'info', text: `Staked in ${dexName(r.dex)}'s farm, which holds the position and pays ${r.rewardSym ?? 'CAKE'} on top of the fees. The fees and the reward are harvested apart, from the farm.` }) : null,
+    v2 ? notice({ tone: 'info', text: 'A v2 position is a share of the whole pair, over the full range. Its fees are added to the pool as they are paid: they grow the value and come out with the liquidity, so there is nothing to claim or collect. Fee APR is read from the pair\'s swaps.' }) : null,
     h('div', { class: 'lp-stats' },
       r && !v2 ? stat('Unclaimed fees', usdOrDash(r.fees)) : null,
+      r?.staked ? stat(`${r.rewardSym ?? 'CAKE'} to harvest`, r.rewardUsd != null ? cash(r.rewardUsd) : '—', `${amount(r.reward ?? 0)} ${r.rewardSym ?? 'CAKE'}`) : null,
       v2 ? stat('Fees', 'In the pool', 'part of the value', V2_FEES) : null,
       r && !r.closed ? stat(`Fee APR · ${win}`, aprText(r), null, aprTitle(r)) : null,
       r && !r.closed ? stat(`Movement · ${win}`, moveView(r), r.aprPrev != null ? `from ${pct(r.aprPrev)}` : null, moveTitle(r)) : null,
@@ -2408,7 +2427,7 @@ function draw(root, store) {
     tabs(store,
       (view.tab === 'fees'
         ? FEES_SUBTITLE
-        : `Uniswap v2, v3 and v4 positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`)
+        : `Uniswap and PancakeSwap positions on ${chainCount} chain${chainCount === 1 ? '' : 's'}, read from the chain. Read-only.`)
         + (state.pending.length ? ` Reading ${state.pending.join(', ')}…` : state.at ? ` ${updatedText()}.` : ''),
       [
         currencySwitch(store),
