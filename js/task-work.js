@@ -15,7 +15,7 @@ import { linkState } from './link-states.js';
 import { previewsOf, askMissing } from './previews.js';
 import { openDeployPanel, stateDot, PROVIDER_NAMES, STATE_NAMES } from './deploy-panel.js';
 import { claudeState } from './dev-core.js';
-import { terminalView, liveSession, onSessionPaint, terminalBackground, openSession, exitText, keyData, wheelData, runnerOf } from './modules/dev.js';
+import { terminalView, liveSession, onSessionPaint, terminalBackground, openSession, exitText, keyData, wheelData, runnerOf, pickUp, resumeSession } from './modules/dev.js';
 import { attachSession, sendInput, stopCommand } from './terminal.js';
 import { createTerminal } from './vt.js';
 
@@ -427,7 +427,7 @@ function sessionList(sessions, options) {
  * A session's terminal as read for Tasks: Dev's own copy when Dev reads it (one stream per session and page), else
  * a stream of its own. Views draw it: the popover's (which takes keys) and the peek's.
  * @typedef {{ session: string, term: Terminal, state: string, running: boolean, pid: number, exit: import('./modules/dev.js').Exit | null,
- *   mirror: boolean, frame: number, views: Set<TermView>, stop: () => void }} Reader
+ *   command: string, cwd: string, mirror: boolean, frame: number, views: Set<TermView>, stop: () => void }} Reader
  * @typedef {{ view: ReturnType<typeof terminalView>, keys: boolean, el: HTMLElement, reader: Reader, bar: HTMLElement | null, head: HTMLElement | null }} TermView
  */
 /** @type {Map<string, Reader>} */
@@ -436,7 +436,7 @@ const readers = new Map();
 /** @param {Reader} r */
 const current = (r) => {
   const live = r.mirror ? liveSession(r.session) : null;
-  return live ? { term: live.term, running: live.running, exit: live.exit, pid: live.pid } : { term: r.term, running: r.running, exit: r.exit, pid: r.pid };
+  return live ?? { term: r.term, running: r.running, exit: r.exit, pid: r.pid, command: r.command, cwd: r.cwd };
 };
 
 /** @param {Reader} r */
@@ -454,7 +454,7 @@ function readerOf(store, session) {
   const had = readers.get(session);
   if (had) return had;
   /** @type {Reader} */
-  const r = { session, term: createTerminal({ cols: 120, rows: 32, background: terminalBackground }), state: 'loading', running: false, pid: 0, exit: null, mirror: false, frame: 0, views: new Set(), stop: () => {} };
+  const r = { session, term: createTerminal({ cols: 120, rows: 32, background: terminalBackground }), state: 'loading', running: false, pid: 0, exit: null, command: '', cwd: '', mirror: false, frame: 0, views: new Set(), stop: () => {} };
   readers.set(session, r);
   const drawSoon = () => (r.frame ||= requestAnimationFrame(() => drawReader(r)));
   if (liveSession(session)) {
@@ -478,7 +478,7 @@ function readerOf(store, session) {
       } else if (e.t === 'live') r.state = 'live';
       else if (e.t === 'size') term.resize(e.cols, e.rows);
       else if (e.t === 'start') {
-        Object.assign(r, { running: true, pid: e.pid, exit: null });
+        Object.assign(r, { running: true, pid: e.pid, exit: null, command: e.command, cwd: e.cwd });
         if (e.cols) term.resize(e.cols, e.rows);
       } else if (e.t === 'out' || e.t === 'err') term.write(e.d);
       else if (e.t === 'exit') {
@@ -497,6 +497,23 @@ function readerOf(store, session) {
   });
   drawSoon();
   return r;
+}
+
+// Starts claude again in a session that ended or that the runner lost (pickUp()), then reads its terminal anew.
+/** @param {Store} store @param {Task} item @param {string} session @param {{ command: string, cwd: string }} next */
+async function resume(store, item, session, next) {
+  const own = store.get('todos').items.filter((t) => t.devSession === session).map((t) => t.id);
+  try {
+    await resumeSession(store, session, next, own.length ? own : [item.id]);
+  } catch (err) {
+    return toast(/** @type {Error} */ (err).message);
+  }
+  // A stream that ended (the runner stopped) is read again; one still open shows the new start by itself.
+  const r = readers.get(session);
+  if (pop.term?.reader.session === session && (!r || r.state === 'offline' || r.state === 'missing')) {
+    dropTerm();
+    paint();
+  }
 }
 
 /** @param {TermView} v */
@@ -600,6 +617,9 @@ function paintBar(v) {
   const store = pop.store;
   if (!v.bar || !store) return;
   const base = runnerOf(store);
+  // claude to pick up once nothing runs: in a terminal that ended, or one the runner no longer has.
+  const item = store.get('todos').items.find((t) => t.id === pop.id);
+  const next = !c.running && r.state !== 'loading' && item ? pickUp(store, { id: r.session, command: c.command, cwd: c.cwd }) : null;
   /** @param {string} label @param {string} data @param {string} title */
   const key = (label, data, title) => h('button', { type: 'button', class: 'term-key', title, onclick: () => {
     if (c.pid) sendInput(base, c.pid, { data });
@@ -618,7 +638,16 @@ function paintBar(v) {
       key('Ctrl+C', '\x03', 'Send Ctrl+C'),
       key('⇧Tab', '\x1b[Z', 'Send Shift+Tab (cycles claude’s permission mode)'),
       h('button', { type: 'button', class: 'term-key stop', title: 'Stop the command and anything it started', onclick: () => stopCommand(base, r.session).catch((err) => toast(err.message)) }, icon('stop'), 'Stop'),
-    ] : null));
+    ] : null,
+    next && item ? h('button', {
+      type: 'button',
+      class: 'term-key resume',
+      title: `${next.label}: runs\n${next.command}`,
+      onclick: (/** @type {MouseEvent} */ e) => {
+        /** @type {HTMLButtonElement} */ (e.currentTarget).disabled = true;
+        resume(store, item, r.session, next);
+      },
+    }, icon('play'), next.worktree ? 'Resume claude' : 'Continue claude') : null));
 }
 
 /** @param {TermView} v */

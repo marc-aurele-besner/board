@@ -45,8 +45,7 @@ import { dateLocale } from '../locale.js';
  * @typedef {LinesEl & { out: HTMLElement, top: number, holding?: boolean }} TermEl
  * @typedef {{ id: string, n: number, cwd: string, tasks: string[], prompt: string, running: boolean, attach: AbortController | null,
  *   replaying: boolean, pid: number, exit: Exit | null, command: string, browse: number, stick: boolean, el: TermEl | null,
- *   term: Terminal, watch?: (text: string) => void, observer?: ResizeObserver, listed: boolean, listedAt: number,
- *   pickup?: { key: string, ok: boolean | null } }} Session
+ *   term: Terminal, watch?: (text: string) => void, observer?: ResizeObserver, listed: boolean, listedAt: number }} Session
  */
 
 export { runnerOf, devAgents, DEFAULT_DEV_COMMAND, devCommandOf };
@@ -690,7 +689,7 @@ const painted = new Set();
 /** @param {string} id */
 export function liveSession(id) {
   const s = view.sessions.find((x) => x.id === id && x.attach);
-  return s ? { term: s.term, running: s.running, exit: s.exit, pid: s.pid } : null;
+  return s ? { term: s.term, running: s.running, exit: s.exit, pid: s.pid, command: s.command, cwd: s.cwd } : null;
 }
 /** @param {() => void} fn */
 export function onSessionPaint(fn) {
@@ -1111,28 +1110,71 @@ function claudeAgain(command) {
   return { worktree: WORKTREE_NAME.test(worktree) ? worktree : '', cd, command: `${kept.join(' ')} --continue` };
 }
 
-// What the bar suggests once a command ended. claude that ran in a worktree (`claude --worktree <name>`) and quit:
-// pick its conversation up in the same worktree, while the worktree is still there. claude anywhere else: continue it.
-/** @param {Store} store @param {Session} s @returns {{ label: string, command: string } | null} */
-function suggestion(store, s) {
-  if (s.running || !s.exit || !s.command) return null;
-  const again = claudeAgain(s.command);
+// Where claude can be picked up in a terminal whose claude ended, or that the runner no longer has (its log gone
+// after a restart or a close): the claude it last ran, started again with --continue, in the worktree it named
+// (`claude --worktree <name>`) while that is still there, or else where it ran. With no command known, the task
+// worktree that names the terminal, with its project's Dev command, stands in. Null when there is nothing to pick up.
+// Whether a worktree is still there is asked of the runner, and asked again after a while.
+const FOLDER_RECHECK_MS = 30000;
+/** @type {Map<string, { ok: boolean | null, at: number }>} */
+const folders = new Map();
+/**
+ * @param {Store} store @param {{ id: string, command: string, cwd: string }} s
+ * @returns {{ label: string, command: string, cwd: string, worktree: string } | null}
+ */
+export function pickUp(store, { id, command, cwd }) {
+  let again = command ? claudeAgain(command) : null;
+  if (!command) {
+    const task = store.get('todos').items.find((t) => t.worktrees?.some((w) => w.session === id));
+    const w = task?.worktrees?.find((x) => x.session === id);
+    const project = store.get('projects').projects.find((p) => p.id === task?.projectId);
+    const plain = w ? claudeAgain(devCommandOf(store, project)) : null;
+    if (!w || !plain) return null;
+    again = { ...plain, worktree: w.name };
+    cwd = w.cwd;
+  }
   if (!again) return null;
-  if (!again.worktree) return { label: 'Continue claude here', command: `${again.cd}${again.command}` };
-  const path = `${s.cwd.replace(/\/+$/, '')}/.claude/worktrees/${again.worktree}`;
-  // Whether the worktree is still there is asked of the runner once per command that ended.
-  const key = `${path}\n${s.command}`;
-  if (s.pickup?.key !== key && view.info) {
-    const pickup = { key, ok: /** @type {boolean | null} */ (null) };
-    s.pickup = pickup;
+  if (!again.worktree) return { label: 'Continue claude here', command: `${again.cd}${again.command}`, cwd, worktree: '' };
+  const path = `${cwd.replace(/\/+$/, '')}/.claude/worktrees/${again.worktree}`;
+  const seen = folders.get(path);
+  if (!seen || (seen.ok !== null && Date.now() - seen.at > FOLDER_RECHECK_MS)) {
+    const asked = { ok: /** @type {boolean | null} */ (seen?.ok ?? null), at: Date.now() };
+    folders.set(path, asked);
     listFolder(runnerOf(store), path).then(() => true, () => false).then((ok) => {
-      pickup.ok = ok;
-      if (s.pickup === pickup) store.refresh();
+      const changed = asked.ok !== ok;
+      Object.assign(asked, { ok, at: Date.now() });
+      if (changed) store.refresh();
     });
   }
-  return s.pickup?.key === key && s.pickup.ok
-    ? { label: `Pick up claude in ${again.worktree}`, command: `cd ${shellQuote(path)} && ${again.command}` }
+  return folders.get(path)?.ok
+    ? { label: `Pick up claude in ${again.worktree}`, command: `cd ${shellQuote(path)} && ${again.command}`, cwd, worktree: again.worktree }
     : null;
+}
+
+// What the bar suggests once a command ended, or in a terminal the runner lost: pickUp().
+/** @param {Store} store @param {Session} s */
+function suggestion(store, s) {
+  if (s.running || (s.command && !s.exit)) return null;
+  return pickUp(store, s);
+}
+
+// Runs claude again in a task's terminal that ended (what pickUp() found), from Tasks: in the same terminal, so the
+// task keeps pointing at it, and listed again on the runner with its tasks, so Dev shows it and the board CLI still
+// knows its tasks. Fails when the runner cannot be reached or refuses.
+/** @param {Store} store @param {string} id @param {{ command: string, cwd: string }} next @param {string[]} taskIds */
+export async function resumeSession(store, id, next, taskIds) {
+  const base = runnerOf(store);
+  const shown = view.sessions.find((x) => x.id === id);
+  if (shown) fit(shown);
+  const size = shown ? { cols: shown.term.cols, rows: shown.term.rows } : { cols: 120, rows: 32 };
+  await runCommand(base, { session: id, command: next.command, cwd: next.cwd, ...size, theme: currentTheme().dark ? 'dark' : 'light' });
+  if (view.restored) {
+    currentStore ??= store;
+    const s = shown ?? makeSession({ id, cwd: next.cwd, tasks: taskIds });
+    if (view.info) attach(store, s);
+    await listOnRunner(store, s);
+  } else await listSession(base, { session: id, cwd: next.cwd, ...(taskIds.length ? { tasks: taskIds, prompt: '' } : {}) }).catch(() => null);
+  store.refresh();
 }
 
 /** @param {Session} s */
