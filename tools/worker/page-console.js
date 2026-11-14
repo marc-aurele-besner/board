@@ -30,7 +30,7 @@ const clip = (/** @type {string} */ text) => (text.length > TEXT_MAX ? `${text.s
 const argsText = (args) => args.map((a) => (a.type === 'string' ? String(a.value) : a.description ?? a.unserializableValue ?? JSON.stringify(a.value))).join(' ');
 
 /**
- * @param {{ url?: unknown, width?: unknown, height?: unknown, mobile?: unknown, ms?: unknown }} body
+ * @param {{ url?: unknown, width?: unknown, height?: unknown, mobile?: unknown, colorScheme?: unknown, ms?: unknown }} body
  * @returns {Promise<{ entries: ConsoleEntry[], truncated: boolean, width: number, height: number, ms: number }>}
  */
 export async function pageConsole(body) {
@@ -102,6 +102,7 @@ export async function pageConsole(body) {
     const mobile = !!body.mobile;
     await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: mobile ? 2 : 1, mobile });
     if (mobile) await send('Emulation.setTouchEmulationEnabled', { enabled: true });
+    if (body.colorScheme === 'light' || body.colorScheme === 'dark') await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: body.colorScheme }] });
     await send('Page.navigate', { url: url.toString() });
     await sleep(ms);
     return { entries, truncated, width, height, ms };
