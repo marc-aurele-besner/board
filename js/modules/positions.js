@@ -43,6 +43,10 @@ import { summaryTab } from './defi-summary.js';
  * @property {string} feeChain
  * @property {string} feeToken
  * @property {string} feeSource
+ * @property {string} dex
+ * @property {string} version
+ * @property {string} feeDex
+ * @property {string} feeVersion
  * @property {boolean} coverageOpen
  * @property {string} tab
  * @property {string | null} detail
@@ -64,10 +68,11 @@ const APR_MIN_MS = 60 * 60 * 1000;
 // layout: 'cards' or 'list'. sort: one of the SORTS keys; dir: 1 low to high, -1 high to low.
 // adding: the form to add a position by hand is open.
 // window: the WINDOWS key fee APR is read over.
+// dex, version: the exchange and version picked on LP positions; feeDex, feeVersion the same on Fees collected.
 // feeSort, feeDir: the Fees collected table's sort. feeChain, feeToken, feeSource: its filters.
 // currency: what amounts are shown in. They are read in USD.
 // The tab, detail and fee range fields are set by restore(), which runs before the first draw.
-const view = /** @type {View} */ ({ currency: 'USD', filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, window: '24h', feeSort: 'date', feeDir: -1, feeChain: 'all', feeToken: 'all', feeSource: 'all', coverageOpen: false });
+const view = /** @type {View} */ ({ currency: 'USD', filter: 'all', chain: 'all', layout: 'cards', sort: 'value', dir: -1, adding: false, window: '24h', feeSort: 'date', feeDir: -1, feeChain: 'all', feeToken: 'all', feeSource: 'all', dex: 'all', version: 'all', feeDex: 'all', feeVersion: 'all', coverageOpen: false });
 // The reads run in js/defi/positions-read.js and save all they find in pools.json; the page draws that file.
 // loading: a read this tab started is running. error: why it failed.
 const COLLECTION = 'pools';
@@ -441,6 +446,34 @@ const versionPills = (r) => [
   h('span', { class: 'version-pill', title: `${dexName(r.dex)} ${r.version}` }, r.version),
   r.staked ? h('span', { class: 'farm-pill', title: `Staked in ${dexName(r.dex)}'s farm, earning ${r.rewardSym ?? 'CAKE'}` }, 'Farming') : null,
 ];
+
+// The exchange and version of a collect, read from its position's ref (see refOf in js/defi/positions-read.js).
+// A ref of two parts is Uniswap v3; else its second part is "v2", "v4" or "pancakeswap-v3". null when unknown.
+/** @param {string | undefined} ref @returns {{ dex: string, version: string } | null} */
+function kindOfRef(ref) {
+  const parts = String(ref ?? '').split(':');
+  if (parts.length === 2 && parts[0] && parts[1]) return { dex: 'uniswap', version: 'v3' };
+  const m = /^(?:(.+)-)?(v\d+)$/.exec(parts[1] ?? '');
+  return m ? { dex: m[1] ?? 'uniswap', version: m[2] } : null;
+}
+/** @param {{ dex?: string }} r */
+const dexOf = (r) => r.dex || 'uniswap';
+// The exchanges or versions found in a list, sorted, for the filter pills.
+/** @param {(string | null | undefined)[]} keys @returns {string[]} */
+const kindsIn = (keys) => [...new Set(/** @type {string[]} */ (keys.filter(Boolean)))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+// A row of pills picking one exchange or one version, with a count each. Hidden when there is only one choice.
+/** @param {string[]} keys @param {string} current @param {(key: string) => string} label @param {(key: string) => number} count @param {number} total @param {string} allLabel @param {(key: string) => void} pick */
+function kindPills(keys, current, label, count, total, allLabel, pick) {
+  if (keys.length < 2) return null;
+  /** @param {string} key @param {string} text @param {number} n */
+  const pill = (key, text, n) => h('button', {
+    type: 'button',
+    class: current === key ? 'lp-chip active' : 'lp-chip',
+    'aria-pressed': String(current === key),
+    onclick: () => pick(key),
+  }, text, h('span', { class: 'chip-count' }, n));
+  return h('div', { class: 'row lp-filters lp-chains' }, pill('all', allLabel, total), keys.map((k) => pill(k, label(k), count(k))));
+}
 
 // Fetches today's rate once a day when CAD is picked, then draws again.
 /** @param {Store} store */
@@ -1331,6 +1364,24 @@ function feeFilters(store, inRange) {
     sources.length > 1 ? select('feeSource', 'Source', [['all', 'All sources'], ...sources.map((k) => /** @type {[string, string]} */ ([k, `${SOURCE_NAMES[k]} (${count((c) => sourceOf(c) === k)})`]))]) : null);
 }
 
+// The exchange and version pills of the log; a collect logged by hand without a position shows only under All.
+/** @param {Store} store @param {CollectEntry[]} inRange */
+function feeKindFilters(store, inRange) {
+  const kinds = inRange.map((c) => kindOfRef(c.ref));
+  const dexes = kindsIn(kinds.map((k) => k?.dex));
+  const versions = kindsIn(kinds.map((k) => k?.version));
+  return [
+    kindPills(dexes, view.feeDex, dexName, (d) => kinds.filter((k) => k?.dex === d).length, inRange.length, 'All platforms', (d) => {
+      view.feeDex = d;
+      store.refresh();
+    }),
+    kindPills(versions, view.feeVersion, (v) => v, (v) => kinds.filter((k) => k?.version === v).length, inRange.length, 'All versions', (v) => {
+      view.feeVersion = v;
+      store.refresh();
+    }),
+  ];
+}
+
 // A share as a percent that only reads 100% when the search is complete.
 /** @param {number} x */
 const coveragePct = (x) => (x >= 1 ? '100%' : `${Math.min(99.9, Math.floor(x * 1000) / 10)}%`);
@@ -1720,10 +1771,14 @@ function feesView(store) {
   if (!inRange.some((c) => c.chain === view.feeChain)) view.feeChain = 'all';
   if (!inRange.some((c) => tokensOf(c).includes(view.feeToken))) view.feeToken = 'all';
   if (!inRange.some((c) => sourceOf(c) === view.feeSource)) view.feeSource = 'all';
+  if (!inRange.some((c) => kindOfRef(c.ref)?.dex === view.feeDex)) view.feeDex = 'all';
+  if (!inRange.some((c) => kindOfRef(c.ref)?.version === view.feeVersion)) view.feeVersion = 'all';
   /** @param {CollectEntry} c */
   const matches = (c) => (view.feeChain === 'all' || c.chain === view.feeChain)
     && (view.feeToken === 'all' || tokensOf(c).includes(view.feeToken))
-    && (view.feeSource === 'all' || sourceOf(c) === view.feeSource);
+    && (view.feeSource === 'all' || sourceOf(c) === view.feeSource)
+    && (view.feeDex === 'all' || kindOfRef(c.ref)?.dex === view.feeDex)
+    && (view.feeVersion === 'all' || kindOfRef(c.ref)?.version === view.feeVersion);
   const list = inRange.filter(matches);
   // Every collection with the filters but not the range: the outlook, pace and calendar look past the range.
   const pool = all.filter(matches);
@@ -1825,6 +1880,7 @@ function feesView(store) {
       }, icon('plus'), 'Log a collection')),
     view.logging ? logForm(store) : null,
     feeFilters(store, inRange),
+    feeKindFilters(store, inRange),
     h('div', { class: 'lp-stats' },
       stat('Collected', cash(total), plural(list.length, 'collection')),
       stat('Per day', cash(perDay), `over ${plural(Math.round(spanDays), 'day')}`),
@@ -2348,7 +2404,14 @@ function draw(root, store) {
   // Chain chips show only chains that have positions, so the row stays short.
   const chainsWithRows = CHAINS.filter((c) => all.some((r) => r.chainId === c.id));
   if (view.chain !== 'all' && !chainsWithRows.some((c) => c.id === view.chain)) view.chain = 'all';
-  const inChain = view.chain === 'all' ? all : all.filter((r) => r.chainId === view.chain);
+  const chainRows = view.chain === 'all' ? all : all.filter((r) => r.chainId === view.chain);
+  // Then the exchange and the version, each counted within the filters before it.
+  const dexes = kindsIn(chainRows.map(dexOf));
+  if (!dexes.includes(view.dex)) view.dex = 'all';
+  const dexRows = view.dex === 'all' ? chainRows : chainRows.filter((r) => dexOf(r) === view.dex);
+  const versions = kindsIn(dexRows.map((r) => r.version));
+  if (!versions.includes(view.version)) view.version = 'all';
+  const inChain = view.version === 'all' ? dexRows : dexRows.filter((r) => r.version === view.version);
   // Closed positions only show under their own filter, and never count in the totals.
   const byChain = inChain.filter((r) => !r.closed);
   const closedRows = inChain.filter((r) => r.closed);
@@ -2417,7 +2480,7 @@ function draw(root, store) {
       : h('div', { class: 'lp-grid' }, shown.map((r) => poolCard(r, seen.has(r.ref) ? null : order++, collected, store)));
     shown.forEach((r) => seen.add(r.ref));
   } else {
-    const filtered = view.filter !== 'all' || view.chain !== 'all';
+    const filtered = view.filter !== 'all' || view.chain !== 'all' || view.dex !== 'all' || view.version !== 'all';
     body = h('div', { class: 'lp-empty' },
       h('span', { class: 'float' }, icon('wallet')),
       h('p', null, showClosed ? 'No closed positions.' : all.length && filtered ? 'No positions match this filter.' : 'No open Uniswap positions for these wallets.'));
@@ -2470,6 +2533,16 @@ function draw(root, store) {
           chainChip('all', 'All chains', null, all.filter((r) => !!r.closed === showClosed).length),
           chainsWithRows.map((c) => chainChip(c.id, c.name, c.logo, all.filter((r) => r.chainId === c.id && !!r.closed === showClosed).length)))
       : null,
+    kindPills(dexes, view.dex, dexName, (k) => chainRows.filter((r) => dexOf(r) === k && !!r.closed === showClosed).length,
+      chainRows.filter((r) => !!r.closed === showClosed).length, 'All platforms', (k) => {
+        view.dex = k;
+        store.refresh();
+      }),
+    kindPills(versions, view.version, (k) => k, (k) => dexRows.filter((r) => r.version === k && !!r.closed === showClosed).length,
+      dexRows.filter((r) => !!r.closed === showClosed).length, 'All versions', (k) => {
+        view.version = k;
+        store.refresh();
+      }),
 
     h('div', { class: 'row between' },
       h('div', { class: 'row lp-filters' },
@@ -2527,6 +2600,8 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
     cur: view.currency === 'USD' ? '' : view.currency,
     filter: view.filter === 'all' ? '' : view.filter,
     chain: view.chain === 'all' ? '' : String(view.chain),
+    dex: view.dex === 'all' ? '' : view.dex,
+    ver: view.version === 'all' ? '' : view.version,
     view: view.layout === 'list' ? 'list' : '',
     sort: view.sort === 'value' && view.dir === -1 ? '' : sortName(view.sort, view.dir),
     apr: view.window === '24h' ? '' : view.window,
@@ -2542,6 +2617,8 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
     fchain: view.feeChain === 'all' ? '' : view.feeChain,
     ftoken: view.feeToken === 'all' ? '' : view.feeToken,
     fsource: view.feeSource === 'all' ? '' : view.feeSource,
+    fdex: view.feeDex === 'all' ? '' : view.feeDex,
+    fver: view.feeVersion === 'all' ? '' : view.feeVersion,
     pos: view.detail ?? '',
     from: view.detail && view.detailFrom === 'fees' ? 'fees' : '',
   }),
@@ -2570,6 +2647,11 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
     view.feeChain = p.fchain || 'all';
     view.feeToken = p.ftoken || 'all';
     view.feeSource = Object.hasOwn(SOURCE_NAMES, p.fsource) ? p.fsource : 'all';
+    // Exchanges and versions are checked against the rows and the log when they are drawn.
+    view.dex = p.dex || 'all';
+    view.version = p.ver || 'all';
+    view.feeDex = p.fdex || 'all';
+    view.feeVersion = p.fver || 'all';
     // The position shown in detail, checked against the rows and the log when it is drawn.
     view.detail = typeof p.pos === 'string' && p.pos ? p.pos : null;
     view.detailFrom = p.from === 'fees' ? 'fees' : 'positions';
