@@ -3548,6 +3548,8 @@ code.tool-fail-call { font-size: 0.76rem; }
 .dev-preset-add { display: flex; gap: 8px; flex-wrap: wrap; }
 .dev-preset-add input { flex: 1 1 200px; min-width: 0; }
 .dev-preset-add input[name="command"] { flex-grow: 2; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.dev-preset-add input[name="env"] { flex-grow: 2; }
+.dev-preset-add select { flex: 0 1 auto; min-width: 0; }
 /* Narrow screens: one column per row. */
 @media (max-width: 720px) {
   .dev-project-row { grid-template-columns: minmax(0, 1fr); padding: 12px 0; }

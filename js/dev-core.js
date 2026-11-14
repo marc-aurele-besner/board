@@ -1,6 +1,6 @@
 // Dev without the DOM: the runner's address, command presets, the command a project's tasks run, and starting a
 // terminal through the command runner. The Dev section and the runners (Cron's Run in Dev step) both use it.
-/** @import { DataStore, Project, DevProvider } from '../types/data' */
+/** @import { DataStore, Project, DevProvider, DevHarness } from '../types/data' */
 import { uid } from './ui.js';
 import { TERMINAL_RUNNER, runnerInfo, runCommand, listSession } from './terminal.js';
 
@@ -75,17 +75,57 @@ function worktreeName(title, id) {
 /** @type {Record<string, string>} */
 export const DEV_MODEL_NAMES = { fable: 'Fable 5.2', opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', haiku: 'Haiku 5.5' };
 
-// A command that runs claude, so --model and --effort mean something to it; another tool's preset is left as is.
-// Variables set before it (a provider's API override) still count.
-const RUNS_CLAUDE = /^\s*(\w+=("[^"]*"|'[^']*'|\S*)\s+)*(\S*\/)?claude(\s|$)/;
+// The coding harnesses (CLIs that run an agent in a terminal) until Settings → Dev environment edits them. Each says
+// how a task's model, effort and prompt reach it; {model}, {effort} and {prompt} are replaced by the quoted value.
+// A command runs the harness whose own command starts with the same program, after any variables set before it.
+/** @type {DevHarness[]} */
+export const DEFAULT_HARNESSES = [
+  { id: CLAUDE_PROVIDER, name: 'Claude Code', command: DEFAULT_DEV_COMMAND, model: '--model {model}', effort: '--effort {effort}', prompt: '-- {prompt}' },
+  { id: 'codex', name: 'Codex CLI', command: 'codex --dangerously-bypass-approvals-and-sandbox', model: '--model {model}', effort: '-c model_reasoning_effort={effort}', prompt: '-- {prompt}' },
+  { id: 'gemini', name: 'Gemini CLI', command: 'gemini --yolo', model: '--model {model}', effort: '', prompt: '--prompt-interactive {prompt}' },
+  { id: 'opencode', name: 'OpenCode', command: 'opencode', model: '--model {model}', effort: '', prompt: '--prompt {prompt}' },
+];
+export const devHarnesses = (/** @type {DataStore} */ store) => store.get(COLLECTION)?.harnesses ?? DEFAULT_HARNESSES;
 
-// The command with a task's model and effort added; unset ones keep the command's own (or claude's default).
-// Added last, they win over the same flags in the project's command.
-/** @param {string} command @param {{ model?: string, effort?: string }} options */
-export function withClaudeOptions(command, { model = '', effort = '' } = {}) {
-  if (!RUNS_CLAUDE.test(command)) return command;
-  const flags = [model && `--model ${shellQuote(model)}`, effort && `--effort ${shellQuote(effort)}`].filter(Boolean);
+// The variables set before a command's program (a provider's API override), and the rest of it.
+const ENV_PREFIX = /^\s*((?:\w+=(?:"[^"]*"|'[^']*'|\S*)\s+)*)/;
+/** @param {string} command @returns {{ env: string, rest: string }} */
+export function splitEnv(command) {
+  const env = ENV_PREFIX.exec(command)?.[1] ?? '';
+  return { env: env.trim(), rest: command.slice(env.length).trim() };
+}
+const programOf = (/** @type {string} */ command) => (splitEnv(command).rest.split(/\s+/)[0] ?? '').split('/').pop() ?? '';
+
+// The harness a command runs, or null for another program (a shell, a script).
+/** @param {DevHarness[]} harnesses @param {string} command */
+export function harnessOf(harnesses, command) {
+  const program = programOf(command);
+  return program ? harnesses.find((x) => programOf(x.command) === program) ?? null : null;
+}
+
+// A harness's flag with its value filled in, quoted as one shell word; '' when either is empty.
+/** @param {string | undefined} template @param {string} key @param {string} value */
+function fill(template, key, value) {
+  if (!template?.trim() || !value) return '';
+  const word = shellQuote(value);
+  return template.includes(`{${key}}`) ? template.split(`{${key}}`).join(word) : `${template} ${word}`;
+}
+
+// The command with a task's model and effort added in its harness's way; unset ones keep the command's own (or the
+// harness's default). Added last, they win over the same flags in the project's command. Another program is left as is.
+/** @param {DevHarness[]} harnesses @param {string} command @param {{ model?: string, effort?: string }} options */
+export function withDevOptions(harnesses, command, { model = '', effort = '' } = {}) {
+  const harness = harnessOf(harnesses, command);
+  if (!harness) return command;
+  const flags = [fill(harness.model, 'model', model), fill(harness.effort, 'effort', effort)].filter(Boolean);
   return flags.length ? `${command} ${flags.join(' ')}` : command;
+}
+
+// The command with the prompt handed over as its harness takes it; claude's way (after --) for another program.
+/** @param {DevHarness[]} harnesses @param {string} command @param {string} prompt */
+export function withPrompt(harnesses, command, prompt) {
+  const template = harnessOf(harnesses, command)?.prompt?.trim() || '-- {prompt}';
+  return `${command} ${fill(template, 'prompt', prompt)}`;
 }
 
 // The project's Dev command (or the default), with a name for the worktree it makes. `fallbackCwd` is the folder
@@ -100,9 +140,11 @@ export function withClaudeOptions(command, { model = '', effort = '' } = {}) {
  */
 export function claudeCommand(store, projectId, title, id, fallbackCwd, override = '', options = {}) {
   const project = store.get('projects').projects.find((p) => p.id === projectId);
-  let command = withClaudeOptions(override.trim() || devCommandOf(store, project), options);
+  const harnesses = devHarnesses(store);
+  let command = withDevOptions(harnesses, override.trim() || devCommandOf(store, project), options);
   let worktree = null;
-  if (BARE_WORKTREE.test(command)) {
+  // Only claude names its worktree from this flag; another harness's -w means something else.
+  if (harnessOf(harnesses, command)?.id === CLAUDE_PROVIDER && BARE_WORKTREE.test(command)) {
     worktree = { name: worktreeName(title, id), cwd: project?.localPath || fallbackCwd };
     command = command.replace(BARE_WORKTREE, `$1$2 ${worktree.name}`);
   }
@@ -124,7 +166,7 @@ export async function startRunnerSession({ store, claude = false, prompt = '', c
   let worktree = null;
   if (claude) {
     ({ command, worktree } = claudeCommand(store, projectId, title, id, cwd, devCommand, { model, effort }));
-    command = `${command} -- ${shellQuote(prompt)}`;
+    command = withPrompt(devHarnesses(store), command, prompt);
   }
   // The terminal is not on a page yet: it starts at a usual size and is fitted once shown.
   await runCommand(base, { session: id, command, cwd, cols: 120, rows: 32, theme });
