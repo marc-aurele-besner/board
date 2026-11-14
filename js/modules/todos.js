@@ -23,7 +23,7 @@ import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startDevSession, openSession, runnerOf } from './dev.js';
 import { DEV_MODEL_NAMES, DEV_EFFORTS, ASK_LABELS, claudeState, devAgents, taskAgent, taskAgentCommand, projectAgent, agentEfforts, devDefaults, taskRunOptions } from '../dev-core.js';
-import { agentLogo } from './dev-agent-field.js';
+import { agentLogo, programName } from './dev-agent-field.js';
 import { DONE_ASK } from '../dev-done.js';
 import { openMenu, copyItem } from '../menu.js';
 import { sessionStatus, runnerInfo, listSkills } from '../terminal.js';
@@ -1062,7 +1062,7 @@ function devOptionEntries(store, item) {
         onSelect: () => set({ devModel: v, devProvider: a.id }),
       }))]
     // An agent with no models is one row, run with the model its program picks.
-    : ['-', { label: a.name, icon: () => agentLogo(store, a), hint: 'Its default model', checked: agent?.id === a.id && !model, onSelect: () => set({ devModel: '', devProvider: a.id }) }]));
+    : ['-', { label: a.name, icon: () => agentLogo(store, a), hint: `${programName(store, a)} decides the model`, checked: agent?.id === a.id && !model, onSelect: () => set({ devModel: '', devProvider: a.id }) }]));
   return [
     { label: 'Project default', icon: own ? () => agentLogo(store, own) : icon('terminal'), hint: own ? [own.name, devDefaults(store, project).model].filter(Boolean).map((x, i) => (i ? name(x) : x)).join(' · ') : 'Its own command', checked: !agent, onSelect: () => set({ devModel: '', devProvider: '' }) },
     ...agentRows,
