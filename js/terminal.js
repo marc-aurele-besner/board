@@ -44,8 +44,16 @@ export const moveSession = (/** @type {string} */ base, /** @type {string} */ se
 
 // What sessions are doing, by id: { state, code?, cwd }, state being working, waiting (running but quiet: the
 // program waits for its user), done, failed, stopped or idle. Sessions the runner no longer has are left out.
+// The runner reads 200 ids a request (tools/terminal.js), and every task keeps its session once done, so more are
+// asked in batches: the newest tasks came last and got no answer, so they never moved to In Review.
+const STATUS_BATCH = 200;
 /** @type {(base: string, ids: string[]) => Promise<Record<string, RunnerStatus>>} */
-export const sessionStatus = async (base, ids) => (ids.length ? (await call(base, `/status?sessions=${ids.map(encodeURIComponent).join(',')}`)).json() : {});
+export const sessionStatus = async (base, ids) => {
+  const batches = [];
+  for (let i = 0; i < ids.length; i += STATUS_BATCH) batches.push(ids.slice(i, i + STATUS_BATCH));
+  const parts = await Promise.all(batches.map(async (b) => (await call(base, `/status?sessions=${b.map(encodeURIComponent).join(',')}`)).json()));
+  return Object.assign({}, ...parts);
+};
 
 // The prompts of the claude a terminal started, and where its last turn stands.
 /** @type {(base: string, id: string, signal?: AbortSignal) => Promise<RunnerTurns>} */
