@@ -235,6 +235,19 @@ export function withPrompt(harnesses, command, prompt) {
   return `${command} ${fill(template, 'prompt', prompt)}`;
 }
 
+// A session started on tasks learns that it can list, add and edit their subtasks (the board-tasks skill,
+// tools/board.js). Claude Code gets it in its system prompt, which a compaction keeps; any other program, or a
+// command that sets its own system prompt, gets it at the end of the prompt.
+const APPEND_SYSTEM = /(^|\s)--append-system-prompt(?=[\s=])/;
+/** @param {DevHarness[]} harnesses @param {string} command @param {string} prompt @param {string[]} taskIds */
+export function withTaskPointer(harnesses, command, prompt, taskIds) {
+  if (!taskIds.length) return { command, prompt };
+  const which = taskIds.length > 1 ? `tasks ${taskIds.join(', ')}` : `task ${taskIds[0]}`;
+  const text = `This session works on board ${which}. To file follow-up work as subtasks, check what is already filed, or update those subtasks, use the board-tasks skill (node "$BOARD_CLI" task --help).`;
+  if (harnessOf(harnesses, command)?.id === CLAUDE_PROVIDER && !APPEND_SYSTEM.test(command)) return { command: `${command} --append-system-prompt ${shellQuote(text)}`, prompt };
+  return { command, prompt: prompt ? `${prompt}\n\n${text}` : text };
+}
+
 // The command as a task would run it, with the variables still in: the harness's flags for those the command does
 // not place itself, then its prompt. For Settings' previews.
 /** @param {DevHarness[]} harnesses @param {string} command */
@@ -313,7 +326,8 @@ export async function startRunnerSession({ store, claude = false, prompt = '', c
   let worktree = null;
   if (claude) {
     ({ command, worktree } = claudeCommand(store, projectId, title, id, cwd, devCommand, { model, effort }));
-    command = withPrompt(devHarnesses(store), command, prompt);
+    const pointed = withTaskPointer(devHarnesses(store), command, prompt, taskIds);
+    command = withPrompt(devHarnesses(store), pointed.command, pointed.prompt);
   }
   // The terminal is not on a page yet: it starts at a usual size and is fitted once shown.
   await runCommand(base, { session: id, command, cwd, cols: 120, rows: 32, theme });
