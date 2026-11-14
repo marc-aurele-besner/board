@@ -1,4 +1,4 @@
-/** @import { Store, Task, TaskArtifact, TaskLink, TaskWebLink, Project, ProjectLabel, IconName } from '../../types/data' */
+/** @import { Store, Task, TaskLink, TaskWebLink, Project, ProjectLabel, IconName } from '../../types/data' */
 /** @import { RunnerStatus } from '../../types/terminal' */
 /** @import { PickOption } from '../inline.js' */
 /** @import { MenuEntry } from '../menu.js' */
@@ -16,11 +16,10 @@ import { createProject, projectIcon, labelsOf, projectTree, moveProject, labelCo
 import { editText, pickChip, pickButton, pickMulti, pill } from '../inline.js';
 import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
 import { openDialog } from '../modal.js';
-import { issuesOf, prsOf, artifactsOf, addTaskArtifacts, moveToReview } from '../task-links.js';
-import { previewChips } from '../previews.js';
+import { issuesOf, prsOf, addTaskArtifacts, moveToReview } from '../task-links.js';
+import { workPill } from '../task-work.js';
 import { openLinkedinComposer, whenText } from '../linkedin-composer.js';
 import { LINKEDIN } from '../linkedin-core.js';
-import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startDevSession, openSession, runnerOf } from './dev.js';
 import { DEV_MODEL_NAMES, DEV_EFFORTS, ASK_LABELS, claudeState, devAgents, taskAgent, taskAgentCommand, projectAgent, agentEfforts, devDefaults, taskRunOptions } from '../dev-core.js';
@@ -805,42 +804,16 @@ function openIssueDialog(store, item, repos) {
   paint();
 }
 
-// A task's issues and PRs as links (#12, opens in a new tab), shown beside its title where they have room.
-// A Dev session started on the task adds the ones it opens. A PR's Vercel or Netlify preview follows it.
-// Each is coloured like GitHub: green while open, purple once merged or completed, red once closed unmerged.
-/** @param {Store} store @param {Task} item */
-function linkChips(store, item) {
-  const issues = issuesOf(item);
-  const prs = prsOf(item);
-  const artifacts = artifactsOf(item);
+// Beside a task's title: one pill for its work (PRs, issues, previews, Dev sessions, artifacts; js/task-work.js), then
+// the other pages it led to and its LinkedIn post. A Dev session started on the task adds the PRs and artifacts it makes.
+/** @param {Store} store @param {Task} item @param {string[]} repos */
+function linkChips(store, item, repos) {
   const links = item.links ?? [];
   const post = postPill(store, item);
-  if (!issues.length && !prs.length && !artifacts.length && !links.length && !post) return null;
-  /** @param {TaskLink} l @param {boolean} pr */
-  const chip = (l, pr) => {
-    const state = linkState(store, l);
-    return h('a', {
-    href: l.url,
-    target: '_blank',
-    rel: 'noopener',
-    class: `issue-link${state ? ` gh-${state}` : ''}`,
-    title: `${pr ? 'Pull request' : 'Issue'} ${linkTitle(l)}${state ? ` · ${STATE_NAMES[state] ?? state}` : ''}`,
-    'aria-label': `Open ${pr ? 'pull request' : 'issue'} ${l.repo} #${l.number}`,
-  }, icon(pr ? 'pull-request' : 'repo'), `#${l.number}`);
-  };
-  return h('span', { class: 'task-link-chips' }, issues.map((l) => chip(l, false)), prs.map((l) => chip(l, true)), previewChips(store, prs, 'issue-link'), artifacts.map(artifactChip), links.map(webChip), post);
+  const work = workPill(store, item, { status: (id) => devWatch.status[id], onLink: () => openIssueDialog(store, item, repos) });
+  if (!work && !links.length && !post) return null;
+  return h('span', { class: 'task-link-chips' }, work, links.map(webChip), post);
 }
-
-// A claude.ai Artifact a Dev session published, by its title (or "Artifact"), opening in a new tab.
-/** @param {TaskArtifact} a */
-const artifactChip = (a) => h('a', {
-  href: a.url,
-  target: '_blank',
-  rel: 'noopener',
-  class: 'issue-link artifact-link',
-  title: `Artifact${a.title ? ` “${a.title}”` : ''} · ${a.url}`,
-  'aria-label': `Open the artifact ${a.title || a.url}`,
-}, icon('sparkle'), h('span', { class: 'artifact-link-title' }, a.title || 'Artifact'));
 
 // Another page the task led to, such as its LinkedIn post.
 /** @param {TaskWebLink} l */
@@ -880,8 +853,6 @@ const taskActions = (store, item) => h('div', { class: 'row task-actions' },
 /** @param {Store} store @param {Task} item */
 const taskTools = (store, item) => h('div', { class: 'task-tools' }, imageStrip(store, item), taskActions(store, item));
 
-/** @type {Record<string, string>} */
-const STATE_NAMES = { open: 'open', merged: 'merged', closed: 'closed', completed: 'closed as completed', not_planned: 'closed as not planned' };
 
 // One button in the actions to see a task's issues and PRs, link more, or create one.
 /** @param {Store} store @param {Task} item @param {string[]} repos */
@@ -1043,10 +1014,11 @@ export function watchDevSessions(store) {
     // The runner answers for the first 200 sessions asked: open tasks come first and the newest before the oldest,
     // or a long list of completed tasks would push the sessions still at work out of the answer.
     const newest = [...items].reverse();
+    // An open task's earlier sessions (those of its worktrees) are asked too, for its Dev tab (js/task-work.js).
     const ids = /** @type {string[]} */ ([...new Set([
-      ...newest.filter((t) => statusOf(t) !== 'done'),
-      ...newest.filter((t) => statusOf(t) === 'done'),
-    ].map((t) => t.devSession).filter(Boolean))].slice(0, STATUS_MAX));
+      ...newest.filter((t) => statusOf(t) !== 'done').flatMap((t) => [t.devSession, ...(t.worktrees ?? []).map((w) => w.session)]),
+      ...newest.filter((t) => statusOf(t) === 'done').map((t) => t.devSession),
+    ].filter(Boolean))].slice(0, STATUS_MAX));
     let status;
     try {
       status = await sessionStatus(runnerOf(store), ids);
@@ -1170,27 +1142,6 @@ function devButton(store, item) {
       openSession({ id: /** @type {string} */ (item.devSession), cwd: status.cwd, taskIds });
     },
   }, icon('terminal'));
-}
-
-// Beside the title while claude waits for its user, so it shows from across the list: what it asks, and a click
-// opens its terminal to answer. A question or permission stands out more than a turn that simply ended.
-/** @param {Store} store @param {Task} item */
-function waitingBadge(store, item) {
-  const status = item.devSession ? devWatch.status[item.devSession] : null;
-  if (status?.state !== 'waiting') return null;
-  const ask = status.ask;
-  const label = ask ? (ask.kind === 'question' ? 'Question' : ask.kind === 'plan' ? 'Approve plan' : 'Permission') : 'Your turn';
-  const what = ask ? `${ASK_LABELS[ask.kind] ?? ASK_LABELS.permission}${ask.text ? `: ${ask.text}` : ''}` : 'claude finished its turn and waits for you';
-  return h('button', {
-    type: 'button',
-    class: `dev-wait-badge${ask ? ' asks' : ''}`,
-    title: `${what}. Click to open its terminal.`,
-    'aria-label': `${what}. Open the Dev terminal of "${item.text}"`,
-    onclick: () => {
-      const taskIds = store.get(COLLECTION).items.filter((t) => t.devSession === item.devSession).map((t) => t.id);
-      openSession({ id: /** @type {string} */ (item.devSession), cwd: status.cwd, taskIds });
-    },
-  }, icon(ask ? 'message' : 'terminal'), label);
 }
 
 // On a task a Cron flow made: opens the run that made it, or the flow when the run is gone (or the task predates
@@ -1468,8 +1419,7 @@ function todoRow(store, item, ctx, place) {
         }),
         dueChip(item),
         autoBadge(item),
-        linkChips(store, item),
-        waitingBadge(store, item),
+        linkChips(store, item, repos),
         item.inbox ? h('span', { class: 'muted small' }, `needs ${missingFor(item)}`) : null,
         item.inbox
           ? h('button', {
