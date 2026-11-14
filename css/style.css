@@ -322,7 +322,7 @@ a.btn-small.primary-link:hover { filter: brightness(1.05); }
 button { transition: background-color 0.15s ease, filter 0.15s ease, transform 0.1s ease, color 0.15s ease, border-color 0.15s ease; }
 button:active:not(:disabled) { transform: scale(0.97); }
 button:disabled { opacity: 0.55; cursor: not-allowed; }
-.tab, .nav-item, .settings-tab, .seg, .project-item, .recipe-item, .recap-row { transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease; }
+.tab, .nav-item, .settings-cat, .settings-page, .seg, .project-item, .recipe-item, .recap-row { transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease; }
 .tab { position: relative; }
 .tab.active::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: -6px; height: 2px; border-radius: 2px; background: var(--accent); }
 /* Only on a change of section: the bar is drawn again on every redraw. */
@@ -776,27 +776,60 @@ body.project-dragging .project-list .root-drop { display: block; }
 .model-chip .icon { width: 12px; height: 12px; }
 
 /* Settings: left sidebar, full-width content */
-.settings-shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--gap); align-items: start; }
-.settings-side { position: sticky; top: 72px; display: flex; flex-direction: column; gap: 10px; }
-.settings-side h2 { margin: 0; }
-.settings-nav { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
-.settings-tab { text-align: left; background: transparent; border: none; padding: 8px 10px; border-radius: 8px; color: var(--muted); }
-.settings-tab:hover { background: var(--surface-2); color: var(--text); }
-.settings-tab.active { background: var(--surface-2); color: var(--text); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
 .settings-main { min-width: 0; display: flex; flex-direction: column; gap: var(--gap); }
-/* Settings uses the whole page below the top bar, like Inbox: no padding around it. The sidebar sticks under the top
-   bar and runs to the bottom of the window; the center panel's cards run to the window's edge, one border between
-   each, with no gap. */
+/* Settings uses the whole page below the top bar, like Inbox: a rail of categories, the category's pages, then the
+   page itself across the rest of the width. The rail and the list stick under the top bar and run to the bottom of
+   the window; the page's cards run to the window's edge, one border between each, with no gap. */
 .view[data-section="settings"] {
   padding: 0;
   min-height: calc(100dvh - 54px);
-  & > .settings-shell { gap: 0; min-height: calc(100dvh - 54px); align-items: stretch; }
-  & .settings-side { top: 54px; height: calc(100dvh - 54px); overflow-y: auto; border-radius: 0; border-top: none; border-left: none; border-bottom: none; }
+  & > .settings-shell { display: grid; grid-template-columns: 96px 300px minmax(0, 1fr); min-height: calc(100dvh - 54px); align-items: stretch; }
+  & .settings-rail, & .settings-list { position: sticky; top: 54px; height: calc(100dvh - 54px); overflow-y: auto; }
   & .settings-main, & .settings-main > .stack-lg { gap: 0; }
   & .settings-main > .card, & .settings-main > .stack-lg > .card { border-radius: 0; border-top: none; border-left: none; border-right: none; }
-  @media (max-width: 720px) {
-    & .settings-side { height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+}
+.settings-rail { display: flex; flex-direction: column; gap: 2px; padding: 10px 6px; background: var(--surface); border-right: 1px solid var(--border); }
+.settings-cat { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 62px; padding: 8px 4px; border: none; border-radius: 10px; background: transparent; color: var(--muted); font-size: 0.72rem; font-weight: 500; line-height: 1.2; text-align: center; }
+.settings-cat:hover { background: var(--surface-2); color: var(--text); }
+.settings-cat.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.settings-cat-icon { position: relative; display: inline-grid; place-items: center; }
+.settings-cat-icon .icon { width: 22px; height: 22px; }
+.settings-cat-badge { position: absolute; top: -6px; right: -12px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--warn); color: var(--surface); font-size: 0.65rem; font-weight: 700; display: grid; place-items: center; }
+.settings-list { display: flex; flex-direction: column; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 55%, var(--bg)); }
+.settings-list-head { display: flex; flex-direction: column; gap: 6px; padding: 16px; border-bottom: 1px solid var(--border); }
+.settings-list-head h2 { margin: 0; font-size: 1.25rem; }
+.settings-list-head p { margin: 0; }
+.settings-progress { width: 100%; height: 6px; accent-color: var(--income); }
+.settings-pages { list-style: none; margin: 0; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.settings-page { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 54px; padding: 8px 10px; border: none; border-radius: 8px; background: transparent; color: inherit; text-align: left; }
+.settings-page:hover { background: var(--surface-2); }
+.settings-page.active { background: var(--surface); box-shadow: 0 0 0 1px var(--border), inset 3px 0 0 var(--accent); }
+.settings-page-icon { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 8px; background: var(--surface-2); color: var(--text); }
+.settings-page-icon .icon { width: 17px; height: 17px; }
+.settings-page-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.settings-page-text strong { font-weight: 600; }
+.settings-page-text .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.settings-dot.is-ok { background: var(--income); }
+.settings-dot.is-warn { background: var(--warn); }
+.settings-dot.is-off { border: 1.5px solid var(--muted); }
+.settings-list-foot { margin: auto 0 0; padding: 12px 16px; }
+.settings-back { display: none; }
+.settings-crumb { margin: 0; padding: 10px 20px; border-bottom: 1px solid var(--border); }
+/* Narrow screens: the rail runs across the top, then the list or the page, with Back between them. */
+@media (max-width: 860px) {
+  .view[data-section="settings"] {
+    & > .settings-shell { grid-template-columns: minmax(0, 1fr); align-content: start; }
+    & .settings-rail, & .settings-list { position: static; height: auto; }
   }
+  .settings-rail { flex-direction: row; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  .settings-cat { min-width: 78px; }
+  .settings-list { border-right: none; }
+  .settings-shell.show-list .settings-main { display: none; }
+  .settings-shell:not(.show-list) .settings-list { display: none; }
+  .settings-back { display: inline-flex; align-self: flex-start; margin: 10px 0 0 12px; min-height: 40px; }
+  .settings-crumb { display: none; }
+}
 }
 .panel { display: flex; flex-direction: column; gap: 18px; padding: 20px; }
 .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px 24px; flex-wrap: wrap; }
@@ -1506,10 +1539,6 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
   .side, .side-pane { position: static; height: auto; overflow: visible; }
   .side-pane .list-scroll { flex: none; max-height: 50vh; }
   .todo-head { display: none; }
-  .settings-shell { grid-template-columns: minmax(0, 1fr); }
-  .settings-side { position: static; min-width: 0; }
-  .settings-nav { flex-direction: row; overflow-x: auto; }
-  .settings-tab { white-space: nowrap; }
   .todo-row { grid-template-columns: 20px 20px minmax(0, 1fr) auto; }
   .todo-title-cell { grid-column: 3; grid-row: 1; }
   .todo-meta { display: flex; flex-wrap: wrap; gap: 6px; grid-column: 3 / 5; grid-row: 2; }
@@ -1820,17 +1849,9 @@ button.run-chip.preview-link { min-height: 28px; padding: 3px 10px; border-radiu
   .lp-stats > :last-child:nth-child(odd) { grid-column: 1 / -1; }
 }
 
-/* Settings: grouped nav with icons, and the GitHub token guide */
-.settings-tab { display: flex; align-items: center; gap: 10px; }
-.settings-group { display: flex; flex-direction: column; gap: 2px; }
-.settings-group + .settings-group { margin-top: 12px; }
-.settings-group-title { margin: 0 10px 2px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+/* Settings: the GitHub token guide */
 .token-guide { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; }
 .token-guide h3 { margin: 0 0 4px; font-size: 0.95rem; }
-@media (max-width: 720px) {
-  .settings-group { display: contents; }
-  .settings-group-title { display: none; }
-}
 
 /* Settings: category colours */
 .label-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; }
@@ -3580,7 +3601,7 @@ code.tool-fail-call { font-size: 0.76rem; }
 .fp-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
 .fp-chosen { overflow-wrap: anywhere; min-width: 0; }
 .pp-icon-row > :first-child:not(.project-icon) { flex: 1; min-width: 0; }
-/* Settings: Dev environment, presets and each project's folder and command */
+/* Settings: Coding Agents, presets and each project's folder and command */
 .dev-env-list { list-style: none; margin: 0; padding: 0; }
 .dev-env-row { display: grid; align-items: center; gap: 6px 20px; padding: 10px 4px; border-bottom: 1px solid var(--border); }
 .dev-env-row:last-child { border-bottom: none; }

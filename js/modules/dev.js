@@ -51,7 +51,7 @@ import { cronRunOf, cronRunHref } from '../cron.js';
 export { runnerOf, devAgents, DEFAULT_DEV_COMMAND, devCommandOf };
 
 const COLLECTION = 'dev';
-// presets: commands named in Settings → Dev environment ({ id, name, command }), which projects pick instead of
+// presets: commands named in Settings → Coding Agents ({ id, name, command }), which projects pick instead of
 // typing the same command each time.
 const DEFAULTS = { history: [], favorites: [], runner: '', presets: [] };
 const HISTORY_MAX = 100;

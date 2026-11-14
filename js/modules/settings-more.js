@@ -301,6 +301,32 @@ export function analyticsCard(store) {
           : empty('No project has a website yet. Add one on a project page.'))));
 }
 
+// --- Websites ---
+
+// Which project websites Monitoring reads: visits (Analytics) and search (Search Console and Bing).
+/** @param {Store} store */
+export function websitesCard(store) {
+  const off = new Set(store.get('settings').search?.off ?? []);
+  const sites = [...sitesOf(store)].sort(byName);
+  /** @param {string} id @param {boolean} on */
+  const setOn = (id, on) => store.update('settings', (d) => {
+    const list = (d.search?.off ?? []).filter((x) => x !== id);
+    d.search = { ...d.search, off: on ? list : [...list, id] };
+  });
+  const onCount = sites.filter((p) => !off.has(p.id)).length;
+  return h('section', { class: 'card panel' },
+    head('Websites', 'The project websites Monitoring reads, from each project’s page. Every one is on by default. Switch one off to leave it out of Monitoring → Search (Google and Bing). To add a website, set it on its project’s page.',
+      sites.length ? badge(`${onCount} of ${sites.length} on`, onCount ? 'done' : 'plain') : null),
+    h('div', { class: 'svc-section' },
+      sites.length
+        ? h('ul', { class: 'stack' }, sites.map((p) =>
+            h('li', { class: 'row prop-row' },
+              projectIcon(p),
+              h('div', { class: 'grow' }, h('strong', null, p.name), h('div', { class: 'muted small' }, hostOf(p.website))),
+              toggle(!off.has(p.id), 'In Monitoring', (on) => setOn(p.id, on)))))
+        : empty('No project has a website yet. Add one on a project page.')));
+}
+
 // --- Search consoles ---
 
 /** @param {Store} store */
@@ -310,26 +336,7 @@ export function searchCard(store) {
   const saveBing = (key) => store.update('settings', (d) => {
     d.bing = { key };
   });
-  const off = new Set(store.get('settings').search?.off ?? []);
-  const sites = [...sitesOf(store)].sort(byName);
-  /** @param {string} id @param {boolean} on */
-  const setOn = (id, on) => store.update('settings', (d) => {
-    const list = (d.search?.off ?? []).filter((x) => x !== id);
-    d.search = { ...d.search, off: on ? list : [...list, id] };
-  });
-  const onCount = sites.filter((p) => !off.has(p.id)).length;
   return h('div', { class: 'stack-lg' },
-    h('section', { class: 'card panel' },
-      head('Websites', 'Every project website is on by default. Switch one off to leave it out of Monitoring → Search (Google and Bing).',
-        sites.length ? badge(`${onCount} of ${sites.length} on`, onCount ? 'done' : 'plain') : null),
-      h('div', { class: 'svc-section' },
-        sites.length
-          ? h('ul', { class: 'stack' }, sites.map((p) =>
-              h('li', { class: 'row prop-row' },
-                projectIcon(p),
-                h('div', { class: 'grow' }, h('strong', null, p.name), h('div', { class: 'muted small' }, hostOf(p.website))),
-                toggle(!off.has(p.id), 'In Monitoring', (on) => setOn(p.id, on)))))
-          : empty('No project has a website yet. Add one on a project page.'))),
     h('section', { class: 'card panel' },
       head('Google Search Console', 'Clicks, impressions and queries for each project website, shown in Monitoring. Read-only. A project is matched to the Search Console property with the same website address.',
         badge(isConnected('search') ? 'Connected' : 'Not connected', isConnected('search') ? 'done' : 'plain')),

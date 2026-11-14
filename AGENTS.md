@@ -104,7 +104,7 @@ js/deploy-panel.js    a preview's panel: state, commit, timings, error, links an
 js/images.js          which pasted or dropped files are images claude reads
 js/task-images.js     a task's images: kept in the data folder, shown on the task, saved through the runner for claude
 js/task-worktrees.js  the worktrees Dev sessions made for tasks; removed through the runner once their tasks are done, their terminals closed
-js/modules/dev-agent-field.js  a project's agent pick (or its own command), shared by Settings → Dev environment and a project's page; agents' logos
+js/modules/dev-agent-field.js  a project's agent pick (or its own command), shared by Settings → Coding Agents and a project's page; agents' logos
 js/modules/dev-worktrees.js  Dev's Worktrees panel: the repo's worktrees, whether each is in use, and removing them
 js/modules/dev-uses.js  the skills and MCP panels of Dev's bar: a session's skills (what each does, its turns) and its MCP calls by server and tool (failures, time per call)
 js/modules/dev-pr.js   Dev's pull request view: the branch against the default branch, file list, diffs as cards that fold, Viewed marks
@@ -121,7 +121,8 @@ js/capture.js         parseTask(), parseMoney() and makeTask(): one place for a 
 js/task-tree.js       the tree parentId makes: wouldLoop() and descendantsOf() (no DOM)
 js/palette.js         the Cmd/Ctrl+K search palette: jump, or capture a task, a Money entry or a recipe link
 js/search.js          what the full search page (modules/search.js, hidden) looks through, grouped by kind
-js/command-field.js   a shell command in an editor's colours, and its field: {{variable}} chips, Edit and Preview (Settings → Dev environment)
+js/settings-pages.js  the Settings pages by category (the rail, the lists, search and the palette), keyed by their ?section= (no DOM)
+js/command-field.js   a shell command in an editor's colours, and its field: {{variable}} chips, Edit and Preview (Settings → Coding Agents)
 js/slash-complete.js  the list of Claude Code skills a "/" opens under the caret of a task's description: narrowing, arrows, Enter or Tab
 js/task-query.js      the Tasks search: words plus #project, !priority, is:status, cat: and due: filters
 js/shortcuts.js       the single-key shortcuts ("g" then a letter) and the sheet that lists them
@@ -141,7 +142,7 @@ tools/worker.js       the runners: one worker that runs the background jobs on a
 tools/worker/store.js the store for Node (get, update, save over node:fs), merged with what the tabs write through js/merge.js
 tools/worker/schedule.js  intervals, no overlap, timeouts, backoff, and the runners.json heartbeat
 tools/board.js        `node "$BOARD_CLI" task list|show|add|edit`: a Dev session's own tasks from inside its terminal, through the runners (BOARD_API, BOARD_SESSION_TOKEN)
-tools/board-skill.js  the board-tasks skill's link in ~/.claude/skills: its state and installing it (Settings → Dev environment through the command runner, and tools/install-skill.js for `bun run install-skill`)
+tools/board-skill.js  the board-tasks skill's link in ~/.claude/skills: its state and installing it (Settings → Coding Agents through the command runner, and tools/install-skill.js for `bun run install-skill`)
 skills/board-tasks/SKILL.md  the skill that tells claude how to use tools/board.js
 tools/worker/tasks.js  a Dev session's own tasks (POST /tasks/list, show, add, edit) by its terminal's token: its roots read-only, what is under them and what it made; 100 per session
 tools/worker/http.js  the worker's localhost API: status, Run now, data folder

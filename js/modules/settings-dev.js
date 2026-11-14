@@ -1,4 +1,4 @@
-// Settings → Dev environment, in two tabs: the agents (the program they run, the connection to a provider, the models
+// Settings → Coding Agents, in two tabs: the agents (the program they run, the connection to a provider, the models
 // a task can pick, and how the program takes them), and each project's folder and agent. Commands are edited in colour, with the variables they take as chips and a Preview of what a task runs.
 import { h, icon, notice, uid } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
@@ -449,7 +449,7 @@ export function devEnvironmentCard(store) {
   return h('div', { class: 'stack-lg' },
     howItWorks(store),
     skillPanel(store),
-    h('div', { class: 'sub-tabs', role: 'tablist', 'aria-label': 'Dev environment' },
+    h('div', { class: 'sub-tabs', role: 'tablist', 'aria-label': 'Coding Agents' },
       DEV_TABS.map(([id, label]) => h('button', {
         type: 'button',
         role: 'tab',

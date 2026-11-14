@@ -1204,14 +1204,14 @@ function projectView(store, p, items, categories) {
     triageBlock(store, p));
 }
 
-// The agent a task goes to Dev with, from Settings → Dev environment, or the project's own command.
+// The agent a task goes to Dev with, from Settings → Coding Agents, or the project's own command.
 /** @param {Store} store @param {Project} p */
 function devCommandBlock(store, p) {
   return h('section', { class: 'pp-block' },
     h('h3', null, 'Dev agent'),
     projectAgentField(store, p, (patch) => updateProject(store, p.id, patch)),
     h('span', { class: 'muted small' }, 'Runs with the task as its prompt when a task goes to Dev. Agents are set in ',
-      h('a', { href: '#/settings?section=dev' }, 'Settings → Dev environment'), '.'));
+      h('a', { href: '#/settings?section=dev' }, 'Settings → Coding Agents'), '.'));
 }
 
 /** @param {Store} store @param {ProjectLabel[]} categories @param {Project[]} projects */

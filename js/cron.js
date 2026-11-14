@@ -77,7 +77,7 @@ export const STEP_TYPES = [
   ['save-contacts', 'Save contacts', 'save', 'Saves the people of a list to Contacts in the flow’s project, merged with those already there by LinkedIn handle or address.', 'LinkedIn'],
 ];
 
-// What a "Run in Dev" step starts: the project's agent ('claude'), an agent from Settings → Dev environment
+// What a "Run in Dev" step starts: the project's agent ('claude'), an agent from Settings → Coding Agents
 // ('preset', step.preset; agents took the presets' place and ids), a Dev command typed on the step ('custom', step.devCommand), each with the Dev prompt,
 // or a plain shell command with no prompt ('command').
 /** @param {DataStore} store */
@@ -104,7 +104,7 @@ function stepDevCommand(store, step) {
   }
   if (step.mode !== 'preset') return '';
   const preset = devAgents(store).find((p) => p.id === step.preset);
-  if (!preset?.command?.trim()) throw new Error('The agent of this step was removed. Choose another in Settings → Dev environment.');
+  if (!preset?.command?.trim()) throw new Error('The agent of this step was removed. Choose another in Settings → Coding Agents.');
   return preset.command;
 }
 

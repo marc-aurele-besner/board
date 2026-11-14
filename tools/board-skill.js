@@ -1,5 +1,5 @@
 // The board-tasks skill (skills/board-tasks): installed for Claude Code as a link from ~/.claude/skills/board-tasks to
-// this checkout's folder, so a pull updates it. Used by `bun run install-skill` and by Settings → Dev environment
+// this checkout's folder, so a pull updates it. Used by `bun run install-skill` and by Settings → Coding Agents
 // through the command runner (GET /board-skill, POST /board-skill/install).
 import { lstat, mkdir, readlink, symlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
