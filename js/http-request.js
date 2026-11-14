@@ -104,7 +104,7 @@ export async function sendWire(wire, signal) {
   try {
     res = await fetch(url, {
       method: String(wire.method || 'GET').toUpperCase(),
-      headers: (wire.headers ?? []).map(([k, v]) => [String(k), String(v)]),
+      headers: (wire.headers ?? []).map(([k, v]) => /** @type {[string, string]} */ ([String(k), String(v)])),
       body: wire.body ?? undefined,
       redirect: 'follow',
       cache: 'no-store',
