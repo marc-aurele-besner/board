@@ -57,7 +57,8 @@ addEventListener('message', (e) => {
 /**
  * @typedef {{ el: HTMLElement, iframe: HTMLIFrameElement | null, log: (e: ConsoleEntry) => void, layout: () => void, paintBar: () => void }} Frame
  * What to show: a page the board writes (`html`), or a site (`url`); or why it cannot be shown (`refused`, with a link).
- * @typedef {{ html?: string, url?: string, refused?: string, sandbox: string, title: string }} FrameContent
+ * `check` is a refusal still being worked out: the site loads meanwhile, and gives way to the reason if there is one.
+ * @typedef {{ html?: string, url?: string, refused?: string, check?: Promise<string>, sandbox: string, title: string }} FrameContent
  */
 
 /**
@@ -180,18 +181,23 @@ export function previewFrame({ head, actions, load, site = '' }) {
   live.add(frame);
   new ResizeObserver(() => frame.layout()).observe(stage);
   frame.paintBar();
+  /** @param {string} reason @param {string} [url] */
+  const refuse = (reason, url) => {
+    frame.iframe = null;
+    stage.replaceChildren(h('div', { class: 'work-empty work-preview-refused' },
+      h('p', { class: 'muted small' }, reason),
+      url ? h('a', { class: 'btn-small', href: url, target: '_blank', rel: 'noopener noreferrer' }, icon('globe'), 'Open site') : null));
+  };
   load().then((c) => {
-    if (c.refused) {
-      stage.replaceChildren(h('div', { class: 'work-empty work-preview-refused' },
-        h('p', { class: 'muted small' }, c.refused),
-        c.url ? h('a', { class: 'btn-small', href: c.url, target: '_blank', rel: 'noopener noreferrer' }, icon('globe'), 'Open site') : null));
-      return;
-    }
+    if (c.refused) return refuse(c.refused, c.url);
     const iframe = /** @type {HTMLIFrameElement} */ (h('iframe', { class: 'work-preview-frame', sandbox: c.sandbox, title: c.title, ...(c.html !== undefined ? { srcdoc: withHook(c.html) } : { src: c.url }) }));
     frame.iframe = iframe;
     box.replaceChildren(iframe);
     stage.replaceChildren(box);
     frame.layout();
+    c.check?.then((reason) => {
+      if (reason && frame.iframe === iframe) refuse(reason, c.url);
+    });
   }, (err) => stage.replaceChildren(h('p', { class: 'muted small work-empty' }, /** @type {Error} */ (err).message)));
   return frame;
 }
