@@ -10,7 +10,7 @@ import { editText } from '../inline.js';
 import { modelChip } from '../model-picker.js';
 import { isAddress, CHAINS, parsePosition, addPosition, addedPositions, addedListOf, tokenLogos, dexName } from '../uniswap.js';
 import { positionFields, positionError } from '../position-input.js';
-import { calendarAccountsCard, telegramCard, analyticsCard, searchCard, resendCard, gmailCard, notificationsCard, automationsCard, dataCard } from './settings-more.js';
+import { calendarAccountsCard, telegramCard, analyticsCard, websitesCard, searchCard, resendCard, gmailCard, notificationsCard, automationsCard, dataCard } from './settings-more.js';
 import { promptsCard } from './settings-prompts.js';
 import { labelsCard } from './settings-labels.js';
 import { chainsCard } from './settings-chains.js';
@@ -23,6 +23,12 @@ import { notionCard } from './settings-notion.js';
 import { modelForTask } from '../models.js';
 import { logo } from './positions.js';
 import { keepAwakeOn, keepAwakeSupported, setKeepAwake } from '../wake-lock.js';
+import { SETTINGS_CATEGORIES, SETTINGS_PAGES, categoryOf } from '../settings-pages.js';
+import { runnersKnown, runnersOnline } from '../runners.js';
+import { isConnected } from '../google-core.js';
+import { sitesOf } from '../automations.js';
+import { overrides } from '../prompts.js';
+import { devAgents, defaultAgent } from '../dev-core.js';
 
 /** @import { Store, IconName, AddedPosition, GithubOrgToken, UniswapSettings, PoolRow, ModelsSettings, ModelTask, GoogleSettings } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
@@ -59,61 +65,18 @@ export function ensureTasks(store) {
   });
 }
 
-// Settings pages in nav order, grouped. Each item is [key, label, icon].
-/** @type {{ title: string, items: [string, string, IconName][] }[]} */
-const SECTION_GROUPS = [
-  {
-    title: 'Connections',
-    items: [
-      ['github', 'GitHub', 'github'],
-      ['openrouter', 'OpenRouter', 'key'],
-      ['google', 'Google Calendar', 'calendar'],
-      ['gmail', 'Gmail', 'inbox'],
-      ['slack', 'Slack', 'slack'],
-      ['x', 'X / Twitter', 'x-mark'],
-      ['linkedin', 'LinkedIn', 'linkedin'],
-      ['github-accounts', 'GitHub accounts', 'github'],
-      ['instagram', 'Instagram', 'instagram'],
-      ['wallets', 'Wallets', 'wallet'],
-      ['blockchains', 'Blockchains', 'cube'],
-      ['contracts', 'Smart contracts', 'code'],
-      ['uniswap', 'Uniswap', 'droplet'],
-      ['telegram', 'Telegram', 'send'],
-      ['notion', 'Notion', 'notion'],
-      ['analytics', 'Google Analytics', 'activity'],
-      ['search', 'Search consoles', 'search'],
-      ['resend', 'Resend', 'mail'],
-      ['vercel', 'Vercel', 'triangle'],
-      ['netlify', 'Netlify', 'rocket'],
-      ['exchange', 'Exchange rates', 'coins'],
-    ],
-  },
-  {
-    title: 'Preferences',
-    items: [
-      ['appearance', 'Appearance', 'palette'],
-      ['models', 'Models & tasks', 'cpu'],
-      ['prompts', 'Prompts', 'sparkle'],
-      ['categories', 'Labels', 'tag'],
-      ['notifications', 'Notifications', 'bell'],
-      ['automations', 'Automations', 'zap'],
-      ['dev', 'Dev environment', 'terminal'],
-      ['runners', 'Runners', 'activity'],
-      ['data', 'Data folder', 'folder'],
-    ],
-  },
-];
-const PAGES = SECTION_GROUPS.flatMap((g) => g.items.map(([key]) => key));
+const PAGES = SETTINGS_PAGES.map(([key]) => key);
 
 export { modelForTask };
 
 
 // UI state: current section, last test result per service, whether a key is shown, and the model list.
+// On a phone the page shows the list of a category or one page, not both: list is true while the list is shown.
 /**
- * @type {{ section: string, results: Record<string, { status: string, text?: string } | null>, reveal: Record<string, boolean>,
+ * @type {{ section: string, list: boolean, results: Record<string, { status: string, text?: string } | null>, reveal: Record<string, boolean>,
  *   catalog: { status: string, items?: { value: string, label: string, name: string }[], error?: string } }}
  */
-const view = { section: 'github', results: {}, reveal: {}, catalog: { status: 'idle' } };
+const view = { section: 'github', list: false, results: {}, reveal: {}, catalog: { status: 'idle' } };
 
 /** @param {string} key */
 async function checkOpenRouterKey(key) {
@@ -1065,6 +1028,7 @@ function draw(root, store) {
         : view.section === 'telegram' ? telegramCard(store)
         : view.section === 'notion' ? notionCard(store)
         : view.section === 'analytics' ? analyticsCard(store)
+        : view.section === 'websites' ? websitesCard(store)
         : view.section === 'search' ? searchCard(store)
         : view.section === 'resend' ? resendCard(store)
         : view.section === 'gmail' ? gmailCard(store)
@@ -1080,28 +1044,146 @@ function draw(root, store) {
         : view.section === 'data' ? dataCard(store)
         : h('div', { class: 'stack-lg' }, tokenGuide(), github, orgKeysCard(store));
 
-  const nav = h('nav', { class: 'settings-nav', 'aria-label': 'Settings sections' },
-    SECTION_GROUPS.map((group) =>
-      h('div', { class: 'settings-group' },
-        h('p', { class: 'settings-group-title' }, group.title),
-        group.items.map(([key, label, iconName]) =>
+  root.replaceChildren(shell(store, content));
+}
+
+// --- The shell: the categories on a rail, the category's pages with their state, then the page ---
+
+/** @param {number} n @param {string} one */
+const count = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
+
+// A page's state for the list: 'ok' (connected, or has what it needs), 'warn' (a saved key was rejected, a sign-in
+// lost, the runners stopped), 'off' (nothing set up yet), or 'pref' for a page of preferences; with a short line.
+/** @param {Store} store @param {string} key @returns {{ state: string, text: string }} */
+function pageState(store, key) {
+  const s = store.get(COLLECTION);
+  const rejected = view.results[key]?.status === 'error';
+  /** @param {boolean} set @param {string} on @param {string} none */
+  const has = (set, on, none) => (set ? { state: rejected ? 'warn' : 'ok', text: rejected ? 'Key rejected' : on } : { state: 'off', text: none });
+  /** @param {number} n @param {string} one @param {string} none */
+  const many = (n, one, none) => (n ? { state: 'ok', text: count(n, one) } : { state: 'off', text: none });
+  /** @param {string} network */
+  const socials = (network) => (store.get('socials').accounts ?? []).filter((a) => a.network === network).length;
+  const pref = 'pref';
+  switch (key) {
+    case 'openrouter': return has(Boolean(s.openrouter.key), 'Key saved', 'No key yet');
+    case 'github': return has(Boolean(s.github.token), s.github.orgs?.length ? `Token saved · ${count(s.github.orgs.length, 'org key')}` : 'Token saved', 'No token yet');
+    case 'vercel': return has(Boolean(s.vercel?.token), 'Token saved', 'No token yet');
+    case 'netlify': return has(Boolean(s.netlify?.token), 'Token saved', 'No token yet');
+    case 'models': return { state: pref, text: s.models.default ? `${s.models.default.split('/').pop()} by default` : 'No default model' };
+    case 'prompts': {
+      const edited = Object.keys(overrides(store)).filter((id) => id !== 'global').length;
+      return { state: pref, text: edited ? `${count(edited, 'prompt')} edited` : 'All on their defaults' };
+    }
+    case 'dev': return { state: pref, text: `${count(devAgents(store).length, 'agent')} · ${defaultAgent(store).name} by default` };
+    case 'runners':
+      if (runnersOnline()) return { state: 'ok', text: 'Running' };
+      return runnersKnown() ? { state: 'warn', text: 'Not running: start bun start' } : { state: 'off', text: 'Not seen yet' };
+    case 'google':
+      return s.gcal.accounts.length ? { state: 'ok', text: count(s.gcal.accounts.length, 'account') } : { state: 'off', text: s.google.clientId ? 'No account yet' : 'No client ID yet' };
+    case 'gmail': return many(s.gmail.accounts.length, 'inbox', 'No account yet');
+    case 'websites': {
+      const sites = [...sitesOf(store)];
+      const off = new Set(s.search?.off ?? []);
+      return { state: pref, text: sites.length ? `${sites.filter((p) => !off.has(p.id)).length} of ${count(sites.length, 'site')} in Monitoring` : 'No project website yet' };
+    }
+    case 'analytics': return many(Object.values(s.analytics.properties ?? {}).filter(Boolean).length, 'property', 'No property yet');
+    case 'search': {
+      const parts = [isConnected('search') ? 'Google connected' : '', s.bing?.key ? 'Bing key saved' : ''].filter(Boolean);
+      return parts.length ? { state: 'ok', text: parts.join(' · ') } : { state: 'off', text: 'Not connected yet' };
+    }
+    case 'slack': {
+      const ws = store.get('slack').workspaces ?? [];
+      const out = ws.filter((w) => w.error).length;
+      return ws.length ? { state: out ? 'warn' : 'ok', text: out ? `${count(out, 'workspace')} signed out` : count(ws.length, 'workspace') } : { state: 'off', text: 'Not signed in yet' };
+    }
+    case 'telegram': return has(Boolean(s.telegram.token && s.telegram.chatId), 'Bot connected', s.telegram.token ? 'No chat yet' : 'No bot yet');
+    case 'notion': return many(s.notion?.accounts?.length ?? 0, 'account', 'No account yet');
+    case 'resend': return many(new Set(Object.values(s.resend.keys ?? {}).filter(Boolean)).size, 'key', 'No key yet');
+    case 'x': return many(socials('x'), 'account', 'No account yet');
+    case 'linkedin': return many(socials('linkedin'), 'account', 'No account yet');
+    case 'github-accounts': return many(socials('github'), 'account', 'No account yet');
+    case 'instagram': return many(socials('instagram'), 'account', 'No account yet');
+    case 'wallets': return many(s.uniswap.wallets.length, 'wallet', 'No wallet yet');
+    case 'contracts': return many(s.contracts.length, 'contract', 'No contract yet');
+    case 'blockchains': return { state: pref, text: s.blockchains.custom?.length ? `${count(s.blockchains.custom.length, 'chain')} added` : 'Built-in chains' };
+    default: return { state: pref, text: '' };
+  }
+}
+
+/** @param {string} key */
+const goTo = (key) => {
+  view.section = key;
+  view.list = false;
+};
+
+/** @param {Store} store @param {Child} content */
+function shell(store, content) {
+  const cat = categoryOf(view.section);
+  /** @param {string} state */
+  const needsFix = (state) => state === 'warn';
+  const rail = h('nav', { class: 'settings-rail', 'aria-label': 'Settings categories' },
+    SETTINGS_CATEGORIES.map((c) => {
+      const fix = c.pages.filter(([key]) => needsFix(pageState(store, key).state)).length;
+      const on = c.id === cat.id;
+      return h('button', {
+        type: 'button',
+        class: on ? 'settings-cat active' : 'settings-cat',
+        'aria-current': on ? 'true' : null,
+        title: fix ? `${c.name}: ${count(fix, 'page')} to fix` : c.name,
+        onclick: () => {
+          // A phone shows the category's list first; a wider screen opens its first page beside it.
+          view.section = on ? view.section : c.pages[0][0];
+          view.list = true;
+          store.refresh();
+        },
+      },
+        h('span', { class: 'settings-cat-icon' }, icon(c.icon), fix ? h('span', { class: 'settings-cat-badge', 'aria-label': `${count(fix, 'page')} to fix` }, String(fix)) : null),
+        h('span', null, c.name));
+    }));
+
+  const states = cat.pages.map(([key]) => pageState(store, key));
+  const linked = states.filter((x) => x.state !== 'pref');
+  const ok = linked.filter((x) => x.state === 'ok').length;
+  const fix = states.filter((x) => x.state === 'warn').length;
+  const progress = linked.length
+    ? `${ok} of ${linked.length} connected${fix ? ` · ${fix} to fix` : ''}`
+    : `${count(states.length, 'page')} of preferences${fix ? ` · ${fix} to fix` : ''}`;
+  const list = h('section', { class: 'settings-list', 'aria-label': cat.name },
+    h('div', { class: 'settings-list-head' },
+      h('p', { class: 'muted small' }, 'Settings'),
+      h('h2', null, cat.name),
+      h('p', { class: 'muted small' }, progress),
+      linked.length ? h('progress', { class: 'settings-progress', value: String(ok), max: String(linked.length), 'aria-label': 'Connected' }) : null),
+    h('ul', { class: 'settings-pages' },
+      cat.pages.map(([key, label, iconName], i) => {
+        const { state, text } = states[i];
+        const on = key === view.section;
+        const stateName = state === 'ok' ? 'Connected' : state === 'warn' ? 'Needs attention' : state === 'off' ? 'Not set up' : '';
+        return h('li', null,
           h('button', {
             type: 'button',
-            class: view.section === key ? 'settings-tab active' : 'settings-tab',
-            'aria-current': view.section === key ? 'page' : null,
+            class: on ? 'settings-page active' : 'settings-page',
+            'aria-current': on ? 'page' : null,
             onclick: () => {
-              view.section = key;
+              goTo(key);
               store.refresh();
             },
-          }, icon(iconName), h('span', null, label))))));
+          },
+            h('span', { class: 'settings-page-icon' }, icon(iconName)),
+            h('span', { class: 'settings-page-text' }, h('strong', null, label), text ? h('span', { class: 'muted small' }, text) : null),
+            stateName ? h('span', { class: `settings-dot is-${state}`, title: stateName, 'aria-label': stateName }) : null));
+      })),
+    h('p', { class: 'muted small settings-list-foot' }, 'Keys are saved in settings.json in your data folder, on this computer. Each key goes only to its own service.'));
 
-  root.replaceChildren(
-    h('div', { class: 'settings-shell' },
-      h('aside', { class: 'card settings-side' },
-        h('h2', null, 'Settings'),
-        h('p', { class: 'muted small' }, 'Keys are saved in settings.json in your data folder, on this computer. Each key goes only to its own service.'),
-        nav),
-      h('div', { class: 'settings-main' }, content)));
+  const page = cat.pages.find(([key]) => key === view.section);
+  return h('div', { class: view.list ? 'settings-shell show-list' : 'settings-shell' },
+    rail,
+    list,
+    h('div', { class: 'settings-main' },
+      h('button', { type: 'button', class: 'btn-ghost settings-back', onclick: () => { view.list = true; store.refresh(); } }, icon('chevron-left'), cat.name),
+      h('p', { class: 'settings-crumb muted small' }, page ? `Settings › ${cat.name} › ${page[1]}` : 'Settings'),
+      content));
 }
 
 export default /** @satisfies {import('../../types/data').Module} */ ({
@@ -1120,5 +1202,7 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
   /** @param {Record<string, string>} [p] */
   restore: (p = {}) => {
     view.section = PAGES.includes(p.section) ? p.section : 'github';
+    // Opened with no page named, a phone starts on the list.
+    view.list = !p.section;
   },
 });
