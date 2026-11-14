@@ -80,6 +80,13 @@ const SWAP_PCS_V3 = '0x19b47279256b2a23a1665c810c8d55a1758940ee09377d4f8d26497a3
 /** @type {Record<string, string>} */
 export const DEXES = { uniswap: 'Uniswap', pancakeswap: 'PancakeSwap' };
 export const dexName = (/** @type {string | undefined | null} */ dex) => DEXES[dex || 'uniswap'] ?? String(dex);
+// Each exchange's logo: its token's (UNI from Trust Wallet's assets, CAKE from CoinGecko, which Trust Wallet lacks).
+/** @type {Record<string, string>} */
+const DEX_LOGOS = {
+  uniswap: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984/logo.png',
+  pancakeswap: 'https://assets.coingecko.com/coins/images/12632/large/pancakeswap-cake-logo_%281%29.png',
+};
+export const dexLogo = (/** @type {string | undefined | null} */ dex) => DEX_LOGOS[dex || 'uniswap'] ?? null;
 
 /** @type {Map<number, Chain>} */
 const pancakes = new Map();
