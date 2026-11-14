@@ -17,6 +17,7 @@ expect(updateState(client, { ...server, version: 'a' }, { now, staleSince: null 
 expect(updateState(client, server, { now, staleSince: now }).kind === 'available', 'another version is available');
 const epoch = updateState(client, { ...server, epoch: 2 }, { now, staleSince: null });
 expect(epoch.kind === 'required' && epoch.reason === 'epoch', 'a higher epoch is required');
+expect(updateState(client, { ...server, version: 'a', epoch: 2 }, { now, staleSince: null }).kind === 'required', 'a higher epoch is required even at the same version');
 expect(updateState(client, { ...server, epoch: 0 }, { now, staleSince: now }).kind === 'available', 'a lower epoch is only available');
 expect(updateState(client, server, { now, staleSince: now - STALE_FORCE_MS }).kind === 'available', 'stale for exactly a day is still available');
 const age = updateState(client, server, { now, staleSince: now - STALE_FORCE_MS - 1 });

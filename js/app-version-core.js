@@ -28,8 +28,9 @@ export const LOOP_GUARD_MS = 30 * 1000;
  * @returns {UpdateState}
  */
 export function updateState(client, server, { now, staleSince }) {
-  if (server.version === client.version) return { kind: 'current' };
+  // The epoch is the code's own, so it counts even when the tab's first check already saw the newer files.
   if (server.epoch > client.epoch) return { kind: 'required', reason: 'epoch' };
+  if (server.version === client.version) return { kind: 'current' };
   if (staleSince !== null && now - staleSince > STALE_FORCE_MS) return { kind: 'required', reason: 'age' };
   return { kind: 'available' };
 }
