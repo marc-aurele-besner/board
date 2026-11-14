@@ -141,14 +141,15 @@ tools/dev.js          bun dev: the command runner unwatched, the rest of start.j
 tools/log.js          terminal lines prefixed with each runner's name
 tools/serve.js        local static server with no-cache headers; GET /version fingerprints the page's files for open tabs; no dependencies
 tools/slack.js        POST /slack and /slack/file: Slack calls from Node, which can send the session's d cookie
-tools/terminal.js     the Dev section's runner: terminal sessions that outlive the page (output and the list of open terminals kept on disk), typed keys, read-only file reads, git for Source control, listing worktrees and removing one (a done task's, or any from Dev's Worktrees panel), ending a done claude with /exit and answering its worktree question, saving images for claude, showing a path in Finder, each terminal's token for the board's tasks (POST /scope); localhost only
+tools/terminal.js     the Dev section's runner: terminal sessions that outlive the page (output and the list of open terminals kept on disk), typed keys, read-only file reads, git for Source control, listing worktrees and removing one (a done task's, or any from Dev's Worktrees panel), ending a done claude with /exit and answering its worktree question, saving images for claude, showing a path in Finder, each terminal's token for the board's tasks (POST /scope) and the other terminals on the same tasks (POST /scope/peers); localhost only
 tools/worker.js       the runners: one worker that runs the background jobs on a schedule and writes into the data folder; localhost API on 8420
 tools/worker/store.js the store for Node (get, update, save over node:fs), merged with what the tabs write through js/merge.js
 tools/worker/schedule.js  intervals, no overlap, timeouts, backoff, and the runners.json heartbeat
-tools/board.js        `node "$BOARD_CLI" task list|show|add|edit`: a Dev session's own tasks from inside its terminal, through the runners (BOARD_API, BOARD_SESSION_TOKEN)
+tools/board.js        `node "$BOARD_CLI" task list|show|add|edit|sessions`, `session`, `project`, `brand`, `image list|get|add`: a Dev session's own tasks and their context from inside its terminal, through the runners (BOARD_API, BOARD_SESSION_TOKEN)
 tools/board-skill.js  the board-tasks skill's link in ~/.claude/skills: its state and installing it (Settings → Coding Agents through the command runner, and tools/install-skill.js for `bun run install-skill`)
 skills/board-tasks/SKILL.md  the skill that tells claude how to use tools/board.js
 tools/worker/tasks.js  a Dev session's own tasks (POST /tasks/list, show, add, edit) by its terminal's token: its roots read-only, what is under them and what it made; 100 per session
+tools/worker/context.js  what else a Dev session reads by its token: the other terminals on its tasks (POST /sessions/peers), its tasks' project and brand (POST /project, /project/brand), their images (POST /images/list, /images/add: image types only, 5 MB)
 tools/worker/http.js  the worker's localhost API: status, Run now, data folder
 tools/jobs/*.js       one file per job: { id, timeout, delay, setup(store), run(ctx) }; listed in tools/jobs/index.js
 tools/jobs/gmail.js, resend.js  read new mail into inbox.json; resend.js also answers GET /resend/email/<id> and POST /resend/check
@@ -168,7 +169,7 @@ tools/jobs/previews.js  reads the preview links of open tasks' and recent Cron r
 tools/jobs/google.js  renews Google access tokens; a tab that finds one expired asks it through POST /run/google
 tools/check-imports.js  loads every worker module under plain Node, to catch a missing import or a DOM call at load time
 tools/check-merge.js  the worker and a tab change two fields of one file; both must survive
-tools/check-board-tasks.js  a Dev session's tasks: what it may read and change, the limit, a tab's write meanwhile
+tools/check-board-tasks.js  a Dev session's tasks: what it may read and change, the limit, a tab's write meanwhile; its project, brand, images and peers
 tools/linkedin-session.js  the LinkedIn session's queue (runners only): 20–40 s gap, daily limit, cache in linkedin.json, stop on sign-out; POST /linkedin/voyager runs it for a tab
 tools/check-linkedin.js  the LinkedIn queue against a stubbed fetch: gap, limit, cache, sign-out
 tools/check-app-version.js  the app version rules: when a tab is current, offered a reload or made to reload
