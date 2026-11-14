@@ -222,7 +222,7 @@ const asked = new Set();
  * @param {Store} store
  * @param {PrRef[]} prs
  */
-function askMissing(store, prs) {
+export function askMissing(store, prs) {
   const saved = store.get(GITHUB)?.previews ?? {};
   const fresh = uniquePrs(prs).filter((p) => !saved[previewKey(p.repo, p.number)] && !asked.has(previewKey(p.repo, p.number)));
   if (!fresh.length) return;
