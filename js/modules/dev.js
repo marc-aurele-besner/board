@@ -1057,20 +1057,47 @@ function favoritesMenu(store, s, input) {
   ];
 }
 
-// claude started again with the options it had: the prompt (after `--`, or quoted) is not sent again, the worktree
-// it named is returned apart, and --continue picks up its last conversation. null for a command that is not claude.
-// A command the suggestion made (`cd <worktree> && claude …`) counts as claude run in that folder.
-const CD_PREFIX = /^\s*cd\s+(?:'[^']*'|\S+)\s*&&\s*/;
-const WORKTREE_NAMED = /(^|\s)(?:--worktree|-w)(?:=|\s+)(?!-)([\w.-]{1,64})(?=\s|$)/;
-const WORKTREE_BARE = /(^|\s)(?:--worktree|-w)(?=\s|$)/;
-const RESUME_FLAGS = /(^|\s)(?:--continue|-c|--resume(?:[= ](?!-)\S+)?|-r(?: (?!-)\S+)?)(?=\s|$)/g;
-/** @param {string} command */
+// claude started again with the options it had, each kept as the shell word it was written as (a quoted
+// --append-system-prompt or --model stays whole): the prompt (after `--`, or the first word that is no option's
+// value) is not sent again, the worktree it named is returned apart, and --continue picks up its last conversation.
+// null for a command that is not claude. A command the suggestion made (`cd <worktree> && claude …`) keeps its `cd`,
+// so the conversation is continued in that folder again.
+const SHELL_WORD = /(?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|[^\s'"\\])+/gs;
+const unquote = (/** @type {string} */ raw) =>
+  raw.replace(/'([^']*)'|"((?:\\.|[^"\\])*)"|\\(.)/gs, (_, single, double, escaped) => single ?? (double !== undefined ? double.replace(/\\(.)/gs, '$1') : escaped));
+const WORKTREE_NAME = /^[\w.-]{1,64}$/;
+// claude's options that take no value; any other option takes the word after it.
+const CLAUDE_SWITCHES = new Set([
+  '--dangerously-skip-permissions', '--allow-dangerously-skip-permissions', '--verbose', '--debug', '-d', '--print', '-p', '--ide',
+  '--strict-mcp-config', '--fork-session', '--include-partial-messages', '--replay-user-messages', '--chrome', '--no-chrome',
+  '--disable-slash-commands',
+]);
+/** @param {string} command @returns {{ worktree: string, cd: string, command: string } | null} */
 function claudeAgain(command) {
-  const head = command.replace(CD_PREFIX, '').split(/\s--(?:\s|$)/)[0].split(/["']/)[0];
-  if (!/^\s*claude(?=\s|$)/.test(head)) return null;
-  const worktree = WORKTREE_NAMED.exec(head)?.[2] ?? '';
-  const options = head.replace(WORKTREE_NAMED, '$1').replace(WORKTREE_BARE, '$1').replace(RESUME_FLAGS, '$1').trim().replace(/\s+/g, ' ');
-  return { worktree, command: `${options} --continue` };
+  const words = command.match(SHELL_WORD) ?? [];
+  let cd = '';
+  if (words[0] === 'cd' && words[1] && words[2] === '&&') cd = `cd ${words.splice(0, 3)[1]} && `;
+  if (words[0] !== 'claude') return null;
+  const kept = ['claude'];
+  let worktree = '';
+  for (let i = 1; i < words.length; i++) {
+    const raw = words[i];
+    if (raw === '--' || !raw.startsWith('-')) break;
+    const eq = raw.startsWith('--') ? raw.indexOf('=') : -1;
+    const flag = eq > 0 ? raw.slice(0, eq) : raw;
+    const next = eq > 0 ? undefined : words[i + 1];
+    const value = next !== undefined && next !== '--' && !next.startsWith('-');
+    if (flag === '--worktree' || flag === '-w') {
+      if (eq > 0) worktree = unquote(raw.slice(eq + 1));
+      else if (value && WORKTREE_NAME.test(unquote(next))) worktree = unquote(words[++i]);
+    } else if (flag === '--resume' || flag === '-r' || flag === '--session-id') {
+      if (value) i++;
+    } else if (flag !== '--continue' && flag !== '-c') {
+      kept.push(raw);
+      if (value && !CLAUDE_SWITCHES.has(flag)) kept.push(words[++i]);
+    }
+  }
+  return { worktree: WORKTREE_NAME.test(worktree) ? worktree : '', cd, command: `${kept.join(' ')} --continue` };
 }
 
 // What the bar suggests once a command ended. claude that ran in a worktree (`claude --worktree <name>`) and quit:
@@ -1080,7 +1107,7 @@ function suggestion(store, s) {
   if (s.running || !s.exit || !s.command) return null;
   const again = claudeAgain(s.command);
   if (!again) return null;
-  if (!again.worktree) return { label: 'Continue claude here', command: again.command };
+  if (!again.worktree) return { label: 'Continue claude here', command: `${again.cd}${again.command}` };
   const path = `${s.cwd.replace(/\/+$/, '')}/.claude/worktrees/${again.worktree}`;
   // Whether the worktree is still there is asked of the runner once per command that ended.
   const key = `${path}\n${s.command}`;
