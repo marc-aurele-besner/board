@@ -1777,7 +1777,10 @@ button.work-group { width: 100%; justify-content: flex-start; gap: 6px; min-heig
 button.work-group .muted { font-weight: 500; text-transform: none; letter-spacing: 0; }
 .work-group .icon { width: 12px; height: 12px; transition: transform 0.12s; }
 .work-group.shut .icon { transform: rotate(-90deg); }
-button.work-session { border: none; border-radius: 0; background: none; justify-content: flex-start; font: inherit; min-height: 28px; }
+/* A button centres its text: the session's name fills the row, so it is set back to the left. */
+button.work-session { border: none; border-radius: 0; background: none; justify-content: flex-start; font: inherit; min-height: 28px; text-align: left; }
+/* The sessions keep their rows above the terminal, which takes the room left (a long list scrolls). */
+.work-body:has(.work-sessions) { flex: none; max-height: 40%; }
 button.work-session.on { background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
 .work-empty { padding: 12px 10px; margin: 0; }
 .work-term-slot { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
