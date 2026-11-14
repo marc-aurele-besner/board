@@ -1556,8 +1556,9 @@ function claudeButtons(store, s, read = true) {
 function drawClaudeButtons(store, s) {
   const slot = outside?.s === s ? outside.slot : document.querySelector('.dev .term-claude');
   if (!slot?.isConnected || followed() !== s || slot.querySelector(':active')) return;
-  // Outside Dev, the slot holds the model and cost too, which Dev's bar shows apart.
-  const next = h('span', null, outside?.s === s ? sessionUsage(store, s) : null, claudeButtons(store, s, false));
+  // Outside Dev, the model and cost have a slot of their own, on the right as in Dev's bar.
+  if (outside?.s === s) fill(outside.usage, [sessionUsage(store, s)]);
+  const next = h('span', null, claudeButtons(store, s, false));
   if (next.innerHTML === slot.innerHTML) return;
   const focused = [...slot.children].findIndex((el) => el === document.activeElement);
   const kind = focused < 0 ? '' : slot.children[focused].className.split(' ').slice(0, 2).join('.');
@@ -1574,7 +1575,7 @@ const TURNS_TIMEOUT_MS = 15000;
 /** @type {{ id: string, at: number, busy: boolean, data: RunnerTurns | null, timer: number }} */
 const turnsView = { id: '', at: 0, busy: false, data: null, timer: 0 };
 // The terminal whose turns are read: a task's terminal Tasks shows with them (followClaude()), else Dev's shown one.
-/** @type {{ s: ClaudeTarget, slot: HTMLElement, cwd: string, type: (text: string) => void, openDev: () => void } | null} */
+/** @type {{ s: ClaudeTarget, slot: HTMLElement, usage: HTMLElement, cwd: string, type: (text: string) => void, openDev: () => void } | null} */
 let outside = null;
 const followed = () => (outside?.slot.isConnected ? outside.s : document.querySelector('.dev') ? activeSession() ?? null : null);
 /** @param {Store} store */
@@ -1584,18 +1585,25 @@ function nextTurns(store) {
 }
 
 // Dev's claude buttons (turns, subagents, tools, skills, MCP) and their panels, for a terminal shown outside Dev: a
-// task's terminal, expanded in Tasks. Drawn into `slot`, and read again while the slot is on the page. A skill
-// picked is typed into that terminal, and its Skills list opens Dev.
+// task's terminal, expanded in Tasks. Drawn into `slot`, the model and cost into `usage`, and read again while the
+// slot is on the page. A skill picked is typed into that terminal, and its Skills list opens Dev.
 /**
- * @param {Store} store @param {HTMLElement} slot
+ * @param {Store} store @param {HTMLElement} slot @param {HTMLElement} usage
  * @param {{ id: string, running: boolean, cwd: string, type: (text: string) => void, openDev: () => void }} target
  */
-export function followClaude(store, slot, { id, running, cwd, type, openDev }) {
+export function followClaude(store, slot, usage, { id, running, cwd, type, openDev }) {
   const s = outside?.s.id === id ? outside.s : { id, running };
   s.running = running;
-  outside = { s, slot, cwd, type, openDev };
+  outside = { s, slot, usage, cwd, type, openDev };
   refreshTurns(store, s);
-  const next = h('span', null, sessionUsage(store, s), claudeButtons(store, s));
+  fill(slot, claudeButtons(store, s));
+  fill(usage, [sessionUsage(store, s)]);
+}
+
+// Puts the nodes in a slot when they read differently, and not under a press, whose click a new button would drop.
+/** @param {HTMLElement} slot @param {Child[]} nodes */
+function fill(slot, nodes) {
+  const next = h('span', null, nodes);
   if (next.innerHTML !== slot.innerHTML && !slot.querySelector(':active')) slot.replaceChildren(...next.childNodes);
 }
 /** @param {Store} store @param {ClaudeTarget} s */
