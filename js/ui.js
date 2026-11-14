@@ -352,6 +352,8 @@ const ICON_PATHS = {
   undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/>',
   'arrow-left-right': '<path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>',
   'pull-request': '<circle cx="18" cy="18" r="2.5"/><circle cx="6" cy="6" r="2.5"/><path d="M13 6h3a2 2 0 0 1 2 2v7.5"/><path d="M6 8.5V21"/>',
+  'pr-merged': '<circle cx="18" cy="18" r="2.5"/><circle cx="6" cy="6" r="2.5"/><path d="M6 21V8.5a9.5 9.5 0 0 0 9.5 9.5"/>',
+  'pr-closed': '<circle cx="18" cy="18" r="2.5"/><circle cx="6" cy="6" r="2.5"/><path d="M6 8.5V21"/><path d="M18 11v4.5"/><path d="m15.5 3.5 5 5"/><path d="m20.5 3.5-5 5"/>',
   repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
   play: '<polygon points="6 3 20 12 6 21 6 3"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="1.5"/>',
