@@ -985,7 +985,7 @@ async function checkRunner(store) {
 }
 
 // What claude used in a task's terminal so far, read from its transcript (dev-usage.js).
-/** @param {Store} store @param {Session} s */
+/** @param {Store} store @param {ClaudeTarget} s */
 function sessionUsage(store, s) {
   const record = recordOfSession(store, s.id);
   if (!record) return null;
@@ -1541,10 +1541,10 @@ function sessionTitle(store, s) {
 }
 
 // What the bar shows of the claude the shown terminal runs: its turns, its subagents, its tools, its skills and
-// MCP tools.
+// MCP tools. `read` asks the runner for its turns again when due.
 /** @param {Store} store @param {ClaudeTarget} s */
-function claudeButtons(store, s) {
-  refreshTurns(store, s);
+function claudeButtons(store, s, read = true) {
+  if (read) refreshTurns(store, s);
   return [turnsButton(store, s), agentsButton(store, s), toolsButton(store, s), toolButtons(store, s)];
 }
 
@@ -1556,7 +1556,8 @@ function claudeButtons(store, s) {
 function drawClaudeButtons(store, s) {
   const slot = outside?.s === s ? outside.slot : document.querySelector('.dev .term-claude');
   if (!slot?.isConnected || followed() !== s || slot.querySelector(':active')) return;
-  const next = h('span', null, turnsButton(store, s), agentsButton(store, s), toolsButton(store, s), toolButtons(store, s));
+  // Outside Dev, the slot holds the model and cost too, which Dev's bar shows apart.
+  const next = h('span', null, outside?.s === s ? sessionUsage(store, s) : null, claudeButtons(store, s, false));
   if (next.innerHTML === slot.innerHTML) return;
   const focused = [...slot.children].findIndex((el) => el === document.activeElement);
   const kind = focused < 0 ? '' : slot.children[focused].className.split(' ').slice(0, 2).join('.');
@@ -1594,7 +1595,7 @@ export function followClaude(store, slot, { id, running, cwd, type, openDev }) {
   s.running = running;
   outside = { s, slot, cwd, type, openDev };
   refreshTurns(store, s);
-  const next = h('span', null, claudeButtons(store, s));
+  const next = h('span', null, sessionUsage(store, s), claudeButtons(store, s));
   if (next.innerHTML !== slot.innerHTML && !slot.querySelector(':active')) slot.replaceChildren(...next.childNodes);
 }
 /** @param {Store} store @param {ClaudeTarget} s */
