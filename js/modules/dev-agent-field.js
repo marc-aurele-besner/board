@@ -23,11 +23,17 @@ export const COMMAND_VARS = [
 ];
 export const EXAMPLE_PROMPT = 'Fix the login bug';
 
+// The program an agent runs, by name ("Claude Code"), for the labels of what is left to it: with no model or effort
+// set, none is passed and the program uses its own setting.
+/** @param {DataStore} store @param {DevProvider} agent */
+export const programName = (store, agent) => harnessOf(devHarnesses(store), agent.command)?.name ?? 'the program';
+
 // A model's name in a pick: a claude alias with the model it runs.
 /** @param {string} v */
 export const modelLabel = (v) => (DEV_MODEL_NAMES[v] ? `${v} · ${DEV_MODEL_NAMES[v]}` : v);
 
-// The project's model and effort, among its agent's; Default is the agent's own default (or the program's).
+// The project's model and effort, among its agent's; Default is the agent's default, or, when that is not set,
+// nothing passed, so the program uses its own setting.
 /** @param {Store} store @param {Project} p @param {DevProvider} agent @param {(patch: Partial<Project>) => void} update */
 function modelEffortPicks(store, p, agent, update) {
   const efforts = agentEfforts(store, agent);
@@ -37,7 +43,7 @@ function modelEffortPicks(store, p, agent, update) {
           value: p.devModel && agent.models.includes(p.devModel) ? p.devModel : null,
           options: agent.models.map((m) => ({ value: m, label: modelLabel(m) })),
           nullable: true,
-          nullLabel: `Model: default (${agent.defaultModel ? modelLabel(agent.defaultModel) : 'the program’s'})`,
+          nullLabel: agent.defaultModel ? `Model: agent default (${modelLabel(agent.defaultModel)})` : `Model: not set (${programName(store, agent)} decides)`,
           className: 'field-pick dev-agent-pick',
           onPick: (v) => update({ devModel: v ?? '' }),
         })
@@ -47,7 +53,7 @@ function modelEffortPicks(store, p, agent, update) {
           value: p.devEffort && efforts.includes(p.devEffort) ? p.devEffort : null,
           options: efforts.map((e) => ({ value: e, label: `Effort: ${e}` })),
           nullable: true,
-          nullLabel: `Effort: default (${agent.defaultEffort && efforts.includes(agent.defaultEffort) ? agent.defaultEffort : 'the program’s'})`,
+          nullLabel: agent.defaultEffort && efforts.includes(agent.defaultEffort) ? `Effort: agent default (${agent.defaultEffort})` : `Effort: not set (${programName(store, agent)} decides)`,
           className: 'field-pick dev-agent-pick',
           onPick: (v) => update({ devEffort: v ?? '' }),
         })

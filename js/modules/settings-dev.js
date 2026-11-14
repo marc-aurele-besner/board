@@ -7,7 +7,7 @@ import { commandField, codeLine } from '../command-field.js';
 import { projectIcon, projectTree, cleanLocalPath, LOCAL_PATH_ERROR } from './projects.js';
 import { sortable } from './settings-labels.js';
 import { DEFAULT_DEV_COMMAND, runnerOf } from './dev.js';
-import { agentLogo, modelLabel, projectAgentField, COMMAND_VARS, EXAMPLE_PROMPT } from './dev-agent-field.js';
+import { agentLogo, modelLabel, programName, projectAgentField, COMMAND_VARS, EXAMPLE_PROMPT } from './dev-agent-field.js';
 import {
   DEV_MODEL_NAMES, agentEfforts, agentsOf, defaultAgent, devAgents, devHarnesses, devTemplate,
   harnessOf, splitEnv,
@@ -233,7 +233,7 @@ function agentsPanel(store, agents, harnesses, projects) {
             }),
             [
               harness?.name ?? 'Another program',
-              agent.models.length ? plural(agent.models.length, 'model') : 'its default model',
+              agent.models.length ? plural(agent.models.length, 'model') : 'no models listed',
               users ? plural(users, 'project') : 'no project',
             ].join(' · '),
             isDefault
@@ -267,8 +267,8 @@ function agentsPanel(store, agents, harnesses, projects) {
           h('div', { class: 'dev-chip-fields' },
             h('div', { class: 'cmd-field' },
               h('span', { class: 'dev-env-label small' }, 'Models in a task’s menu'),
-              chipsEditor({ key: `models-${agent.id}`, values: agent.models, what: 'a model', empty: 'none: the program picks',
-                // A default that was removed goes back to the program's.
+              chipsEditor({ key: `models-${agent.id}`, values: agent.models, what: 'a model', empty: `none: ${programName(store, agent)} decides`,
+                // A default that was removed is unset: nothing is passed.
                 save: (models) => patch(agent.id, { models, ...(models.includes(agent.defaultModel ?? '') ? {} : { defaultModel: '' }) }) }),
               agent.models.length
                 ? h('div', { class: 'dev-default-pick' },
@@ -277,7 +277,7 @@ function agentsPanel(store, agents, harnesses, projects) {
                       value: agent.defaultModel && agent.models.includes(agent.defaultModel) ? agent.defaultModel : null,
                       options: agent.models.map((m) => ({ value: m, label: modelLabel(m) })),
                       nullable: true,
-                      nullLabel: 'The program’s',
+                      nullLabel: `Not set: ${programName(store, agent)} decides`,
                       onPick: (v) => patch(agent.id, { defaultModel: v ?? '' }),
                     }))
                 : null),
@@ -292,7 +292,7 @@ function agentsPanel(store, agents, harnesses, projects) {
                       value: agent.defaultEffort && agentEfforts(store, agent).includes(agent.defaultEffort) ? agent.defaultEffort : null,
                       options: agentEfforts(store, agent).map((e) => ({ value: e, label: e })),
                       nullable: true,
-                      nullLabel: 'The program’s',
+                      nullLabel: `Not set: ${programName(store, agent)} decides`,
                       onPick: (v) => patch(agent.id, { defaultEffort: v ?? '' }),
                     }))
                 : null)),
