@@ -648,8 +648,9 @@ function paint(s) {
   s.el.top = out.scrollTop;
 }
 
-// A read-only terminal for other sections (Cron), drawn as Dev draws its own: colours, styles and links. paint(term)
-// draws it again and keeps it at the end when it was there.
+// A terminal for other sections (Cron, a task's Dev tab), drawn as Dev draws its own: colours, styles and links.
+// paint(term) draws it again and keeps it at the end when it was there; `cursor` draws the cursor, for a terminal
+// that takes keys. `screen` is the part a wheel turn is measured against.
 /** @param {string} [label] */
 export function terminalView(label = 'Terminal output') {
   const history = h('div', { class: 'term-history' });
@@ -660,12 +661,13 @@ export function terminalView(label = 'Terminal output') {
   const cache = new WeakMap();
   return {
     el: out,
-    /** @param {Terminal} term */
-    paint(term) {
+    screen,
+    /** @param {Terminal} term @param {boolean} [cursor] */
+    paint(term, cursor = false) {
       const atEnd = out.scrollHeight - out.scrollTop - out.clientHeight < 24;
       // The theme may have been switched since Dev last drew.
       theme = null;
-      drawLines(el, term, -1, cache);
+      drawLines(el, term, cursor && term.cursor ? term.y : -1, cache);
       if (atEnd) out.scrollTop = out.scrollHeight;
     },
   };
@@ -688,7 +690,7 @@ const painted = new Set();
 /** @param {string} id */
 export function liveSession(id) {
   const s = view.sessions.find((x) => x.id === id && x.attach);
-  return s ? { term: s.term, running: s.running, exit: s.exit } : null;
+  return s ? { term: s.term, running: s.running, exit: s.exit, pid: s.pid } : null;
 }
 /** @param {() => void} fn */
 export function onSessionPaint(fn) {
@@ -716,9 +718,9 @@ function fit(s) {
   schedulePaint();
 }
 
-// Keys for the program, as a terminal sends them.
+// Keys for the program, as a terminal sends them. Tasks' terminals send them too.
 /** @param {KeyboardEvent} e @param {boolean} appCursor @returns {string | null} */
-function keyData(e, appCursor) {
+export function keyData(e, appCursor) {
   if (e.isComposing || e.metaKey) return null;
   const mod = 1 + (e.shiftKey ? 1 : 0) + (e.altKey ? 2 : 0) + (e.ctrlKey ? 4 : 0);
   /** @type {Record<string, string>} */
@@ -824,14 +826,22 @@ function onTerminalScroll(s) {
 /** @param {Store} store @param {Session} s @param {WheelEvent} e */
 function onTerminalWheel(store, s, e) {
   if (e.deltaY < 0) s.stick = false;
-  const { term } = s;
-  if (!s.running || !s.pid || !e.deltaY || (!term.mouse && !term.main)) return;
+  if (!s.running || !s.pid) return;
+  const data = wheelData(s.term, e, /** @type {TermEl} */ (s.el).screen);
+  if (data) sendInput(runnerOf(store), s.pid, { data });
+}
+
+// What a wheel turn over a running program's screen sends it, or null when the page should scroll instead (it
+// stops the page's own scroll when it answers). Tasks' terminals send it too.
+/** @param {Terminal} term @param {WheelEvent} e @param {HTMLElement} screen @returns {string | null} */
+export function wheelData(term, e, screen) {
+  if (!e.deltaY || (!term.mouse && !term.main)) return null;
   e.preventDefault();
   const up = e.deltaY < 0;
   const lines = Math.min(10, Math.max(1, Math.round(Math.abs(e.deltaMode ? e.deltaY : e.deltaY / 40))));
   let data;
   if (term.mouse) {
-    const box = /** @type {TermEl} */ (s.el).screen.getBoundingClientRect();
+    const box = screen.getBoundingClientRect();
     const x = Math.min(term.cols, Math.max(1, Math.ceil(((e.clientX - box.left) / box.width) * term.cols) || 1));
     const y = Math.min(term.rows, Math.max(1, Math.ceil(((e.clientY - box.top) / box.height) * term.rows) || 1));
     const b = up ? 64 : 65;
@@ -840,7 +850,7 @@ function onTerminalWheel(store, s, e) {
   } else {
     data = `${term.appCursor ? '\x1bO' : '\x1b['}${up ? 'A' : 'B'}`.repeat(lines);
   }
-  sendInput(runnerOf(store), s.pid, { data });
+  return data;
 }
 
 /** @param {Store} store @param {Session} s @returns {TermEl} */
