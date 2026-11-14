@@ -159,6 +159,16 @@ function categoriesFor(store, projectId) {
       categoryLabelIds(c).some((id) => labels.includes(id)))
     .map((c) => c.name);
 }
+
+// The project a task typed in the add field goes to, as far as is known before it is added: the project its
+// #tag names, else the listed one. A #tag naming no project yet leaves the user's own skills.
+/** @param {Store} store @param {string} raw @returns {string | null} */
+function addFieldProject(store, raw) {
+  const tag = raw.match(/(?:^|\s)#([\w-]+)/);
+  if (tag) return projectsOf(store).find((p) => p.name.toLowerCase() === tag[1].toLowerCase())?.id ?? null;
+  return isProjectFilter(view.filter) ? view.filter : null;
+}
+
 // "buy milk #home" files the item under project "home" (created if missing).
 // Extra lines from a multi-line paste arrive as the description.
 // Images pasted or dropped on the add field go to the task it adds. Returns the task added, or null.
@@ -864,14 +874,14 @@ function copyButton(store, item) {
   }, icon('copy'));
 }
 
-// The skills a "/" in a task's description lists: those claude would have in the task's project folder (the
-// project's own first, then the user's), read through the runner and kept a moment per folder.
+// The skills a "/" in a task's description or the add field lists: those claude would have in the project's folder
+// (the project's own first, then the user's), read through the runner and kept a moment per folder.
 const SKILLS_STALE_MS = 30000;
 /** @type {Map<string, { at: number, items: Promise<SlashItem[]> }>} */
 const skillsByFolder = new Map();
-/** @param {Store} store @param {Task} item @returns {Promise<SlashItem[]>} */
-function taskSkills(store, item) {
-  const path = store.get('projects').projects.find((p) => p.id === item.projectId)?.localPath ?? '';
+/** @param {Store} store @param {string | null} projectId @returns {Promise<SlashItem[]>} */
+function projectSkills(store, projectId) {
+  const path = store.get('projects').projects.find((p) => p.id === projectId)?.localPath ?? '';
   const kept = skillsByFolder.get(path);
   if (kept && Date.now() - kept.at < SKILLS_STALE_MS) return kept.items;
   const base = runnerOf(store);
@@ -1470,7 +1480,7 @@ function todoRow(store, item, ctx, place) {
             rich: true,
             multiline: true,
             allowEmpty: true,
-            attach: (field) => slashComplete(field, () => taskSkills(store, item)),
+            attach: (field) => slashComplete(field, () => projectSkills(store, item.projectId)),
             onSave: (description) => updateItem(store, item.id, { description }),
           }),
           taskTools(store, item),
@@ -1728,7 +1738,7 @@ function boardCard(store, item, projects, order, place) {
             rich: true,
             multiline: true,
             allowEmpty: true,
-            attach: (field) => slashComplete(field, () => taskSkills(store, item)),
+            attach: (field) => slashComplete(field, () => projectSkills(store, item.projectId)),
             onSave: (description) => updateItem(store, item.id, { description }),
           }),
           taskTools(store, item),
@@ -2162,6 +2172,25 @@ function draw(root, store) {
   // deleted elsewhere.
   for (const id of view.selected) if (!order.includes(id)) view.selected.delete(id);
   const onScreen = visible.filter((i) => order.includes(i.id));
+  // The section patches the field in place, so the "/" list attached on its first draw stays; it reads the
+  // project when asked, not when attached.
+  const addField = /** @type {HTMLInputElement} */ (h('input', {
+    name: 'todo',
+    placeholder: 'Add a task… #project to file it, paste several lines for a description, or an image',
+    'aria-label': 'New todo',
+    autocomplete: 'off',
+    'data-autofocus': true,
+    onpaste: (/** @type {ClipboardEvent} */ e) => pasteAsTodo(store, e),
+    ondragover: (/** @type {DragEvent} */ e) => dragsFiles(e) && e.preventDefault(),
+    ondrop: (/** @type {DragEvent & { dataTransfer: DataTransfer }} */ e) => {
+      if (!dragsFiles(e)) return;
+      e.preventDefault();
+      const files = imageFiles(e.dataTransfer);
+      if (files.length) takePending(files);
+      else toast('Only PNG, JPEG, GIF and WebP images can be added');
+    },
+  }));
+  slashComplete(addField, () => projectSkills(store, addFieldProject(store, addField.value)));
 
   root.replaceChildren(
     resizableSide(h('div', { class: 'split' },
@@ -2325,22 +2354,7 @@ function draw(root, store) {
             if (addItem(store, input.value)) input.value = '';
           },
         },
-          h('input', {
-            name: 'todo',
-            placeholder: 'Add a task… #project to file it, paste several lines for a description, or an image',
-            'aria-label': 'New todo',
-            autocomplete: 'off',
-            'data-autofocus': true,
-            onpaste: (/** @type {ClipboardEvent} */ e) => pasteAsTodo(store, e),
-            ondragover: (/** @type {DragEvent} */ e) => dragsFiles(e) && e.preventDefault(),
-            ondrop: (/** @type {DragEvent & { dataTransfer: DataTransfer }} */ e) => {
-              if (!dragsFiles(e)) return;
-              e.preventDefault();
-              const files = imageFiles(e.dataTransfer);
-              if (files.length) takePending(files);
-              else toast('Only PNG, JPEG, GIF and WebP images can be added');
-            },
-          }),
+          addField,
           h('button', { class: 'primary', type: 'submit' }, 'Add'),
           // Adds the task and starts a Dev session on it, when the listed project has a folder for Dev to open.
           projects.find((p) => p.id === view.filter)?.localPath
