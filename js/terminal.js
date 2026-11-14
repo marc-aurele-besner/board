@@ -254,6 +254,13 @@ export const gitAction = async (base, path, action, body = {}) => (await call(ba
 /** @type {(base: string, params: Record<string, string>) => Promise<RunnerSearch>} */
 export const searchFiles = async (base, params) => (await call(base, `/search?${new URLSearchParams(params)}`)).json();
 
+// The board-tasks skill (tools/board-skill.js): whether ~/.claude/skills links to it, and linking it.
+/** @typedef {{ state: string, path: string, source: string, points?: string }} BoardSkill */
+/** @type {(base: string) => Promise<BoardSkill>} */
+export const boardSkill = async (base) => (await call(base, '/board-skill')).json();
+/** @type {(base: string) => Promise<BoardSkill>} */
+export const installBoardSkill = async (base) => (await call(base, '/board-skill/install', post({}))).json();
+
 // Shows a file or folder in Finder (Explorer on Windows, the file manager elsewhere).
 /** @param {string} base @param {string} path */
 export const revealPath = (base, path) => call(base, '/reveal', post({ path }));
