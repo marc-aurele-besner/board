@@ -3,7 +3,7 @@ import { h, empty, notice, progress, icon, refreshIcon } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { isConnected } from '../google.js';
 import { analyticsReport, searchReport, bingReport, mergeSearchRows, mergeSearchReports } from '../webstats.js';
-import { sitesOf } from '../automations.js';
+import { sitesOf, searchSitesOf } from '../automations.js';
 import { hostOf } from '../sitecheck.js';
 import { barChart, legend } from '../chart.js';
 import { stat } from './monitoring.js';
@@ -299,8 +299,12 @@ export function searchTab(store, view, w) {
   const note = missing
     ? ` ${SEARCH_ENGINES[missing].label} is not connected: only ${SEARCH_ENGINES[sources[0]].name} is counted.`
     : sources.length > 1 ? ' Google and Bing are added together.' : '';
-  const sites = sitesOf(store);
-  if (!sites.length) return h('div', { class: 'stack-lg' }, engines, empty('No project has a website yet. Add one on a project page.'));
+  const sites = searchSitesOf(store);
+  if (!sites.length) {
+    return h('div', { class: 'stack-lg' }, engines, empty(sitesOf(store).length
+      ? 'Every project website is switched off in Settings → Search consoles.'
+      : 'No project has a website yet. Add one on a project page.'));
+  }
   const p = pickedSite(view, sites);
   const b = dayBuckets(w);
   const all = loadSearch(store, p ? [p] : sites, sources, b);
