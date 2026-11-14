@@ -1741,6 +1741,8 @@ button.work-cwd:hover { background: var(--surface-2); color: var(--text); }
 .work-term-note { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .term-key.stop { display: inline-flex; align-items: center; gap: 4px; color: var(--danger); }
 .term-key.stop .icon { width: 11px; height: 11px; }
+.term-key.resume { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.term-key.resume .icon { width: 11px; height: 11px; }
 .work-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 5px 8px; border-top: 1px solid var(--border); }
 .work-foot > .grow { flex: 1 1 260px; }
 .work-peek { position: absolute; z-index: 46; width: min(560px, calc(100vw - 16px)); background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18); overflow: hidden; pointer-events: none; }

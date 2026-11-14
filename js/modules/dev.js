@@ -45,8 +45,9 @@ import { dateLocale } from '../locale.js';
  * @typedef {LinesEl & { out: HTMLElement, top: number, holding?: boolean }} TermEl
  * @typedef {{ id: string, n: number, cwd: string, tasks: string[], prompt: string, running: boolean, attach: AbortController | null,
  *   replaying: boolean, pid: number, exit: Exit | null, command: string, browse: number, stick: boolean, el: TermEl | null,
- *   term: Terminal, watch?: (text: string) => void, observer?: ResizeObserver, listed: boolean, listedAt: number,
- *   pickup?: { key: string, ok: boolean | null } }} Session
+ *   term: Terminal, watch?: (text: string) => void, observer?: ResizeObserver, listed: boolean, listedAt: number }} Session
+ * A terminal whose claude the bar's buttons read: Dev's session, or a task's terminal shown in Tasks.
+ * @typedef {{ id: string, running: boolean }} ClaudeTarget
  */
 
 export { runnerOf, devAgents, DEFAULT_DEV_COMMAND, devCommandOf };
@@ -690,7 +691,7 @@ const painted = new Set();
 /** @param {string} id */
 export function liveSession(id) {
   const s = view.sessions.find((x) => x.id === id && x.attach);
-  return s ? { term: s.term, running: s.running, exit: s.exit, pid: s.pid } : null;
+  return s ? { term: s.term, running: s.running, exit: s.exit, pid: s.pid, command: s.command, cwd: s.cwd } : null;
 }
 /** @param {() => void} fn */
 export function onSessionPaint(fn) {
@@ -701,8 +702,30 @@ export function onSessionPaint(fn) {
 // Columns and rows that fit the terminal, from the size of one character.
 /** @param {Session} s */
 function fit(s) {
-  const out = s.el?.out;
-  if (!out?.isConnected || !out.clientWidth) return;
+  const size = measure(s.el?.out);
+  if (!size) return;
+  const { cols, rows } = size;
+  if (cols === s.term.cols && rows === s.term.rows) return;
+  s.term.resize(cols, rows);
+  if (s.running && s.pid) sendInput(runnerOf(/** @type {Store} */ (currentStore)), s.pid, { cols, rows });
+  schedulePaint();
+}
+
+// A terminal Tasks shows, fitted to its view as Dev fits its own: the program is told its new size. Dev's copy of
+// the session (`term` when Tasks mirrors it) is resized with it, so Dev fits it back to its own page once shown.
+/** @param {Store} store @param {HTMLElement} out @param {Terminal} term @param {number} pid */
+export function fitTerminal(store, out, term, pid) {
+  const size = measure(out);
+  if (!size || (size.cols === term.cols && size.rows === term.rows)) return false;
+  term.resize(size.cols, size.rows);
+  if (pid) sendInput(runnerOf(store), pid, size);
+  schedulePaint();
+  return true;
+}
+
+/** @param {HTMLElement | undefined} out @returns {{ cols: number, rows: number } | null} */
+function measure(out) {
+  if (!out?.isConnected || !out.clientWidth) return null;
   const probe = h('span', { class: 'term-probe' }, 'M'.repeat(20));
   out.append(probe);
   const box = probe.getBoundingClientRect();
@@ -712,10 +735,7 @@ function fit(s) {
   const height = out.clientHeight - parseFloat(css.paddingTop) - parseFloat(css.paddingBottom);
   const cols = Math.max(20, Math.floor(width / (box.width / 20)));
   const rows = Math.max(5, Math.floor(height / box.height));
-  if (cols === s.term.cols && rows === s.term.rows) return;
-  s.term.resize(cols, rows);
-  if (s.running && s.pid) sendInput(runnerOf(/** @type {Store} */ (currentStore)), s.pid, { cols, rows });
-  schedulePaint();
+  return { cols, rows };
 }
 
 // Keys for the program, as a terminal sends them. Tasks' terminals send them too.
@@ -783,17 +803,23 @@ function onTerminalPaste(store, s, e) {
 /** @param {Store} store @param {Session} s @param {File[]} images */
 async function typeImages(store, s, images) {
   const pid = s.pid;
-  let paths;
-  try {
-    paths = await Promise.all(images.map(async (blob) => (await saveImage(runnerOf(store), blob)).path));
-  } catch (err) {
-    return toast(/** @type {Error} */ (err).message);
-  }
-  if (!s.running || s.pid !== pid) return;
-  const text = `${paths.join(' ')} `;
+  const text = await imagePaths(store, images);
+  if (!text || !s.running || s.pid !== pid) return;
   s.stick = true;
   sendInput(runnerOf(store), pid, { data: s.term.paste ? `\x1b[200~${text}\x1b[201~` : text });
   s.el?.out.focus({ preventScroll: true });
+}
+
+// The paths of copies the runner saved of the images, as typed into claude; null (with a toast) when it could not.
+/** @param {Store} store @param {File[]} images */
+export async function imagePaths(store, images) {
+  try {
+    const paths = await Promise.all(images.map(async (blob) => (await saveImage(runnerOf(store), blob)).path));
+    return `${paths.join(' ')} `;
+  } catch (err) {
+    toast(/** @type {Error} */ (err).message);
+    return null;
+  }
 }
 
 /** @param {Store} store @param {Session} s @param {DragEvent} e */
@@ -1111,28 +1137,75 @@ function claudeAgain(command) {
   return { worktree: WORKTREE_NAME.test(worktree) ? worktree : '', cd, command: `${kept.join(' ')} --continue` };
 }
 
-// What the bar suggests once a command ended. claude that ran in a worktree (`claude --worktree <name>`) and quit:
-// pick its conversation up in the same worktree, while the worktree is still there. claude anywhere else: continue it.
-/** @param {Store} store @param {Session} s @returns {{ label: string, command: string } | null} */
-function suggestion(store, s) {
-  if (s.running || !s.exit || !s.command) return null;
-  const again = claudeAgain(s.command);
+// Where claude can be picked up in a terminal whose claude ended, or that the runner no longer has (its log gone
+// after a restart or a close): the claude it last ran, started again with --continue, in the worktree it named
+// (`claude --worktree <name>`) while that is still there, or else where it ran. With no command known, the task
+// worktree that names the terminal, with its project's Dev command, stands in. Null when there is nothing to pick up.
+// Whether a worktree is still there is asked of the runner, and asked again after a while.
+const FOLDER_RECHECK_MS = 30000;
+/** @type {Map<string, { ok: boolean | null, at: number }>} */
+const folders = new Map();
+/**
+ * @param {Store} store @param {{ id: string, command: string, cwd: string }} s
+ * @returns {{ label: string, command: string, cwd: string, worktree: string } | null}
+ */
+export function pickUp(store, { id, command, cwd }) {
+  let again = command ? claudeAgain(command) : null;
+  if (!command) {
+    const task = store.get('todos').items.find((t) => t.worktrees?.some((w) => w.session === id));
+    const w = task?.worktrees?.find((x) => x.session === id);
+    const project = store.get('projects').projects.find((p) => p.id === task?.projectId);
+    const plain = w ? claudeAgain(devCommandOf(store, project)) : null;
+    if (!w || !plain) return null;
+    again = { ...plain, worktree: w.name };
+    cwd = w.cwd;
+  }
   if (!again) return null;
-  if (!again.worktree) return { label: 'Continue claude here', command: `${again.cd}${again.command}` };
-  const path = `${s.cwd.replace(/\/+$/, '')}/.claude/worktrees/${again.worktree}`;
-  // Whether the worktree is still there is asked of the runner once per command that ended.
-  const key = `${path}\n${s.command}`;
-  if (s.pickup?.key !== key && view.info) {
-    const pickup = { key, ok: /** @type {boolean | null} */ (null) };
-    s.pickup = pickup;
+  if (!again.worktree) return { label: 'Continue claude here', command: `${again.cd}${again.command}`, cwd, worktree: '' };
+  const path = `${cwd.replace(/\/+$/, '')}/.claude/worktrees/${again.worktree}`;
+  const seen = folders.get(path);
+  if (!seen || (seen.ok !== null && Date.now() - seen.at > FOLDER_RECHECK_MS)) {
+    const asked = { ok: /** @type {boolean | null} */ (seen?.ok ?? null), at: Date.now() };
+    folders.set(path, asked);
     listFolder(runnerOf(store), path).then(() => true, () => false).then((ok) => {
-      pickup.ok = ok;
-      if (s.pickup === pickup) store.refresh();
+      const changed = asked.ok !== ok;
+      Object.assign(asked, { ok, at: Date.now() });
+      if (changed) store.refresh();
     });
   }
-  return s.pickup?.key === key && s.pickup.ok
-    ? { label: `Pick up claude in ${again.worktree}`, command: `cd ${shellQuote(path)} && ${again.command}` }
+  return folders.get(path)?.ok
+    ? { label: `Pick up claude in ${again.worktree}`, command: `cd ${shellQuote(path)} && ${again.command}`, cwd, worktree: again.worktree }
     : null;
+}
+
+// What the bar suggests once a command ended, or in a terminal the runner lost: pickUp().
+/** @param {Store} store @param {Session} s */
+function suggestion(store, s) {
+  if (s.running || (s.command && !s.exit)) return null;
+  return pickUp(store, s);
+}
+
+// Runs claude again in a task's terminal that ended (what pickUp() found), from Tasks: in the same terminal, so the
+// task keeps pointing at it, and listed again on the runner with its tasks, so Dev shows it and the board CLI still
+// knows its tasks. Fails when the runner cannot be reached or refuses.
+// `out` is the view Tasks shows it in: the program starts at its size.
+/**
+ * @param {Store} store @param {string} id @param {{ command: string, cwd: string }} next @param {string[]} taskIds
+ * @param {HTMLElement} [out]
+ */
+export async function resumeSession(store, id, next, taskIds, out) {
+  const base = runnerOf(store);
+  const shown = view.sessions.find((x) => x.id === id);
+  if (shown) fit(shown);
+  const size = measure(out) ?? (shown ? { cols: shown.term.cols, rows: shown.term.rows } : { cols: 120, rows: 32 });
+  await runCommand(base, { session: id, command: next.command, cwd: next.cwd, ...size, theme: currentTheme().dark ? 'dark' : 'light' });
+  if (view.restored) {
+    currentStore ??= store;
+    const s = shown ?? makeSession({ id, cwd: next.cwd, tasks: taskIds });
+    if (view.info) attach(store, s);
+    await listOnRunner(store, s);
+  } else await listSession(base, { session: id, cwd: next.cwd, ...(taskIds.length ? { tasks: taskIds, prompt: '' } : {}) }).catch(() => null);
+  store.refresh();
 }
 
 /** @param {Session} s */
@@ -1409,7 +1482,7 @@ function sessionTitle(store, s) {
 
 // What the bar shows of the claude the shown terminal runs: its turns, its subagents, its tools, its skills and
 // MCP tools.
-/** @param {Store} store @param {Session} s */
+/** @param {Store} store @param {ClaudeTarget} s */
 function claudeButtons(store, s) {
   refreshTurns(store, s);
   return [turnsButton(store, s), agentsButton(store, s), toolsButton(store, s), toolButtons(store, s)];
@@ -1419,10 +1492,10 @@ function claudeButtons(store, s) {
 // is open (the subagents panel too), a field has unsent text or the tab is hidden, and the counts went stale.
 // Only when they read differently, and not under a press, whose click a new button would drop: the next read
 // draws them then.
-/** @param {Store} store @param {Session} s */
+/** @param {Store} store @param {ClaudeTarget} s */
 function drawClaudeButtons(store, s) {
-  const slot = document.querySelector('.dev .term-claude');
-  if (!slot || activeSession() !== s || slot.querySelector(':active')) return;
+  const slot = outside?.s === s ? outside.slot : document.querySelector('.dev .term-claude');
+  if (!slot?.isConnected || followed() !== s || slot.querySelector(':active')) return;
   const next = h('span', null, turnsButton(store, s), agentsButton(store, s), toolsButton(store, s), toolButtons(store, s));
   if (next.innerHTML === slot.innerHTML) return;
   const focused = [...slot.children].findIndex((el) => el === document.activeElement);
@@ -1439,16 +1512,36 @@ const TURNS_WORKING_MS = 2000;
 const TURNS_TIMEOUT_MS = 15000;
 /** @type {{ id: string, at: number, busy: boolean, data: RunnerTurns | null, timer: number }} */
 const turnsView = { id: '', at: 0, busy: false, data: null, timer: 0 };
+// The terminal whose turns are read: a task's terminal Tasks shows with them (followClaude()), else Dev's shown one.
+/** @type {{ s: ClaudeTarget, slot: HTMLElement, cwd: string, type: (text: string) => void, openDev: () => void } | null} */
+let outside = null;
+const followed = () => (outside?.slot.isConnected ? outside.s : document.querySelector('.dev') ? activeSession() ?? null : null);
 /** @param {Store} store */
 function nextTurns(store) {
-  const s = activeSession();
-  if (s && document.querySelector('.dev')) refreshTurns(store, s);
+  const s = followed();
+  if (s) refreshTurns(store, s);
 }
-/** @param {Store} store @param {Session} s */
+
+// Dev's claude buttons (turns, subagents, tools, skills, MCP) and their panels, for a terminal shown outside Dev: a
+// task's terminal, expanded in Tasks. Drawn into `slot`, and read again while the slot is on the page. A skill
+// picked is typed into that terminal, and its Skills list opens Dev.
+/**
+ * @param {Store} store @param {HTMLElement} slot
+ * @param {{ id: string, running: boolean, cwd: string, type: (text: string) => void, openDev: () => void }} target
+ */
+export function followClaude(store, slot, { id, running, cwd, type, openDev }) {
+  const s = outside?.s.id === id ? outside.s : { id, running };
+  s.running = running;
+  outside = { s, slot, cwd, type, openDev };
+  refreshTurns(store, s);
+  const next = h('span', null, claudeButtons(store, s));
+  if (next.innerHTML !== slot.innerHTML && !slot.querySelector(':active')) slot.replaceChildren(...next.childNodes);
+}
+/** @param {Store} store @param {ClaudeTarget} s */
 function refreshTurns(store, s) {
   if (turnsView.id !== s.id) Object.assign(turnsView, { id: s.id, at: 0, data: null });
   clearTimeout(turnsView.timer);
-  if (turnsView.busy || !view.info) return;
+  if (turnsView.busy || (!view.info && outside?.s !== s)) return;
   const data = turnsView.data;
   // An ended claude no longer changes: read once more, then wait for the next command.
   if (data && !s.running && data.state === 'done') return;
@@ -1510,7 +1603,7 @@ function phasesOf(t, live, now) {
 // subagents panel opens in its place, under the subagents button (kind 'agents'), and so do the tools, skills and
 // MCP panels under theirs.
 /** @typedef {'turns' | 'agents' | 'tools' | 'skills' | 'mcp'} PopKind */
-/** @type {{ el: HTMLElement, s: Session, timer: number, kind: PopKind, store: Store } | null} */
+/** @type {{ el: HTMLElement, s: ClaudeTarget, timer: number, kind: PopKind, store: Store } | null} */
 let turnsPop = null;
 
 function closeTurns() {
@@ -1537,7 +1630,7 @@ function onTurnsKey(e) {
 }
 
 const POP_LABELS = { turns: 'Claude turns', agents: 'Claude subagents', tools: 'Claude tools', skills: 'Claude skills', mcp: 'Claude MCP calls' };
-/** @param {Store} store @param {HTMLElement} anchor @param {Session} s @param {PopKind} [kind] */
+/** @param {Store} store @param {HTMLElement} anchor @param {ClaudeTarget} s @param {PopKind} [kind] */
 function openTurns(store, anchor, s, kind = 'turns') {
   closeMenu();
   closeTurns();
@@ -1558,12 +1651,16 @@ function drawTurns() {
   if (!turnsPop) return;
   const { el, s } = turnsPop;
   const data = turnsView.id === s.id ? turnsView.data : null;
-  if (!data || activeSession() !== s || !el.isConnected) return closeTurns();
+  if (!data || followed() !== s || !el.isConnected) return closeTurns();
   if (turnsPop.kind === 'agents') return drawAgents(el, data.agents ?? []);
   if (turnsPop.kind === 'tools') return drawTools(el, data);
   if (turnsPop.kind === 'mcp') return drawMcp(el, data);
   if (turnsPop.kind === 'skills') {
     const { store } = turnsPop;
+    if (outside?.s === s) {
+      const { type, cwd, openDev } = outside;
+      return drawSkills(el, data, { ctx: { ...filesCtx(store), typeInTerminal: type }, known: knownSkills(cwd), close: closeTurns, browse: openDev });
+    }
     return drawSkills(el, data, { ctx: filesCtx(store), known: knownSkills(rootPath(store, view.workspace)), close: closeTurns, browse: () => showSide(store, 'skills') });
   }
   const { turns, state } = data;
@@ -1668,7 +1765,7 @@ function idleRow(g) {
 }
 
 // How many turns the shown claude took, and where the last one stands; a click opens the turns panel.
-/** @param {Store} store @param {Session} s */
+/** @param {Store} store @param {ClaudeTarget} s */
 function turnsButton(store, s) {
   const data = turnsView.id === s.id ? turnsView.data : null;
   if (!data?.claude) return null;
@@ -1696,7 +1793,7 @@ function turnsButton(store, s) {
 
 // The subagents the shown claude started, read with its turns: how many still work (or how many it ran, once all
 // are done). A click opens the subagents panel.
-/** @param {Store} store @param {Session} s */
+/** @param {Store} store @param {ClaudeTarget} s */
 function agentsButton(store, s) {
   const data = turnsView.id === s.id ? turnsView.data : null;
   if (!data?.claude) return null;
@@ -1777,7 +1874,7 @@ function drawAgents(el, agents) {
 
 // The tools the shown claude called, read with its turns: how many calls its session and its subagents made so
 // far. A click opens the tools panel.
-/** @param {Store} store @param {Session} s */
+/** @param {Store} store @param {ClaudeTarget} s */
 function toolsButton(store, s) {
   const data = turnsView.id === s.id ? turnsView.data : null;
   if (!data?.claude) return null;
@@ -1910,7 +2007,7 @@ function drawTools(el, data) {
 
 // The skills and the MCP tools the shown claude used, read with its turns: a button each, with its own count, and
 // the MCP one with its failed calls in red. A click opens its panel (dev-uses.js).
-/** @param {Store} store @param {Session} s */
+/** @param {Store} store @param {ClaudeTarget} s */
 function toolButtons(store, s) {
   const data = turnsView.id === s.id ? turnsView.data : null;
   if (!data?.claude) return null;
