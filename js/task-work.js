@@ -4,7 +4,7 @@
 // previews with their site and build log, the session's live terminal (keys go to it, as in Dev) and the artifacts.
 // The popover lives on the page, not in the list, so the list's redraws leave the terminal and its scroll alone.
 // Hovering the Dev part shows a peek at the session's terminal.
-/** @import { Store, Task, TaskLink } from '../types/data' */
+/** @import { Store, Task, TaskLink, IconName } from '../types/data' */
 /** @import { RunnerStatus } from '../types/terminal' */
 /** @import { Terminal } from './vt.js' */
 /** @import { PrPreview } from './deploy-panel.js' */
@@ -30,6 +30,8 @@ const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 const TABS = /** @type {const} */ (['prs', 'issues', 'previews', 'dev', 'artifacts']);
 /** @typedef {typeof TABS[number]} WorkTab */
 const TAB_NAMES = /** @type {Record<WorkTab, string>} */ ({ prs: 'PRs', issues: 'Issues', previews: 'Previews', dev: 'Dev', artifacts: 'Artifacts' });
+// The icons of the pill's parts, on their tabs.
+const TAB_ICONS = /** @type {Record<WorkTab, IconName>} */ ({ prs: 'pull-request', issues: 'repo', previews: 'globe', dev: 'terminal', artifacts: 'sparkle' });
 /** @type {Record<string, string>} */
 const LINK_STATES = { open: 'open', merged: 'merged', closed: 'closed', completed: 'closed as completed', not_planned: 'closed as not planned' };
 // Above this many PRs, the PRs tab offers its state filters.
@@ -270,7 +272,7 @@ function paint() {
         paint();
         store.refresh();
       },
-    }, TAB_NAMES[t], h('b', null, String(counts[t]))))),
+    }, icon(TAB_ICONS[t]), TAB_NAMES[t], h('b', null, String(counts[t]))))),
     h('button', { type: 'button', class: 'icon-btn', title: pop.big ? 'Back under the row (Esc)' : 'Expand', 'aria-label': pop.big ? 'Back under the row' : 'Expand', onclick: () => {
       pop.big = !pop.big;
       paint();
