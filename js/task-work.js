@@ -16,7 +16,7 @@ import { previewsOf, askMissing } from './previews.js';
 import { openDeployPanel, stateDot, PROVIDER_NAMES, STATE_NAMES } from './deploy-panel.js';
 import { claudeState } from './dev-core.js';
 import { terminalView, liveSession, onSessionPaint, terminalBackground, openSession, exitText, keyData, wheelData, runnerOf, pickUp, resumeSession, followClaude, fitTerminal, imagePaths } from './modules/dev.js';
-import { attachSession, sendInput, stopCommand } from './terminal.js';
+import { attachSession, sendInput, stopCommand, readFile } from './terminal.js';
 import { createTerminal } from './vt.js';
 import { imageFiles, dragsFiles } from './images.js';
 
@@ -154,16 +154,16 @@ export function workPill(store, item, options) {
  * @type {{ id: string, tab: WorkTab, filter: string, shut: Set<string>, big: boolean, session: string,
  *   store: Store | null, options: WorkOptions | null, el: HTMLElement | null, head: HTMLElement | null,
  *   body: HTMLElement | null, slot: HTMLElement | null, foot: HTMLElement | null, unsub: (() => void) | null, frame: number,
- *   term: TermView | null }}
+ *   term: TermView | null, preview: string }}
  */
-const pop = { id: '', tab: 'prs', filter: 'all', shut: new Set(), big: false, session: '', store: null, options: null, el: null, head: null, body: null, slot: null, foot: null, unsub: null, frame: 0, term: null };
+const pop = { id: '', tab: 'prs', filter: 'all', shut: new Set(), big: false, session: '', store: null, options: null, el: null, head: null, body: null, slot: null, foot: null, unsub: null, frame: 0, term: null, preview: '' };
 
 /** @param {Store} store @param {string} id @param {WorkTab} tab @param {WorkOptions} options */
 function toggleWork(store, id, tab, options) {
   if (pop.id === id && pop.tab === tab) return closeWork();
   if (pop.id !== id) {
     closeWork();
-    Object.assign(pop, { id, filter: 'all', shut: new Set(), big: false, session: '' });
+    Object.assign(pop, { id, filter: 'all', shut: new Set(), big: false, session: '', preview: '' });
   }
   Object.assign(pop, { tab, store, options });
   if (!pop.el) build(store);
@@ -175,6 +175,8 @@ export function closeWork() {
   if (!pop.el) return;
   const store = pop.store;
   dropTerm();
+  // An artifact's page is read again on the next open.
+  frames.clear();
   pop.el.remove();
   pop.unsub?.();
   document.removeEventListener('pointerdown', onOutside, true);
@@ -299,7 +301,8 @@ function paint() {
     patch(pop.body, h('div', null, filterRow, pop.tab === 'prs' ? prList(store, prs, previews)
       : pop.tab === 'issues' ? linkLines(store, issues, false, [])
         : pop.tab === 'previews' ? previewList(store, previews)
-          : artifactList(artifacts)));
+          : artifactList(store, artifacts)));
+    showPreview(store, pop.tab === 'artifacts' ? artifacts : []);
   }
 
   const summary = [
@@ -398,11 +401,65 @@ function previewList(store, previews) {
     }))];
 }
 
-/** @param {ReturnType<typeof artifactsOf>} artifacts */
-const artifactList = (artifacts) => h('div', { class: 'work-lines' }, [...artifacts].reverse().map((a) => h('div', { class: 'work-line', 'data-key': a.url },
+// Each artifact, newest first, with Preview when the page it was published from is known, and Open on claude.ai.
+/** @param {Store} store @param {ReturnType<typeof artifactsOf>} artifacts */
+const artifactList = (store, artifacts) => h('div', { class: 'work-lines' }, [...artifacts].reverse().map((a) => h('div', { class: 'work-line', 'data-key': a.url },
   h('span', { class: 'work-art' }, icon('sparkle')),
   h('a', { class: 'work-title', href: a.url, target: '_blank', rel: 'noopener', title: a.url }, a.title || 'Artifact'),
-  h('span', { class: 'work-actions' }, h('a', { class: 'btn-small', href: a.url, target: '_blank', rel: 'noopener' }, 'Open')))));
+  h('span', { class: 'work-actions' },
+    a.file ? h('button', {
+      type: 'button',
+      class: `btn-small${pop.preview === a.url ? ' on' : ''}`,
+      'aria-pressed': String(pop.preview === a.url),
+      title: `Preview the page it was published from:\n${a.file}`,
+      onclick: () => {
+        pop.preview = pop.preview === a.url ? '-' : a.url;
+        paint();
+        store.refresh();
+      },
+    }, icon('eye'), 'Preview') : null,
+    h('a', { class: 'btn-small', href: a.url, target: '_blank', rel: 'noopener' }, 'Open')))));
+
+// The preview of an artifact: the local page it was last published from, read through the runner and drawn in a
+// sandboxed frame (its scripts run, with no access to the board). claude.ai's own page refuses to be framed, and a
+// private artifact needs the user's sign-in. What the page loads beside it (its other files) may be missing. The newest
+// artifact with a page shows first; '-' is none. Frames are kept by page, so a redraw does not reload them.
+/** @type {Map<string, { el: HTMLElement, at: number }>} */
+const frames = new Map();
+/** @param {Store} store @param {ReturnType<typeof artifactsOf>} artifacts */
+function showPreview(store, artifacts) {
+  if (!pop.slot) return;
+  const withPage = [...artifacts].reverse().filter((a) => a.file);
+  if (pop.preview !== '-' && !withPage.some((a) => a.url === pop.preview)) pop.preview = withPage[0]?.url ?? '';
+  const a = withPage.find((x) => x.url === pop.preview);
+  if (!a?.file) {
+    if (pop.slot.querySelector('.work-preview')) pop.slot.replaceChildren();
+    return;
+  }
+  const file = a.file;
+  let frame = frames.get(file);
+  if (!frame) {
+    const body = h('div', { class: 'work-preview-body' }, h('p', { class: 'muted small work-empty' }, 'Reading the page…'));
+    const el = h('div', { class: 'work-preview' },
+      h('div', { class: 'work-preview-head' },
+        h('span', { class: 'work-art' }, icon('sparkle')),
+        h('span', { class: 'work-title', title: file }, a.title || 'Artifact'),
+        h('span', { class: 'muted small work-preview-note', title: `${file}\nIts other files (styles, images, data) may not show here.` }, 'Local page, as last published'),
+        h('button', { type: 'button', class: 'icon-btn', title: 'Read the page again', 'aria-label': 'Read the page again', onclick: () => {
+          frames.delete(file);
+          paint();
+        } }, icon('refresh'))),
+      body);
+    frame = { el, at: Date.now() };
+    frames.set(file, frame);
+    readFile(runnerOf(store), file).then((f) => {
+      body.replaceChildren(typeof f.text === 'string'
+        ? h('iframe', { class: 'work-preview-frame', sandbox: 'allow-scripts allow-popups', srcdoc: f.text, title: `Preview of ${a.title || 'the artifact'}` })
+        : h('p', { class: 'muted small work-empty' }, f.tooLarge ? 'The page is too large to preview.' : 'The page is not text.'));
+    }, (err) => body.replaceChildren(h('p', { class: 'muted small work-empty' }, `Could not read the page: ${/** @type {Error} */ (err).message}`)));
+  }
+  if (pop.slot.firstChild !== frame.el) pop.slot.replaceChildren(frame.el);
+}
 
 // With more than one session, a row each to pick the one the terminal shows.
 /** @param {WorkSession[]} sessions @param {WorkOptions} options */
