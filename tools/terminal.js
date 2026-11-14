@@ -707,6 +707,52 @@ async function scopeOf(req, res, cors) {
   res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify({ session: id, tasks: entry?.tasks ?? [] }));
 }
 
+// The other open terminals started for any of `tasks` (the runners send the asking session's reach), with where
+// each works: its folder or claude's worktree, the branch, the last commit and the uncommitted files there, so a
+// parallel session can see what is already done elsewhere. Read-only; the token must belong to an open terminal.
+/** @param {IncomingMessage} req @param {ServerResponse} res @param {Cors} cors */
+async function scopePeers(req, res, cors) {
+  const body = await jsonBody(req, res, cors);
+  if (!body) return;
+  const token = String(body.token ?? '');
+  const all = readTokens();
+  const self = token ? Object.keys(all).find((k) => all[k] === token) : '';
+  if (!self) return res.writeHead(404, cors).end('This terminal is not open on the board.');
+  const wanted = new Set(Array.isArray(body.tasks) ? body.tasks.map(String).slice(0, 2000) : []);
+  const listed = (await readList()).sessions ?? [];
+  const peers = await Promise.all(listed
+    .filter((/** @type {DevSession} */ x) => x.id !== self && (x.tasks ?? []).some((t) => wanted.has(t)))
+    .map(async (/** @type {DevSession} */ x) => {
+      const s = sessions.has(x.id) || (await stat(logFile(x.id)).catch(() => null)) ? await sessionOf(x.id) : null;
+      const start = s?.open ?? s?.events.findLast((e) => e.t === 'start');
+      const command = start?.t === 'start' ? String(start.command ?? '') : '';
+      const name = worktreeOf(command);
+      const base = start?.t === 'start' && start.cwd ? start.cwd : x.cwd;
+      const tree = name && base ? join(base, '.claude', 'worktrees', name) : '';
+      const dir = tree && (await stat(tree).catch(() => null)) ? tree : x.cwd || base;
+      const where = dir ? await Promise.all([
+        git(dir, ['rev-parse', '--abbrev-ref', 'HEAD']).then((out) => out.trim(), () => ''),
+        git(dir, ['log', '-1', '--format=%h %s']).then((out) => out.trim(), () => ''),
+        git(dir, ['status', '--porcelain', ...NOT_WORKTREES]).then((out) => out.split('\n').filter(Boolean).length, () => null),
+      ]) : ['', '', null];
+      return {
+        session: x.id,
+        n: x.n,
+        tasks: (x.tasks ?? []).filter((t) => wanted.has(t)),
+        cwd: x.cwd,
+        worktree: tree && dir === tree ? tree : '',
+        dir,
+        branch: where[0] === 'HEAD' ? '' : where[0],
+        commit: where[1],
+        changes: where[2],
+        claude: startsClaude(command),
+        state: !s || s.closed ? 'closed' : s.run ? 'running' : 'ended',
+        started: start?.t === 'start' ? start.at : 0,
+      };
+    }));
+  res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify({ session: self, peers }));
+}
+
 // A listed terminal's folder changed (cd in it, or a command started in another folder).
 /** @param {IncomingMessage} req @param {ServerResponse} res @param {Cors} cors */
 async function updateList(req, res, cors) {
@@ -1640,6 +1686,7 @@ createServer(async (req, res) => {
   if (req.method === 'POST' && path === '/sessions/update' && json) return updateList(req, res, cors);
   if (req.method === 'POST' && ['/stop', '/clear', '/close'].includes(path) && json) return control(req, res, cors, path.slice(1));
   if (req.method === 'POST' && path === '/scope' && json) return scopeOf(req, res, cors);
+  if (req.method === 'POST' && path === '/scope/peers' && json) return scopePeers(req, res, cors);
   if (req.method === 'POST' && path === '/board-skill/install' && json) {
     try {
       res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(await installSkill()));
