@@ -28,14 +28,15 @@ const plan = { status: 'idle', text: '' };
 /** @param {Store} store */
 async function runPlan(store) {
   const projects = store.get('projects').projects;
-  const open = store.get('todos').items.filter((i) => statusOf(i) !== 'done').slice(0, 40);
+  const allOpen = store.get('todos').items.filter((i) => statusOf(i) !== 'done');
+  const open = allOpen.slice(0, 40);
   plan.status = 'loading';
   store.refresh();
   try {
     plan.text = (await ask(store, 'task-plan', [
       {
         role: 'system',
-        content: systemPrompt(store, 'plan'),
+        content: systemPrompt(store, 'plan', { openTasks: allOpen.length }),
       },
       {
         role: 'user',

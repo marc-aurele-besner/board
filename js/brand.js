@@ -215,7 +215,7 @@ export async function findBrand(store, project, { onStep = () => {} } = {}) {
   onStep('Picking the brand…');
   const usageId = uid();
   const reply = await ask(store, 'task-summary', [
-    { role: 'system', content: systemPrompt(store, 'project-brand') },
+    { role: 'system', content: systemPrompt(store, 'project-brand', { project: project.name, website: project.website ?? '' }) },
     { role: 'user', content: brandInput(project, sources, brandOf(project)) },
   ], { usageId, projectId: project.id });
   const found = parseJson(reply);
