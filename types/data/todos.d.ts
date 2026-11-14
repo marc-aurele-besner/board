@@ -89,6 +89,8 @@ export interface Task {
   // The model and effort its Dev sessions run claude with (--model, --effort); missing or '' for the default.
   devModel?: string;
   devEffort?: string;
+  // The provider of devModel when it is not Claude's (Settings → Dev environment); its command runs the session.
+  devProvider?: string;
   images?: TaskImage[];
   worktrees?: TaskWorktree[];
   prs?: TaskLink[];

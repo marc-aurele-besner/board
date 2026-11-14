@@ -5,7 +5,8 @@ import { editText, pickChip } from '../inline.js';
 import { pickFolder } from '../folder-picker.js';
 import { projectIcon, projectTree, cleanLocalPath, LOCAL_PATH_ERROR } from './projects.js';
 import { DEFAULT_DEV_COMMAND, devPresets, runnerOf } from './dev.js';
-/** @import { Store, DevPreset, Project } from '../../types/data' */
+import { CLAUDE_PROVIDER, DEFAULT_PROVIDERS, devProviders } from '../dev-core.js';
+/** @import { Store, DevPreset, DevProvider, Project } from '../../types/data' */
 
 // The last problem shown above the cards.
 const devEnvView = { error: '' };
@@ -116,6 +117,95 @@ function presetsPanel(store, presets, projects) {
       h('button', { type: 'submit' }, icon('plus'), 'Add preset')));
 }
 
+// The providers as saved; the first change saves the built-in ones with it.
+/** @param {Store} store @param {(providers: DevProvider[]) => void} mutate */
+function updateProviders(store, mutate) {
+  devEnvView.error = '';
+  store.update('dev', (d) => {
+    d.providers ??= DEFAULT_PROVIDERS.map((p) => ({ ...p, models: [...p.models] }));
+    mutate(d.providers);
+  });
+}
+
+// "opus, sonnet" or one per line, as a list without blanks or repeats.
+const parseModels = (/** @type {string} */ text) => [...new Set(text.split(/[\s,]+/).filter(Boolean))];
+
+// Tasks that picked a removed provider's model go back to their project's command (taskProvider skips it).
+/** @param {Store} store @param {DevProvider[]} providers */
+function providersPanel(store, providers) {
+  /** @param {string} id @param {Partial<DevProvider>} patch */
+  const patch = (id, patch) => updateProviders(store, (list) => {
+    const p = list.find((x) => x.id === id);
+    if (p) Object.assign(p, patch);
+  });
+  const add = (/** @type {SubmitEvent} */ e) => {
+    e.preventDefault();
+    const form = /** @type {HTMLFormElement & { elements: { name: HTMLInputElement, command: HTMLInputElement, models: HTMLInputElement } }} */ (e.currentTarget);
+    const name = form.elements.name.value.trim();
+    const command = form.elements.command.value.trim();
+    const models = parseModels(form.elements.models.value);
+    if (!name || !command || !models.length) return fail(store, 'A provider needs a name, a command and at least one model.');
+    if (providers.some((x) => x.name.toLowerCase() === name.toLowerCase())) return fail(store, `A provider named "${name}" already exists.`);
+    updateProviders(store, (list) => { list.push({ id: uid(), name, command, models }); });
+  };
+  return h('section', { class: 'card panel' },
+    h('header', { class: 'panel-head' },
+      h('div', null,
+        h('h2', null, 'AI providers'),
+        h('p', { class: 'muted' }, 'The models a task’s right-click menu offers, by provider. Claude’s command runs for projects without their own; picking another provider’s model runs that provider’s command instead of the project’s. MiniMax runs claude with its API in place of Anthropic’s, with the key from MINIMAX_API_KEY in the runner’s environment.'))),
+    h('ul', { class: 'dev-env-list' },
+      providers.map((provider) => h('li', { class: 'dev-env-row dev-preset-row' },
+        h('div', { class: 'dev-env-name' },
+          editText({
+            value: provider.name,
+            placeholder: 'Name',
+            onSave: (name) => {
+              const clean = name.trim();
+              if (!clean) return fail(store, 'A provider needs a name.');
+              if (providers.some((x) => x.id !== provider.id && x.name.toLowerCase() === clean.toLowerCase())) return fail(store, `A provider named "${clean}" already exists.`);
+              patch(provider.id, { name: clean });
+            },
+          }),
+          h('span', { class: 'muted small' }, provider.id === CLAUDE_PROVIDER ? 'Default' : plural(provider.models.length, 'model'))),
+        h('div', { class: 'dev-env-field dev-provider-fields' },
+          h('span', { class: 'dev-env-label small' }, 'Command'),
+          editText({
+            value: provider.command,
+            placeholder: DEFAULT_DEV_COMMAND,
+            className: 'dev-env-command',
+            onSave: (command) => {
+              const clean = command.trim();
+              if (!clean) return fail(store, 'A provider needs a command.');
+              patch(provider.id, { command: clean });
+            },
+          }),
+          h('span', { class: 'dev-env-label small' }, 'Models'),
+          editText({
+            value: provider.models.join(', '),
+            placeholder: 'model-a, model-b',
+            className: 'dev-env-command',
+            onSave: (text) => {
+              const models = parseModels(text);
+              if (!models.length) return fail(store, 'A provider needs at least one model.');
+              patch(provider.id, { models });
+            },
+          })),
+        provider.id === CLAUDE_PROVIDER
+          ? h('span')
+          : h('button', {
+              type: 'button',
+              class: 'icon-btn',
+              title: 'Remove this provider. Tasks that picked its models go back to their project’s command.',
+              'aria-label': `Remove the provider ${provider.name}`,
+              onclick: () => updateProviders(store, (list) => list.splice(list.findIndex((x) => x.id === provider.id), 1)),
+            }, icon('trash'))))),
+    h('form', { class: 'dev-preset-add', onsubmit: add },
+      h('input', { name: 'name', placeholder: 'Name, such as MiniMax', 'aria-label': 'Provider name', autocomplete: 'off' }),
+      h('input', { name: 'command', placeholder: `ANTHROPIC_BASE_URL=… ${DEFAULT_DEV_COMMAND}`, 'aria-label': 'Provider command', autocomplete: 'off', spellcheck: false }),
+      h('input', { name: 'models', placeholder: 'Models, comma separated', 'aria-label': 'Provider models', autocomplete: 'off', spellcheck: false }),
+      h('button', { type: 'submit' }, icon('plus'), 'Add provider')));
+}
+
 /** @param {Store} store @param {Project} p @param {number} depth @param {DevPreset[]} presets */
 function projectRow(store, p, depth, presets) {
   const presetOptions = presets.map((x) => ({ value: x.id, label: x.name }));
@@ -167,6 +257,7 @@ export function devEnvironmentCard(store) {
   const { projects } = store.get('projects');
   return h('div', { class: 'stack-lg' },
     devEnvView.error ? notice({ text: devEnvView.error }) : null,
+    providersPanel(store, devProviders(store)),
     presetsPanel(store, presets, projects),
     h('section', { class: 'card panel' },
       h('header', { class: 'panel-head' },

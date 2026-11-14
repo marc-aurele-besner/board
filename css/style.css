@@ -3536,6 +3536,7 @@ code.tool-fail-call { font-size: 0.76rem; }
   .dev-preset-row .dev-env-name { grid-area: name; }
   .dev-preset-row .dev-env-command { grid-area: command; }
   .dev-preset-row > button { grid-area: remove; }
+  .dev-preset-row .dev-provider-fields { grid-area: command; }
 }
 
 /* Tools → Requests */

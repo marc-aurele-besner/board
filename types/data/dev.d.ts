@@ -7,6 +7,16 @@ export interface DevPreset {
   command: string;
 }
 
+// An AI provider in Settings → Dev environment: the command its sessions run and the models a task can pick.
+// Claude's command is the default for projects without their own; another's (MiniMax runs claude with its API
+// in place of Anthropic's) replaces the project's command for a task that picks one of its models.
+export interface DevProvider {
+  id: string;
+  name: string;
+  command: string;
+  models: string[];
+}
+
 export interface DevData {
   // Commands run from Dev, newest first.
   history: string[];
@@ -15,6 +25,8 @@ export interface DevData {
   // The command runner's address; '' means the default (TERMINAL_RUNNER).
   runner: string;
   presets: DevPreset[];
+  // Missing until one is edited: the built-in Claude and MiniMax (DEFAULT_PROVIDERS in js/dev-core.js).
+  providers?: DevProvider[];
   schemaVersion?: number;
 }
 
