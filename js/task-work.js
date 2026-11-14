@@ -430,7 +430,7 @@ function sessionList(sessions, options) {
  * @typedef {{ session: string, term: Terminal, state: string, running: boolean, pid: number, exit: import('./modules/dev.js').Exit | null,
  *   command: string, cwd: string, mirror: boolean, frame: number, views: Set<TermView>, stop: () => void }} Reader
  * @typedef {{ view: ReturnType<typeof terminalView>, keys: boolean, el: HTMLElement, reader: Reader, bar: HTMLElement | null, head: HTMLElement | null,
- *   claude: HTMLElement | null, observer: ResizeObserver | null, fitted?: { cols: number, pid: number } }} TermView
+ *   claude: HTMLElement | null, usage: HTMLElement | null, observer: ResizeObserver | null, fitted?: { cols: number, pid: number } }} TermView
  */
 /** @type {Map<string, Reader>} */
 const readers = new Map();
@@ -549,7 +549,8 @@ function showTerm(store, item, sessions, options) {
     openSession({ id: s.id, cwd: s.cwd || options.status(s.id)?.cwd || '', taskIds: taskIds.length ? taskIds : [item.id] });
   };
   if (head) {
-    // Expanded, the head has what Dev's bar shows of claude: its turns, subagents, tools, skills and MCP calls.
+    // Expanded, the head has what Dev's bar shows of claude: its turns, subagents, tools, skills and MCP calls, and on
+    // the right its model and cost.
     const claude = pop.big ? term.claude : null;
     patch(head, h('div', null,
       h('span', { class: `work-dot is-${look.key}`, 'aria-hidden': 'true' }),
@@ -562,11 +563,12 @@ function showTerm(store, item, sessions, options) {
       }, (s.cwd || options.status(s.id)?.cwd || '').split('/').pop()) : null,
       claude,
       h('span', { class: 'grow' }),
+      claude ? term.usage : null,
       h('button', { type: 'button', class: 'icon-btn', title: 'Copy the output', 'aria-label': 'Copy the output', onclick: () => copyOutput(/** @type {TermView} */ (pop.term)) }, icon('copy')),
       h('button', { type: 'button', class: 'btn-small', title: 'Open this terminal in Dev', onclick: openDev }, icon('terminal'), 'Open in Dev')));
     if (claude) {
       const c = current(term.reader);
-      followClaude(store, claude, {
+      followClaude(store, claude, /** @type {HTMLElement} */ (term.usage), {
         id: s.id,
         running: c.running,
         cwd: c.cwd || s.cwd,
@@ -599,7 +601,8 @@ function termView(store, item, s, keys) {
   const bar = keys ? h('div', { class: 'work-term-bar' }) : null;
   const el = h('div', { class: keys ? 'work-term' : 'work-term peek' }, head, view.el, bar);
   /** @type {TermView} */
-  const v = { view, keys, el, reader, bar, head, claude: keys ? h('span', { class: 'term-claude', 'data-own': '' }) : null, observer: null };
+  const v = { view, keys, el, reader, bar, head, claude: keys ? h('span', { class: 'term-claude', 'data-own': '' }) : null,
+    usage: keys ? h('span', { class: 'term-claude work-usage', 'data-own': '' }) : null, observer: null };
   reader.views.add(v);
   if (keys) {
     const base = runnerOf(store);
