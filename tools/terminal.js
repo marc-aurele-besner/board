@@ -8,7 +8,7 @@
 // output is kept (in memory and in TERMINAL_STATE, a folder in the system's temp folder by default) so the page
 // shows it again when it comes back, even after the runner restarted. The list of open terminals is kept there too,
 // so every browser on this machine opens the same terminals.
-// TERMINAL_PORT changes the port (8419 by default); TERMINAL_MAX the number of commands that may run at once (24).
+// TERMINAL_PORT changes the port (8419 by default); TERMINAL_MAX the number of commands that may run at once (50).
 // It can run anything on this machine, so it listens on 127.0.0.1 only and answers only pages served from this
 // machine: the Origin check keeps other websites out, the Host check keeps out DNS rebinding.
 /** @import { IncomingMessage, ServerResponse } from 'node:http' */
@@ -30,7 +30,7 @@ import { createTerminal } from '../js/vt.js';
 import { sessionTranscript, worktreeActivity, worktreeUsage } from './usage.js';
 
 const PORT = Number(process.env.TERMINAL_PORT) || 8419;
-const MAX = Number(process.env.TERMINAL_MAX) || 24;
+const MAX = Number(process.env.TERMINAL_MAX) || 50;
 const ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]$/, '');
 const WINDOWS = process.platform === 'win32';
 const SHELL = WINDOWS ? process.env.ComSpec || 'cmd.exe' : process.env.SHELL || '/bin/sh';
