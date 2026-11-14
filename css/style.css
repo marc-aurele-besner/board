@@ -4,6 +4,8 @@
 
 /* Tokens: light by default, dark when the OS asks for it or data-theme="dark" is set. */
 :root {
+  /* The sticky top bar's height: full-height panes start below it. */
+  --topbar-h: 44px;
   /* Google's brand colors for the Gmail and Calendar marks; the same in both themes. */
   --google-blue: #4285f4;
   --google-red: #ea4335;
@@ -809,9 +811,9 @@ body.project-dragging .project-list .root-drop { display: block; }
    the window; the page's cards run to the window's edge, one border between each, with no gap. */
 .view[data-section="settings"] {
   padding: 0;
-  min-height: calc(100dvh - 54px);
-  & > .settings-shell { display: grid; grid-template-columns: 96px 300px minmax(0, 1fr); min-height: calc(100dvh - 54px); align-items: stretch; }
-  & .settings-rail, & .settings-list { position: sticky; top: 54px; height: calc(100dvh - 54px); overflow-y: auto; }
+  min-height: calc(100dvh - var(--topbar-h));
+  & > .settings-shell { display: grid; grid-template-columns: 96px 300px minmax(0, 1fr); min-height: calc(100dvh - var(--topbar-h)); align-items: stretch; }
+  & .settings-rail, & .settings-list { position: sticky; top: var(--topbar-h); height: calc(100dvh - var(--topbar-h)); overflow-y: auto; }
   & .settings-main, & .settings-main > .stack-lg { gap: 0; }
   & .settings-main > .card, & .settings-main > .stack-lg > .card { border-radius: 0; border-top: none; border-left: none; border-right: none; }
 }
@@ -1533,7 +1535,7 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
    and the side panels stick right under the top bar and run to the bottom of the window. */
 .view:is([data-section="todos"], [data-section="inbox"], [data-section="calendar"], [data-section="projects"], [data-section="money"], [data-section="positions"], [data-section="monitoring"], [data-section="tools"], [data-section="cron"]) {
   padding: 0;
-  min-height: calc(100dvh - 54px);
+  min-height: calc(100dvh - var(--topbar-h));
   & > .stack-lg > :is(header, .row.between, nav.sub-tabs, .sub-tabs-bar, p, .notice, .period-row, .money-controls) { padding-inline: 16px; }
   & > .stack-lg > :first-child { padding-top: 14px; }
   /* The side panel and the center panel meet: one border between them, no gap. */
@@ -1541,8 +1543,8 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
   & > .split > .card { border-radius: 0; border-top: none; }
   & > .split > .card:first-child { border-left: none; }
   & > .split > .card.main-pane { border-left: none; border-right: none; }
-  & > .split > :is(.side, .side-pane) { top: 54px; height: calc(100dvh - 54px); }
-  & > .split > .main-pane { min-height: calc(100dvh - 54px); }
+  & > .split > :is(.side, .side-pane) { top: var(--topbar-h); height: calc(100dvh - var(--topbar-h)); }
+  & > .split > .main-pane { min-height: calc(100dvh - var(--topbar-h)); }
 }
 
 /* A side panel the user resizes (js/side-resize.js): the divider sits on its right edge. */
@@ -2117,10 +2119,10 @@ kbd { font: 0.72rem var(--font); padding: 1px 6px; border-radius: 5px; border: 1
 
 /* Top bar: every section in one row. Labels fold away on narrower screens, and the row scrolls on phones. */
 /* The tabs fill the bar's height and sit edge to edge, square, with no space around or between them. */
-.topbar { flex-wrap: nowrap; align-items: stretch; gap: 0 14px; padding: 0 16px 0 0; min-height: 54px; }
+.topbar { flex-wrap: nowrap; align-items: stretch; gap: 0 10px; padding: 0 12px 0 0; min-height: var(--topbar-h); }
 .tabs { flex: 0 1 auto; flex-wrap: nowrap; min-width: 0; gap: 0; overflow-x: auto; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
-.tab { flex: none; padding: 0 12px; border-radius: 0; white-space: nowrap; font-weight: 500; }
+.tab { flex: none; padding: 0 9px; border-radius: 0; white-space: nowrap; font-weight: 500; }
 .tab:hover { background: var(--surface-2); color: var(--text); }
 .tab.active { background: color-mix(in srgb, var(--accent) 13%, var(--surface)); color: var(--accent); }
 .tab.active::after { display: none; }
@@ -2145,8 +2147,8 @@ a { color: var(--accent); }
 @media (max-width: 720px) {
   .topbar { flex-wrap: wrap; padding: 0; }
   .tabs { order: 3; flex-basis: 100%; border-top: 1px solid var(--border); }
-  .tab { padding-block: 10px; }
-  .topbar-end { margin-left: auto; width: auto; padding: 8px 16px; }
+  .tab { padding-block: 7px; }
+  .topbar-end { margin-left: auto; width: auto; padding: 6px 12px; }
   .search-btn { width: auto; }
   .search-btn .grow, .search-btn kbd { display: none; }
 }
@@ -2593,7 +2595,7 @@ button.tick:hover, button.tick:focus-visible { outline: 2px solid var(--danger);
 /* The flow list runs under the tabs to the bottom of the window and meets the editor with one border: the cards on
    both sides lose their corners and outer edges. */
 .cron:has(> .cron-layout) { gap: 0; }
-.cron-layout > .cron-list { position: sticky; top: 54px; height: calc(100dvh - 54px); overflow-y: auto; border-radius: 0; border-top: none; border-left: none; }
+.cron-layout > .cron-list { position: sticky; top: var(--topbar-h); height: calc(100dvh - var(--topbar-h)); overflow-y: auto; border-radius: 0; border-top: none; border-left: none; }
 .cron-layout > .card:not(.cron-list), .cron-editor > .card { border-radius: 0; border-top: none; border-left: none; border-right: none; }
 .cron-layout > .cron-editor { gap: 0; }
 .cron-flows { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
@@ -3255,7 +3257,7 @@ button.sum-line:hover { background: var(--surface-2); }
 /* Inbox: folders and project directories in a side column, like a mail client. On a phone they sit above the list. */
 /* The side column runs from the top bar to the bottom of the window, and meets the mail list with one border. */
 .inbox-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 0; align-items: start; }
-.inbox-side { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 54px; height: calc(100dvh - 54px); overflow-y: auto; padding: 10px 8px 10px 0; background: var(--surface); border-right: 1px solid var(--border); }
+.inbox-side { display: flex; flex-direction: column; gap: 12px; position: sticky; top: var(--topbar-h); height: calc(100dvh - var(--topbar-h)); overflow-y: auto; padding: 10px 8px 10px 0; background: var(--surface); border-right: 1px solid var(--border); }
 .view[data-section="inbox"] > .stack-lg > .inbox-layout:first-child { padding-top: 0; }
 .inbox-main { gap: 8px; min-width: 0; }
 .inbox-main > :not(.inbox-card) { margin-inline: 12px; }
@@ -3307,7 +3309,7 @@ button.sum-line:hover { background: var(--surface-2); }
 .view[data-section="calendar"] > .stack-lg > .cal-layout:first-child { padding-top: 0; }
 /* DeFi, Monitoring, Tools and Cron: the tabs sit right under the top bar. */
 .view:is([data-section="positions"], [data-section="monitoring"], [data-section="tools"], [data-section="cron"]) > .stack-lg > :is(.sub-tabs-bar, nav.sub-tabs):first-child { padding-top: 0; }
-.cal-side { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 54px; height: calc(100dvh - 54px); overflow-y: auto; padding: 12px; background: var(--surface); border-right: 1px solid var(--border); }
+.cal-side { display: flex; flex-direction: column; gap: 16px; position: sticky; top: var(--topbar-h); height: calc(100dvh - var(--topbar-h)); overflow-y: auto; padding: 12px; background: var(--surface); border-right: 1px solid var(--border); }
 .cal-filters { display: flex; flex-direction: column; gap: 8px; }
 .cal-filters .pick-multi, .cal-filters .cal-project-pick { width: 100%; justify-content: space-between; }
 .cal-main { display: flex; flex-direction: column; min-width: 0; }
@@ -3399,7 +3401,7 @@ button.cal-agenda-name:hover { color: var(--accent); }
    the bottom of the window from where it starts (--dev-top, measured by dev.js under any banners). The panels meet
    on a single line instead of floating as separate cards. */
 .view:has(> .dev) { padding: 0; }
-.dev { height: calc(100dvh - var(--dev-top, 55px)); min-height: 460px; gap: 0; }
+.dev { height: calc(100dvh - var(--dev-top, calc(var(--topbar-h) + 1px))); min-height: 460px; gap: 0; }
 .dev > .stack { padding: 12px; border-bottom: 1px solid var(--border); }
 .ide { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 0; }
 .ide-main { display: flex; flex-direction: column; gap: 0; min-width: 0; min-height: 0; }
@@ -4052,7 +4054,7 @@ code.cmd-code { background: none; padding: 0; }
 .view:has(> .slack) { padding: 0; }
 .slack.stack { gap: 0; }
 .slack > .notice { margin: 8px 12px; }
-.slack-layout { position: relative; display: grid; grid-template-columns: var(--slack-side-w, 240px) minmax(0, 1fr); height: calc(100dvh - var(--slack-top, 55px)); min-height: 460px; overflow: hidden; background: var(--surface); }
+.slack-layout { position: relative; display: grid; grid-template-columns: var(--slack-side-w, 240px) minmax(0, 1fr); height: calc(100dvh - var(--slack-top, calc(var(--topbar-h) + 1px))); min-height: 460px; overflow: hidden; background: var(--surface); }
 .slack-layout.with-thread { grid-template-columns: var(--slack-side-w, 240px) minmax(0, 1fr) var(--slack-thread-w, 380px); }
 .slack-resize { position: absolute; top: 0; bottom: 0; width: 8px; z-index: 2; cursor: col-resize; touch-action: none; }
 .slack-resize-side { left: calc(var(--slack-side-w, 240px) - 4px); }
