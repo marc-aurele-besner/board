@@ -1,6 +1,6 @@
 // Dev without the DOM: the runner's address, command presets, the command a project's tasks run, and starting a
 // terminal through the command runner. The Dev section and the runners (Cron's Run in Dev step) both use it.
-/** @import { DataStore, Project } from '../types/data' */
+/** @import { DataStore, Project, DevProvider } from '../types/data' */
 import { uid } from './ui.js';
 import { TERMINAL_RUNNER, runnerInfo, runCommand, listSession } from './terminal.js';
 
@@ -15,12 +15,49 @@ export const shellQuote = (/** @type {string} */ text) => `'${text.replace(/'/g,
 // The command a task is handed to; a project can set its own in its Dev command field.
 export const DEFAULT_DEV_COMMAND = 'claude --dangerously-skip-permissions --worktree';
 
-// The command a project's tasks are handed to: its preset's, else its own Dev command, else the default.
-// A preset that was removed is skipped, so the project falls back to its own command.
+// The models and efforts a task can pick for its Dev session (claude's --model aliases and --effort levels).
+export const DEV_MODELS = ['fable', 'opus', 'sonnet', 'haiku'];
+export const DEV_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+// The AI providers until Settings → Dev environment edits them. MiniMax runs claude itself with MiniMax's
+// Anthropic-compatible API in its place; the key comes from MINIMAX_API_KEY in the runner's environment, and
+// claude's own aliases (opus, sonnet, haiku, which subagents use) point at MiniMax's model too.
+export const CLAUDE_PROVIDER = 'claude';
+const MINIMAX_MODEL = 'MiniMax-M3';
+/** @type {DevProvider[]} */
+export const DEFAULT_PROVIDERS = [
+  { id: CLAUDE_PROVIDER, name: 'Claude', command: DEFAULT_DEV_COMMAND, models: DEV_MODELS },
+  {
+    id: 'minimax',
+    name: 'MiniMax',
+    command: [
+      'ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic',
+      'ANTHROPIC_AUTH_TOKEN="$MINIMAX_API_KEY"',
+      'API_TIMEOUT_MS=3000000',
+      'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1',
+      ...['OPUS', 'SONNET', 'HAIKU'].map((m) => `ANTHROPIC_DEFAULT_${m}_MODEL=${MINIMAX_MODEL}`),
+      DEFAULT_DEV_COMMAND,
+    ].join(' '),
+    models: [MINIMAX_MODEL, 'MiniMax-M2.7'],
+  },
+];
+export const devProviders = (/** @type {DataStore} */ store) => store.get(COLLECTION)?.providers ?? DEFAULT_PROVIDERS;
+
+// The provider whose command a task's session runs instead of its project's: one other than Claude it picked a
+// model of. A provider that was removed is skipped, so the task falls back to its project's command.
+/** @param {DataStore} store @param {string | undefined} id */
+export function taskProvider(store, id) {
+  if (!id || id === CLAUDE_PROVIDER) return null;
+  return devProviders(store).find((p) => p.id === id && p.command.trim()) ?? null;
+}
+
+// The command a project's tasks are handed to: its preset's, else its own Dev command, else Claude's provider
+// command, else the default. A preset that was removed is skipped, so the project falls back to its own command.
 /** @param {DataStore} store @param {Project | null | undefined} project */
 export function devCommandOf(store, project) {
   const preset = project?.devPreset ? devPresets(store).find((x) => x.id === project.devPreset) : null;
-  return preset?.command?.trim() || project?.devCommand?.trim() || DEFAULT_DEV_COMMAND;
+  const claude = devProviders(store).find((p) => p.id === CLAUDE_PROVIDER);
+  return preset?.command?.trim() || project?.devCommand?.trim() || claude?.command?.trim() || DEFAULT_DEV_COMMAND;
 }
 
 // A worktree flag with no name: claude would pick a random one, which the tasks could not find again.
@@ -34,16 +71,13 @@ function worktreeName(title, id) {
   return `${slug || 'task'}-${id.replace(/-/g, '').slice(0, 6)}`;
 }
 
-// The models and efforts a task can pick for its Dev session (claude's --model aliases and --effort levels).
-export const DEV_MODELS = ['fable', 'opus', 'sonnet', 'haiku'];
-export const DEV_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
-
 // The model each alias runs today, named in the menu (claude moves an alias to a new version on its own).
 /** @type {Record<string, string>} */
 export const DEV_MODEL_NAMES = { fable: 'Fable 5.2', opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', haiku: 'Haiku 5.5' };
 
 // A command that runs claude, so --model and --effort mean something to it; another tool's preset is left as is.
-const RUNS_CLAUDE = /^\s*(\S*\/)?claude(\s|$)/;
+// Variables set before it (a provider's API override) still count.
+const RUNS_CLAUDE = /^\s*(\w+=("[^"]*"|'[^']*'|\S*)\s+)*(\S*\/)?claude(\s|$)/;
 
 // The command with a task's model and effort added; unset ones keep the command's own (or claude's default).
 // Added last, they win over the same flags in the project's command.
