@@ -76,16 +76,19 @@ function worktreeName(title, id) {
 export const DEV_MODEL_NAMES = { fable: 'Fable 5.2', opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', haiku: 'Haiku 5.5' };
 
 // The coding harnesses (CLIs that run an agent in a terminal) until Settings → Dev environment edits them. Each says
-// how a task's model, effort and prompt reach it; {model}, {effort} and {prompt} are replaced by the quoted value.
-// A command runs the harness whose own command starts with the same program, after any variables set before it.
+// how a task's model, effort and prompt reach it; {{model}}, {{effort}} and {{prompt}} are replaced by the quoted
+// value. A command runs the harness whose own command starts with the same program, after any variables set before it.
 /** @type {DevHarness[]} */
 export const DEFAULT_HARNESSES = [
-  { id: CLAUDE_PROVIDER, name: 'Claude Code', command: DEFAULT_DEV_COMMAND, model: '--model {model}', effort: '--effort {effort}', prompt: '-- {prompt}' },
-  { id: 'codex', name: 'Codex CLI', command: 'codex --dangerously-bypass-approvals-and-sandbox', model: '--model {model}', effort: '-c model_reasoning_effort={effort}', prompt: '-- {prompt}' },
-  { id: 'gemini', name: 'Gemini CLI', command: 'gemini --yolo', model: '--model {model}', effort: '', prompt: '--prompt-interactive {prompt}' },
-  { id: 'opencode', name: 'OpenCode', command: 'opencode', model: '--model {model}', effort: '', prompt: '--prompt {prompt}' },
+  { id: CLAUDE_PROVIDER, name: 'Claude Code', command: DEFAULT_DEV_COMMAND, model: '--model {{model}}', effort: '--effort {{effort}}', prompt: '-- {{prompt}}' },
+  { id: 'codex', name: 'Codex CLI', command: 'codex --dangerously-bypass-approvals-and-sandbox', model: '--model {{model}}', effort: '-c model_reasoning_effort={{effort}}', prompt: '-- {{prompt}}' },
+  { id: 'gemini', name: 'Gemini CLI', command: 'gemini --yolo', model: '--model {{model}}', effort: '', prompt: '--prompt-interactive {{prompt}}' },
+  { id: 'opencode', name: 'OpenCode', command: 'opencode', model: '--model {{model}}', effort: '', prompt: '--prompt {{prompt}}' },
 ];
 export const devHarnesses = (/** @type {DataStore} */ store) => store.get(COLLECTION)?.harnesses ?? DEFAULT_HARNESSES;
+
+// The variables a harness flag or a Dev command can hold.
+export const DEV_VARS = ['model', 'effort', 'prompt'];
 
 // The variables set before a command's program (a provider's API override), and the rest of it.
 const ENV_PREFIX = /^\s*((?:\w+=(?:"[^"]*"|'[^']*'|\S*)\s+)*)/;
@@ -103,29 +106,83 @@ export function harnessOf(harnesses, command) {
   return program ? harnesses.find((x) => programOf(x.command) === program) ?? null : null;
 }
 
+// {{key}}, or {key} as the first harnesses were saved.
+const token = (/** @type {string} */ key) => new RegExp(`\\{\\{?${key}\\}\\}?`, 'g');
+const holds = (/** @type {string} */ text, /** @type {string} */ key) => token(key).test(text);
+
 // A harness's flag with its value filled in, quoted as one shell word; '' when either is empty.
 /** @param {string | undefined} template @param {string} key @param {string} value */
 function fill(template, key, value) {
   if (!template?.trim() || !value) return '';
   const word = shellQuote(value);
-  return template.includes(`{${key}}`) ? template.split(`{${key}}`).join(word) : `${template} ${word}`;
+  return holds(template, key) ? template.replace(token(key), () => word) : `${template} ${word}`;
+}
+
+// A command that holds {{key}} itself gets the value there; with no value, the variable goes, and the flag just
+// before it (`-m {{model}}`, `--model={{model}}`) with it.
+/** @param {string} command @param {string} key @param {string} value */
+function fillInPlace(command, key, value) {
+  if (value) return command.replace(token(key), () => shellQuote(value));
+  return command.replace(new RegExp(`(\\s+--?[\\w-]+(?:=|\\s+))?${token(key).source}`, 'g'), '').trim();
 }
 
 // The command with a task's model and effort added in its harness's way; unset ones keep the command's own (or the
-// harness's default). Added last, they win over the same flags in the project's command. Another program is left as is.
+// harness's default). Added last, they win over the same flags in the project's command. Another program is left as
+// is, unless the command places {{model}} or {{effort}} itself.
 /** @param {DevHarness[]} harnesses @param {string} command @param {{ model?: string, effort?: string }} options */
 export function withDevOptions(harnesses, command, { model = '', effort = '' } = {}) {
   const harness = harnessOf(harnesses, command);
-  if (!harness) return command;
-  const flags = [fill(harness.model, 'model', model), fill(harness.effort, 'effort', effort)].filter(Boolean);
-  return flags.length ? `${command} ${flags.join(' ')}` : command;
+  /** @type {string[]} */
+  const flags = [];
+  for (const [key, value, template] of /** @type {[string, string, string | undefined][]} */ ([['model', model, harness?.model], ['effort', effort, harness?.effort]])) {
+    if (holds(command, key)) command = fillInPlace(command, key, value);
+    else if (harness) flags.push(fill(template, key, value));
+  }
+  const added = flags.filter(Boolean);
+  return added.length ? `${command} ${added.join(' ')}` : command;
 }
 
-// The command with the prompt handed over as its harness takes it; claude's way (after --) for another program.
+// The command with the prompt handed over as its harness takes it, or where the command places {{prompt}};
+// claude's way (after --) for another program.
 /** @param {DevHarness[]} harnesses @param {string} command @param {string} prompt */
 export function withPrompt(harnesses, command, prompt) {
-  const template = harnessOf(harnesses, command)?.prompt?.trim() || '-- {prompt}';
+  if (holds(command, 'prompt')) return command.replace(token('prompt'), () => shellQuote(prompt));
+  const template = harnessOf(harnesses, command)?.prompt?.trim() || '-- {{prompt}}';
   return `${command} ${fill(template, 'prompt', prompt)}`;
+}
+
+// The command as a task would run it, with the variables still in: the harness's flags for those the command does
+// not place itself, then its prompt. For Settings' previews.
+/** @param {DevHarness[]} harnesses @param {string} command */
+export function devTemplate(harnesses, command) {
+  const harness = harnessOf(harnesses, command);
+  const parts = [command];
+  for (const key of DEV_VARS) {
+    if (holds(command, key)) continue;
+    const template = key === 'prompt' ? harness?.prompt?.trim() || '-- {{prompt}}' : harness?.[/** @type {'model' | 'effort'} */ (key)]?.trim();
+    if (template) parts.push(holds(template, key) ? template : `${template} {{${key}}}`);
+  }
+  return parts.join(' ').replace(/\{\{?(\w+)\}\}?/g, '{{$1}}');
+}
+
+// The logo of a provider or harness, by the brand its name, id or command names; '' when none matches.
+const BRANDS = [
+  ['ai-claude', /claude|anthropic/i],
+  ['ai-openai', /codex|openai|\bgpt/i],
+  ['ai-gemini', /gemini|google/i],
+  ['ai-minimax', /minimax/i],
+  ['ai-qwen', /qwen|dashscope|alibaba/i],
+  ['ai-deepseek', /deepseek/i],
+  ['ai-openrouter', /openrouter/i],
+  ['ai-mistral', /mistral/i],
+];
+/** @param {...string} texts the most telling first: a name before a command */
+export function brandOf(...texts) {
+  for (const text of texts) {
+    const found = BRANDS.find(([, re]) => /** @type {RegExp} */ (re).test(text ?? ''));
+    if (found) return /** @type {string} */ (found[0]);
+  }
+  return '';
 }
 
 // The project's Dev command (or the default), with a name for the worktree it makes. `fallbackCwd` is the folder

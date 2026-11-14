@@ -19,8 +19,8 @@ export interface DevProvider {
 }
 
 // A coding harness in Settings → Dev environment: a CLI that runs an agent in a terminal (Claude Code, Codex CLI…).
-// A command runs the harness whose command starts with the same program. Its flags are templates: {model},
-// {effort} and {prompt} are replaced by the quoted value; '' means the harness takes no such flag.
+// A command runs the harness whose command starts with the same program. Its flags are templates: {{model}},
+// {{effort}} and {{prompt}} are replaced by the quoted value; '' means the harness takes no such flag.
 export interface DevHarness {
   id: string;
   name: string;
