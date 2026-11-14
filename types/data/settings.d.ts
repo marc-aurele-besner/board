@@ -41,6 +41,8 @@ export interface ChainChoice {
 export interface AddedPosition {
   chainId: number;
   tokenId: string;
+  // Another exchange than Uniswap: 'pancakeswap'.
+  dex?: string;
 }
 
 // Kept under "uniswap" because the wallets and nodes were first saved there.

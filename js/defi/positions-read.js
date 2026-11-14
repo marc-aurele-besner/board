@@ -1,15 +1,17 @@
-// Liquidity Pools without the DOM: reading Uniswap v2, v3 and v4 positions from each chain's node, their fee APR from
+// Liquidity Pools without the DOM: reading Uniswap v2, v3 and v4 positions, and PancakeSwap v2 and v3 (staked ones
+// too, with their CAKE), from each chain's node, their fee APR from
 // the pools' swaps, and the fees they collected (from the node and Etherscan). Everything read is saved in pools.json,
 // which DeFi → Positions renders:
 //   cache, prices, scan, fees, collected, earned, history, etherscan, as before;
 //   v2scan: { <chainId>: { <wallet>: { block, pairs, rejected, at, error } } }, the v2 pairs Etherscan found;
+//   PancakeSwap's searches sit in v2scan and etherscan under "<chainId>:pancakeswap" (scanKey);
 //   read: { at, warnings: { "<chainId>:<version>": text }, stale: { "<chainId>:<version>": at }, shallow: [chain names],
 //     pending: [chain names], v2lookup: { <chain name>: text } }, the state of the last read;
 //   aprs: { "<window>|<ref>": { apr, secs, full, prev, prevSecs, at } }, fee APR from swaps;
 //   etherscanErrors: { <chain name>: text }.
 // Cron reads open positions through openPositions().
 import { uid } from '../ui.js';
-import { readPositions, poolState, tokenMeta, isAddressSymbol, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, MAX_TICK, chainSettings, addedPositions, scanV4, readV4Position, readV3Position, readV2Pair, walletV2Pairs, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey, nodeUrls } from '../uniswap.js';
+import { readPositions, poolState, tokenMeta, isAddressSymbol, usdPrices, positionAmounts, priceAtTick, isAddress, CHAINS, MAX_TICK, chainSettings, addedPositions, scanV4, readV4Position, readV3Position, readV2Pair, walletV2Pairs, readStaked, pancakeOf, deploymentOf, scanKey, positionUrl, dexName, chainClock, poolSwaps, swapFees, swapEarn, isClosed, positionHistory, collectFees, usdPricesAt, nodeSource, etherscanSource, collectTx, positionsInReceipt, walletPositionTxs, nodeKey, nodeUrls } from '../uniswap.js';
 import { etherscanKey } from '../chains.js';
 import { poolsChanged } from '../automations.js';
 /** @import { DataStore, UniswapSettings, Wallet, PoolsData, PoolRow, PoolCachePart, ChainPrices, FeeBaseline, CollectEntry, EarnedHours, V4Scan, V2Scan, AprEntry, PositionsReadState, PositionHistory } from '../../types/data' */
@@ -34,15 +36,24 @@ export const WINDOWS = { '15m': [15 * 60, '15 min'], '1h': [3600, '1 h'], '3h': 
 /** @type {Map<string, TokenInfo>} */
 const tokenInfo = new Map(); // "chainId:token address" -> { symbol, decimals }, read once per process
 export const knownTokens = () => tokenInfo;
-/** @param {number} chainId */
-const chainOf = (chainId) => CHAINS.find((c) => c.id === chainId);
+// The deployment a row is read from: its chain as Uniswap's, or as PancakeSwap's.
+/** @param {{ chainId: number, dex?: string }} r */
+const deploymentOfRow = (r) => deploymentOf(r.chainId, r.dex);
+// A deployment's name in messages: the chain's, and the exchange when it is not Uniswap.
+/** @param {Chain} chain */
+const placeOf = (chain) => (chain.dex ? `${chain.name} (${dexName(chain.dex)})` : chain.name);
 
 /** @param {{ id: number }} chain @param {string} address */
 export const tokenKey = (chain, address) => `${chain.id}:${address}`;
 // v3 rows keep their old key, so tasks made before v4 still match. A v2 pair is held by a wallet, and two wallets
-// can hold the same one, so its key ends with the wallet.
-/** @param {string} version @param {number} chainId @param {string | number} tokenId @param {string} [wallet] v2 only */
-export const refOf = (version, chainId, tokenId, wallet) => (version === 'v3' ? `${chainId}:${tokenId}` : version === 'v2' ? `${chainId}:v2:${tokenId}:${String(wallet).toLowerCase()}` : `${chainId}:${version}:${tokenId}`);
+// can hold the same one, so its key ends with the wallet. Another exchange's rows name it before the version
+// ("56:pancakeswap-v3:123"), as its position numbers are its own.
+/** @param {string} version @param {number} chainId @param {string | number} tokenId @param {string} [wallet] v2 only @param {string} [dex] */
+export const refOf = (version, chainId, tokenId, wallet, dex) => {
+  const kind = dex && dex !== 'uniswap' ? `${dex}-${version}` : version;
+  if (version === 'v2') return `${chainId}:${kind}:${tokenId}:${String(wallet).toLowerCase()}`;
+  return kind === 'v3' ? `${chainId}:${tokenId}` : `${chainId}:${kind}:${tokenId}`;
+};
 
 // Builds one row from a position, its pool's current state and the token prices on its chain.
 /**
@@ -65,6 +76,10 @@ function buildRow(p, pool, prices, chain, pricesAt = null) {
   const fee0 = Number(p.owed0) / 10 ** m0.decimals;
   const fee1 = Number(p.owed1) / 10 ** m1.decimals;
   const fees = priced ? fee0 * p0 + fee1 * p1 : null;
+  // A staked position's reward, such as CAKE, in tokens and USD.
+  const rm = p.rewardToken ? tokenInfo.get(tokenKey(chain, p.rewardToken)) ?? { symbol: 'CAKE', decimals: 18 } : null;
+  const reward = rm && p.reward != null ? Number(p.reward) / 10 ** rm.decimals : null;
+  const rewardPrice = p.rewardToken ? prices[p.rewardToken.toLowerCase()] ?? null : null;
   const full = p.tickLower <= -MAX_TICK && p.tickUpper >= MAX_TICK;
   const min = p.tickLower <= -MAX_TICK ? 0 : priceAtTick(p.tickLower, m0.decimals, m1.decimals);
   const max = p.tickUpper >= MAX_TICK ? Infinity : priceAtTick(p.tickUpper, m0.decimals, m1.decimals);
@@ -75,7 +90,9 @@ function buildRow(p, pool, prices, chain, pricesAt = null) {
     : Math.min(100, Math.max(0, ((Math.log(current) - Math.log(min)) / (Math.log(max) - Math.log(min))) * 100));
   return {
     version: p.version,
-    ref: refOf(p.version, chain.id, p.tokenId, p.owner),
+    // Missing on Uniswap's rows.
+    ...(chain.dex ? { dex: chain.dex } : {}),
+    ref: refOf(p.version, chain.id, p.tokenId, p.owner, chain.dex),
     chain: chain.name,
     chainId: chain.id,
     tokenId: p.tokenId,
@@ -110,14 +127,16 @@ function buildRow(p, pool, prices, chain, pricesAt = null) {
     // Fees read by a simulated collect, not the stored amounts, which lag. Only these can tell a collect apart.
     feesFull: Boolean(p.feesFull),
     share0: value ? (a0 * /** @type {number} */ (p0)) / value : null,
-    url: chain.app ? `https://app.uniswap.org/positions/${p.version}/${chain.app}/${p.tokenId}` : null,
+    url: positionUrl(chain, p.version, p.tokenId),
+    // Staked in a farm: the reward it can harvest.
+    ...(p.via ? { staked: true, reward: reward ?? 0, rewardSym: rm?.symbol ?? 'CAKE', rewardAddr: /** @type {string} */ (p.rewardToken), rewardUsd: reward != null && rewardPrice != null ? reward * rewardPrice : null } : {}),
     // What fee APR from swaps needs: the range, the liquidity (as text, for JSON), the pool and the decimals.
     tickLower: p.tickLower,
     tickUpper: p.tickUpper,
     liq: p.liquidity.toString(),
     ...(p.supply != null ? { supply: p.supply.toString() } : {}),
     pool: pool.pool,
-    feePips: p.lpFee ?? p.fee,
+    feePips: p.lpFee ?? pool.lpFee ?? p.fee,
     dec0: m0.decimals,
     dec1: m1.decimals,
   };
@@ -222,13 +241,21 @@ async function readV4(chain, node, wallets, cfg, saved) {
   return { items, scans };
 }
 
-// Every wallet's v3 positions on a chain, and those added by hand, each with its pool's current state.
+// Whether a position added by hand is one of this deployment's.
+/** @param {{ chainId: number, dex?: string }} x @param {Chain} chain */
+const addedHere = (x, chain) => x.chainId === chain.id && (x.dex || 'uniswap') === (chain.dex || 'uniswap');
+
+// Every wallet's v3 positions on a chain, those staked in its farm, and those added by hand, each with its pool's
+// current state.
 /** @param {Chain} chain @param {string} node @param {Wallet[]} wallets @param {Partial<UniswapSettings>} cfg */
 async function readV3(chain, node, wallets, cfg) {
-  const owned = (await Promise.all(wallets.map(async (w) => (await readPositions(chain, node, w.address)).map((p) => ({ ...p, label: w.label || w.address }))))).flat();
+  const owned = (await Promise.all(wallets.map(async (w) => {
+    const [own, staked] = await Promise.all([readPositions(chain, node, w.address), readStaked(chain, node, w.address)]);
+    return [...own, ...staked].map((p) => ({ ...p, label: w.label || w.address }));
+  }))).flat();
   const labels = new Map(wallets.map((w) => [w.address.toLowerCase(), w.label || w.address]));
   const have = new Set(owned.map((p) => p.tokenId));
-  const added = addedPositions(cfg).filter((x) => x.version === 'v3' && x.chainId === chain.id && !have.has(String(x.tokenId)));
+  const added = addedPositions(cfg).filter((x) => x.version === 'v3' && addedHere(x, chain) && !have.has(String(x.tokenId)));
   const extra = /** @type {Position[]} */ ((await Promise.all(added.map((x) => readV3Position(chain, node, x.tokenId))))
     .filter(Boolean))
     .map((p) => ({ ...p, label: labels.get(p.owner) ?? shortAddress(p.owner) }));
@@ -295,7 +322,7 @@ async function findV2(chain, key, wallets, saved) {
  */
 async function readV2(chain, node, wallets, cfg, saved, key) {
   const { scans, error } = await findV2(chain, key, wallets, saved);
-  const manual = new Set(addedPositions(cfg).filter((x) => x.version === 'v2' && x.chainId === chain.id).map((x) => String(x.tokenId).toLowerCase()));
+  const manual = new Set(addedPositions(cfg).filter((x) => x.version === 'v2' && addedHere(x, chain)).map((x) => String(x.tokenId).toLowerCase()));
   const pairs = [...new Set([...manual, ...Object.values(scans).flatMap((s) => s.pairs)])];
   const owners = wallets.map((w) => w.address);
   const labels = new Map(wallets.map((w) => [w.address.toLowerCase(), w.label || w.address]));
@@ -315,7 +342,7 @@ async function readV2(chain, node, wallets, cfg, saved, key) {
     items,
     v2scans: scans,
     lookup: error,
-    warning: wrong.length ? `${wrong.map(shortAddress).join(', ')} on ${chain.name} ${wrong.length === 1 ? 'is not a Uniswap v2 pair' : 'are not Uniswap v2 pairs'}: remove ${wrong.length === 1 ? 'it' : 'them'} in Settings → Uniswap.` : '',
+    warning: wrong.length ? `${wrong.map(shortAddress).join(', ')} on ${chain.name} ${wrong.length === 1 ? `is not a ${dexName(chain.dex)} v2 pair` : `are not ${dexName(chain.dex)} v2 pairs`}: remove ${wrong.length === 1 ? 'it' : 'them'} in Settings → Uniswap.` : '',
   };
 }
 
@@ -323,7 +350,8 @@ async function readV2(chain, node, wallets, cfg, saved, key) {
 // ones read for this chain (savedPrices).
 /** @param {Chain} chain @param {string} node @param {PositionRead[]} items @param {ChainPrices | undefined} savedPrices */
 async function toRows(chain, node, items, savedPrices) {
-  const tokens = [...new Set(items.flatMap((x) => [x.position.token0, x.position.token1]))];
+  // A staked position's reward token is priced with the rest.
+  const tokens = [...new Set(items.flatMap((x) => [x.position.token0, x.position.token1, ...(x.position.rewardToken ? [x.position.rewardToken] : [])]))];
   // A symbol that could not be read is asked for again, rather than showing the address for good.
   await Promise.all(tokens.filter((t) => !tokenInfo.has(tokenKey(chain, t)) || /** @type {TokenInfo} */ (tokenInfo.get(tokenKey(chain, t))).guessed).map(async (t) => tokenInfo.set(tokenKey(chain, t), await tokenMeta(node, t, chain))));
   /** @type {Record<string, number>} */
@@ -412,7 +440,7 @@ export async function readAprs(store, rows, win = '24h') {
   for (const r of rows.filter((x) => x.liq != null && x.pool && !x.closed)) byChain.set(r.chainId, [...(byChain.get(r.chainId) ?? []), r]);
   await Promise.all([...byChain].map(async ([chainId, rows]) => {
     // The rows are those of the chains in CHAINS (cachedRows).
-    const chain = /** @type {Chain} */ (chainOf(chainId));
+    const chain = /** @type {Chain} */ (deploymentOf(chainId, null));
     const { node } = chainSettings(cfg, chain);
     let clock;
     try {
@@ -428,7 +456,8 @@ export async function readAprs(store, rows, win = '24h') {
     for (const r of rows) pools.set(`${r.version}:${r.pool}`, [...(pools.get(`${r.version}:${r.pool}`) ?? []), r]);
     for (const list of pools.values()) {
       try {
-        const c = await poolSwaps(chain, node, list[0].version, list[0].pool, from, clock.head);
+        // A PancakeSwap pool logs its swaps under its own event.
+        const c = await poolSwaps(/** @type {Chain} */ (deploymentOfRow(list[0])), node, list[0].version, list[0].pool, from, clock.head);
         const start = Math.max(curFrom, c.from);
         const prevStart = Math.max(from, c.from);
         // Swaps read now cover start..head. Older parts of the window come from the hours saved by earlier loads.
@@ -719,7 +748,8 @@ async function etherscanCollects(store, chain, node, key, wallets, rows) {
   const byRef = new Map(rows.map((r) => [r.ref, r]));
   let budget = ETHERSCAN_TXS;
   for (const wallet of wallets) {
-    const saved = store.get(COLLECTION)?.etherscan?.[chain.id]?.[wallet] ?? { block: 0, checked: [] };
+    // Each exchange keeps its own search: a wallet's PancakeSwap transactions go to other contracts.
+    const saved = store.get(COLLECTION)?.etherscan?.[scanKey(chain)]?.[wallet] ?? { block: 0, checked: [] };
     const checked = new Set(saved.checked);
     let block = saved.block;
     /** @type {CollectEntry[]} */
@@ -743,7 +773,7 @@ async function etherscanCollects(store, chain, node, key, wallets, rows) {
         tell(chain.id, `${who} · reading transaction ${i + 1} of ${count} (${new Date(t.time * 1000).toLocaleString()})`);
         const receipt = await src.call('eth_getTransactionReceipt', [t.tx]);
         for (const p of await positionsInReceipt(chain, node, receipt)) {
-          const r = byRef.get(refOf(p.version, chain.id, p.tokenId));
+          const r = byRef.get(refOf(p.version, chain.id, p.tokenId, undefined, chain.dex));
           if (!r || !wanted(store, r.ref, t.tx, 3)) continue;
           const res = await collectTx(chain, src, node, t.tx, posOf(r), receipt);
           if (res && (res.f0 > 0 || res.f1 > 0) && wanted(store, r.ref, t.tx, res.level)) found.push(await collectEntry(chain, r, t.tx, t.time, res.f0, res.f1, res.level, 'etherscan'));
@@ -760,7 +790,7 @@ async function etherscanCollects(store, chain, node, key, wallets, rows) {
     const caughtUp = !cut;
     store.update(COLLECTION, (d) => {
       // Only the transactions of the block the next call starts at need remembering.
-      d.etherscan = { ...d.etherscan, [chain.id]: { ...d.etherscan?.[chain.id], [wallet]: { block, checked: [...checked].slice(-200), caughtUp, at: Date.now() } } };
+      d.etherscan = { ...d.etherscan, [scanKey(chain)]: { ...d.etherscan?.[scanKey(chain)], [wallet]: { block, checked: [...checked].slice(-200), caughtUp, at: Date.now() } } };
       if (found.length) mergeCollects(d, found);
     });
   }
@@ -793,7 +823,7 @@ export async function readHistory(store, rows, { only = null, say = () => {} } =
   todo.forEach(([chainId]) => searching.add(chainId));
   await Promise.all(todo.map(async ([chainId, list]) => {
     // The rows are those of the chains in CHAINS (cachedRows).
-    const chain = /** @type {Chain} */ (chainOf(chainId));
+    const chain = /** @type {Chain} */ (deploymentOf(chainId, null));
     const { node } = chainSettings(cfg, chain);
     try {
       try {
@@ -808,7 +838,7 @@ export async function readHistory(store, rows, { only = null, say = () => {} } =
       const lanes = Math.max(1, Math.floor(nodes / side));
       await eachLimit(list, side, async (r, i) => {
         try {
-          await nodeCollects(store, chain, node, r, `${i + 1} of ${list.length}`, lanes);
+          await nodeCollects(store, /** @type {Chain} */ (deploymentOfRow(r)), node, r, `${i + 1} of ${list.length}`, lanes);
         } catch {
           // This position keeps the other readings until its history can be read.
         } finally {
@@ -816,19 +846,25 @@ export async function readHistory(store, rows, { only = null, say = () => {} } =
         }
       });
       if (!key || chain.etherscan === false) return;
-      /** @type {string | null} */
-      let error = null;
-      try {
-        await etherscanCollects(store, chain, node, key, wallets, list);
-      } catch (err) {
-        error = /** @type {Error} */ (err).message;
+      // Each exchange's transactions are read on their own, Uniswap's first.
+      const pancake = pancakeOf(chain);
+      for (const at of [chain, ...(pancake ? [pancake] : [])]) {
+        const mine = list.filter((r) => (r.dex || 'uniswap') === (at.dex || 'uniswap'));
+        if (!mine.length) continue;
+        /** @type {string | null} */
+        let error = null;
+        try {
+          await etherscanCollects(store, at, node, key, wallets, mine);
+        } catch (err) {
+          error = /** @type {Error} */ (err).message;
+        }
+        store.save(COLLECTION, (d) => {
+          const errors = { ...d.etherscanErrors };
+          if (error) errors[placeOf(at)] = error;
+          else delete errors[placeOf(at)];
+          d.etherscanErrors = errors;
+        });
       }
-      store.save(COLLECTION, (d) => {
-        const errors = { ...d.etherscanErrors };
-        if (error) errors[chain.name] = error;
-        else delete errors[chain.name];
-        d.etherscanErrors = errors;
-      });
     } finally {
       searching.delete(chainId);
       tell(chainId, null, '*');
@@ -838,8 +874,12 @@ export async function readHistory(store, rows, { only = null, say = () => {} } =
 
 // Rows saved by the last read, for the wallets and chains still chosen. JSON has no Infinity, so an open-ended range
 // comes back as null and is restored here. A row of a part the last read could not read is marked with staleAt.
+// PancakeSwap's parts are "<chainId>:pancakeswap-v3" and "<chainId>:pancakeswap-v2".
 /** @param {Chain[]} chains */
-export const cacheKeys = (chains) => chains.flatMap((c) => ['v3', ...(c.v4 ? ['v4'] : []), ...(c.v2 ? ['v2'] : [])].map((v) => `${c.id}:${v}`));
+export const cacheKeys = (chains) => chains.flatMap((c) => [
+  ...['v3', ...(c.v4 ? ['v4'] : []), ...(c.v2 ? ['v2'] : [])].map((v) => `${c.id}:${v}`),
+  ...(pancakeOf(c) ? [`${c.id}:pancakeswap-v3`, `${c.id}:pancakeswap-v2`] : []),
+]);
 /** @param {Partial<UniswapSettings>} cfg */
 export const enabledChains = (cfg) => CHAINS.filter((chain) => chainSettings(cfg, chain).enabled);
 
@@ -853,11 +893,13 @@ export function cachedRows(store, cfg = store.get('settings').uniswap ?? {}, key
   const stale = d.read?.stale ?? {};
   const wallets = new Set((cfg.wallets ?? []).map((w) => w.address.toLowerCase()));
   const added = addedPositions(cfg);
-  const manual = new Set(added.filter((x) => x.version !== 'v2').map((x) => refOf(x.version, x.chainId, x.tokenId)));
+  const manual = new Set(added.filter((x) => x.version !== 'v2').map((x) => refOf(x.version, x.chainId, x.tokenId, undefined, x.dex)));
   // A v2 row is a wallet's share of a pair: the wallet must still be chosen, and the pair still found or added.
-  const pairs = new Set(added.filter((x) => x.version === 'v2').map((x) => `${x.chainId}:${String(x.tokenId).toLowerCase()}`));
+  /** @param {{ chainId: number, dex?: string }} x */
+  const placeKey = (x) => scanKey({ id: x.chainId, dex: x.dex && x.dex !== 'uniswap' ? x.dex : undefined });
+  const pairs = new Set(added.filter((x) => x.version === 'v2').map((x) => `${placeKey(x)}|${String(x.tokenId).toLowerCase()}`));
   /** @param {PoolRow} r */
-  const v2Kept = (r) => wallets.has(r.wallet) && (pairs.has(`${r.chainId}:${r.tokenId}`) || (d.v2scan?.[r.chainId]?.[r.wallet]?.pairs ?? []).includes(r.tokenId));
+  const v2Kept = (r) => wallets.has(r.wallet) && (pairs.has(`${placeKey(r)}|${r.tokenId}`) || (d.v2scan?.[placeKey(r)]?.[r.wallet]?.pairs ?? []).includes(r.tokenId));
   return keys.flatMap((key) => (cache[key]?.rows ?? [])
     .filter((r) => (r.version === 'v2' ? v2Kept(r) : wallets.has(r.wallet) || manual.has(r.ref)))
     .map((r) => ({ ...r, max: r.max ?? Infinity, staleAt: stale[key] ?? null })));
@@ -892,7 +934,8 @@ export function openPositions(store) {
 let reading = false;
 export const readingPositions = () => reading;
 
-// Reads every enabled chain in parallel, and v2, v3 and v4 side by side on each, and saves each part as it lands. A part
+// Reads every enabled chain in parallel, and Uniswap's v2, v3 and v4 and PancakeSwap's v2 and v3 side by side on each,
+// and saves each part as it lands. A part
 // that fails keeps its last good read, marked stale. Returns the rows read, or null when a read is already running.
 /** @param {DataStore} store */
 export async function readAllPositions(store) {
@@ -910,11 +953,14 @@ export async function readAllPositions(store) {
     });
     setRead(() => ({ pending: chains.map((c) => c.chain.name) }));
 
-    await Promise.all(chains.map(async ({ chain, node }) => {
-      const savedPrices = saved.prices?.[chain.id];
-      /** @param {string} version @param {() => Promise<{ items: PositionRead[], scans?: Record<string, V4Scan>, v2scans?: Record<string, V2Scan>, lookup?: string, warning?: string }>} read */
-      const part = async (version, read) => {
-        const key = `${chain.id}:${version}`;
+    await Promise.all(chains.map(async ({ chain: uni, node }) => {
+      const savedPrices = saved.prices?.[uni.id];
+      /**
+       * @param {Chain} chain Uniswap's chain, or PancakeSwap's deployment on it
+       * @param {string} version @param {() => Promise<{ items: PositionRead[], scans?: Record<string, V4Scan>, v2scans?: Record<string, V2Scan>, lookup?: string, warning?: string }>} read
+       */
+      const part = async (chain, version, read) => {
+        const key = `${chain.id}:${chain.dex ? `${chain.dex}-${version}` : version}`;
         try {
           const got = await read();
           const done = await toRows(chain, node, got.items, savedPrices);
@@ -940,26 +986,30 @@ export async function readAllPositions(store) {
             d.read = { .../** @type {PositionsReadState} */ (d.read), stale, shallow: [...shallow], warnings: { ...d.read?.warnings, [key]: [done.warning, got.warning].filter(Boolean).join(' ') } };
             // The same for each wallet's v2 pairs, with why Etherscan could not list them, if so.
             if (got.v2scans) {
-              d.v2scan = { ...d.v2scan, [chain.id]: got.v2scans };
-              const { [chain.name]: __, ...lookup } = d.read.v2lookup ?? {};
-              d.read.v2lookup = got.lookup ? { ...lookup, [chain.name]: got.lookup } : lookup;
+              d.v2scan = { ...d.v2scan, [scanKey(chain)]: got.v2scans };
+              const { [placeOf(chain)]: __, ...lookup } = d.read.v2lookup ?? {};
+              d.read.v2lookup = got.lookup ? { ...lookup, [placeOf(chain)]: got.lookup } : lookup;
             }
           });
         } catch (err) {
           const at = saved.cache?.[key]?.at;
           setRead((r) => ({
-            warnings: { ...r.warnings, [key]: `${chain.name} ${version} positions could not be read: ${/** @type {Error} */ (err).message}` },
+            warnings: { ...r.warnings, [key]: `${chain.name} ${dexName(chain.dex)} ${version} positions could not be read: ${/** @type {Error} */ (err).message}` },
             stale: at ? { ...r.stale, [key]: at } : r.stale,
           }));
         }
       };
+      const pcs = pancakeOf(uni);
+      const key = etherscanKey(store.get('settings'));
       await Promise.all([
-        part('v3', () => readV3(chain, node, wallets, cfg)),
-        chain.v4 ? part('v4', () => readV4(chain, node, wallets, cfg, saved.scan?.[chain.id] ?? {})) : null,
-        chain.v2 ? part('v2', () => readV2(chain, node, wallets, cfg, saved.v2scan?.[chain.id] ?? {}, etherscanKey(store.get('settings')))) : null,
+        part(uni, 'v3', () => readV3(uni, node, wallets, cfg)),
+        uni.v4 ? part(uni, 'v4', () => readV4(uni, node, wallets, cfg, saved.scan?.[uni.id] ?? {})) : null,
+        uni.v2 ? part(uni, 'v2', () => readV2(uni, node, wallets, cfg, saved.v2scan?.[uni.id] ?? {}, key)) : null,
+        pcs ? part(pcs, 'v3', () => readV3(pcs, node, wallets, cfg)) : null,
+        pcs ? part(pcs, 'v2', () => readV2(pcs, node, wallets, cfg, saved.v2scan?.[scanKey(pcs)] ?? {}, key)) : null,
       ]);
-      await fixLeftSymbols(store, chain, node, cachedRows(store, cfg));
-      setRead((r) => ({ pending: (r.pending ?? []).filter((name) => name !== chain.name) }));
+      await fixLeftSymbols(store, uni, node, cachedRows(store, cfg));
+      setRead((r) => ({ pending: (r.pending ?? []).filter((name) => name !== uni.name) }));
     }));
     // Parts of chains no longer read leave no warning behind.
     const keys = new Set(cacheKeys(chains.map((c) => c.chain)));
@@ -968,7 +1018,7 @@ export async function readAllPositions(store) {
       pending: [],
       warnings: Object.fromEntries(Object.entries(r.warnings ?? {}).filter(([k, v]) => keys.has(k) && v)),
       stale: Object.fromEntries(Object.entries(r.stale ?? {}).filter(([k]) => keys.has(k))),
-      v2lookup: Object.fromEntries(Object.entries(r.v2lookup ?? {}).filter(([name]) => chains.some((c) => c.chain.name === name && c.chain.v2))),
+      v2lookup: Object.fromEntries(Object.entries(r.v2lookup ?? {}).filter(([name]) => chains.some((c) => [c.chain, pancakeOf(c.chain)].some((x) => x?.v2 && placeOf(x) === name)))),
     }));
     const rows = cachedRows(store, cfg);
     // Tell the automation rules and the notifications which positions left their range. Old rows are left out.

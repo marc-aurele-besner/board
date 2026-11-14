@@ -1,4 +1,5 @@
-// Uniswap v2, v3 and v4 liquidity positions, read straight from each chain's node. Read-only: only public addresses are used,
+// Uniswap v2, v3 and v4 liquidity positions, and PancakeSwap's v2 and v3 (forks of Uniswap's), read straight from each
+// chain's node. Read-only: only public addresses are used,
 // never keys. Token prices come from DefiLlama's public price endpoint.
 import { keccak256 } from './keccak.js';
 /** @import { Chain, Position, PoolState, Swap, ListedToken, RpcLog, Receipt, TxSource, BigIntish, V4Deployment } from '../types/uniswap' */
@@ -54,6 +55,66 @@ const MORE_NODES = {
   324: ['https://zksync.drpc.org', 'https://1rpc.io/zksync2-era'],
 };
 for (const c of CHAINS) c.rpc = [c.rpc, ...(MORE_NODES[c.id] ?? [])].join(' ');
+
+// PancakeSwap's v2 and v3 on the chains above, each address checked on-chain. Its v3 is Uniswap's code with other fee
+// tiers and a Swap event of its own; its v2 charges 0.25%, of which liquidity keeps 0.17% once the fee switch is on.
+// chef is its farm (MasterChef v3), which holds the staked positions and pays CAKE. app is the chain's key in
+// pancakeswap.finance links ('' where the site names none). Robinhood Chain has no farm.
+const PCS_V3 = { factory: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865', positions: '0x46A15B0b27311cedF172AB29E4f4766fbE7F4364' };
+const PCS_V2 = '0x02a84c1b3BBD7401a5f7fa98a384EBC70bB5749E';
+const PCS_CHEF = '0x556B9306565093C855AEA9AE92A594704c2Cd59e';
+/** @type {Record<number, { factory: string, positions: string, v2: string, chef?: string, app: string }>} */
+const PANCAKE = {
+  56: { ...PCS_V3, v2: '0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73', chef: PCS_CHEF, app: 'bsc' },
+  1: { ...PCS_V3, v2: '0x1097053Fd2ea711dad45caCcc45EfF7548fCB362', chef: PCS_CHEF, app: 'eth' },
+  42161: { ...PCS_V3, v2: PCS_V2, chef: '0x5e09ACf80C0296740eC5d6F643005a4ef8DaA694', app: 'arb' },
+  8453: { ...PCS_V3, v2: PCS_V2, chef: '0xC6A2Db661D5a5690172d8eB0a7DEA2d3008665A3', app: 'base' },
+  4663: { ...PCS_V3, v2: PCS_V2, app: '' },
+  324: { factory: '0x1BB72E0CbbEA93c08f535fc7856E0338D7F7a8aB', positions: '0xa815e2eD7f7d5B0c49fda367F249232a1B9D2883', v2: '0xd03D8D566183F0086d8D09A84E1e30b58Dd5619d', chef: '0x4c615E78c5fCA1Ad31e4d66eb0D8688d84307463', app: 'zksync' },
+};
+// Swap(address,address,int256,int256,uint160,uint128,int24,uint128,uint128) on a PancakeSwap v3 pool: Uniswap's, with
+// the protocol's fees at the end.
+const SWAP_PCS_V3 = '0x19b47279256b2a23a1665c810c8d55a1758940ee09377d4f8d26497a3577dc83';
+
+// The exchanges the board reads, by the id rows and added positions carry. A row without one is Uniswap's.
+/** @type {Record<string, string>} */
+export const DEXES = { uniswap: 'Uniswap', pancakeswap: 'PancakeSwap' };
+export const dexName = (/** @type {string | undefined | null} */ dex) => DEXES[dex || 'uniswap'] ?? String(dex);
+
+/** @type {Map<number, Chain>} */
+const pancakes = new Map();
+// A chain as PancakeSwap's deployment on it: the same chain and nodes, with its contracts in place of Uniswap's, so
+// the Uniswap readers read it as they are. null where PancakeSwap is not deployed.
+/** @param {Chain} chain @returns {Chain | null} */
+export function pancakeOf(chain) {
+  const p = PANCAKE[chain.id];
+  if (!p) return null;
+  if (!pancakes.has(chain.id)) {
+    const { v4: _, ...rest } = chain;
+    pancakes.set(chain.id, { ...rest, dex: 'pancakeswap', app: p.app, factory: p.factory, positions: p.positions, v2: p.v2, chef: p.chef, v3swap: SWAP_PCS_V3, v2fee: 2500, v2lp: 1700, v2symbol: 'Cake-LP' });
+  }
+  return /** @type {Chain} */ (pancakes.get(chain.id));
+}
+// The deployment a row or added position is read from: its chain, as the exchange it names.
+/** @param {number} chainId @param {string | undefined | null} dex @returns {Chain | null} */
+export function deploymentOf(chainId, dex) {
+  const chain = CHAINS.find((c) => c.id === chainId);
+  if (!chain) return null;
+  return dex === 'pancakeswap' ? pancakeOf(chain) : chain;
+}
+// The key a deployment's saved searches sit under in pools.json: the chain id, and for PancakeSwap its name too.
+export const scanKey = (/** @type {{ id: number, dex?: string }} */ chain) => (chain.dex ? `${chain.id}:${chain.dex}` : String(chain.id));
+
+// A position's page on its exchange's site, or null where the site has no link for that chain. A PancakeSwap v2
+// pair has no page of its own: its link is the chain's list of positions.
+/** @param {Chain} chain @param {string} version @param {string} tokenId */
+export function positionUrl(chain, version, tokenId) {
+  if (!chain.app) return null;
+  if (chain.dex === 'pancakeswap') {
+    return version === 'v2' ? `https://pancakeswap.finance/liquidity/positions?network=${chain.id}` : `https://pancakeswap.finance/liquidity/${tokenId}?chain=${chain.app}`;
+  }
+  return `https://app.uniswap.org/positions/${version}/${chain.app}/${tokenId}`;
+}
 
 // v4 pools hold the chain's native coin directly, as the zero address.
 export const NATIVE = '0x0000000000000000000000000000000000000000';
@@ -115,6 +176,10 @@ const SEL = {
   totalSupply: '0x18160ddd',
   getPair: '0xe6a43905',
   feeTo: '0x017e7e58',
+  // PancakeSwap's farm (MasterChef v3).
+  CAKE: '0x4ca6ef28',
+  pendingCake: '0xce5f39c6',
+  userPositionInfos: '0x3b1acf74',
 };
 // Swap(address,uint256,uint256,uint256,uint256,address) on a v2 pair.
 const SWAP_V2 = '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822';
@@ -268,13 +333,13 @@ export async function rpcCall(node, to, data, from) {
 
 // A v3 position's unclaimed fees. positions() only holds the fees credited at the last poke or collect, so a
 // collect of everything is simulated as the owner, which credits the fees earned since. Falls back to the
-// stored amounts when the node refuses the call.
+// stored amounts when the node refuses the call. A staked position is collected as the farm that holds it (via).
 const MAX_U128 = (2n ** 128n - 1n).toString(16);
 /** @param {Chain} chain @param {string} node @param {Position} p @returns {Promise<Position>} */
 async function withFees(chain, node, p) {
   try {
     const call = SEL.collect + pad(BigInt(p.tokenId).toString(16)) + pad(p.owner) + pad(MAX_U128) + pad(MAX_U128);
-    const w = words(await rpcCall(node, chain.positions, call, p.owner));
+    const w = words(await rpcCall(node, chain.positions, call, p.via ?? p.owner));
     if (w.length >= 2) return { ...p, owed0: big(w[0]), owed1: big(w[1]), feesFull: true };
   } catch {}
   return p;
@@ -305,6 +370,36 @@ export async function readPositions(chain, node, owner) {
     .map((p) => (isClosed(p) ? { ...p, feesFull: true } : withFees(chain, node, p))));
 }
 
+// The reward token a farm pays (CAKE), per chain, read once.
+/** @type {Map<number, string>} */
+const rewardTokens = new Map();
+/** @param {Chain} chain @param {string} node @param {string} chef */
+async function rewardTokenOf(chain, node, chef) {
+  if (!rewardTokens.has(chain.id)) rewardTokens.set(chain.id, addressOf(words(await rpcCall(node, chef, SEL.CAKE))[0]));
+  return /** @type {string} */ (rewardTokens.get(chain.id));
+}
+
+// The positions an address has staked in PancakeSwap's farm (up to MAX_POSITIONS). The farm holds their tokens and
+// lists them per staker, like the position manager does. Each carries the farm (via) and the CAKE it can harvest.
+/** @param {Chain} chain @param {string} node @param {string} owner @returns {Promise<Position[]>} */
+export async function readStaked(chain, node, owner) {
+  const chef = chain.chef;
+  if (!chef) return [];
+  const ownerWord = pad(owner);
+  const count = Number(big(words(await rpcCall(node, chef, SEL.balanceOf + ownerWord))[0]));
+  if (!count) return [];
+  const rewardToken = await rewardTokenOf(chain, node, chef);
+  const indexes = Array.from({ length: Math.min(count, MAX_POSITIONS) }, (_, i) => i);
+  const ids = await Promise.all(indexes.map(async (i) => big(words(await rpcCall(node, chef, SEL.tokenOfOwnerByIndex + ownerWord + pad(i.toString(16))))[0])));
+  const [raw, pending] = await Promise.all([
+    Promise.all(ids.map((id) => rpcCall(node, chain.positions, SEL.positions + pad(id.toString(16))))),
+    Promise.all(ids.map((id) => rpcCall(node, chef, SEL.pendingCake + pad(id.toString(16))).catch(() => '0x'))),
+  ]);
+  return Promise.all(raw
+    .map((hex, i) => ({ ...decodeV3(chain, ids[i].toString(), owner, hex), via: chef, reward: big(words(pending[i])[0]), rewardToken }))
+    .map((p) => (isClosed(p) ? { ...p, feesFull: true } : withFees(chain, node, p))));
+}
+
 // No liquidity and nothing owed: the position was emptied but its token not burned.
 export const isClosed = (/** @type {{ liquidity: BigIntish, owed0: BigIntish, owed1: BigIntish }} */ p) => BigInt(p.liquidity) === 0n && BigInt(p.owed0) === 0n && BigInt(p.owed1) === 0n;
 
@@ -328,7 +423,8 @@ function decodeV3(chain, tokenId, owner, hex) {
   };
 }
 
-// One v3 position by its number, whoever owns it. null when the token was burned.
+// One v3 position by its number, whoever owns it. null when the token was burned. A position staked in the farm
+// is the staker's, with the CAKE it can harvest.
 /** @param {Chain} chain @param {string} node @param {BigIntish} tokenId @returns {Promise<Position | null>} */
 export async function readV3Position(chain, node, tokenId) {
   const id = pad(BigInt(tokenId).toString(16));
@@ -337,7 +433,17 @@ export async function readV3Position(chain, node, tokenId) {
       rpcCall(node, chain.positions, SEL.ownerOf + id),
       rpcCall(node, chain.positions, SEL.positions + id),
     ]);
-    const p = decodeV3(chain, String(tokenId), addressOf(words(owner)[0]), hex);
+    let p = decodeV3(chain, String(tokenId), addressOf(words(owner)[0]), hex);
+    if (chain.chef && p.owner === lower(chain.chef)) {
+      const [info, pending, rewardToken] = await Promise.all([
+        rpcCall(node, chain.chef, SEL.userPositionInfos + id),
+        rpcCall(node, chain.chef, SEL.pendingCake + id).catch(() => '0x'),
+        rewardTokenOf(chain, node, chain.chef),
+      ]);
+      // userPositionInfos: liquidity, boostLiquidity, tickLower, tickUpper, rewardGrowthInside, reward, user, ...
+      const user = words(info)[6];
+      if (user) p = { ...p, owner: addressOf(user), via: chain.chef, reward: big(words(pending)[0]), rewardToken };
+    }
     return isClosed(p) ? { ...p, feesFull: true } : withFees(chain, node, p);
   } catch (err) {
     if (/** @type {RpcError} */ (err).refused) return null; // both calls revert for a burned token
@@ -349,7 +455,8 @@ export async function readV3Position(chain, node, tokenId) {
 // its share of the supply is its share of both reserves, over the full range. Fees stay in the reserves, so
 // nothing is owed. tokenId is the pair's address, liquidity the balance, supply the pair's token supply.
 // null when the address is not a pair of Uniswap's own factory: other exchanges run the same code.
-// Swaps pay 0.3%; once the factory's fee switch is on (feeTo is set), a sixth of it goes to the protocol.
+// Swaps pay 0.3%; once the factory's fee switch is on (feeTo is set), a sixth of it goes to the protocol. A fork
+// gives its own fee (v2fee) and what liquidity keeps of it with the switch on (v2lp), in pips.
 /** @param {Chain} chain @param {string} node @param {string} pair @param {string[]} owners @returns {Promise<{ positions: Position[], pool: PoolState } | null>} */
 export async function readV2Pair(chain, node, pair, owners) {
   const factory = /** @type {string} */ (chain.v2); // v2 only
@@ -377,7 +484,8 @@ export async function readV2Pair(chain, node, pair, owners) {
   const r0 = big(r[0]);
   const r1 = big(r[1]);
   const supply = big(words(supplyHex)[0]);
-  const lpFee = big(words(feeTo)[0]) === 0n ? 3000 : 2500;
+  const fee = chain.v2fee ?? 3000;
+  const lpFee = big(words(feeTo)[0]) === 0n ? fee : chain.v2lp ?? 2500;
   const price = r0 > 0n ? Number(r1) / Number(r0) : 0;
   /** @type {Position[]} */
   const positions = [];
@@ -391,7 +499,7 @@ export async function readV2Pair(chain, node, pair, owners) {
       owner,
       token0,
       token1,
-      fee: 3000,
+      fee,
       lpFee,
       tickLower: -MAX_TICK,
       tickUpper: MAX_TICK,
@@ -408,12 +516,21 @@ export async function readV2Pair(chain, node, pair, owners) {
 }
 
 // The pool a position is in: its current price (sqrt, as a float) and tick. null when the pool does not exist.
+// A PancakeSwap pool also says the share of each swap fee its protocol keeps (feeProtocol: a share in ten thousandths
+// per token, the second in the high 16 bits), so lpFee is what liquidity is paid, in pips.
 /** @param {Chain} chain @param {string} node @param {{ token0: string, token1: string, fee: number }} p @returns {Promise<PoolState | null>} */
 export async function poolState(chain, node, p) {
   const pool = addressOf(words(await rpcCall(node, chain.factory, SEL.getPool + pad(p.token0) + pad(p.token1) + pad(p.fee.toString(16))))[0]);
   if (/^0x0+$/.test(pool)) return null;
   const s = words(await rpcCall(node, pool, SEL.slot0));
-  return { pool, sqrtPrice: Number(big(s[0])) / Q96, tick: Number(signed(s[1])) };
+  /** @type {PoolState} */
+  const state = { pool, sqrtPrice: Number(big(s[0])) / Q96, tick: Number(signed(s[1])) };
+  if (chain.dex === 'pancakeswap' && s[5]) {
+    const fp = Number(big(s[5]) & 0xffffffffn);
+    const share = Math.min(1, ((fp & 0xffff) + (fp >>> 16)) / 2 / 10000);
+    state.lpFee = Math.round(p.fee * (1 - share));
+  }
+  return state;
 }
 
 // A token's symbol and decimals. Falls back to the short address when the token does not answer.
@@ -824,7 +941,8 @@ export async function blockTime(src, block) {
 export async function walletPositionTxs(key, chain, wallet, startblock) {
   /** @type {{ to: string, isError: string, hash: string, blockNumber: string, timeStamp: string }[]} */
   const list = await etherscan(key, chain.id, { module: 'account', action: 'txlist', address: wallet, startblock: String(startblock), endblock: '999999999', sort: 'asc', page: '1', offset: '1000' });
-  const managers = new Set([chain.positions, chain.v4?.positions].filter(Boolean).map(lower));
+  // A staked position is changed and collected through the farm.
+  const managers = new Set([chain.positions, chain.v4?.positions, chain.chef].filter(Boolean).map(lower));
   return {
     txs: list.filter((t) => managers.has(lower(t.to)) && t.isError === '0').map((t) => ({ tx: t.hash, block: Number(t.blockNumber), time: Number(t.timeStamp) })),
     last: list.length ? Number(list[list.length - 1].blockNumber) : null,
@@ -832,15 +950,15 @@ export async function walletPositionTxs(key, chain, wallet, startblock) {
   };
 }
 
-// The Uniswap v2 pair tokens a wallet received, from a block on, as Etherscan names them: every token called UNI-V2,
-// which other exchanges' pairs are called too, so each is checked against the factory when it is read
-// (readV2Pair). Etherscan sends up to 1000 transfers a call; last and more are as in walletPositionTxs.
+// The Uniswap v2 pair tokens a wallet received, from a block on, as Etherscan names them: every token called UNI-V2
+// (Cake-LP on PancakeSwap, v2symbol), which other exchanges' pairs are called too, so each is checked against the
+// factory when it is read (readV2Pair). Etherscan sends up to 1000 transfers a call; last and more are as in walletPositionTxs.
 /** @param {string} key @param {Chain} chain @param {string} wallet @param {number} startblock */
 export async function walletV2Pairs(key, chain, wallet, startblock) {
   /** @type {{ to: string, contractAddress: string, tokenSymbol: string, blockNumber: string }[]} */
   const list = await etherscan(key, chain.id, { module: 'account', action: 'tokentx', address: wallet, startblock: String(startblock), endblock: '999999999', sort: 'asc', page: '1', offset: '1000' });
   return {
-    pairs: [...new Set(list.filter((t) => t.tokenSymbol === 'UNI-V2' && lower(t.to) === lower(wallet)).map((t) => lower(t.contractAddress)))],
+    pairs: [...new Set(list.filter((t) => t.tokenSymbol === (chain.v2symbol ?? 'UNI-V2') && lower(t.to) === lower(wallet)).map((t) => lower(t.contractAddress)))],
     last: list.length ? Number(list[list.length - 1].blockNumber) : null,
     more: list.length >= 1000,
   };
@@ -1038,7 +1156,7 @@ export async function poolSwaps(chain, node, version, pool, from, head) {
   let c = swapCache.get(key);
   // A gap too long to close in one load starts over, so the swaps read are always one unbroken range.
   if (!c || nodeKey(c.node) !== nodeKey(node) || head - c.to > chain.span * (SWAP_CALLS / 2)) c = { node, from: head + 1, to: head, swaps: [] };
-  const filter = version === 'v4' ? { address: await managerOf(chain, node), topics: [SWAP_V4, pool] } : { address: pool, topics: [version === 'v2' ? SWAP_V2 : SWAP_V3] };
+  const filter = version === 'v4' ? { address: await managerOf(chain, node), topics: [SWAP_V4, pool] } : { address: pool, topics: [version === 'v2' ? SWAP_V2 : chain.v3swap ?? SWAP_V3] };
   let span = chain.span;
   let calls = SWAP_CALLS;
   while (c.to < head && calls > 0) {
@@ -1156,7 +1274,8 @@ export async function readV4Position(chain, node, tokenId) {
 
 // Positions added by hand, for those the board does not find: a v3 position held by an address that is not in the
 // wallet list, a v4 position older than the node's history, or a v2 pair, which is named by its address (the
-// tokenId of its entry) and read for every wallet. v4ids came first, so each version has its own list.
+// tokenId of its entry) and read for every wallet. v4ids came first, so each version has its own list. A PancakeSwap
+// position sits in the list of its version with dex set.
 export const addedPositions = (/** @type {Partial<UniswapSettings> | undefined} */ cfg) => [
   ...(cfg?.v3ids ?? []).map((x) => ({ ...x, version: 'v3' })),
   ...(cfg?.v4ids ?? []).map((x) => ({ ...x, version: 'v4' })),
@@ -1165,46 +1284,66 @@ export const addedPositions = (/** @type {Partial<UniswapSettings> | undefined} 
 /** @returns {'v2ids' | 'v3ids' | 'v4ids'} */
 export const addedListOf = (/** @type {string} */ version) => (version === 'v2' ? 'v2ids' : version === 'v3' ? 'v3ids' : 'v4ids');
 
-// Whether the board reads positions of this Uniswap version on the chain.
+// Whether the board reads positions of this version on the chain, or on PancakeSwap's deployment given as one.
 export const hasVersion = (/** @type {Chain} */ chain, /** @type {string} */ version) => version === 'v3' || (version === 'v4' && Boolean(chain.v4)) || (version === 'v2' && Boolean(chain.v2));
 // The versions read on a chain, in words: "v2, v3 and v4".
 export const versionsOf = (/** @type {Chain} */ chain) => ['v2', 'v3', 'v4'].filter((v) => hasVersion(chain, v)).join(', ').replace(/, (?=[^,]*$)/, ' and ');
 
+/** @typedef {{ chainId?: number, version: string, tokenId?: string, slug: string, dex: string }} PositionLink */
 // Reads a Uniswap app link (…/positions/<v2|v3|v4>/<chain>/<id>), which names its chain, version and number, or
-// for v2 its pair's address.
+// for v2 its pair's address, or a PancakeSwap v3 position link (pancakeswap.finance/liquidity/<id>?chain=<key>).
 // Returns null for text that is not such a link, and { slug } alone when the link names a chain the board does not read.
-/** @param {unknown} text @returns {{ chainId?: number, version: string, tokenId?: string, slug: string } | null} */
+/** @param {unknown} text @returns {PositionLink | null} */
 export function readLink(text) {
-  const m = String(text ?? '').trim().match(/positions\/(?:(v3|v4)\/([a-z0-9_-]+)\/(\d+)|(v2)\/([a-z0-9_-]+)\/(0x[0-9a-f]{40}))/i);
+  const s = String(text ?? '').trim();
+  const cake = s.match(/pancakeswap\.finance\/liquidity\/(\d+)\/?\?(?:[^#]*&)?chain=([a-z0-9_-]+)/i);
+  if (cake) {
+    const slug = cake[2].toLowerCase();
+    const chain = CHAINS.find((c) => PANCAKE[c.id]?.app === slug);
+    return chain ? { chainId: chain.id, version: 'v3', tokenId: cake[1], slug, dex: 'pancakeswap' } : { slug, version: 'v3', dex: 'pancakeswap' };
+  }
+  const m = s.match(/positions\/(?:(v3|v4)\/([a-z0-9_-]+)\/(\d+)|(v2)\/([a-z0-9_-]+)\/(0x[0-9a-f]{40}))/i);
   if (!m) return null;
   const slug = (m[2] ?? m[5]).toLowerCase();
   const chain = CHAINS.find((c) => c.app === slug);
   const version = (m[1] ?? m[4]).toLowerCase();
-  return chain && hasVersion(chain, version) ? { chainId: chain.id, version, tokenId: (m[3] ?? m[6]).toLowerCase(), slug } : { slug, version };
+  return chain && hasVersion(chain, version) ? { chainId: chain.id, version, tokenId: (m[3] ?? m[6]).toLowerCase(), slug, dex: 'uniswap' } : { slug, version, dex: 'uniswap' };
 }
 
-// Reads what was typed to add a position: a Uniswap app link, a plain number, which takes the chain and version
-// picked beside it, or an address, which can only be a v2 pair on the chain picked.
-/** @param {unknown} text @param {number} chainId @param {string} version @returns {{ chainId: number, version: string, tokenId: string } | null} */
-export function parsePosition(text, chainId, version) {
+// The choices of the version picker: "<version>" for Uniswap, "<dex>:<version>" for another exchange.
+/** @param {string} choice @returns {{ dex: string, version: string }} */
+export const readChoice = (choice) => {
+  const [a, b] = String(choice).split(':');
+  return b ? { dex: a, version: b } : { dex: 'uniswap', version: a };
+};
+
+/** @typedef {{ chainId: number, version: string, tokenId: string, dex?: string }} PositionEntry */
+// Reads what was typed to add a position: a link, a plain number, which takes the chain and the exchange and version
+// picked beside it, or an address, which can only be a v2 pair on the chain picked, of the exchange picked.
+/** @param {unknown} text @param {number} chainId @param {string} choice @returns {PositionEntry | null} */
+export function parsePosition(text, chainId, choice) {
   const link = readLink(text);
-  if (link) return link.chainId ? { chainId: link.chainId, version: link.version, tokenId: /** @type {string} */ (link.tokenId) } : null;
+  if (link) return link.chainId ? { chainId: link.chainId, version: link.version, tokenId: /** @type {string} */ (link.tokenId), dex: link.dex } : null;
   const s = String(text ?? '').trim();
-  const chain = CHAINS.find((c) => c.id === chainId);
-  if (isAddress(s)) return chain && hasVersion(chain, 'v2') ? { chainId, version: 'v2', tokenId: s.toLowerCase() } : null;
-  return /^\d+$/.test(s) && chain && hasVersion(chain, version) ? { chainId, version, tokenId: s } : null;
+  const { dex } = readChoice(choice);
+  const chain = deploymentOf(chainId, dex);
+  if (isAddress(s)) return chain && hasVersion(chain, 'v2') ? { chainId, version: 'v2', tokenId: s.toLowerCase(), dex } : null;
+  const { version } = readChoice(choice);
+  return /^\d+$/.test(s) && version !== 'v2' && chain && hasVersion(chain, version) ? { chainId, version, tokenId: s, dex } : null;
 }
 
-// Adds a parsed position to the settings. Returns an error message, or '' when it was added.
-/** @param {Store} store @param {{ chainId: number, version: string, tokenId: string }} entry */
+// Adds a parsed position to the settings. Returns an error message, or '' when it was added. Uniswap entries keep
+// no dex, as before there was another exchange.
+/** @param {Store} store @param {PositionEntry} entry */
 export function addPosition(store, entry) {
   const cfg = store.get('settings').uniswap ?? {};
-  if (addedPositions(cfg).some((x) => x.version === entry.version && x.chainId === entry.chainId && String(x.tokenId).toLowerCase() === entry.tokenId)) {
+  const dex = entry.dex && entry.dex !== 'uniswap' ? entry.dex : undefined;
+  if (addedPositions(cfg).some((x) => x.version === entry.version && x.chainId === entry.chainId && (x.dex || undefined) === dex && String(x.tokenId).toLowerCase() === entry.tokenId)) {
     return entry.version === 'v2' ? 'That pair is already in the list.' : 'That position is already in the list.';
   }
   const list = addedListOf(entry.version);
   store.update('settings', (d) => {
-    d.uniswap = { wallets: [], chains: {}, .../** @type {Partial<UniswapSettings> | undefined} */ (d.uniswap), [list]: [...(d.uniswap?.[list] ?? []), { chainId: entry.chainId, tokenId: entry.tokenId }] };
+    d.uniswap = { wallets: [], chains: {}, .../** @type {Partial<UniswapSettings> | undefined} */ (d.uniswap), [list]: [...(d.uniswap?.[list] ?? []), { chainId: entry.chainId, tokenId: entry.tokenId, ...(dex ? { dex } : {}) }] };
   });
   return '';
 }

@@ -8,7 +8,7 @@ import { trackedPrs } from '../previews.js';
 import { runJob } from '../runners.js';
 import { editText } from '../inline.js';
 import { modelChip } from '../model-picker.js';
-import { isAddress, CHAINS, parsePosition, addPosition, addedPositions, addedListOf, tokenLogos } from '../uniswap.js';
+import { isAddress, CHAINS, parsePosition, addPosition, addedPositions, addedListOf, tokenLogos, dexName } from '../uniswap.js';
 import { positionFields, positionError } from '../position-input.js';
 import { calendarAccountsCard, telegramCard, analyticsCard, searchCard, resendCard, gmailCard, notificationsCard, automationsCard, dataCard } from './settings-more.js';
 import { promptsCard } from './settings-prompts.js';
@@ -595,10 +595,13 @@ function addedList(store, added, remove) {
   // The same key as a pools row's ref: v3 rows have no version in it. A v2 pair is read once per wallet that
   // holds it, so it is found by its address, and any of its rows names its tokens.
   /** @param {Added} x */
-  const refOf = (x) => (x.version === 'v3' ? `${x.chainId}:${x.tokenId}` : `${x.chainId}:${x.version}:${String(x.tokenId).toLowerCase()}`);
+  const refOf = (x) => {
+    const kind = x.dex && x.dex !== 'uniswap' ? `${x.dex}-${x.version}` : x.version;
+    return kind === 'v3' ? `${x.chainId}:${x.tokenId}` : `${x.chainId}:${kind}:${String(x.tokenId).toLowerCase()}`;
+  };
   /** @type {Map<string, PoolRow>} */
   const read = new Map();
-  for (const part of Object.values(store.get('pools')?.cache ?? {})) for (const r of part.rows ?? []) read.set(r.version === 'v2' ? `${r.chainId}:v2:${r.tokenId}` : r.ref, r);
+  for (const part of Object.values(store.get('pools')?.cache ?? {})) for (const r of part.rows ?? []) read.set(r.version === 'v2' ? r.ref.split(':').slice(0, 3).join(':') : r.ref, r);
   /** @param {number} chainId @param {string | undefined} address */
   const tokenLogo = (chainId, address) => (address ? tokenLogoMap.get(`${chainId}:${address.toLowerCase()}`) ?? null : null);
   const rows = added
@@ -608,7 +611,7 @@ function addedList(store, added, remove) {
   /** @param {PoolRow | null} r @param {Added} x */
   const status = (r, x) => (!r ? ['unread', x.version === 'v2' ? 'Not read, or not held' : 'Not read yet'] : r.closed ? ['closed', 'Closed'] : r.inRange ? ['in', 'In range'] : ['out', 'Out of range']);
   /** @param {Added} x */
-  const nameOf = (x) => (x.version === 'v2' ? `v2 ${String(x.tokenId).slice(0, 6)}…${String(x.tokenId).slice(-4)}` : `${x.version} #${x.tokenId}`);
+  const nameOf = (x) => `${x.dex && x.dex !== 'uniswap' ? `${dexName(x.dex)} ` : ''}${x.version === 'v2' ? `v2 ${String(x.tokenId).slice(0, 6)}…${String(x.tokenId).slice(-4)}` : `${x.version} #${x.tokenId}`}`;
 
   return h('ul', { class: 'added-list' },
     h('li', { class: 'added-row added-head', 'aria-hidden': 'true' },
@@ -706,15 +709,16 @@ function uniswapCard(store) {
   /** @param {Added} x */
   const removeAdded = (x) => {
     const list = addedListOf(x.version);
-    save({ [list]: (cfg[list] ?? []).filter((y) => !(y.chainId === x.chainId && String(y.tokenId) === String(x.tokenId))) });
+    save({ [list]: (cfg[list] ?? []).filter((y) => !(y.chainId === x.chainId && (y.dex || '') === (x.dex || '') && String(y.tokenId) === String(x.tokenId))) });
   };
 
   return h('section', { class: 'card panel' },
     h('h2', null, 'Uniswap'),
-    h('p', { class: 'muted small' }, 'Uniswap v2, v3 and v4 positions are read from the wallets in ',
+    h('p', { class: 'muted small' }, 'Uniswap v2, v3 and v4 and PancakeSwap v2 and v3 positions are read from the wallets in ',
       h('button', { type: 'button', class: 'btn-link-inline', onclick: () => { view.section = 'wallets'; store.refresh(); } }, 'Wallets'), '.'),
     h('p', { class: 'muted small' }, 'Positions added by hand: a v3 position held by an address that is not in Wallets, or a v4 position the board does not find. v4 positions are found by searching each wallet\'s history on the chain, and most public nodes only search recent blocks. The Liquidity Pools tab has the same Add position button.'),
     h('p', { class: 'muted small' }, 'A v2 position is a wallet\'s share of a pair, and the chain cannot list the pairs a wallet holds. Add a pair by its link or its address, and it is read for every wallet. With an Etherscan key in Blockchains, the pairs your wallets hold are found by themselves.'),
+    h('p', { class: 'muted small' }, 'PancakeSwap positions staked in its farm are found with the others, with the CAKE they can harvest. Add one by hand with its pancakeswap.finance link, or its number with PancakeSwap v3 picked.'),
     added.length ? addedList(store, added, removeAdded) : null,
     (() => {
       const f = positionFields();

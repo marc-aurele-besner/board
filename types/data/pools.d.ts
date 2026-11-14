@@ -1,12 +1,14 @@
-// pools.json: DeFi → Positions (Uniswap v2/v3/v4 liquidity), Wallets and Lending. Written by the board's tab and by the
+// pools.json: DeFi → Positions (Uniswap v2/v3/v4 and PancakeSwap v2/v3 liquidity), Wallets and Lending. Written by the board's tab and by the
 // runners (js/defi/*.js, tools/jobs/defi.js). Most maps are keyed by chain id, "<chainId>:<version>" or a position ref.
 
 // One Uniswap position as last read (buildRow in js/defi/positions-read.js).
 export interface PoolRow {
   version: string; // 'v2' | 'v3' | 'v4'
   // "<chainId>:<tokenId>" for v3, "<chainId>:v4:<tokenId>" for v4, and "<chainId>:v2:<pair>:<wallet>" for v2,
-  // where two wallets can hold the same pair.
+  // where two wallets can hold the same pair. PancakeSwap's name it before the version: "<chainId>:pancakeswap-v3:<id>".
   ref: string;
+  // The exchange: 'pancakeswap', or missing for Uniswap.
+  dex?: string;
   chain: string; // the chain's name
   chainId: number;
   // v2: the pair's address, in lowercase.
@@ -46,6 +48,12 @@ export interface PoolRow {
   feesFull: boolean;
   share0: number | null; // share of the value in token0, 0 to 1
   url: string | null;
+  // Staked in PancakeSwap's farm: the reward it can harvest, in tokens and USD, and the reward token.
+  staked?: boolean;
+  reward?: number;
+  rewardSym?: string;
+  rewardAddr?: string;
+  rewardUsd?: number | null;
   tickLower: number;
   tickUpper: number;
   liq: string; // liquidity as a decimal string; v2: the balance of the pair's token
@@ -301,7 +309,7 @@ export interface PoolsData {
   prices: Record<string, ChainPrices>;
   // chainId -> lowercase wallet -> search.
   scan: Record<string, Record<string, V4Scan>>;
-  // chainId -> lowercase wallet -> search. Missing in files saved before v2 was read.
+  // chainId (or "<chainId>:pancakeswap") -> lowercase wallet -> search. Missing in files saved before v2 was read.
   v2scan?: Record<string, Record<string, V2Scan>>;
   // ref -> baseline.
   fees: Record<string, FeeBaseline>;
@@ -310,7 +318,7 @@ export interface PoolsData {
   history: Record<string, PositionHistory>;
   // Keys "<ref>|<tx>" of collects the user removed.
   hidden: string[];
-  // chainId -> lowercase wallet -> search.
+  // chainId (or "<chainId>:pancakeswap") -> lowercase wallet -> search.
   etherscan: Record<string, Record<string, EtherscanScan>>;
   // "SYM0/SYM1" -> prices shown flipped. The runners' defaults lack it and insights.
   flip?: Record<string, boolean>;
