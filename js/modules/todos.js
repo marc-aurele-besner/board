@@ -951,6 +951,8 @@ async function devTasks(store, items) {
 // green), or once it has a PR and claude waits for its user: the runner says waiting only when claude's turn ended
 // and no subagent still works, so a PR opened mid-turn does not count yet.
 const DEV_POLL_MS = 4000;
+// As many sessions as the runner's /status answers for (tools/terminal.js).
+const STATUS_MAX = 200;
 /** @type {{ status: Record<string, RunnerStatus>, withPr: Set<string>, timer: number, polled: boolean }} */
 const devWatch = { status: {}, withPr: new Set(), timer: 0, polled: false };
 /** @param {Store} store */
@@ -959,7 +961,13 @@ export function watchDevSessions(store) {
   const poll = async () => {
     devWatch.timer = 0;
     const items = store.get(COLLECTION).items;
-    const ids = /** @type {string[]} */ ([...new Set(items.map((t) => t.devSession).filter(Boolean))]);
+    // The runner answers for the first 200 sessions asked: open tasks come first and the newest before the oldest,
+    // or a long list of completed tasks would push the sessions still at work out of the answer.
+    const newest = [...items].reverse();
+    const ids = /** @type {string[]} */ ([...new Set([
+      ...newest.filter((t) => statusOf(t) !== 'done'),
+      ...newest.filter((t) => statusOf(t) === 'done'),
+    ].map((t) => t.devSession).filter(Boolean))].slice(0, STATUS_MAX));
     let status;
     try {
       status = await sessionStatus(runnerOf(store), ids);
