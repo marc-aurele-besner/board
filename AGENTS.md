@@ -97,6 +97,7 @@ js/runners.js         the board's side of the runners: their heartbeat in runner
 js/modules/monitoring-runners.js  Monitoring → Board runners: the static server, command runner and worker, and every job's last outcome
 js/modules/settings-runners.js  Settings → Runners: the worker's status and folder, and each job's switch, interval and Run now
 js/task-links.js      a task's GitHub issues and PRs; finds the links a Dev session prints and adds them to its tasks
+js/task-work.js       a task row's work pill (PRs, issues, previews, Dev sessions, artifacts) and its popover, with the session's live terminal
 js/link-states.js     whether a task's issues and PRs are open, merged or closed: read by the runners into github.json, coloured on tasks
 js/previews.js        the Vercel and Netlify preview links in PR comments: read by the runners into github.json, shown on tasks and Cron runs
 js/deployments.js     a PR's deployments from the Vercel and Netlify APIs (with Settings' tokens), and their build logs (no DOM)
