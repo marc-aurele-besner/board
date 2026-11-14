@@ -659,8 +659,6 @@ body.project-dragging .project-list .root-drop { display: block; }
 .notice-pill-pop ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .notice-pill-pop li { display: flex; flex-direction: column; gap: 6px; padding-left: 10px; border-left: 2px solid color-mix(in srgb, var(--tone) 45%, transparent); }
 .notice-pill-pop li > p { margin: 0; font-size: 0.85rem; overflow-wrap: anywhere; }
-/* Pills at the left edge of a row open their list rightwards, so it stays on screen. */
-.pills-start .notice-pill-pop { left: 0; right: auto; }
 
 /* AI output */
 .plan-text { white-space: pre-wrap; font-family: inherit; font-size: 0.9rem; margin: 0; background: var(--surface-2); padding: 10px; border-radius: 8px; }
