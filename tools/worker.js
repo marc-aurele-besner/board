@@ -15,6 +15,7 @@ import { createNodeStore } from './worker/store.js';
 import { createScheduler } from './worker/schedule.js';
 import { serve } from './worker/http.js';
 import { jobs } from './jobs/index.js';
+import { taskRoutes } from './worker/tasks.js';
 import { sendWire } from '../js/http-request.js';
 import { slackCall, slackFile } from './slack.js';
 import { voyager, queueState } from './linkedin-session.js';
@@ -121,6 +122,8 @@ serve({
   log,
   routes: {
     ...jobRoutes,
+    // tools/board.js: a Dev session's own tasks (list, show, add, edit), by its terminal's token.
+    ...taskRoutes(() => scheduler.store()),
     // Tools → Requests: sends a request from Node, where CORS does not apply. Needs no data folder.
     'POST /http': (body) => sendWire(/** @type {import('../js/http-request.js').Wire} */ (body)),
     // The Slack tab: Web API calls and session-only files, with the session cookie a page cannot send.

@@ -9,6 +9,7 @@
 /** @typedef {{ status: string, issues: number, prs: number, error?: string | null }} RepoState */
 import { h, uid, icon, statusOf, notice, todayISO } from '../ui.js';
 import { makeTask } from '../capture.js';
+import { wouldLoop } from '../task-tree.js';
 import { AUTO_SOURCES, autoSourceLink } from '../automations.js';
 import { toast } from '../toast.js';
 import { createProject, projectIcon, labelsOf, projectTree, moveProject, labelColor } from './projects.js';
@@ -423,13 +424,6 @@ function moveItem(store, id, targetId, after, parentId, patch = {}) {
 
 // --- Subtasks: a task with a parentId shows under that task while both are in the same list ---
 
-// Whether putting `id` under `parentId` would put it under itself, at any depth.
-/** @param {Task[]} items @param {string} id @param {string} parentId */
-function wouldLoop(items, id, parentId) {
-  const byId = new Map(items.map((i) => [i.id, i]));
-  for (let at = parentId, n = 0; at && n <= items.length; at = byId.get(at)?.parentId ?? '', n++) if (at === id) return true;
-  return false;
-}
 
 // Puts `id` under `parentId`, after the subtasks it already has. `patch` adds changes, such as a board column's status.
 /** @param {Store} store @param {string} id @param {string} parentId @param {Partial<Task>} [patch] */

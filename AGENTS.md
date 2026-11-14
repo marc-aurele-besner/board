@@ -13,7 +13,7 @@ A personal command center that runs locally. It is plain HTML, CSS and JavaScrip
 - Run `bun install` once after cloning. It installs TypeScript as a dev-only tool (it never ships to the browser) and turns on `.githooks/pre-commit`.
 - Syntax check every module before committing:
   `for f in js/*.js js/modules/*.js tools/*.js tools/*/*.js; do node --experimental-default-type=module --check "$f" || echo "FAIL $f"; done`
-- Type check with `bun run typecheck`. `tools/typecheck.js` runs `tsc` over the JSDoc with two configs: `jsconfig.json` for the browser code (`js/`, `types/`) and `tools/jsconfig.json` for the Node runner, which sees neither `window` nor `document`. The runner's modules from `js/` are checked by the browser config, so only errors in `tools/` count in the second run. Every `.js` file is checked in strict mode, with no opt-in: a new file is checked as soon as it exists. `bun run check` runs the syntax loop, the import, merge and LinkedIn queue checks and the type check together; the pre-commit hook runs it.
+- Type check with `bun run typecheck`. `tools/typecheck.js` runs `tsc` over the JSDoc with two configs: `jsconfig.json` for the browser code (`js/`, `types/`) and `tools/jsconfig.json` for the Node runner, which sees neither `window` nor `document`. The runner's modules from `js/` are checked by the browser config, so only errors in `tools/` count in the second run. Every `.js` file is checked in strict mode, with no opt-in: a new file is checked as soon as it exists. `bun run check` runs the syntax loop, the import, merge, Dev session task and LinkedIn queue checks and the type check together; the pre-commit hook runs it.
 - The worker imports modules from `js/` under Node, so those must not touch `document`, `window`, `localStorage` or `location` when they load, nor import a module that does. `node tools/check-imports.js` loads every job and catches both a missing import and a DOM call at load time. `node tools/check-merge.js` checks that the worker's writes and a tab's merge without losing either.
 - Test real behavior in the browser when you can. Folder picking needs a user click, so ask the user to drive that step if you cannot.
 
@@ -116,6 +116,7 @@ js/defi/lending-read.js  DeFi → Lending Aave accounts read per chain into pool
 js/json-extract.js    findJson(): the JSON in a blob of text (prose, fences, wrapped lines, cut off at either end) for Cron's Parse JSON step
 js/meetings.js        upcoming meetings with guests, each guest matched to contacts with their latest emails: Cron's meetings source (no DOM)
 js/capture.js         parseTask(), parseMoney() and makeTask(): one place for a task's shape
+js/task-tree.js       the tree parentId makes: wouldLoop() and descendantsOf() (no DOM)
 js/palette.js         the Cmd/Ctrl+K search palette: jump, or capture a task, a Money entry or a recipe link
 js/search.js          what the full search page (modules/search.js, hidden) looks through, grouped by kind
 js/command-field.js   a shell command in an editor's colours, and its field: {{variable}} chips, Edit and Preview (Settings → Dev environment)
@@ -137,6 +138,7 @@ tools/terminal.js     the Dev section's runner: terminal sessions that outlive t
 tools/worker.js       the runners: one worker that runs the background jobs on a schedule and writes into the data folder; localhost API on 8420
 tools/worker/store.js the store for Node (get, update, save over node:fs), merged with what the tabs write through js/merge.js
 tools/worker/schedule.js  intervals, no overlap, timeouts, backoff, and the runners.json heartbeat
+tools/worker/tasks.js  a Dev session's own tasks (POST /tasks/list, show, add, edit) by its terminal's token: its roots read-only, what is under them and what it made; 100 per session
 tools/worker/http.js  the worker's localhost API: status, Run now, data folder
 tools/jobs/*.js       one file per job: { id, timeout, delay, setup(store), run(ctx) }; listed in tools/jobs/index.js
 tools/jobs/gmail.js, resend.js  read new mail into inbox.json; resend.js also answers GET /resend/email/<id> and POST /resend/check
@@ -156,6 +158,7 @@ tools/jobs/previews.js  reads the preview links of open tasks' and recent Cron r
 tools/jobs/google.js  renews Google access tokens; a tab that finds one expired asks it through POST /run/google
 tools/check-imports.js  loads every worker module under plain Node, to catch a missing import or a DOM call at load time
 tools/check-merge.js  the worker and a tab change two fields of one file; both must survive
+tools/check-board-tasks.js  a Dev session's tasks: what it may read and change, the limit, a tab's write meanwhile
 tools/linkedin-session.js  the LinkedIn session's queue (runners only): 20–40 s gap, daily limit, cache in linkedin.json, stop on sign-out; POST /linkedin/voyager runs it for a tab
 tools/check-linkedin.js  the LinkedIn queue against a stubbed fetch: gap, limit, cache, sign-out
 tools/usage.js        reads Claude Code's transcripts for the runner: a task worktree's models, tokens, cost and effort, and each turn's tools (calls, failures, time), skills and output tokens
@@ -196,4 +199,4 @@ tools/usage.js        reads Claude Code's transcripts for the runner: a task wor
 - Keep PR titles short. The description lists what changed and how it was checked, in a few lines.
 - **Never leave a PR unmerged.** Every PR you open is merged in the same turn, as soon as the strict syntax check passes and the change is complete. Do not ask whether to merge, do not wait for approval, and do not end a turn with an open PR. If a merge is blocked (conflict, failing check), fix it in the same turn and merge; if that is impossible, say so explicitly and stop.
 - Before finishing any turn, list open PRs (`gh pr list --state open`). If any are open, merge them now.
-- Run the strict check before every commit and again before `gh pr merge`, and stop if it fails: `bun run check` (the syntax loop, `node tools/check-imports.js`, `node tools/check-merge.js` and `bun run typecheck`). Never commit with `--no-verify`.
+- Run the strict check before every commit and again before `gh pr merge`, and stop if it fails: `bun run check` (the syntax loop, `node tools/check-imports.js`, `node tools/check-merge.js`, `node tools/check-board-tasks.js` and `bun run typecheck`). Never commit with `--no-verify`.
