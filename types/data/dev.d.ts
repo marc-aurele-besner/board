@@ -7,7 +7,8 @@ export interface DevPreset {
   command: string;
 }
 
-// An AI provider in Settings → Dev environment: the command its sessions run and the models a task can pick.
+// An AI provider in Settings → Dev environment: the command its sessions run and the models a task can pick. The
+// command's program picks its harness, so a provider is routed to Claude Code, Codex or another by its command.
 // Claude's command is the default for projects without their own; another's (MiniMax runs claude with its API
 // in place of Anthropic's) replaces the project's command for a task that picks one of its models.
 export interface DevProvider {
@@ -15,6 +16,18 @@ export interface DevProvider {
   name: string;
   command: string;
   models: string[];
+}
+
+// A coding harness in Settings → Dev environment: a CLI that runs an agent in a terminal (Claude Code, Codex CLI…).
+// A command runs the harness whose command starts with the same program. Its flags are templates: {model},
+// {effort} and {prompt} are replaced by the quoted value; '' means the harness takes no such flag.
+export interface DevHarness {
+  id: string;
+  name: string;
+  command: string;
+  model: string;
+  effort: string;
+  prompt: string;
 }
 
 export interface DevData {
@@ -27,6 +40,8 @@ export interface DevData {
   presets: DevPreset[];
   // Missing until one is edited: the built-in Claude and MiniMax (DEFAULT_PROVIDERS in js/dev-core.js).
   providers?: DevProvider[];
+  // Missing until one is edited: the built-in harnesses (DEFAULT_HARNESSES in js/dev-core.js).
+  harnesses?: DevHarness[];
   schemaVersion?: number;
 }
 

@@ -27,7 +27,7 @@ import { projectIcon } from './projects.js';
 import { linkWatcher, moveToReview } from '../task-links.js';
 import { watchDevSessions } from './todos.js';
 import { recordOfSession, sumUsage, usageLine, usageTitle, mcpTool } from '../dev-usage.js';
-import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand, claudeState } from '../dev-core.js';
+import { runnerOf, devPresets, shellQuote, DEFAULT_DEV_COMMAND, devCommandOf, claudeCommand, claudeState, devHarnesses, withPrompt } from '../dev-core.js';
 import { sessionTools, toolGroup, fmtSpan, pct } from '../dev-turns.js';
 import { cronRunOf, cronRunHref } from '../cron.js';
 /** @import { Store, DevSessionList, IconName } from '../../types/data' */
@@ -927,7 +927,7 @@ export async function startDevSession({ store, claude = false, prompt = '', comm
   let worktree = null;
   if (claude) {
     ({ command, worktree } = claudeCommand(store, projectId, title, id, cwd, devCommand, { model, effort }));
-    command = `${command} -- ${shellQuote(prompt)}`;
+    command = withPrompt(devHarnesses(store), command, prompt);
   }
   // The terminal is not on the page yet: it starts at a usual size and is fitted once shown.
   await runCommand(base, { session: id, command, cwd, cols: 120, rows: 32, theme: currentTheme().dark ? 'dark' : 'light' });

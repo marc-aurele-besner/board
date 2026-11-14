@@ -9,7 +9,7 @@ import { calendarEvents, calendarAccounts, eventDate } from './gcal.js';
 import { sitesOf, siteData } from './automations.js';
 import { readPageText } from './sitecheck.js';
 import { openPositions } from './defi/positions-read.js';
-import { devPresets, devCommandOf, runnerOf, startRunnerSession, withClaudeOptions } from './dev-core.js';
+import { devPresets, devCommandOf, runnerOf, startRunnerSession, withDevOptions, devHarnesses } from './dev-core.js';
 import { sessionStatus, sessionOutcome, exitClaude } from './terminal.js';
 import { forgetWorktree } from './task-worktrees.js';
 import { findGithubLinks, plainOutput, addTaskLinks, prsOf } from './task-links.js';
@@ -122,7 +122,7 @@ export function devCommandPreview(store, flow, step) {
   if (step.mode === 'command') return '';
   try {
     const command = stepDevCommand(store, step) || devCommandOf(store, store.get('projects').projects.find((p) => p.id === withFlowProject(flow, step).projectId));
-    return withClaudeOptions(command, stepClaudeOptions(step));
+    return withDevOptions(devHarnesses(store), command, stepClaudeOptions(step));
   } catch (err) {
     return /** @type {Error} */ (err).message;
   }
