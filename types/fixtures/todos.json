@@ -17,7 +17,7 @@
       "images": [{ "path": "tasks/task-1-image-1.png", "name": "Pasted image", "type": "image/png" }],
       "worktrees": [{ "name": "example-worktree", "cwd": "~/example/project", "session": "example-session-1", "kept": "Example git message" }],
       "prs": [{ "repo": "example-org/example-repo", "number": 12, "url": "https://github.com/example-org/example-repo/pull/12", "title": "Example PR" }],
-      "artifacts": [{ "url": "https://claude.ai/artifact/exampleArtifactId", "title": "Example artifact" }],
+      "artifacts": [{ "url": "https://claude.ai/artifact/exampleArtifactId", "title": "Example artifact", "file": "/home/user/project/artifact.html" }],
       "links": [{ "url": "https://www.linkedin.com/feed/update/urn:li:share:1/", "title": "LinkedIn post" }],
       "issues": [{ "repo": "example-org/example-repo", "number": 11, "url": "https://github.com/example-org/example-repo/issues/11", "title": "" }]
     },

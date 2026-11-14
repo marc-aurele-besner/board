@@ -16,6 +16,8 @@ export interface TaskLink {
 export interface TaskArtifact {
   url: string;
   title: string;
+  // The local page it was last published from (an HTML file), which the work pill previews.
+  file?: string;
 }
 
 // A page a task led to, by its title.

@@ -121,6 +121,8 @@ export interface SessionAgent {
 export interface SessionArtifact {
   url: string;
   title: string;
+  // The local page it was last published from, when it was an HTML file.
+  file?: string;
 }
 
 // GET /files.
