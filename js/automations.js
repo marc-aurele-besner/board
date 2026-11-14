@@ -35,7 +35,7 @@ const RULE_DEFAULTS = {
 export const ruleOf = (/** @type {DataStore} */ store, /** @type {string} */ key) => /** @type {Required<AutomationRule>} */ ({ ...RULE_DEFAULTS[key], ...(store.get('settings').automations?.[key] ?? {}) });
 
 // What each source is called on a task's "Auto" flag.
-export const AUTO_SOURCES = { domain: 'the domain check', ssl: 'the SSL check', health: 'the website health check', email: 'the DNS check', crawl: 'the crawl files check', recurring: 'a recurring bill', pools: 'Liquidity Pools', lending: 'Aave lending', 'linkedin-followers': 'LinkedIn followers', 'linkedin-post': 'a LinkedIn post’s results', 'linkedin-session': 'the LinkedIn session', 'linkedin-signin': 'the LinkedIn sign-in', telegram: 'a Telegram message', notion: 'a Notion page', cron: 'a Cron flow' };
+export const AUTO_SOURCES = { domain: 'the domain check', ssl: 'the SSL check', health: 'the website health check', email: 'the DNS check', crawl: 'the crawl files check', recurring: 'a recurring bill', pools: 'Liquidity Pools', lending: 'Aave lending', 'linkedin-followers': 'LinkedIn followers', 'linkedin-post': 'a LinkedIn post’s results', 'linkedin-session': 'the LinkedIn session', 'linkedin-signin': 'the LinkedIn sign-in', telegram: 'a Telegram message', notion: 'a Notion page', cron: 'a Cron flow', dev: 'a Dev session' };
 
 // Where a rule's task leads back to: the page that shows what the check found, with the icon and name of that page.
 // Telegram and Cron tasks have their own links on the task.

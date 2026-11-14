@@ -1941,6 +1941,8 @@ label.check { cursor: pointer; }
 .auto-badge .icon { width: 11px; height: 11px; }
 /* A Notion task's flag opens its page. */
 .auto-badge[href] { cursor: pointer; text-decoration: none; }
+/* A Dev session's task: its flag opens the session's terminal. */
+button.auto-badge { background: none; font-family: inherit; line-height: inherit; cursor: pointer; }
 .nav-item .icon { width: 15px; height: 15px; color: var(--muted); }
 @media (max-width: 720px) { .todo-row { grid-template-columns: 20px 20px minmax(0, 1fr) auto; } }
 
