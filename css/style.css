@@ -1089,13 +1089,15 @@ textarea.editable-field { resize: vertical; }
   background: color-mix(in srgb, var(--c) 16%, transparent);
   color: var(--c);
 }
-.pill.tone-plain { --c: var(--muted); }
-.pill.tone-todo { --c: #7d7a72; }
-.pill.tone-doing, .pill.doing { --c: #3b74b8; }
-.pill.tone-done { --c: #2f8f5b; }
-.pill.tone-low, .pill.priority-low { --c: #2e8a8a; }
-.pill.tone-medium, .pill.priority-medium { --c: #c7811a; }
+/* .tone-c: a status's colour on something else than a pill (the project pill's bars and dots). */
+.pill.tone-plain, .tone-c.tone-plain { --c: var(--muted); }
+.pill.tone-todo, .tone-c.tone-todo { --c: #7d7a72; }
+.pill.tone-doing, .pill.doing, .tone-c.tone-doing { --c: #3b74b8; }
+.pill.tone-done, .tone-c.tone-done { --c: #2f8f5b; }
+.pill.tone-low, .pill.priority-low, .tone-c.tone-low { --c: #2e8a8a; }
+.pill.tone-medium, .pill.priority-medium, .tone-c.tone-medium { --c: #c7811a; }
 .pill.tone-high, .pill.priority-high { --c: #c0392b; font-weight: 600; }
+.tone-c.tone-high { --c: #c0392b; }
 .pill.tone-custom { font-weight: 500; }
 .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); }
 .card {
@@ -1320,11 +1322,13 @@ button.danger { color: var(--danger); }
 .todo-title-cell .todo-title { white-space: normal; }
 .todo-desc { padding: 4px 4px 12px 40px; }
 .todo-desc .editable { display: block; min-height: 1.5em; color: var(--text); }
-.project-bar { background: var(--surface-2); border-radius: var(--radius); padding: 6px 10px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px; }
-.project-details { border-top: 1px solid var(--border); padding-top: 10px; }
-.project-details a, .repo-summary a { color: var(--accent); word-break: break-all; }
-.repo-summary { display: flex; flex-direction: column; gap: 4px; }
-.repo-summary li { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+/* Tasks' project header: the project pill, labels, and its open tasks by status (a click shows only those). */
+.status-counts { display: inline-flex; flex-wrap: wrap; gap: 2px; font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.status-counts button { min-height: 22px; padding: 0 6px; border: none; border-radius: 4px; background: none; color: inherit; font: inherit; }
+.status-counts button b { color: var(--text); font-weight: 600; }
+.status-counts button:hover { background: var(--surface-2); }
+.status-counts button.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); }
+.status-counts button.on b { color: var(--accent); }
 .cat-list { display: flex; flex-direction: column; gap: 6px; }
 .cat-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 4px 0; border-bottom: 1px solid var(--border); }
 .cat-name { font-weight: 600; min-width: 120px; }
@@ -1687,6 +1691,47 @@ button.work-seg.is-asks { background: var(--warn); color: var(--bg); animation: 
 .work-bar .bar-open { background: var(--gh-open); }
 .work-bar .bar-merged { background: var(--gh-merged); }
 .work-bar .bar-closed { background: var(--gh-closed); }
+/* The project pill (js/project-work.js): the overview part's bar of open tasks by status, then the links. */
+.project-pill { height: 24px; }
+.proj-bar { width: 30px; gap: 1px; }
+.proj-bar i, .proj-legend i, .proj-tip-st i { background: var(--c, var(--muted)); }
+.proj-bar.wide { width: 100%; height: 7px; }
+.proj-tip { position: absolute; z-index: 46; width: max-content; max-width: min(320px, calc(100vw - 16px)); display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16); font-size: 0.8rem; pointer-events: none; }
+.proj-tip > div { display: flex; align-items: center; gap: 5px; }
+.proj-tip .icon { width: 12px; height: 12px; flex: none; }
+.proj-tip-st { flex-wrap: wrap; gap: 2px 10px !important; }
+.proj-tip-st > span, .proj-legend button { display: inline-flex; align-items: center; gap: 4px; }
+.proj-tip-st i, .proj-legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+.proj-overview-body { padding: 6px; }
+.proj-desc { margin: 0 4px 6px; }
+.proj-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; }
+.proj-card { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.proj-card h4 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.proj-card h4 .linkish { margin-left: auto; min-height: 0; padding: 0; border: none; background: none; color: var(--accent); font-size: 0.76rem; font-weight: 500; text-transform: none; letter-spacing: 0; }
+.proj-big { display: flex; align-items: baseline; gap: 6px; }
+.proj-big strong { font: 600 1.35rem/1 var(--display, inherit); font-variant-numeric: tabular-nums; }
+.proj-legend { display: flex; flex-wrap: wrap; gap: 0 8px; }
+.proj-legend button { min-height: 20px; padding: 0; border: none; background: none; color: var(--muted); font-size: 0.76rem; }
+.proj-legend button:hover { color: var(--text); }
+.proj-lines { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.proj-item { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 22px; padding: 0 2px; border: none; border-radius: 4px; background: none; color: var(--text); font: inherit; font-size: 0.8rem; text-align: left; text-decoration: none; }
+.proj-item:hover { background: var(--surface-2); }
+.proj-item .icon { width: 12px; height: 12px; flex: none; }
+.proj-repo-head { align-items: center; }
+.proj-repo-name { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; font-size: 0.8rem; }
+.proj-repo-head .icon { width: 13px; height: 13px; }
+.proj-crumbs { display: flex; align-items: center; gap: 1px; padding: 3px 6px; border-bottom: 1px solid var(--border); overflow-x: auto; white-space: nowrap; font-size: 0.8rem; scrollbar-width: none; }
+.proj-crumbs button { display: inline-flex; align-items: center; gap: 4px; min-height: 22px; padding: 0 5px; border: none; border-radius: 4px; background: none; color: var(--accent); font: inherit; }
+.proj-crumbs button:hover { background: var(--surface-2); }
+.proj-crumbs .icon { width: 13px; height: 13px; }
+.proj-crumbs strong { padding: 0 5px; }
+button.proj-entry { width: 100%; justify-content: flex-start; border: none; border-radius: 0; background: none; font: inherit; color: var(--text); text-align: left; }
+.proj-entry.dir > .icon:first-child { color: var(--accent); }
+.proj-entry > .icon:last-child:not(:first-child) { color: var(--muted); }
+.proj-error { color: var(--danger); }
+.proj-file .code-view { border-top: none; }
+.work-pop:has(.proj-file) .work-body { flex: none; }
+.work-foot a.btn-small { gap: 4px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); color: var(--text); text-decoration: none; }
 .work-dot { display: inline-block; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .work-dot.is-working { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
 .work-dot.is-waiting, .work-dot.is-asks { background: var(--warn); }
