@@ -3,6 +3,7 @@ import { h, icon, notice } from '../ui.js';
 import { allChains, customChains, isNodeUrl, isExplorerUrl, testNode, testNodes, etherscanKey } from '../chains.js';
 import { nodeUrls } from '../uniswap.js';
 import { logo } from './positions.js';
+import { numberLocale } from '../locale.js';
 /** @import { Store, ChainChoice, UniswapSettings } from '../../types/data' */
 /** @import { BoardChain } from '../chains.js' */
 
@@ -27,7 +28,7 @@ async function runTest(store, chain, node) {
   const block = Math.max(0, ...good.map((r) => r.block));
   const fastest = good.reduce((a, r) => (!a || r.ms < a.ms ? r : a), /** @type {(typeof good)[number] | null} */ (null));
   const head = good.length
-    ? `${results.length > 1 ? `${good.length} of ${results.length} nodes answer · ` : ''}Block ${block.toLocaleString()}${results.length > 1 ? ` · fastest ${/** @type {{ ms: number }} */ (fastest).ms} ms` : ''}`
+    ? `${results.length > 1 ? `${good.length} of ${results.length} nodes answer · ` : ''}Block ${block.toLocaleString(numberLocale())}${results.length > 1 ? ` · fastest ${/** @type {{ ms: number }} */ (fastest).ms} ms` : ''}`
     : results.length > 1 ? 'No node answers' : problem(results[0]);
   chainsView.tests[chain.id] = {
     ok: good.length === results.length,

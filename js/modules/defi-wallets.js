@@ -7,6 +7,7 @@ import { tokenRef } from '../balances.js';
 import { savedChainRows, walletsOf, enabledChains } from '../defi/wallets-read.js';
 import { runJob } from '../runners.js';
 import { toast } from '../toast.js';
+import { numberLocale } from '../locale.js';
 /** @import { Store, Wallet, WalletBalance, ChainReadState } from '../../types/data' */
 /** @import { DefiUi, DefiTab } from '../../types/defi' */
 /** @import { Child } from '../../types/ui' */
@@ -52,7 +53,7 @@ const hiddenOf = (store) => new Set(store.get(COLLECTION)?.hiddenTokens ?? []);
 /** @param {string} a */
 const shortAddress = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 /** @param {number} n */
-const amountText = (n) => (n >= 1e6 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toLocaleString(undefined, { maximumFractionDigits: 4 }) : n.toPrecision(4));
+const amountText = (n) => (n >= 1e6 ? n.toLocaleString(numberLocale(), { maximumFractionDigits: 0 }) : n >= 1 ? n.toLocaleString(numberLocale(), { maximumFractionDigits: 4 }) : n.toPrecision(4));
 
 // Asks the runners to read every chain now (tools/jobs/defi.js); each lands on screen as soon as they save it.
 /** @param {Store} store */

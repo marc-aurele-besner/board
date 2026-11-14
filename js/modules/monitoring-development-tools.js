@@ -9,6 +9,7 @@ import { stat } from './monitoring.js';
 import { sortTable } from './monitoring-web.js';
 import { segmented, PALETTE, OTHER, TOP } from './monitoring-ai.js';
 import { developmentView, KINDS, withChange, projectCell, projectName, uncounted } from './monitoring-development.js';
+import { dateLocale } from '../locale.js';
 /** @import { ChartTip } from '../chart.js' */
 /** @import { TurnRow, UseRow } from '../dev-turns.js' */
 /** @import { DevContext } from './monitoring-development.js' */
@@ -16,7 +17,7 @@ import { developmentView, KINDS, withChange, projectCell, projectName, uncounted
 
 const TOOL_MEASURES = [['calls', 'Calls'], ['failed', 'Failed'], ['time', 'Time']];
 const HEAVIEST = 10;
-const when = (/** @type {number} */ v) => new Date(v).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+const when = (/** @type {number} */ v) => new Date(v).toLocaleString(dateLocale(), { dateStyle: 'short', timeStyle: 'short' });
 const rate = (/** @type {number} */ v) => `${(v * 100).toFixed(1)}%`;
 
 /** @typedef {UseRow & { label: string, color: string }} Row */

@@ -28,6 +28,7 @@ import { attachSession, sessionStatus, listSkills } from '../terminal.js';
 import { createTerminal } from '../vt.js';
 import { hasProfileSources } from '../profile.js';
 import { resizableSide } from '../side-resize.js';
+import { dateLocale } from '../locale.js';
 /** @import { Store, CronFlow, CronStep, CronSource, CronFormatField, CronSchedule, CronRun, CronRunStep, CronRunTerminal, CronPr, Project, Task, IconName } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @import { Vars } from '../cron.js' */
@@ -70,7 +71,7 @@ const SUBTITLES = {
  */
 const typeOf = (type) => STEP_TYPES.find(([t]) => t === type) ?? [type, type, 'info', ''];
 /** @param {string | undefined} at */
-const timeOf = (at) => (at ? new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never');
+const timeOf = (at) => (at ? new Date(at).toLocaleString(dateLocale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never');
 /** @param {Store} store */
 const projectsOf = (store) => projectTree(store.get('projects').projects).map(({ project }) => project);
 /**

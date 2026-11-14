@@ -7,6 +7,7 @@ import { aaveChains } from '../defi/lending-read.js';
 import { runJob } from '../runners.js';
 import { toast } from '../toast.js';
 import { savedChainRows, walletsOf } from '../defi/wallets-read.js';
+import { numberLocale } from '../locale.js';
 /** @import { Store, Wallet, LendingAccount, LendingAsset, ChainReadState, IconName } from '../../types/data' */
 /** @import { DefiUi, DefiTab } from '../../types/defi' */
 /** @import { Child } from '../../types/ui' */
@@ -51,7 +52,7 @@ const shortAddress = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 /** @param {number | null} n */
 const pct = (n) => (n == null ? '—' : `${(n * 100).toFixed(2)}%`);
 /** @param {number} n */
-const amountText = (n) => (n >= 1e6 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toLocaleString(undefined, { maximumFractionDigits: 4 }) : n.toPrecision(4));
+const amountText = (n) => (n >= 1e6 ? n.toLocaleString(numberLocale(), { maximumFractionDigits: 0 }) : n >= 1 ? n.toLocaleString(numberLocale(), { maximumFractionDigits: 4 }) : n.toPrecision(4));
 /** @param {number | null | undefined} hf */
 const healthTone = (hf) => (hf == null ? 'safe' : hf < RISK ? 'risk' : hf < WATCH ? 'watch' : 'safe');
 /** @param {number | null} hf */

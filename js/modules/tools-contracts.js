@@ -5,6 +5,7 @@ import { chainById, explorerUrl } from '../chains.js';
 import { readsOf, writesOf, parseInput, parseUnits, show, signature, isPayable } from '../abi.js';
 import { contractsOf, readFunction, sendFunction, waitForReceipt, wallets, walletAccount, connectedWallet, connectWallet, disconnectWallet, onWalletChange } from '../contracts.js';
 import { logo } from './positions.js';
+import { numberLocale } from '../locale.js';
 /** @import { Store, Settings, Contract, AbiItem } from '../../types/data' */
 /** @import { AbiValue } from '../../types/abi' */
 /** @import { Eip6963ProviderInfo } from '../../types/wallet' */
@@ -76,7 +77,7 @@ async function send(store, settings, c, fn, form) {
     const hash = await sendFunction(settings, c, fn, args, value);
     setResult(store, key, { busy: true, hash, note: 'Sent. Waiting for it to land…' });
     const receipt = await waitForReceipt(settings, c, hash);
-    setResult(store, key, receipt ? { ok: receipt.ok, hash, note: receipt.ok ? `Confirmed in block ${receipt.block.toLocaleString()}.` : `Reverted in block ${receipt.block.toLocaleString()}.` } : { ok: true, hash, note: 'Sent. Not landed after five minutes; check the explorer.' });
+    setResult(store, key, receipt ? { ok: receipt.ok, hash, note: receipt.ok ? `Confirmed in block ${receipt.block.toLocaleString(numberLocale())}.` : `Reverted in block ${receipt.block.toLocaleString(numberLocale())}.` } : { ok: true, hash, note: 'Sent. Not landed after five minutes; check the explorer.' });
   } catch (err) {
     // A wallet's refusal carries an EIP-1193 code.
     setResult(store, key, { ok: false, error: /** @type {{ code?: number } | undefined} */ (err)?.code === 4001 ? 'Rejected in the wallet.' : /** @type {Error} */ (err).message });

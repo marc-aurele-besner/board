@@ -14,6 +14,7 @@ import { projectIcon } from './projects.js';
 import { sortTable } from './monitoring-web.js';
 import { devProjectOf, projectLabel, segmented, previous, change, NO_PROJECT } from './monitoring-ai.js';
 import { skillsView, toolsView } from './monitoring-development-tools.js';
+import { dateLocale } from '../locale.js';
 /** @import { DevTurn, DevUsage, Project, Store } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 /** @import { Child } from '../../types/ui' */
@@ -335,7 +336,7 @@ function turnsView(ctx) {
         { label: 'Failed', num: true, value: (r) => r.failed, format: count },
         { label: 'Output', num: true, value: (r) => r.tokens, format: fmtTokens },
         { label: 'Task time', num: true, value: (r) => r.elapsed, format: fmtSpan },
-        { label: 'Last reply', num: true, value: (r) => r.last, format: (v) => new Date(v).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) },
+        { label: 'Last reply', num: true, value: (r) => r.last, format: (v) => new Date(v).toLocaleString(dateLocale(), { dateStyle: 'short', timeStyle: 'short' }) },
       ], [...rows].sort((a, b) => b.last - a.last)),
       h('p', { class: 'muted small' }, 'Each task counts all its turns, also those before the period. Per turn is the median; Output is the tokens claude wrote.')),
     h('section', { class: 'card stack' },
@@ -344,7 +345,7 @@ function turnsView(ctx) {
         const all = callsOf(t);
         const mcp = callsOf(t, isMcp);
         return h('li', null,
-          h('span', { class: 'muted small time' }, new Date(t.at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })),
+          h('span', { class: 'muted small time' }, new Date(t.at).toLocaleString(dateLocale(), { dateStyle: 'short', timeStyle: 'short' })),
           h('span', { class: 'grow cell-clip', title: t.text }, h('span', null, t.text || '—'), h('span', { class: 'muted small' }, ' ·', turnIcon(project), ` ${labelOf.get(r.name) ?? r.name}`)),
           Object.keys(t.skills ?? {}).map((name) => h('span', { class: 'pill tone-doing', title: 'A skill this turn ran' }, `/${name}`)),
           mcp.calls ? h('span', { class: 'pill tone-plain', title: mcpTitle(t) }, `MCP ${mcp.calls}`) : null,

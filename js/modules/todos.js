@@ -38,6 +38,7 @@ import { setupBanner, hasOpenRouter } from '../integrations.js';
 import { taskMatcher, QUERY_HINT } from '../task-query.js';
 import { resizableSide } from '../side-resize.js';
 import { taskStatuses, statusName, statusOptions, statusLook, categoryColor, taskCategoryNames, categoryLabelIds, isReady } from '../task-labels.js';
+import { dateLocale } from '../locale.js';
 
 const COLLECTION = 'todos';
 const PRIORITIES = [
@@ -317,7 +318,7 @@ function removeItems(store, ids) {
 function dueChip(item) {
   if (!item.due || statusOf(item) === 'done') return null;
   const today = todayISO();
-  const label = new Date(`${item.due}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const label = new Date(`${item.due}T12:00:00`).toLocaleDateString(dateLocale(), { month: 'short', day: 'numeric' });
   if (item.due < today) return h('span', { class: 'due late' }, `Overdue · ${label}`);
   return h('span', { class: item.due === today ? 'due today' : 'due' }, item.due === today ? 'Today' : label);
 }
@@ -349,7 +350,7 @@ function dueControl(store, item) {
   const open = () => {
     try { input.showPicker(); } catch { input.focus(); }
   };
-  const date = item.due ? new Date(`${item.due}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  const date = item.due ? new Date(`${item.due}T12:00:00`).toLocaleDateString(dateLocale(), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : '';
   const button = item.due
     ? h('button', { type: 'button', class: 'btn-small due-left', title: `Deadline: ${date}`, 'aria-label': `Deadline for "${item.text}": ${date}. Change it`, onclick: open }, timeLeft(item.due))
     : h('button', { type: 'button', class: 'icon-btn', title: 'Set a deadline', 'aria-label': `Set a deadline for "${item.text}"`, onclick: open }, icon('calendar'));

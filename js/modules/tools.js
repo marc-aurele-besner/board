@@ -11,6 +11,7 @@ import { barChart } from '../chart.js';
 import { pickChip, infoButton } from '../inline.js';
 import { contractsTab, contractsSerialize, contractsRestore } from './tools-contracts.js';
 import { requestsTab, requestsSerialize, requestsRestore } from './tools-requests.js';
+import { dateLocale, numberLocale } from '../locale.js';
 /** @import { CrawlFile, HealthSample, IconName, LlmsFile, Project, Provider, ProviderStatus, RobotsFile, SecurityFile, Site, SiteCrawl, SiteDns, SiteLogEntry, SiteDomain, SiteMeta, SitemapFile, Store } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 
@@ -43,7 +44,7 @@ const view = { tab: 'health', project: '', busy: new Set(), openDns: new Set(), 
 const LAYOUT_DEFAULT = { health: 'cards', ssl: 'list', meta: 'list' };
 
 const pillOf = (/** @type {string} */ text, /** @type {string} */ tone) => h('span', { class: `pill tone-${tone}` }, text);
-const timeOf = (/** @type {string | undefined} */ at) => (at ? new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never');
+const timeOf = (/** @type {string | undefined} */ at) => (at ? new Date(at).toLocaleString(dateLocale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never');
 
 // A check can finish in a few milliseconds; the busy state lasts long enough to be seen.
 const MIN_BUSY_MS = 600;
@@ -216,7 +217,7 @@ function siteDetail(store, sites, p) {
         stat(p95 === null ? null : `${p95} ms`, '95% answered within'),
         stat(lastDown ? timeOf(lastDown.at) : 'Never', 'last failed check')),
       history.length
-        ? barChart(history.map((c) => new Date(c.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })), [
+        ? barChart(history.map((c) => new Date(c.at).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' })), [
             { name: 'Answered', color: 'var(--income)', values: history.map((c) => (c.ok && c.ms <= 1500 ? c.ms : 0)) },
             { name: 'Slow', color: 'var(--warn)', values: history.map((c) => (c.ok && c.ms > 1500 ? c.ms : 0)) },
           ], { format: (v) => `${v} ms`, tip: (i) => [h('span', { class: 'muted' }, timeOf(history[i].at)), h('strong', null, history[i].ok ? `${history[i].ms} ms${history[i].ms > 1500 ? ' · slow' : ''}` : 'No answer')] })
@@ -561,7 +562,7 @@ function filePreview(store, p, key, f) {
   return h('div', { class: 'file-preview stack' },
     h('div', { class: 'row between' },
       h('a', { href: f.url, target: '_blank', rel: 'noopener', class: 'small file-url' }, f.url),
-      h('span', { class: 'muted small' }, [f.size ? kb(f.size) : '', cut ? `first ${/** @type {string} */ (f.raw).length.toLocaleString()} characters shown` : ''].filter(Boolean).join(' · '))),
+      h('span', { class: 'muted small' }, [f.size ? kb(f.size) : '', cut ? `first ${/** @type {string} */ (f.raw).length.toLocaleString(numberLocale())} characters shown` : ''].filter(Boolean).join(' · '))),
     f.checks
       ? h('ul', { class: 'file-checks' }, f.checks.map(([level, text]) => h('li', { class: `lvl-${level}` }, icon(level === 'ok' ? 'check' : level === 'warn' ? 'alert' : 'x'), h('span', null, text))))
       : h('p', { class: 'muted small' }, 'Read again to check its format.'),

@@ -12,6 +12,7 @@ import { chainById, explorerUrl, etherscanKey } from '../chains.js';
 import { walletsTab, walletsView } from './defi-wallets.js';
 import { lendingTab, lendingView } from './defi-lending.js';
 import { summaryTab } from './defi-summary.js';
+import { dateLocale, numberLocale } from '../locale.js';
 /** @import { Store, PoolsData, CollectEntry, FeeBaseline, IconName } from '../../types/data' */
 /** @import { PositionRow, DefiUi, DefiTab, DefiNotice, LpSummary } from '../../types/defi' */
 /** @import { Child } from '../../types/ui' */
@@ -409,7 +410,7 @@ function named(c) {
 }
 
 /** @param {number} n */
-const amount = (n) => (n >= 1000 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toFixed(2) : n.toPrecision(4));
+const amount = (n) => (n >= 1000 ? n.toLocaleString(numberLocale(), { maximumFractionDigits: 0 }) : n >= 1 ? n.toFixed(2) : n.toPrecision(4));
 /** @param {number} n */
 const price = (n) => (n === Infinity ? '∞' : n === 0 ? '0' : amount(n));
 // Amounts are read in USD. In CAD they use today's rate, the same for every amount, and stay in USD until it is known.
@@ -1013,14 +1014,14 @@ function bucketsBetween(from, to, group) {
 }
 /** @param {string} key @param {string} group */
 const bucketLabel = (key, group) => (group === 'month'
-  ? new Date(`${key}-01T00:00`).toLocaleDateString(undefined, { month: 'short', year: '2-digit' })
-  : new Date(`${key}T00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+  ? new Date(`${key}-01T00:00`).toLocaleDateString(dateLocale(), { month: 'short', year: '2-digit' })
+  : new Date(`${key}T00:00`).toLocaleDateString(dateLocale(), { month: 'short', day: 'numeric' }));
 
 // The full name of a bucket, for the chart's tooltip.
 /** @param {string} key @param {string} group */
 function bucketName(key, group) {
-  if (group === 'month') return new Date(`${key}-01T00:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-  const date = new Date(`${key}T00:00`).toLocaleDateString(undefined, { weekday: group === 'day' ? 'short' : undefined, month: 'short', day: 'numeric', year: 'numeric' });
+  if (group === 'month') return new Date(`${key}-01T00:00`).toLocaleDateString(dateLocale(), { month: 'long', year: 'numeric' });
+  const date = new Date(`${key}T00:00`).toLocaleDateString(dateLocale(), { weekday: group === 'day' ? 'short' : undefined, month: 'short', day: 'numeric', year: 'numeric' });
   return group === 'week' ? `Week of ${date}` : date;
 }
 
@@ -1481,7 +1482,7 @@ function nextMilestone(total) {
   return null;
 }
 /** @param {number} ms */
-const shortDate = (ms) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: new Date(ms).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+const shortDate = (ms) => new Date(ms).toLocaleDateString(dateLocale(), { month: 'short', day: 'numeric', year: new Date(ms).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
 
 // The outlook tiles: how this range compares with the one before, what the month and year should end on, the
 // next round total, and how often fees get collected.
@@ -1851,10 +1852,10 @@ function feesView(store) {
         feeSortHead(store, 'value', 'Value', { class: 'num' }),
         h('th', null, ''))),
       h('tbody', null, sortCollects([...list], view.feeSort, view.feeDir).map((c) => h('tr', null,
-        h('td', { title: c.since ? `Collected between ${new Date(c.since).toLocaleString()} and ${new Date(c.at).toLocaleString()}` : null },
-          new Date(c.at).toLocaleDateString(),
+        h('td', { title: c.since ? `Collected between ${new Date(c.since).toLocaleString(dateLocale())} and ${new Date(c.at).toLocaleString(dateLocale())}` : null },
+          new Date(c.at).toLocaleDateString(dateLocale()),
           // One logged by hand is set to noon, a placeholder, so it shows no time.
-          c.source === 'manual' ? null : h('span', { class: 'muted' }, ` ${new Date(c.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`),
+          c.source === 'manual' ? null : h('span', { class: 'muted' }, ` ${new Date(c.at).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' })}`),
           c.level === 1 ? h('div', { class: 'muted small' }, `The ${c.sym0} part could not be read`) : null),
         h('td', null, c.chain
           ? h('span', { class: 'chain-chip' }, logo(CHAINS.find((x) => x.name === c.chain)?.logo, c.chain, 'xs'), c.chain)
@@ -1875,7 +1876,7 @@ function feesView(store) {
           type: 'button',
           class: 'icon-btn',
           title: 'Remove',
-          'aria-label': `Remove the collection of ${new Date(c.at).toLocaleDateString()}`,
+          'aria-label': `Remove the collection of ${new Date(c.at).toLocaleDateString(dateLocale())}`,
           onclick: () => removeCollect(store, c),
         }, icon('trash'))))))));
 
@@ -2148,14 +2149,14 @@ function detailFacts(store, r) {
   /** @type {[string, Child][]} */
   const facts = [
     ['Chain', h('span', { class: 'chain-chip' }, logo(chainOf(r.chainId)?.logo, r.chain, 'xs'), r.chain)],
-    ['Protocol', `${dexName(r.dex)} ${r.version} · ${r.feePct}% fee tier${r.feePips !== r.feePct * 10000 ? ` (${(r.feePips / 10000).toLocaleString(undefined, { maximumSignificantDigits: 3 })}% to liquidity)` : ''}`],
+    ['Protocol', `${dexName(r.dex)} ${r.version} · ${r.feePct}% fee tier${r.feePips !== r.feePct * 10000 ? ` (${(r.feePips / 10000).toLocaleString(numberLocale(), { maximumSignificantDigits: 3 })}% to liquidity)` : ''}`],
     ['Position', r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener' }, numberOf(r)) : numberOf(r)],
     ['Owner', r.owner],
     ['Wallet', address('address', r.wallet)],
     [r.version === 'v4' ? 'Pool ID' : r.version === 'v2' ? 'Pair' : 'Pool', r.pool ? (r.version === 'v4' ? copyable(r.pool, { label: `${r.pool.slice(0, 10)}…${r.pool.slice(-6)}` }) : address('address', r.pool)) : '—'],
     [r.sym0, address('token', r.addr0)],
     [r.sym1, address('token', r.addr1)],
-    ['Liquidity', BigInt(r.liq ?? '0').toLocaleString()],
+    ['Liquidity', BigInt(r.liq ?? '0').toLocaleString(numberLocale())],
     ['Read', r.staleAt ? `${ago(r.staleAt)} (outdated)` : state.at ? ago(state.at) : '—'],
     ['Prices', r.pricesAt ? `from ${ago(r.pricesAt)}` : 'Current'],
     ['Collect search', h('span', { class: 'row lp-search', title: COVERAGE_TITLE }, h('div', { class: 'meter', role: 'presentation' }, h('span', { style: { width: `${share * 100}%` } })), coveragePct(share))],
@@ -2163,7 +2164,7 @@ function detailFacts(store, r) {
   // A v2 pair has no collects to search for. What it holds is its share of the pair's own token.
   if (r.version === 'v2') {
     const part = Number(r.supply) > 0 ? Number(r.liq) / Number(r.supply) : 0;
-    facts.splice(-1, 1, ['Share of the pair', `${(part * 100).toLocaleString(undefined, { maximumSignificantDigits: 3 })}%`]);
+    facts.splice(-1, 1, ['Share of the pair', `${(part * 100).toLocaleString(numberLocale(), { maximumSignificantDigits: 3 })}%`]);
   }
   return panel('Details', null,
     h('dl', { class: 'lp-facts' }, facts.map(([k, v]) => h('div', null, h('dt', { class: 'muted small' }, k), h('dd', null, v)))));
@@ -2178,7 +2179,7 @@ function detailCollections(collects) {
       ? h('div', { class: 'mon-scroll' }, h('table', { class: 'mon-table' },
           h('thead', null, h('tr', null, h('th', null, 'Date'), h('th', null, 'Tokens'), h('th', null, 'Source'), h('th', { class: 'num' }, 'Value'))),
           h('tbody', null, collects.map((c) => h('tr', null,
-            h('td', null, new Date(c.at).toLocaleDateString()),
+            h('td', null, new Date(c.at).toLocaleDateString(dateLocale())),
             h('td', { class: 'small' }, tokenCell(c)),
             h('td', { class: 'small muted', title: c.tx ?? null }, SOURCE_NAMES[sourceOf(c)]),
             h('td', { class: 'num' }, usdOrDash(c.usd ?? null)))))))

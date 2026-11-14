@@ -7,6 +7,7 @@ import { makeTask } from '../capture.js';
 import { ask } from '../ai.js';
 import { systemPrompt } from '../prompts.js';
 import { LINKEDIN } from '../linkedin-core.js';
+import { dateLocale } from '../locale.js';
 /** @import { Store, DataStore, LinkedinComment, LinkedinPost } from '../../types/data' */
 
 // View state: unread only or every comment, and the reply drafts by comment id (kept while the Inbox redraws).
@@ -33,8 +34,8 @@ const firstLine = (p) => {
 function when(at) {
   const d = new Date(at);
   const today = new Date();
-  if (d.toDateString() === today.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric', ...(d.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }) });
+  if (d.toDateString() === today.toDateString()) return d.toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString(dateLocale(), { month: 'short', day: 'numeric', ...(d.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }) });
 }
 
 /** @param {Store} store @param {string[]} ids @param {Partial<LinkedinComment>} fields */
@@ -51,7 +52,7 @@ function makeCommentTask(store, c, post) {
   const task = makeTask({
     text: `Reply to ${c.author} on LinkedIn`,
     description: [
-      `${c.author}${c.authorHeadline ? ` (${c.authorHeadline})` : ''} commented on “${firstLine(post) || 'your post'}”, ${new Date(c.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}:`,
+      `${c.author}${c.authorHeadline ? ` (${c.authorHeadline})` : ''} commented on “${firstLine(post) || 'your post'}”, ${new Date(c.at).toLocaleString(dateLocale(), { dateStyle: 'medium', timeStyle: 'short' })}:`,
       '',
       c.text,
       '',
@@ -130,7 +131,7 @@ function commentRow(store, c, posts) {
       h('div', { class: 'li-comment-who' },
         c.authorUrl ? h('a', { href: c.authorUrl, target: '_blank', rel: 'noopener noreferrer' }, h('strong', null, c.author)) : h('strong', null, c.author),
         c.authorHeadline ? h('span', { class: 'muted small' }, c.authorHeadline) : null),
-      h('span', { class: 'muted small li-comment-when', title: new Date(c.at).toLocaleString() }, when(c.at))),
+      h('span', { class: 'muted small li-comment-when', title: new Date(c.at).toLocaleString(dateLocale()) }, when(c.at))),
     h('p', { class: 'li-comment-text' }, c.text),
     h('p', { class: 'muted small li-comment-post' }, 'On ', post?.url
       ? h('a', { href: post.url, target: '_blank', rel: 'noopener noreferrer' }, `“${firstLine(post)}”`)

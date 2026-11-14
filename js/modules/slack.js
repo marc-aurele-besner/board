@@ -18,6 +18,7 @@ import {
   SLACK, SLACK_DEFAULTS, keyOf, splitKey, addWorkspaces, listChannels, ensureUsers, readCounts, readHistory, readThread,
   postMessage, editMessage, deleteMessage, react, markRead, customEmoji, fileData, slackLink,
 } from '../slack.js';
+import { dateLocale } from '../locale.js';
 /** @import { Store, SlackData, SlackWorkspace, SlackChannel, SlackGroup, Project } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @import { MenuEntry } from '../menu.js' */
@@ -517,7 +518,7 @@ function emojiNode(team, name) {
 /** @param {string} ts */
 const dateOf = (ts) => new Date(Number(ts) * 1000);
 /** @param {string} ts */
-const timeOf = (ts) => dateOf(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const timeOf = (ts) => dateOf(ts).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' });
 /** @param {string} ts */
 function dayOf(ts) {
   const d = dateOf(ts);
@@ -525,7 +526,7 @@ function dayOf(ts) {
   const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
   if (d.toDateString() === today.toDateString()) return 'Today';
   if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
-  return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', ...(d.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) });
+  return d.toLocaleDateString(dateLocale(), { weekday: 'long', month: 'long', day: 'numeric', ...(d.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) });
 }
 
 // A small dialog with one text field.
@@ -1231,7 +1232,7 @@ function messageRow(store, key, m, { compact, inThread }) {
   const ctx = markupContext(store, team);
   if (SYSTEM.test(m.subtype)) {
     return h('div', { class: 'slack-msg system', 'data-ts': m.ts },
-      h('span', { class: 'slack-time', title: dateOf(m.ts).toLocaleString() }, timeOf(m.ts)),
+      h('span', { class: 'slack-time', title: dateOf(m.ts).toLocaleString(dateLocale()) }, timeOf(m.ts)),
       h('span', { class: 'muted small' }, markup(m.text, ctx)));
   }
   const reactions = m.reactions.length
@@ -1275,13 +1276,13 @@ function messageRow(store, key, m, { compact, inThread }) {
     h('a', { class: 'icon-btn', href: slackLink(w, channel, m.ts), target: '_blank', rel: 'noopener noreferrer', title: 'Open in Slack', 'aria-label': 'Open in Slack' }, icon('link')));
   const row = h('div', { class: compact ? 'slack-msg compact' : 'slack-msg', 'data-ts': m.ts },
     compact
-      ? h('span', { class: 'slack-time slack-gutter', title: dateOf(m.ts).toLocaleString() }, timeOf(m.ts))
+      ? h('span', { class: 'slack-time slack-gutter', title: dateOf(m.ts).toLocaleString(dateLocale()) }, timeOf(m.ts))
       : avatar(name, person?.avatar || m.avatar),
     h('div', { class: 'slack-msg-body' },
       compact ? null : h('div', { class: 'slack-msg-meta' },
         h('strong', null, name),
         person?.bot || (!m.user && m.username) ? h('span', { class: 'pill tone-plain' }, 'App') : null,
-        h('span', { class: 'slack-time', title: dateOf(m.ts).toLocaleString() }, timeOf(m.ts))),
+        h('span', { class: 'slack-time', title: dateOf(m.ts).toLocaleString(dateLocale()) }, timeOf(m.ts))),
       m.text ? markup(m.text, ctx) : null,
       m.edited ? h('span', { class: 'muted small' }, '(edited)') : null,
       files,

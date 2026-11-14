@@ -5,6 +5,7 @@ import { ask, parseJson } from './ai.js';
 import { systemPrompt } from './prompts.js';
 import { setupBanner, hasOpenRouter } from './integrations.js';
 import { CHAINS, dexName } from './uniswap.js';
+import { dateLocale, numberLocale } from './locale.js';
 /** @import { Store, PoolInsightItem, PoolInsightPosition, PoolInsightRun } from '../types/data' */
 /** @import { PositionRow } from '../types/defi' */
 /** @import { Child } from '../types/ui' */
@@ -45,11 +46,11 @@ const round = (n, digits = 4) => (Number.isFinite(n) ? Number(/** @type {number}
 /** @param {number} n */
 const pctOf = (n) => (Number.isFinite(n) ? round(n * 100, 3) : null);
 /** @param {number} n */
-const priceText = (n) => (!Number.isFinite(n) ? '∞' : n >= 1000 ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) : n >= 1 ? n.toFixed(2) : n.toPrecision(4));
+const priceText = (n) => (!Number.isFinite(n) ? '∞' : n >= 1000 ? n.toLocaleString(numberLocale(), { maximumFractionDigits: 0 }) : n >= 1 ? n.toFixed(2) : n.toPrecision(4));
 /** @param {InsightRow} r */
 const nearEdge = (r) => r.inRange && !r.full && r.marker !== null && (r.marker < EDGE || r.marker > 100 - EDGE);
 /** @param {number} at */
-const whenText = (at) => new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const whenText = (at) => new Date(at).toLocaleString(dateLocale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 /** @param {Store} store */
 const runsOf = (store) => store.get(COLLECTION)?.insights ?? [];
 

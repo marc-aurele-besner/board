@@ -9,13 +9,14 @@ import { linkedinApp, linkedinRedirect, linkedinSignIn, linkedinSignOut } from '
 import { SOCIALS, NETWORKS, networkIcon, parseHandle, profileUrl, handleLabel, isOrganization } from '../socials.js';
 import { projectIcon, projectTree } from './projects.js';
 import { sessionState } from '../linkedin-session.js';
+import { dateLocale, numberLocale } from '../locale.js';
 /** @import { Store, SocialAccount, Project, LinkedinSettings } from '../../types/data' */
 
 /** @param {string} text @param {string} tone */
 const badge = (text, tone) => h('span', { class: `pill tone-${tone}` }, text);
 /** @param {string} href @param {string} text */
 const link = (href, text) => h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text);
-const count = new Intl.NumberFormat();
+const count = { format: (/** @type {number} */ n) => n.toLocaleString(numberLocale()) };
 
 // Accounts being read now, so their row shows it. Shared with Monitoring → Socials.
 /** @type {Set<string>} */
@@ -170,7 +171,7 @@ function publishCard(store) {
   };
   const clientId = h('input', { name: 'clientId', autocomplete: 'off', spellcheck: false, placeholder: 'Client ID', value: app.clientId ?? '', 'aria-label': 'Client ID' });
   const clientSecret = h('input', { name: 'clientSecret', type: 'password', autocomplete: 'off', spellcheck: false, placeholder: 'Client Secret', value: app.clientSecret ?? '', 'aria-label': 'Client Secret' });
-  const ends = auth ? new Date(auth.expires).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+  const ends = auth ? new Date(auth.expires).toLocaleDateString(dateLocale(), { year: 'numeric', month: 'short', day: 'numeric' }) : '';
   return h('section', { class: 'card panel' },
     h('header', { class: 'panel-head' },
       h('div', null,
@@ -261,10 +262,10 @@ function linkedinSession(store) {
       h('div', { class: 'svc-section stack-sm' },
         h('h3', null, 'Session'),
         state.expiredAt
-          ? notice({ text: `LinkedIn signed the session out on ${new Date(state.expiredAt).toLocaleString()}${state.error ? ` (${state.error})` : ''}. Session reads are stopped until you save li_at and JSESSIONID again.` })
+          ? notice({ text: `LinkedIn signed the session out on ${new Date(state.expiredAt).toLocaleString(dateLocale())}${state.error ? ` (${state.error})` : ''}. Session reads are stopped until you save li_at and JSESSIONID again.` })
           : null,
         notice({ tone: 'info', text: 'Reads through the session use LinkedIn’s internal API, the one its own pages call. That is against LinkedIn’s terms, and the account is at risk: LinkedIn may sign it out or restrict it. The runners make one call at a time, 20 to 40 s apart, under the daily limit, and stop at the first sign-out.' }),
-        h('p', { class: 'muted small' }, `${state.today} of ${state.limit} calls today${state.lastCallAt ? `, the last at ${new Date(state.lastCallAt).toLocaleTimeString()}` : ''}. Answers are kept and reused, so the same read does not call again for a while.`),
+        h('p', { class: 'muted small' }, `${state.today} of ${state.limit} calls today${state.lastCallAt ? `, the last at ${new Date(state.lastCallAt).toLocaleTimeString(dateLocale())}` : ''}. Answers are kept and reused, so the same read does not call again for a while.`),
         h('form', {
           class: 'row',
           onsubmit: (/** @type {SubmitEvent} */ e) => {

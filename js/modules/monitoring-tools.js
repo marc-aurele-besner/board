@@ -6,6 +6,7 @@ import { byUse, mcpTool } from '../dev-usage.js';
 import { stat } from './monitoring.js';
 import { sortTable } from './monitoring-web.js';
 import { devProjectOf, projectLabel, segmented, PALETTE, OTHER, TOP } from './monitoring-ai.js';
+import { dateLocale } from '../locale.js';
 /** @import { DevUsage, Store } from '../../types/data' */
 /** @import { PeriodWindow } from '../../types/monitoring' */
 /** @import { ChartTip } from '../chart.js' */
@@ -127,7 +128,7 @@ export function toolUsage(store, w, records) {
                     value: (r) => [...r.projects].map((id) => projectOf.get(id)?.name ?? 'Removed project').join(', ') || null,
                     format: (_v, r) => h('span', { class: 'ai-project-list' }, [...r.projects].map((id) => projectLabel(projectOf.get(id)))),
                   },
-                  { label: 'Last used', num: true, value: (r) => r.last || null, format: (v) => new Date(v).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) },
+                  { label: 'Last used', num: true, value: (r) => r.last || null, format: (v) => new Date(v).toLocaleString(dateLocale(), { dateStyle: 'short', timeStyle: 'short' }) },
                   {
                     label: 'Share',
                     num: true,

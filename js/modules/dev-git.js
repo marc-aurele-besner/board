@@ -8,6 +8,7 @@ import { onContextMenu, copyItem } from '../menu.js';
 import { gitStatus, gitDiff, gitAction } from '../terminal.js';
 import { openDiff, openFile, baseName, panelHead, panelAction } from './dev-files.js';
 import { openPullRequest } from './dev-pr.js';
+import { dateLocale } from '../locale.js';
 /** @import { DevContext, FileDecor } from '../../types/dev' */
 /** @import { GitStatus, GitRepoStatus, GitFile, GitCommit } from '../../types/terminal' */
 /** @import { Child } from '../../types/ui' */
@@ -284,7 +285,7 @@ const ago = (/** @type {number} */ at) => {
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   if (s < 86400 * 30) return `${Math.floor(s / 86400)}d`;
-  return new Date(at).toLocaleDateString();
+  return new Date(at).toLocaleDateString(dateLocale());
 };
 
 /** @param {DevContext} ctx @param {GitRepoStatus} st */
@@ -361,7 +362,7 @@ function repoBody(ctx) {
       section(ctx, 'log', 'Commits', null, null,
         st.log.length
           ? st.log.map((c) => onContextMenu(h('div', { class: 'tree-row scm-row' },
-              h('button', { type: 'button', class: 'tree-item', title: `${c.subject}\n${c.author} · ${new Date(c.at).toLocaleString()} · ${c.short}`, onclick: () => showCommit(ctx, c) },
+              h('button', { type: 'button', class: 'tree-item', title: `${c.subject}\n${c.author} · ${new Date(c.at).toLocaleString(dateLocale())} · ${c.short}`, onclick: () => showCommit(ctx, c) },
                 icon('git-commit'),
                 h('span', { class: 'tree-name' }, c.subject),
                 c.refs.length ? h('span', { class: 'scm-refs' }, c.refs.map((r) => r.replace(/^HEAD -> /, '')).join(', ')) : null,

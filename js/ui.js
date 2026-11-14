@@ -1,4 +1,5 @@
 // Small DOM and formatting helpers. No framework.
+import { numberLocale } from './locale.js';
 /** @import { Child } from '../types/ui' */
 
 export const CURRENCY = 'USD'; // change to your currency code, e.g. 'CAD' or 'EUR'
@@ -175,8 +176,11 @@ export const CURRENCIES = ['USD', 'CAD'];
 const formatters = new Map();
 /** @param {number | bigint} n @param {string} [currency] */
 export const money = (n, currency = CURRENCY) => {
-  if (!formatters.has(currency)) formatters.set(currency, new Intl.NumberFormat(undefined, { style: 'currency', currency }));
-  return /** @type {Intl.NumberFormat} */ (formatters.get(currency)).format(n);
+  // One formatter per number format and currency: Appearance can change the format while the page is open.
+  const locale = numberLocale();
+  const key = `${locale ?? ''}:${currency}`;
+  if (!formatters.has(key)) formatters.set(key, new Intl.NumberFormat(locale, { style: 'currency', currency }));
+  return /** @type {Intl.NumberFormat} */ (formatters.get(key)).format(n);
 };
 
 /** @param {Child} text */

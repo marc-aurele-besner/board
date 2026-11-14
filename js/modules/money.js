@@ -10,6 +10,7 @@ import { projectIcon } from './projects.js';
 import { barChart, legend } from '../chart.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
+import { dateLocale } from '../locale.js';
 /** @import { Store, FinanceEntry, Recurring, AiContentPart } from '../../types/data' */
 /** @import { PickOption } from '../inline.js' */
 
@@ -133,7 +134,7 @@ function bucketLabel(key, group) {
   }
   if (group === 'month') {
     const [y, m] = key.split('-').map(Number);
-    return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+    return new Date(y, m - 1, 1).toLocaleDateString(dateLocale(), { month: 'short', year: '2-digit' });
   }
   return key;
 }
@@ -1293,7 +1294,7 @@ function draw(root, store) {
     { name: 'Expenses', color: 'var(--expense)', values: keys.map((k) => round2(expenseByBucket.get(k) ?? 0)) },
   ];
   const month = shownMonth(view.range);
-  const monthName = month ? parseYmd(`${month}-01`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : '';
+  const monthName = month ? parseYmd(`${month}-01`).toLocaleDateString(dateLocale(), { month: 'long', year: 'numeric' }) : '';
   const rangeLabel = RANGES.find(([k]) => k === view.range)?.[1] ?? monthName;
   const stepTo = (/** @type {number} */ delta) => () => {
     view.range = stepMonth(view.range, delta);

@@ -6,6 +6,7 @@ import { toast } from '../toast.js';
 import { onContextMenu, copyItem } from '../menu.js';
 import { listFolder, readFile, revealPath } from '../terminal.js';
 import { highlight, languageOf, languageLabel } from '../highlight.js';
+import { dateLocale } from '../locale.js';
 /** @import { DevContext } from '../../types/dev' */
 /** @import { RunnerFolder, GitDiff } from '../../types/terminal' */
 /** @import { Child } from '../../types/ui' */
@@ -340,7 +341,7 @@ function diffView(file) {
   const head = file.commit
     ? h('div', { class: 'diff-commit' },
         h('p', { class: 'diff-commit-message' }, file.commit.message),
-        h('p', { class: 'muted small' }, `${file.commit.author} · ${new Date(file.commit.at).toLocaleString()} · `, h('code', null, file.commit.hash.slice(0, 10))))
+        h('p', { class: 'muted small' }, `${file.commit.author} · ${new Date(file.commit.at).toLocaleString(dateLocale())} · `, h('code', null, file.commit.hash.slice(0, 10))))
     : null;
   const body = rows.length
     ? h('div', { class: 'code diff', style: { '--gutter': `${String(last).length + 1}ch` } }, rows)

@@ -5,12 +5,13 @@ import { toast } from '../toast.js';
 import { LINKEDIN, latestMetrics, signedIn } from '../linkedin-core.js';
 import { openLinkedinComposer, whenText } from '../linkedin-composer.js';
 import { postNow } from '../linkedin.js';
+import { numberLocale } from '../locale.js';
 /** @import { Store, Project, LinkedinPost } from '../../types/data' */
 
 // Posts being posted from here now, so their row shows it.
 /** @type {Set<string>} */
 const posting = new Set();
-const count = new Intl.NumberFormat();
+const count = { format: (/** @type {number} */ n) => n.toLocaleString(numberLocale()) };
 
 /** @param {Store} store @param {LinkedinPost} p */
 function postNowFromList(store, p) {
@@ -55,7 +56,7 @@ function postRow(store, p, live) {
     : p.status === 'scheduled' && p.scheduledAt ? `Scheduled for ${whenText(p.scheduledAt)}`
       : p.status === 'missed' && p.scheduledAt ? `Missed: it was due ${whenText(p.scheduledAt)}`
         : p.status === 'failed' ? `Failed: ${p.error ?? 'LinkedIn did not take it.'}`
-          : busy ? 'Posting…' : `Draft, ${p.text.length.toLocaleString()} characters`;
+          : busy ? 'Posting…' : `Draft, ${p.text.length.toLocaleString(numberLocale())} characters`;
   const edit = () => openLinkedinComposer(store, { postId: p.id });
   return h('li', { class: 'li-post-row' },
     h('button', { type: 'button', class: 'li-post-main', title: out ? 'Show the post' : 'Edit the post', onclick: edit },

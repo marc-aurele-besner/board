@@ -5,6 +5,7 @@ import { openDialog } from './modal.js';
 import { toast } from './toast.js';
 import { LINKEDIN, POST_LIMIT, linkedinDraftOf, makePost, signedIn } from './linkedin-core.js';
 import { postNow } from './linkedin.js';
+import { dateLocale, numberLocale } from './locale.js';
 /** @import { Store, LinkedinPost } from '../types/data' */
 
 // LinkedIn folds a post after about three lines; this many characters is close to it.
@@ -37,7 +38,7 @@ const nextMorning = () => {
   return d.getTime();
 };
 /** @param {number} ms */
-export const whenText = (ms) => new Date(ms).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+export const whenText = (ms) => new Date(ms).toLocaleString(dateLocale(), { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 /**
  * @param {Store} store
@@ -71,7 +72,7 @@ export function openLinkedinComposer(store, { postId, taskId, projectId }) {
   let open = false;
   const paint = () => {
     const value = text.value;
-    counter.textContent = `${value.length.toLocaleString()} / ${POST_LIMIT.toLocaleString()}`;
+    counter.textContent = `${value.length.toLocaleString(numberLocale())} / ${POST_LIMIT.toLocaleString(numberLocale())}`;
     counter.classList.toggle('error', value.length > POST_LIMIT);
     const host = hostOf(link.value.trim());
     const long = value.length > FOLD && !open;
@@ -108,7 +109,7 @@ export function openLinkedinComposer(store, { postId, taskId, projectId }) {
   };
   const check = () => {
     if (!text.value.trim()) return 'Write the post first.';
-    if (text.value.length > POST_LIMIT) return `LinkedIn takes at most ${POST_LIMIT.toLocaleString()} characters.`;
+    if (text.value.length > POST_LIMIT) return `LinkedIn takes at most ${POST_LIMIT.toLocaleString(numberLocale())} characters.`;
     if (link.value.trim() && !hostOf(link.value.trim())) return 'The link is not a full address (https://…).';
     return '';
   };

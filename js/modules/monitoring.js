@@ -16,6 +16,7 @@ import { developmentTab, developmentView, VIEWS as DEV_VIEWS, KINDS as DEV_KINDS
 import { aiOverview, aiView, devProjectOf, projectLabel, projectShown, sourceShown, SOURCES, BREAKDOWNS, MEASURES } from './monitoring-ai.js';
 import { sessionStatus } from '../terminal.js';
 import { runnerOf } from '../dev-core.js';
+import { dateLocale } from '../locale.js';
 /** @import { AiCallMeta, AiMessage, DevUsage, Store, UsageEntry } from '../../types/data' */
 /** @import { RunnerStatus } from '../../types/terminal' */
 /** @import { Child } from '../../types/ui' */
@@ -184,7 +185,7 @@ function showCall(e, task) {
   const c = costOf(e);
   const m = /** @type {Partial<AiCallMeta>} */ (e.meta ?? {});
   const facts = /** @type {[string, string][]} */ ([
-    ['Time', new Date(e.at).toLocaleString()],
+    ['Time', new Date(e.at).toLocaleString(dateLocale())],
     ['Task', task],
     ['Model asked', e.model],
     m.servedModel && m.servedModel !== e.model ? ['Model served', m.servedModel] : null,
@@ -202,7 +203,7 @@ function showCall(e, task) {
   ].filter(Boolean));
   const messages = Array.isArray(e.input) ? e.input : [];
   openDialog({
-    title: `${task} · ${new Date(e.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`,
+    title: `${task} · ${new Date(e.at).toLocaleString(dateLocale(), { dateStyle: 'medium', timeStyle: 'short' })}`,
     wide: true,
     body: h('div', { class: 'stack call-detail' },
       e.error ? notice({ text: e.error }) : null,
@@ -335,7 +336,7 @@ function devSessions(store, w) {
             { label: 'Extra', num: true, value: (r) => r.one.extraCost, format: (v) => costCell(v) },
             { label: 'Time', num: true, value: (r) => r.one.duration, format: fmtDuration },
             { label: 'Lines', num: true, value: (r) => r.one.linesAdded + r.one.linesRemoved, format: (_v, r) => (r.one.linesAdded || r.one.linesRemoved ? `+${r.one.linesAdded} −${r.one.linesRemoved}` : '—') },
-            { label: 'Last reply', num: true, value: (r) => r.end, format: (v) => new Date(v).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) },
+            { label: 'Last reply', num: true, value: (r) => r.end, format: (v) => new Date(v).toLocaleString(dateLocale(), { dateStyle: 'short', timeStyle: 'short' }) },
           ], rows.sort((a, b) => /** @type {number} */ (b.end) - /** @type {number} */ (a.end)), (r) => (r.state ? `dev-live dev-${r.state}` : '')),
         ]
       : empty('No Dev sessions in this period. Start claude on a task with its Dev button and its usage shows here.'));
