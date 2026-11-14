@@ -27,7 +27,7 @@ const cache = new Map();
 /** @typedef {{ startTime?: string, totalCostUSD?: number, totalDuration?: number, totalAPIDuration?: number, totalLinesAdded?: number, totalLinesRemoved?: number, modelUsage?: Record<string, ModelTokens> }} CostState */
 /**
  * @typedef {CostState & { type?: string, uuid?: string, timestamp?: string, isSidechain?: boolean, effort?: string,
- *   isMeta?: boolean, isCompactSummary?: boolean, isVisibleInTranscriptOnly?: boolean,
+ *   isMeta?: boolean, isCompactSummary?: boolean, cwd?: string, isVisibleInTranscriptOnly?: boolean,
  *   worktreeSession?: { worktreeName?: string }, quotaLimits?: Quota, apiErrorParams?: { rate_limit_info?: Quota },
  *   message?: ReplyMessage, toolUseResult?: { url?: unknown, title?: unknown } }} TranscriptLine
  */
@@ -138,8 +138,9 @@ function parse(text, billing) {
   // Tool calls still waiting for their result, by id: the last one is what claude waits on when the terminal is quiet.
   /** @type {Map<string, { name: string, input: ToolInput, at: number }>} */
   const pending = new Map();
-  // The Artifacts it published (claude.ai links) with their titles, and the publish calls awaiting their result.
-  /** @type {Map<string, string>} */
+  // The Artifacts it published (claude.ai links) with their titles and the local page each was published from, and
+  // the publish calls awaiting their result.
+  /** @type {Map<string, { title: string, file: string }>} */
   const artifacts = new Map();
   /** @type {Map<string, ToolInput>} */
   const publishing = new Map();
@@ -325,7 +326,7 @@ function parse(text, billing) {
     replies: replies.size, start, end, open, prompt, reply, written: [...written], turns,
     ask: last ? askOf(last) : null,
     since: last?.at || 0,
-    artifacts: [...artifacts].map(([url, title]) => ({ url, title })),
+    artifacts: [...artifacts].map(([url, a]) => ({ url, title: a.title, ...(a.file ? { file: a.file } : {}) })),
     skills, mcp,
     lastTool, toolCalls, tools, failures, said, task,
   };
@@ -383,9 +384,10 @@ function readTools(o, command, skills, mcp, turn) {
 }
 
 // The Artifacts a session published: a publish call (no action, or 'publish'; not an asset upload) and the claude.ai
-// link its result names. The type it started from, or another artifact it copied from, is not one of them.
+// link its result names. The type it started from, or another artifact it copied from, is not one of them. The page
+// it published (file_path, resolved against the session's folder) is kept, for Tasks to preview it.
 const ARTIFACT_URL = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[\w-]+/g;
-/** @param {TranscriptLine} o @param {Map<string, ToolInput>} publishing @param {Map<string, string>} artifacts */
+/** @param {TranscriptLine} o @param {Map<string, ToolInput>} publishing @param {Map<string, { title: string, file: string }>} artifacts */
 function readArtifacts(o, publishing, artifacts) {
   const c = o.message?.content;
   if (!Array.isArray(c)) return;
@@ -404,7 +406,9 @@ function readArtifacts(o, publishing, artifacts) {
         : [...text.matchAll(ARTIFACT_URL)].map((m) => m[0]).find((u) => u !== input.type_url && u !== input.from_url);
       if (!url) continue;
       const title = typeof result?.title === 'string' && result.title ? result.title : typeof input.title === 'string' ? input.title : '';
-      artifacts.set(url, title || artifacts.get(url) || '');
+      const page = typeof input.file_path === 'string' && /\.html?$/i.test(input.file_path) ? resolve(o.cwd ?? '', input.file_path) : '';
+      const had = artifacts.get(url);
+      artifacts.set(url, { title: title || had?.title || '', file: page || had?.file || '' });
     }
   }
 }

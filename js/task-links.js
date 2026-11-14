@@ -19,13 +19,14 @@ export const prsOf = (task) => task.prs ?? [];
 export const artifactsOf = (task) => task.artifacts ?? [];
 
 // Adds the claude.ai Artifacts each Dev session published to the tasks it works on, by session id. A title that comes
-// later (a type's artifact is named before its first write) fills in an empty one. Saves only on a change.
+// later (a type's artifact is named before its first write) fills in an empty one, and so does the page it was
+// published from. Saves only on a change.
 /** @param {DataStore} store @param {Record<string, TaskArtifact[]>} bySession */
 export function addTaskArtifacts(store, bySession) {
   /** @param {Task} task */
   const missing = (task) => (bySession[task.devSession ?? ''] ?? []).filter((a) => {
     const had = artifactsOf(task).find((x) => x.url === a.url);
-    return !had || (!had.title && a.title);
+    return !had || (!had.title && a.title) || (!!a.file && had.file !== a.file);
   });
   if (!store.get(COLLECTION).items.some((t) => missing(t).length)) return;
   /** @type {{ task: string, artifact: TaskArtifact }[]} */
@@ -35,9 +36,11 @@ export function addTaskArtifacts(store, bySession) {
       for (const a of missing(task)) {
         const list = artifactsOf(task);
         const had = list.find((x) => x.url === a.url);
-        if (had) had.title = a.title;
-        else {
-          task.artifacts = [...list, { url: a.url, title: a.title }];
+        if (had) {
+          had.title ||= a.title;
+          if (a.file) had.file = a.file;
+        } else {
+          task.artifacts = [...list, { url: a.url, title: a.title, ...(a.file ? { file: a.file } : {}) }];
           added.push({ task: task.text, artifact: a });
         }
       }
