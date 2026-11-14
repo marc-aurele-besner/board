@@ -22,13 +22,14 @@ import { socialsCard } from './settings-socials.js';
 import { notionCard } from './settings-notion.js';
 import { modelForTask } from '../models.js';
 import { logo } from './positions.js';
-import { keepAwakeOn, keepAwakeSupported, setKeepAwake } from '../wake-lock.js';
+import { appearanceCard } from './settings-appearance.js';
 import { SETTINGS_CATEGORIES, SETTINGS_PAGES, categoryOf } from '../settings-pages.js';
 import { runnersKnown, runnersOnline } from '../runners.js';
 import { isConnected } from '../google-core.js';
 import { sitesOf } from '../automations.js';
 import { overrides } from '../prompts.js';
 import { devAgents, defaultAgent } from '../dev-core.js';
+import { removeWithUndo } from '../remove.js';
 
 /** @import { Store, IconName, AddedPosition, GithubOrgToken, UniswapSettings, PoolRow, ModelsSettings, ModelTask, GoogleSettings } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
@@ -249,9 +250,15 @@ function addTask(store, name, description) {
 
 /** @param {Store} store @param {string} id */
 function removeTask(store, id) {
-  if (!confirm('Remove this task? Its model pin goes with it.')) return;
-  store.update(COLLECTION, (d) => {
-    d.models.tasks = d.models.tasks.filter((t) => t.id !== id);
+  removeWithUndo(store, {
+    ask: 'Remove this task? Its model pin goes with it.',
+    done: 'Task removed',
+    collections: ['settings'],
+    run: () => {
+      store.update(COLLECTION, (d) => {
+        d.models.tasks = d.models.tasks.filter((t) => t.id !== id);
+      });
+    },
   });
 }
 
@@ -538,27 +545,6 @@ function googleCard(store) {
     calendarAccountsCard(store));
 }
 
-// --- Appearance ---
-
-const THEME_KEY = 'board:theme'; // unset: follow the system; otherwise 'light' or 'dark'
-const DENSITY_KEY = 'board:density'; // 'comfortable' (default) or 'compact'
-
-// Applies the saved theme and density. Runs at startup and whenever either changes.
-export function applyAppearance() {
-  /** @type {string | null} */
-  let theme = null;
-  let density = 'comfortable';
-  try {
-    theme = localStorage.getItem(THEME_KEY);
-    density = localStorage.getItem(DENSITY_KEY) ?? 'comfortable';
-  } catch {
-    /* storage blocked: system theme, comfortable density */
-  }
-  if (theme) document.documentElement.dataset.theme = theme;
-  else delete document.documentElement.dataset.theme;
-  document.body.classList.toggle('compact', density === 'compact');
-}
-
 /** @type {{ message: string, ok: boolean | null }} */
 const uniswapView = { message: '', ok: null };
 
@@ -713,86 +699,6 @@ function uniswapCard(store) {
     h('p', { class: 'muted small' }, 'The chains the LP tab reads, the node each is read from, and the Etherscan API key are set in ',
       h('button', { type: 'button', class: 'btn-link-inline', onclick: () => { view.section = 'blockchains'; store.refresh(); } }, 'Blockchains'), '.'),
     uniswapView.message ? notice({ tone: uniswapView.ok ? 'info' : 'error', text: uniswapView.message }) : null);
-}
-
-/** @param {string} key @param {string | null} value */
-function setStored(key, value) {
-  try {
-    if (value) localStorage.setItem(key, value);
-    else localStorage.removeItem(key);
-  } catch {
-    /* storage blocked */
-  }
-}
-
-/** @param {Store} store */
-function appearanceCard(store) {
-  /** @type {string | null} */
-  let theme = null;
-  let density = 'comfortable';
-  try {
-    theme = localStorage.getItem(THEME_KEY);
-    density = localStorage.getItem(DENSITY_KEY) ?? 'comfortable';
-  } catch {
-    /* storage blocked */
-  }
-  /** @param {string} label @param {string | null} value @param {string | null} current @param {(value: string | null) => void} onPick */
-  const choice = (label, value, current, onPick) =>
-    h('button', {
-      type: 'button',
-      class: current === value ? 'seg active' : 'seg',
-      'aria-pressed': String(current === value),
-      onclick: () => onPick(value),
-    }, label);
-  /** @param {string | null} value */
-  const pickTheme = (value) => {
-    setStored(THEME_KEY, value);
-    applyAppearance();
-    store.refresh();
-  };
-  /** @param {string | null} value */
-  const pickDensity = (value) => {
-    setStored(DENSITY_KEY, value === 'compact' ? 'compact' : null);
-    applyAppearance();
-    store.refresh();
-  };
-  return h('section', { class: 'card panel' },
-    h('header', { class: 'panel-head' },
-      h('div', null,
-        h('h2', null, 'Appearance'),
-        h('p', { class: 'muted' }, 'How the board looks on this computer. Saved in this browser, and changes apply as you pick them.'))),
-
-    h('div', { class: 'svc-section' },
-      h('h3', null, 'Theme'),
-      h('div', { class: 'segmented app-seg' },
-        choice('System', null, theme, pickTheme),
-        choice('Light', 'light', theme, pickTheme),
-        choice('Dark', 'dark', theme, pickTheme))),
-
-    h('div', { class: 'svc-section' },
-      h('h3', null, 'Density'),
-      h('p', { class: 'muted small' }, 'Compact tightens the rows in tasks, projects and the board.'),
-      h('div', { class: 'segmented app-seg' },
-        choice('Comfortable', 'comfortable', density, pickDensity),
-        choice('Compact', 'compact', density, pickDensity))),
-
-    h('div', { class: 'svc-section' },
-      h('h3', null, 'Screen'),
-      h('p', { class: 'muted small' }, keepAwakeSupported()
-        ? 'Keeps the screen from dimming or sleeping while the board is open in front. Saved in this browser.'
-        : 'This browser cannot keep the screen awake. Chrome and Edge can.'),
-      h('label', { class: 'check' },
-        h('input', {
-          type: 'checkbox',
-          role: 'switch',
-          checked: keepAwakeOn(),
-          disabled: !keepAwakeSupported(),
-          onchange: (/** @type {Event} */ e) => {
-            setKeepAwake(/** @type {HTMLInputElement} */ (e.target).checked);
-            store.refresh();
-          },
-        }),
-        'Keep the screen awake')));
 }
 
 // --- Keys per organization ---

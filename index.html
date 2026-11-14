@@ -7,11 +7,15 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="css/style.css">
   <script>
-    // Apply the saved theme before first paint to avoid a flash of the wrong colors.
+    // Apply the saved theme, accent, text size and motion before first paint to avoid a flash of the wrong look.
+    // js/appearance.js applies them again whenever they change.
     try {
-      var savedTheme = localStorage.getItem('board:theme');
-      if (savedTheme) document.documentElement.dataset.theme = savedTheme;
-    } catch (e) { /* storage blocked: follow the OS setting */ }
+      var saved = { theme: 'board:theme', accent: 'board:accent', text: 'board:text-size', motion: 'board:motion' };
+      for (var name in saved) {
+        var value = localStorage.getItem(saved[name]);
+        if (value) document.documentElement.dataset[name] = value;
+      }
+    } catch (e) { /* storage blocked: the default look */ }
   </script>
 </head>
 <body>

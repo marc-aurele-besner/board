@@ -3,7 +3,8 @@ import { fsSupported, pickFolder, loadHandle, hasPermission } from './storage.js
 import { createStore } from './store.js';
 import { h, icon, uid, keepImages, steadyAnimations, patch } from './ui.js';
 import { configure } from './github.js';
-import { ensureTasks, applyAppearance } from './modules/settings.js';
+import { ensureTasks } from './modules/settings.js';
+import { applyAppearance, startSection, hiddenSections, linksInNewTab, THEME_KEY } from './appearance.js';
 import { modules } from './modules/index.js';
 import { migrateLegacyProjects, migrateProjectShape } from './modules/projects.js';
 import { bell, COLLECTION as NOTIFICATIONS, DEFAULTS as NOTIFICATION_DEFAULTS } from './notifications.js';
@@ -50,8 +51,6 @@ let pendingHandle = null; // remembered folder that still needs permission
 let connectError = '';
 let held = false; // a rebuild is waiting for the user to leave the field they are typing in
 
-const THEME_KEY = 'board:theme';
-
 // No saved choice means "follow the OS", so resolve the effective theme from both.
 const isDark = () =>
   (document.documentElement.dataset.theme ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark';
@@ -91,7 +90,7 @@ const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 // The URL is #/<section>?<view params>. The params restore each section's view after a refresh.
 function readRoute() {
   const [path = '', query = ''] = location.hash.replace(/^#\//, '').split('?');
-  return { id: path || 'home', params: Object.fromEntries(new URLSearchParams(query)) };
+  return { id: path || startSection(), params: Object.fromEntries(new URLSearchParams(query)) };
 }
 const currentModule = () => modules.find((m) => m.id === readRoute().id) ?? modules[0];
 
@@ -134,7 +133,7 @@ function render({ user = true } = {}) {
   const parts = /** @type {HTMLElement[]} */ ([
     h('header', { class: entered ? 'topbar enter' : 'topbar' },
       h('nav', { class: 'tabs' },
-        modules.filter((m) => !m.hidden).map((m) =>
+        modules.filter((m) => !m.hidden && (m.id === mod.id || !hiddenSections().has(m.id))).map((m) =>
           h('a', { href: `#/${m.id}`, class: m.id === mod.id ? 'tab active' : 'tab', title: m.title, 'data-id': m.id, 'aria-current': m.id === mod.id ? 'page' : null },
             icon(m.icon), h('span', { class: 'tab-label' }, m.short ?? m.title),
             // What waits on the user there (Slack mentions, Dev terminals); js/attention.js updates it in place.
@@ -381,6 +380,15 @@ async function reconnect() {
 
 async function boot() {
   applyAppearance();
+  // Appearance can open links to other sites in this tab instead of a new one.
+  document.addEventListener('click', (e) => {
+    if (linksInNewTab() || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const a = /** @type {Element} */ (e.target).closest?.('a[target="_blank"]');
+    const href = a?.getAttribute('href') ?? '';
+    if (!/^https?:/i.test(href)) return;
+    e.preventDefault();
+    location.href = href;
+  });
   watchKeepAwake();
   // A link or the back button changed the route: load that section's view from the URL, then render.
   window.addEventListener('hashchange', () => {

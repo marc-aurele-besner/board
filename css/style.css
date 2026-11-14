@@ -189,6 +189,27 @@
 
 * { box-sizing: border-box; }
 
+/* Appearance: the accent colour (light, then dark in both places the dark theme is set), the text size, and motion. */
+:root[data-accent="teal"] { --accent: #0f766e; --accent-text: #ffffff; }
+:root[data-accent="green"] { --accent: #1d7a58; --accent-text: #ffffff; }
+:root[data-accent="amber"] { --accent: #a15c07; --accent-text: #ffffff; }
+:root[data-accent="rose"] { --accent: #be185d; --accent-text: #ffffff; }
+:root[data-accent="violet"] { --accent: #6d28d9; --accent-text: #ffffff; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-accent="teal"] { --accent: #5eead4; --accent-text: #04201d; }
+  :root:not([data-theme="light"])[data-accent="green"] { --accent: #62c99e; --accent-text: #05201a; }
+  :root:not([data-theme="light"])[data-accent="amber"] { --accent: #f2b179; --accent-text: #2a1600; }
+  :root:not([data-theme="light"])[data-accent="rose"] { --accent: #f9a8d4; --accent-text: #2a0716; }
+  :root:not([data-theme="light"])[data-accent="violet"] { --accent: #c4b5fd; --accent-text: #16083a; }
+}
+:root[data-theme="dark"][data-accent="teal"] { --accent: #5eead4; --accent-text: #04201d; }
+:root[data-theme="dark"][data-accent="green"] { --accent: #62c99e; --accent-text: #05201a; }
+:root[data-theme="dark"][data-accent="amber"] { --accent: #f2b179; --accent-text: #2a1600; }
+:root[data-theme="dark"][data-accent="rose"] { --accent: #f9a8d4; --accent-text: #2a0716; }
+:root[data-theme="dark"][data-accent="violet"] { --accent: #c4b5fd; --accent-text: #16083a; }
+:root[data-text="small"] { zoom: 0.92; }
+:root[data-text="large"] { zoom: 1.1; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -341,12 +362,16 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .todo-item input[type='checkbox'] { transition: transform 0.15s ease; }
 .todo-item input[type='checkbox']:active { transform: scale(0.85); }
 
+/* Less motion when the system asks for it, unless Appearance says Off ("full"), or always when it says On. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
-  .progress-bar { animation: none; left: 0; width: 100%; opacity: 0.45; }
+  :root:not([data-motion="full"]) :is(*, *::before, *::after) { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  :root:not([data-motion="full"]) .progress-bar { animation: none; left: 0; width: 100%; opacity: 0.45; }
   /* A loading spinner is the only sign a click did something, so it keeps turning, slower. */
-  .spin-icon { animation: spin 1.6s linear infinite !important; }
+  :root:not([data-motion="full"]) .spin-icon { animation: spin 1.6s linear infinite !important; }
 }
+:root[data-motion="reduce"] :is(*, *::before, *::after) { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+:root[data-motion="reduce"] .progress-bar { animation: none; left: 0; width: 100%; opacity: 0.45; }
+:root[data-motion="reduce"] .spin-icon { animation: spin 1.6s linear infinite !important; }
 
 /* Home board */
 .board { display: flex; flex-direction: column; gap: 16px; }
@@ -1553,8 +1578,31 @@ h2.row { gap: 10px; flex-wrap: nowrap; }
   .quick > button { width: 100%; }
 }
 
-/* Appearance: label colours */
-.app-seg .seg { min-width: 96px; }
+/* Settings → Appearance: a row per choice, its control on the right; swatches for the accent; the top bar's sections */
+.app-seg { margin: 0; flex-wrap: wrap; }
+.app-seg .seg { min-width: 88px; }
+.appearance-group { display: flex; flex-direction: column; }
+.appearance-group > h3 { margin: 14px 0 2px; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.appearance-row { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--border); }
+.appearance-group > h3 + .appearance-row, .appearance-group > .appearance-preview + .appearance-row { border-top: none; }
+.appearance-row > .grow { min-width: 220px; }
+.appearance-row p { margin: 2px 0 0; }
+.appearance-row.is-wide { flex-direction: column; align-items: stretch; }
+.appearance-preview { margin: 4px 0; padding: 10px 12px; border-radius: 8px; background: var(--surface-2); }
+.accent-swatches { display: flex; gap: 8px; }
+.accent-swatch { width: 30px; height: 30px; min-height: 0; padding: 0; border-radius: 50%; border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--border); }
+.accent-swatch.active { box-shadow: 0 0 0 2px var(--text); }
+/* The accent colours as they show in the light theme (js/appearance.js ACCENTS; their dark values are at the top). */
+.accent-swatch[data-swatch="blue"] { background: #0a6c9f; }
+.accent-swatch[data-swatch="teal"] { background: #0f766e; }
+.accent-swatch[data-swatch="green"] { background: #1d7a58; }
+.accent-swatch[data-swatch="amber"] { background: #a15c07; }
+.accent-swatch[data-swatch="rose"] { background: #be185d; }
+.accent-swatch[data-swatch="violet"] { background: #6d28d9; }
+.nav-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.nav-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 3px 12px; border-radius: 999px; border: 1px dashed var(--border); background: transparent; color: var(--muted); text-decoration: line-through; }
+.nav-chip.active { border-style: solid; background: var(--surface-2); color: var(--text); text-decoration: none; }
+.nav-chip .icon { width: 15px; height: 15px; }
 
 /* Money entries: one line each; bills open to their charges */
 .entries { display: flex; flex-direction: column; list-style: none; margin: 0; padding: 0; }
