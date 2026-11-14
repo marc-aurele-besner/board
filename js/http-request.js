@@ -8,7 +8,7 @@ export const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTION
 const BODY_MAX = 2 * 1024 * 1024;
 const TIMEOUT_MS = 60000;
 
-/** A request ready to send. @typedef {{ method: string, url: string, headers: [string, string][], body?: string }} Wire */
+/** A request ready to send; `headersOnly` stops at the headers, its body left unread. @typedef {{ method: string, url: string, headers: [string, string][], body?: string, headersOnly?: boolean }} Wire */
 /**
  * What came back.
  * @typedef {{ status: number, statusText: string, url: string, redirected: boolean, ms: number, size: number,
@@ -116,7 +116,8 @@ export async function sendWire(wire, signal) {
     if (/** @type {Error} */ (err).name === 'TimeoutError') throw new Error(`No answer after ${TIMEOUT_MS / 1000} seconds.`);
     throw cause ? new Error(`Could not reach ${url.host}: ${cause}`) : err;
   }
-  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (wire.headersOnly) await res.body?.cancel().catch(() => {});
+  const bytes = wire.headersOnly ? new Uint8Array() : new Uint8Array(await res.arrayBuffer());
   const ms = Math.round(performance.now() - started);
   const contentType = res.headers.get('content-type') ?? '';
   const binary = !textual(contentType);
