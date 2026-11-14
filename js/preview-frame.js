@@ -35,8 +35,16 @@ const live = new Set();
 
 // Sent up by the script a written page gets: its console calls and uncaught errors.
 const HOOK = `<script>(()=>{const t=(a)=>{try{return typeof a==='string'?a:a instanceof Error?(a.stack||String(a)):JSON.stringify(a)}catch{return String(a)}};const s=(level,args)=>{try{parent.postMessage({boardConsole:1,level,text:Array.from(args).map(t).join(' ')},'*')}catch{}};for(const l of ['log','info','warn','error','debug']){const o=console[l];console[l]=function(){s(l,arguments);return o.apply(console,arguments)}}addEventListener('error',(e)=>s('error',[e.message+(e.filename?' ('+e.filename+':'+e.lineno+')':'')]));addEventListener('unhandledrejection',(e)=>s('error',['Unhandled rejection: '+t(e.reason)]))})()</script>`;
+// It goes right after the page's <head> tag when there is one ahead of its first script, else after its doctype,
+// else first. A `<header>`, or a `<head>` in a script's text, is no place for it: its </script> would end that script.
 /** @param {string} html */
-const withHook = (html) => (/<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + HOOK) : HOOK + html);
+function withHook(html) {
+  const script = html.search(/<script[\s>]/i);
+  const head = /<head(?=[\s/>])[^>]*>/i.exec(html);
+  const at = head && (script < 0 || head.index < script) ? head.index + head[0].length
+    : /^\s*<!doctype[^>]*>/i.exec(html)?.[0].length ?? 0;
+  return html.slice(0, at) + HOOK + html.slice(at);
+}
 
 addEventListener('message', (e) => {
   const d = e.data;
