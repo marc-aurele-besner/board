@@ -8,6 +8,7 @@
 /** @import { RunnerStatus } from '../types/terminal' */
 /** @import { Terminal } from './vt.js' */
 /** @import { PrPreview } from './deploy-panel.js' */
+/** @import { Frame } from './preview-frame.js' */
 import { h, icon, patch } from './ui.js';
 import { toast } from './toast.js';
 import { issuesOf, prsOf, artifactsOf } from './task-links.js';
@@ -18,6 +19,7 @@ import { claudeState } from './dev-core.js';
 import { terminalView, liveSession, onSessionPaint, terminalBackground, openSession, exitText, keyData, wheelData, runnerOf, pickUp, resumeSession, followClaude, fitTerminal, imagePaths } from './modules/dev.js';
 import { attachSession, sendInput, stopCommand, readFile } from './terminal.js';
 import { workerCall } from './runners.js';
+import { previewFrame, dropFrame } from './preview-frame.js';
 import { createTerminal } from './vt.js';
 import { imageFiles, dragsFiles } from './images.js';
 
@@ -177,7 +179,7 @@ export function closeWork() {
   const store = pop.store;
   dropTerm();
   // An artifact's page is read again on the next open.
-  frames.clear();
+  for (const key of [...frames.keys()]) forgetFrame(key);
   pop.el.remove();
   pop.unsub?.();
   document.removeEventListener('pointerdown', onOutside, true);
@@ -432,46 +434,37 @@ const artifactList = (store, artifacts) => h('div', { class: 'work-lines' }, [..
     }, icon('eye'), 'Preview') : null,
     h('a', { class: 'btn-small', href: a.url, target: '_blank', rel: 'noopener' }, 'Open')))));
 
-// A preview deployment's site, shown below the list in a frame: the newest ready one first, '-' for none. Before it
-// is framed, the runners read its headers: a site that forbids being framed (X-Frame-Options, or a CSP
-// frame-ancestors that leaves the board out), or that asks to sign in first (Vercel's Deployment Protection), says
-// so instead of showing a blank frame. Without the runners, it is framed as it is.
+// A preview deployment's site, shown below the list in a frame (js/preview-frame.js, with its device sizes and
+// console): the newest ready one first, '-' for none. Before it is framed, the runners read its headers: a site that
+// forbids being framed (X-Frame-Options, or a CSP frame-ancestors that leaves the board out), or that asks to sign in
+// first (Vercel's Deployment Protection), says so instead of showing a blank frame. Without the runners, it is framed
+// as it is.
 /** @param {PrPreview[]} previews */
 function showSite(previews) {
   if (!pop.slot) return;
   const sites = [...previews].reverse().filter((p) => p.url);
   if (pop.site !== '-' && !sites.some((p) => p.url === pop.site)) pop.site = (sites.find((p) => p.state === 'ready') ?? sites[0])?.url ?? '';
   const p = sites.find((x) => x.url === pop.site);
-  if (!p) {
-    if (pop.slot.querySelector('.work-preview')) pop.slot.replaceChildren();
-    return;
-  }
+  if (!p) return clearSlot();
   const key = `site:${p.url}`;
-  let frame = frames.get(key);
-  if (!frame) {
-    const body = h('div', { class: 'work-preview-body' }, h('p', { class: 'muted small work-empty' }, 'Opening the site…'));
-    const host = p.url.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-    const el = h('div', { class: 'work-preview' },
-      h('div', { class: 'work-preview-head' },
-        stateDot(p.state),
-        h('span', { class: 'work-title', title: p.url }, host),
-        h('span', { class: 'muted small work-preview-note' }, `${PROVIDER_NAMES[p.provider] ?? 'Preview'} · #${p.pr.number}`),
-        h('a', { class: 'icon-btn', href: p.url, target: '_blank', rel: 'noopener noreferrer', title: 'Open the site in a new tab', 'aria-label': 'Open the site in a new tab' }, icon('globe')),
-        h('button', { type: 'button', class: 'icon-btn', title: 'Load the site again', 'aria-label': 'Load the site again', onclick: () => {
-          frames.delete(key);
-          paint();
-        } }, icon('refresh'))),
-      body);
-    frame = { el, at: Date.now() };
-    frames.set(key, frame);
-    const url = p.url;
-    framable(url).then((refused) => body.replaceChildren(refused
-      ? h('div', { class: 'work-empty work-preview-refused' },
-        h('p', { class: 'muted small' }, refused),
-        h('a', { class: 'btn-small', href: url, target: '_blank', rel: 'noopener noreferrer' }, icon('globe'), 'Open site'))
-      : h('iframe', { class: 'work-preview-frame', src: url, sandbox: 'allow-scripts allow-same-origin allow-forms allow-popups', title: `Preview of ${host}` })));
-  }
-  if (pop.slot.firstChild !== frame.el) pop.slot.replaceChildren(frame.el);
+  const url = p.url;
+  const host = url.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  showFrame(key, () => previewFrame({
+    site: url,
+    head: [
+      stateDot(p.state),
+      h('span', { class: 'work-title', title: url }, host),
+      h('span', { class: 'muted small work-preview-note' }, `${PROVIDER_NAMES[p.provider] ?? 'Preview'} · #${p.pr.number}`),
+    ],
+    actions: [
+      h('a', { class: 'icon-btn', href: url, target: '_blank', rel: 'noopener noreferrer', title: 'Open the site in a new tab', 'aria-label': 'Open the site in a new tab' }, icon('globe')),
+      reloadButton(key, 'Load the site again'),
+    ],
+    load: async () => {
+      const refused = await framable(url);
+      return { url, refused, sandbox: 'allow-scripts allow-same-origin allow-forms allow-popups', title: `Preview of ${host}` };
+    },
+  }));
 }
 
 // Why a site cannot be shown in a frame here, or '' when it can (or the runners could not tell).
@@ -498,45 +491,61 @@ async function framable(url) {
 }
 
 // The preview of an artifact: the local page it was last published from, read through the runner and drawn in a
-// sandboxed frame (its scripts run, with no access to the board). claude.ai's own page refuses to be framed, and a
-// private artifact needs the user's sign-in. What the page loads beside it (its other files) may be missing. The newest
-// artifact with a page shows first; '-' is none. Frames are kept by page, so a redraw does not reload them.
-/** @type {Map<string, { el: HTMLElement, at: number }>} */
-const frames = new Map();
+// sandboxed frame (its scripts run, with no access to the board; its console comes up live). claude.ai's own page
+// refuses to be framed, and a private artifact needs the user's sign-in. What the page loads beside it (its other
+// files) may be missing. The newest artifact with a page shows first; '-' is none.
 /** @param {Store} store @param {ReturnType<typeof artifactsOf>} artifacts */
 function showPreview(store, artifacts) {
   if (!pop.slot) return;
   const withPage = [...artifacts].reverse().filter((a) => a.file);
   if (pop.preview !== '-' && !withPage.some((a) => a.url === pop.preview)) pop.preview = withPage[0]?.url ?? '';
   const a = withPage.find((x) => x.url === pop.preview);
-  if (!a?.file) {
-    if (pop.slot.querySelector('.work-preview')) pop.slot.replaceChildren();
-    return;
-  }
+  if (!a?.file) return clearSlot();
   const file = a.file;
-  let frame = frames.get(file);
+  showFrame(file, () => previewFrame({
+    head: [
+      h('span', { class: 'work-art' }, icon('sparkle')),
+      h('span', { class: 'work-title', title: file }, a.title || 'Artifact'),
+      h('span', { class: 'muted small work-preview-note', title: `${file}\nIts other files (styles, images, data) may not show here.` }, 'Local page, as last published'),
+    ],
+    actions: [reloadButton(file, 'Read the page again')],
+    load: async () => {
+      const f = await readFile(runnerOf(store), file).catch((err) => {
+        throw new Error(`Could not read the page: ${/** @type {Error} */ (err).message}`);
+      });
+      if (typeof f.text !== 'string') return { refused: f.tooLarge ? 'The page is too large to preview.' : 'The page is not text.', sandbox: '', title: '' };
+      return { html: f.text, sandbox: 'allow-scripts allow-popups', title: `Preview of ${a.title || 'the artifact'}` };
+    },
+  }));
+}
+
+// Frames are kept by page or site, so a redraw does not reload them; closing the popover lets them go.
+/** @type {Map<string, Frame>} */
+const frames = new Map();
+/** @param {string} key @param {() => Frame} make */
+function showFrame(key, make) {
+  if (!pop.slot) return;
+  let frame = frames.get(key);
   if (!frame) {
-    const body = h('div', { class: 'work-preview-body' }, h('p', { class: 'muted small work-empty' }, 'Reading the page…'));
-    const el = h('div', { class: 'work-preview' },
-      h('div', { class: 'work-preview-head' },
-        h('span', { class: 'work-art' }, icon('sparkle')),
-        h('span', { class: 'work-title', title: file }, a.title || 'Artifact'),
-        h('span', { class: 'muted small work-preview-note', title: `${file}\nIts other files (styles, images, data) may not show here.` }, 'Local page, as last published'),
-        h('button', { type: 'button', class: 'icon-btn', title: 'Read the page again', 'aria-label': 'Read the page again', onclick: () => {
-          frames.delete(file);
-          paint();
-        } }, icon('refresh'))),
-      body);
-    frame = { el, at: Date.now() };
-    frames.set(file, frame);
-    readFile(runnerOf(store), file).then((f) => {
-      body.replaceChildren(typeof f.text === 'string'
-        ? h('iframe', { class: 'work-preview-frame', sandbox: 'allow-scripts allow-popups', srcdoc: f.text, title: `Preview of ${a.title || 'the artifact'}` })
-        : h('p', { class: 'muted small work-empty' }, f.tooLarge ? 'The page is too large to preview.' : 'The page is not text.'));
-    }, (err) => body.replaceChildren(h('p', { class: 'muted small work-empty' }, `Could not read the page: ${/** @type {Error} */ (err).message}`)));
+    frame = make();
+    frames.set(key, frame);
   }
   if (pop.slot.firstChild !== frame.el) pop.slot.replaceChildren(frame.el);
 }
+function clearSlot() {
+  if (pop.slot?.querySelector('.work-preview')) pop.slot.replaceChildren();
+}
+/** @param {string} key */
+function forgetFrame(key) {
+  const f = frames.get(key);
+  if (f) dropFrame(f);
+  frames.delete(key);
+}
+/** @param {string} key @param {string} title */
+const reloadButton = (key, title) => h('button', { type: 'button', class: 'icon-btn', title, 'aria-label': title, onclick: () => {
+  forgetFrame(key);
+  paint();
+} }, icon('refresh'));
 
 // With more than one session, a row each to pick the one the terminal shows.
 /** @param {WorkSession[]} sessions @param {WorkOptions} options */
