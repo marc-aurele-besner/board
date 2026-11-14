@@ -701,7 +701,7 @@ async function reviewSpending(store, range, periodEntries) {
     spend.text = (await ask(store, 'task-budget', [
       {
         role: 'system',
-        content: systemPrompt(store, 'budget', { currency: view.currency }),
+        content: systemPrompt(store, 'budget', { currency: view.currency, period: range }),
       },
       {
         role: 'user',

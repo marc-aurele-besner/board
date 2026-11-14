@@ -774,6 +774,8 @@ body.project-dragging .project-list .root-drop { display: block; }
 .mp-desc { margin: 0; font-size: 0.9rem; white-space: pre-line; max-height: 14vh; overflow: auto; }
 .model-chip .model-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; }
 .model-chip .icon { width: 12px; height: 12px; }
+.model-chip-text { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; text-align: left; line-height: 1.25; }
+.model-chip-text .small { font-size: 0.72rem; }
 
 /* Settings: left sidebar, full-width content */
 .settings-main { min-width: 0; display: flex; flex-direction: column; gap: var(--gap); }
@@ -2877,6 +2879,11 @@ button.json-key:hover { background: color-mix(in srgb, var(--accent) 15%, transp
 
 /* Settings → Prompts */
 .prompt-list { display: flex; flex-direction: column; }
+.prompt-list-head { align-items: center; gap: 12px; flex-wrap: wrap; }
+.prompt-find { max-width: 280px; }
+.prompt-vars { align-items: center; }
+.prompt-vars > .muted { min-width: 86px; }
+.prompt-preview { font-family: var(--mono, ui-monospace, monospace); font-size: 0.85rem; }
 .prompt-list > li { border-bottom: 1px solid var(--border); }
 .prompt-item summary { display: flex; align-items: center; gap: 10px; padding: 10px 0; cursor: pointer; flex-wrap: wrap; }
 .prompt-item summary .icon { width: 13px; height: 13px; vertical-align: -2px; }

@@ -39,6 +39,9 @@ const COLLECTION = 'settings';
 const OPENROUTER_CHECK = 'https://openrouter.ai/api/v1/auth/key';
 const OPENROUTER_MODELS = 'https://openrouter.ai/api/v1/models';
 
+// The tasks that read images: their model dialog lists the models that can.
+const IMAGE_TASKS = ['task-receipt', 'task-recipe-photo'];
+
 // Tasks the board can run with an AI model. Each one can be pinned to its own model.
 export const DEFAULT_TASKS = [
   { id: 'task-summary', name: 'Project summaries', description: 'Summarize a project’s todos and notes into a short status.' },
@@ -74,7 +77,7 @@ export { modelForTask };
 // On a phone the page shows the list of a category or one page, not both: list is true while the list is shown.
 /**
  * @type {{ section: string, list: boolean, results: Record<string, { status: string, text?: string } | null>, reveal: Record<string, boolean>,
- *   catalog: { status: string, items?: { value: string, label: string, name: string }[], error?: string } }}
+ *   catalog: { status: string, items?: { value: string, label: string, name: string, price: string }[], error?: string } }}
  */
 const view = { section: 'github', list: false, results: {}, reveal: {}, catalog: { status: 'idle' } };
 
@@ -96,14 +99,28 @@ function loadCatalog(store) {
       if (!res.ok) throw new Error(`OpenRouter error ${res.status}`);
       return res.json();
     })
-    .then((/** @type {{ data: { id: string, name: string }[] }} */ { data }) => {
-      view.catalog = { status: 'ok', items: data.map((m) => ({ value: m.id, label: m.id, name: m.name })) };
+    .then((/** @type {{ data: { id: string, name: string, pricing?: { prompt?: string, completion?: string } }[] }} */ { data }) => {
+      view.catalog = { status: 'ok', items: data.map((m) => ({ value: m.id, label: m.id, name: m.name, price: priceLine(m.pricing) })) };
     })
     .catch((err) => {
       view.catalog = { status: 'error', error: err.message };
     })
     .finally(() => store.refresh());
 }
+
+// "$3.00 / $15.00 per 1M": a model's input and output price per million tokens, as OpenRouter lists them per token.
+/** @param {{ prompt?: string, completion?: string } | undefined} pricing */
+function priceLine(pricing) {
+  const per = (/** @type {string | undefined} */ v) => (v === undefined || !Number.isFinite(Number(v)) ? null : Number(v) * 1e6);
+  const money = (/** @type {number} */ n) => (n === 0 ? 'free' : n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
+  const input = per(pricing?.prompt);
+  const output = per(pricing?.completion);
+  if (input === null || output === null) return '';
+  return input === 0 && output === 0 ? 'Free' : `${money(input)} / ${money(output)} per 1M`;
+}
+
+/** @param {string} id */
+const priceOf = (id) => view.catalog.items?.find((m) => m.value === id)?.price ?? '';
 
 /** @param {string} href @param {Child} text */
 const link = (href, text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
@@ -254,7 +271,7 @@ function modelsPanel(store) {
     h('header', { class: 'panel-head' },
       h('div', null,
         h('h2', null, 'Models & tasks'),
-        h('p', { class: 'muted' }, 'Pin a model to each task. A task without its own pin uses the default model.')),
+        h('p', { class: 'muted' }, `Pin a model to each task. A task without its own pin uses the default model. ${models.tasks.filter((t) => t.model).length} of ${models.tasks.length} tasks pinned.`)),
       h('button', {
         type: 'button',
         disabled: cat.status === 'loading',
@@ -271,6 +288,7 @@ function modelsPanel(store) {
       modelChip({
         value: models.default,
         placeholder: 'Choose a model',
+        detail: priceOf(models.default),
         onPick: (v) => updateModels(store, { default: v ?? '' }),
       })),
 
@@ -291,13 +309,16 @@ function modelsPanel(store) {
                   allowEmpty: true,
                   onSave: (description) => updateTask(store, t.id, { description }),
                 }))),
+              IMAGE_TASKS.includes(t.id) ? h('span', { class: 'pill tone-doing', title: 'Its dialog lists the models that can read images' }, 'Reads images') : null,
               modelChip({
                 value: t.model,
                 nullable: true,
                 nullLabel: models.default ? `Default: ${models.default}` : 'Use default',
-                requireImages: t.id === 'task-receipt' || t.id === 'task-recipe-photo',
+                requireImages: IMAGE_TASKS.includes(t.id),
+                detail: priceOf(t.model || models.default),
                 onPick: (v) => updateTask(store, t.id, { model: v ?? '' }),
               }),
+              t.model ? h('button', { type: 'button', class: 'btn-small btn-ghost', title: 'Follow the default model', onclick: () => updateTask(store, t.id, { model: '' }) }, 'Unpin') : null,
               h('button', {
                 type: 'button',
                 class: 'icon-btn',

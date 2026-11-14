@@ -1,5 +1,6 @@
 // The system prompts behind every AI feature. Settings → Prompts can replace any of them; an empty override means the default.
-// {{name}} placeholders are filled at call time with values the feature knows (the currency, the categories, ...).
+// {{name}} placeholders are filled at call time: the general ones (the date, the time zone, the projects...) in every
+// prompt and in the text added to every call, and a feature's own (its `vars`: the currency, the project...) in its.
 /** @import { DataStore } from '../types/data' */
 
 export const GLOBAL_PROMPT = 'global';
@@ -10,6 +11,7 @@ export const PROMPTS = [
     task: 'task-plan',
     name: 'Next steps',
     where: 'Home → Plan my day',
+    vars: ['openTasks'],
     text: 'You plan a personal day. Given open tasks as JSON (`tasks`), with short profiles of their projects keyed by project id (`profiles`) for context, reply in plain text with three short sections titled Now, Next and Later, each with up to four bullet points. Name the project in brackets when it helps. Be concise.',
   },
   {
@@ -32,6 +34,7 @@ export const PROMPTS = [
     task: 'task-review',
     name: 'Issue & PR triage',
     where: 'Projects → Triage with AI',
+    vars: ['project', 'website'],
     text: 'You triage GitHub issues and pull requests. Given the open items as JSON (`items`), with a short profile of the project keyed by project id (`profiles`) for context, reply in plain text: first what needs attention now, then what looks stale (no update in 30 days or more), then one suggested next action per item in a single line. Be concise.',
   },
   {
@@ -39,6 +42,7 @@ export const PROMPTS = [
     task: 'task-summary',
     name: 'Repository summary',
     where: 'Projects → Explain with AI',
+    vars: ['repo'],
     text: 'You help a developer understand a code repository. From the description, topics, languages, file list and README, reply in plain text: what the project does in two sentences, its main parts (from the files), how to work on it, and anything unclear. Do not invent features.',
   },
   {
@@ -46,6 +50,7 @@ export const PROMPTS = [
     task: 'task-summary',
     name: 'Project profile',
     where: 'Projects → Build profile',
+    vars: ['project', 'website'],
     text: [
       'You write a short profile of a project, which other AI features will read as context.',
       'The input holds the project\'s name and description, then the sources that could be read: local files (README, AGENTS.md, CLAUDE.md, package.json, the top-level folder), recent commit subjects, GitHub details, and web pages. It ends with the sources that could not be read.',
@@ -64,6 +69,7 @@ export const PROMPTS = [
     task: 'task-summary',
     name: 'Project brand',
     where: 'Projects → Brand → Find with AI',
+    vars: ['project', 'website'],
     text: [
       'You collect the brand of a project: its images, colours, fonts and style files.',
       'The input holds the project\'s name, website and local folder, then the sources that could be read: image files named like a logo or icon, web manifests, theme and Tailwind configs, the brand lines of its stylesheets (custom properties, fonts), and the icon, colour and stylesheet tags of its pages. It ends with the sources that could not be read, and the brand the project already has, if any.',
@@ -111,7 +117,7 @@ export const PROMPTS = [
     task: 'task-budget',
     name: 'Spending review',
     where: 'Money → Review this period with AI',
-    vars: ['currency'],
+    vars: ['currency', 'period'],
     text: 'You review a personal budget. Amounts are in {{currency}}. Given the totals, totals by category and the entries as JSON, reply in plain text: the overall picture in two sentences, then the three things worth a second look, then one practical suggestion. Be concise and do not invent figures.',
   },
   {
@@ -197,6 +203,58 @@ Reply with JSON only:
 /** @param {string | undefined} template @param {Record<string, unknown>} vars */
 const fill = (template, vars) => String(template ?? '').replace(/\{\{\s*(\w+)\s*\}\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
 
+// The variables every prompt can hold, with what they are and an example, as Settings → Prompts offers them.
+/** @type {[string, string, string][]} */
+export const GENERAL_VARS = [
+  ['date', 'Today’s date', '2026-11-14'],
+  ['weekday', 'Today’s day of the week', 'Saturday'],
+  ['time', 'The time of the call', '09:41'],
+  ['week', 'The ISO week number', '46'],
+  ['timezone', 'Your time zone', 'America/Toronto'],
+  ['locale', 'Your language and region', 'en-CA'],
+  ['projects', 'The names of your projects', 'Atlas, Studio site, Notes app'],
+];
+
+// A feature's own variables (each prompt's `vars`), with what they are and an example.
+/** @type {Record<string, [string, string]>} */
+export const FEATURE_VARS = {
+  currency: ['The currency amounts are shown in', 'CAD'],
+  categories: ['Your money categories', 'Groceries, Rent, Transport'],
+  maxImages: ['How many photos a recipe keeps', '6'],
+  project: ['The project it runs on', 'Atlas'],
+  website: ['That project’s website', 'atlas.example.com'],
+  repo: ['The repository', 'owner/atlas'],
+  period: ['The period under review', 'This month'],
+  openTasks: ['How many tasks are open', '23'],
+};
+
+/** @param {number} n */
+const pad = (n) => String(n).padStart(2, '0');
+
+// The ISO 8601 week of a date: the week of its Thursday, counted from the week holding January 4.
+/** @param {Date} d */
+export function isoWeek(d) {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  t.setUTCDate(t.getUTCDate() + 3 - ((t.getUTCDay() + 6) % 7));
+  const jan4 = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+  return 1 + Math.round(((t.getTime() - jan4.getTime()) / 86400000 - 3 + ((jan4.getUTCDay() + 6) % 7)) / 7);
+}
+
+// The general variables' values now. No DOM: the runners fill Cron's prompts with them too.
+/** @param {DataStore} store @param {Date} [now] @returns {Record<string, string>} */
+export function generalVars(store, now = new Date()) {
+  const intl = Intl.DateTimeFormat().resolvedOptions();
+  return {
+    date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
+    weekday: now.toLocaleDateString('en-US', { weekday: 'long' }),
+    time: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
+    week: String(isoWeek(now)),
+    timezone: intl.timeZone ?? '',
+    locale: intl.locale ?? '',
+    projects: (store.get('projects')?.projects ?? []).map((p) => p.name).join(', '),
+  };
+}
+
 /** @param {DataStore} store */
 export const overrides = (store) => store.get('settings').prompts ?? {};
 
@@ -205,9 +263,9 @@ export const overrides = (store) => store.get('settings').prompts ?? {};
 export function systemPrompt(store, id, vars = {}) {
   const def = PROMPTS.find((p) => p.id === id);
   const text = overrides(store)[id]?.trim() || def?.text || '';
-  return fill(text, vars);
+  return fill(text, { ...generalVars(store), ...vars });
 }
 
-// Instructions added to every call, Cron steps included. Empty when none are set.
+// Instructions added to every call, Cron steps included, with the general variables filled. Empty when none are set.
 /** @param {DataStore} store */
-export const globalPrompt = (store) => overrides(store)[GLOBAL_PROMPT]?.trim() ?? '';
+export const globalPrompt = (store) => fill(overrides(store)[GLOBAL_PROMPT]?.trim() ?? '', generalVars(store));

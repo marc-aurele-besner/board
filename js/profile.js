@@ -217,7 +217,7 @@ export async function buildProfile(store, project, { onStep = () => {}, keepEdit
   const merge = keepEdits && current.edited && current.text.trim();
   const input = profileInput(project, sources);
   const reply = await ask(store, 'task-summary', [
-    { role: 'system', content: systemPrompt(store, 'project-profile') },
+    { role: 'system', content: systemPrompt(store, 'project-profile', { project: project.name, website: project.website ?? '' }) },
     { role: 'user', content: merge ? `${input}\n\n${EDITED_NOTE}\n\n<current-profile>\n${current.text}\n</current-profile>` : input },
   ], { usageId, projectId: project.id });
   const edited = Boolean(merge);

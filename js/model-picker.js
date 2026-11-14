@@ -71,8 +71,9 @@ const SORTERS = {
  * @typedef {{ value?: string | null, nullable?: boolean, nullLabel?: string, requireImages?: boolean, onPick: (id: string | null) => void }} PickerOptions
  */
 
-/** @param {PickerOptions & { placeholder?: string }} options */
-export function modelChip({ value = '', placeholder = 'Choose a model', nullable = false, nullLabel = 'Use default', requireImages = false, onPick }) {
+// `detail` is a second line under the model (its price per million tokens).
+/** @param {PickerOptions & { placeholder?: string, detail?: string }} options */
+export function modelChip({ value = '', placeholder = 'Choose a model', nullable = false, nullLabel = 'Use default', requireImages = false, detail = '', onPick }) {
   const empty = !value;
   return h('button', {
     type: 'button',
@@ -80,7 +81,9 @@ export function modelChip({ value = '', placeholder = 'Choose a model', nullable
     'aria-haspopup': 'dialog',
     onclick: () => openModelPicker({ value, nullable, nullLabel, requireImages, onPick }),
   },
-    h('span', { class: 'model-id' }, empty ? (nullable ? nullLabel : placeholder) : value),
+    h('span', { class: 'model-chip-text' },
+      h('span', { class: 'model-id' }, empty ? (nullable ? nullLabel : placeholder) : value),
+      detail ? h('span', { class: 'muted small' }, detail) : null),
     icon('chevron-down'));
 }
 

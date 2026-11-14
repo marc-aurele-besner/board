@@ -645,7 +645,7 @@ async function runTriage(store, p) {
       triage.text = (await ask(store, 'task-review', [
         {
           role: 'system',
-          content: systemPrompt(store, 'triage'),
+          content: systemPrompt(store, 'triage', { project: p.name, website: p.website ?? '' }),
         },
         { role: 'user', content: JSON.stringify({ items: all, profiles: profilesFor([p], [p.id]) }) },
       ], { projectId: p.id })).trim();
@@ -895,7 +895,7 @@ async function explainRepo(store, repo, entry) {
     const text = await ask(store, 'task-summary', [
       {
         role: 'system',
-        content: systemPrompt(store, 'repo-summary'),
+        content: systemPrompt(store, 'repo-summary', { repo }),
       },
       {
         role: 'user',
