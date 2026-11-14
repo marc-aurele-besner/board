@@ -79,9 +79,41 @@ function updateAgents(store, mutate) {
 // "opus, sonnet" or one per line, as a list without blanks or repeats.
 const parseModels = (/** @type {string} */ text) => [...new Set(text.split(/[\s,]+/).filter(Boolean))];
 
-/** @param {string} text */
-const modelPills = (text) => h('span', { class: 'dev-models' }, parseModels(text).map((m) =>
-  h('span', { class: 'dev-model', title: DEV_MODEL_NAMES[m] ? `Runs as ${m}` : m }, h('code', null, m), DEV_MODEL_NAMES[m] ? h('span', { class: 'muted' }, DEV_MODEL_NAMES[m]) : null)));
+// An agent's models as the chips they are edited as: each the value passed to --model (a claude alias names its model
+// in its tooltip), with × to remove it, then a field that adds one (Enter, or a comma, adds; several may be pasted).
+/** @param {DevProvider} agent @param {(models: string[]) => void} save */
+function modelsEditor(agent, save) {
+  const add = (/** @type {HTMLInputElement} */ input) => {
+    const added = parseModels(input.value).filter((m) => !agent.models.includes(m));
+    input.value = '';
+    if (added.length) save([...agent.models, ...added]);
+  };
+  return h('div', { class: 'dev-models' },
+    agent.models.map((m) => h('span', { class: 'dev-model', title: DEV_MODEL_NAMES[m] ? `${m} runs ${DEV_MODEL_NAMES[m]} today` : m },
+      h('code', null, m),
+      h('button', {
+        type: 'button',
+        class: 'dev-model-x',
+        'aria-label': `Remove ${m}`,
+        title: `Remove ${m}`,
+        onclick: () => save(agent.models.filter((x) => x !== m)),
+      }, icon('x')))),
+    h('input', {
+      class: 'dev-model-add',
+      name: `models-${agent.id}`,
+      placeholder: agent.models.length ? 'Add a model' : 'Add a model (none: the program picks)',
+      'aria-label': `Add a model to ${agent.name}`,
+      autocomplete: 'off',
+      spellcheck: false,
+      onkeydown: (/** @type {KeyboardEvent & { currentTarget: HTMLInputElement }} */ e) => {
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          add(e.currentTarget);
+        }
+      },
+      onchange: (/** @type {Event & { currentTarget: HTMLInputElement }} */ e) => add(e.currentTarget),
+    }));
+}
 
 // Projects that ran a removed agent keep its command as their own; tasks that picked it go back to their project's.
 /** @param {Store} store @param {DevProvider[]} agents @param {DevHarness[]} harnesses @param {Project[]} projects */
@@ -164,13 +196,7 @@ function agentsPanel(store, agents, harnesses, projects) {
           }),
           h('div', { class: 'cmd-field' },
             h('span', { class: 'dev-env-label small' }, 'Models in a task’s menu'),
-            editText({
-              value: agent.models.join(', '),
-              placeholder: 'None: the program picks the model',
-              allowEmpty: true,
-              display: modelPills,
-              onSave: (text) => patch(agent.id, { models: parseModels(text) }),
-            })),
+            modelsEditor(agent, (models) => patch(agent.id, { models }))),
           agentFlags(store, agent, harness, agents));
       })),
     h('form', { class: 'dev-preset-add', onsubmit: add },
