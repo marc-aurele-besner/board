@@ -235,7 +235,8 @@ export function withPrompt(harnesses, command, prompt) {
   return `${command} ${fill(template, 'prompt', prompt)}`;
 }
 
-// A session started on tasks learns that it can list, add and edit their subtasks (the board-tasks skill,
+// A session started on tasks learns that it can check other sessions on them, read their project, brand and images,
+// and list, add and edit their subtasks (the board-tasks skill,
 // tools/board.js). Claude Code gets it in its system prompt, which a compaction keeps; any other program, or a
 // command that sets its own system prompt, gets it at the end of the prompt.
 const APPEND_SYSTEM = /(^|\s)--append-system-prompt(?=[\s=])/;
@@ -243,7 +244,7 @@ const APPEND_SYSTEM = /(^|\s)--append-system-prompt(?=[\s=])/;
 export function withTaskPointer(harnesses, command, prompt, taskIds) {
   if (!taskIds.length) return { command, prompt };
   const which = taskIds.length > 1 ? `tasks ${taskIds.join(', ')}` : `task ${taskIds[0]}`;
-  const text = `This session works on board ${which}. To file follow-up work as subtasks, check what is already filed, or update those subtasks, use the board-tasks skill (node "$BOARD_CLI" task --help).`;
+  const text = `This session works on board ${which}. Before coding, check whether other sessions already work on it (node "$BOARD_CLI" session). For its project, brand or images, and to file follow-up work as subtasks or update them, use the board-tasks skill (node "$BOARD_CLI" --help).`;
   if (harnessOf(harnesses, command)?.id === CLAUDE_PROVIDER && !APPEND_SYSTEM.test(command)) return { command: `${command} --append-system-prompt ${shellQuote(text)}`, prompt };
   return { command, prompt: prompt ? `${prompt}\n\n${text}` : text };
 }
