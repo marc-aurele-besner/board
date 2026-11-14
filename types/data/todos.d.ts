@@ -75,7 +75,8 @@ export interface Task {
   created: string;
   // Old: before statuses.
   done?: boolean;
-  // Which rule or source made the task ('telegram', 'cron', 'domain', ...), and what it is about.
+  // Which rule or source made the task ('telegram', 'cron', 'domain', ...), and what it is about. 'dev': a Dev
+  // session made it through tools/board.js, and autoRef is its terminal session's id.
   auto?: string;
   autoRef?: string;
   // Waits in "To Organize".
