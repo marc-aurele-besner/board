@@ -259,6 +259,25 @@ export async function fetchRepoOverview(repo) {
   };
 }
 
+// A folder of a repo (its entries, folders first) or a file (its text), from the contents API on the default branch.
+// A file over 1 MB comes without its content; one that is not UTF-8 text is said to be binary.
+/** @param {string} repo @param {string} path @returns {Promise<{ entries: { name: string, dir: boolean }[] } | { text?: string, binary?: boolean, tooLarge?: boolean }>} */
+export async function repoContents(repo, path) {
+  const res = await fetch(`${API}/repos/${repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}`, { headers: headers(repo) });
+  if (!res.ok) throw new Error(explain(res.status));
+  const body = /** @type {{ name: string, type: string }[] | { content?: string, encoding?: string, size?: number }} */ (await res.json());
+  if (Array.isArray(body)) {
+    const entries = body.map((f) => ({ name: f.name, dir: f.type === 'dir' }));
+    return { entries: entries.sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name)) };
+  }
+  if (body.encoding !== 'base64' || !body.content) return { tooLarge: (body.size ?? 0) > 0 };
+  try {
+    return { text: new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(atob(body.content.replace(/\s+/g, '')), (c) => c.charCodeAt(0))) };
+  } catch {
+    return { binary: true };
+  }
+}
+
 // Asks the runners to read the repo again now.
 /** @param {string} repo @param {() => void} [onChange] */
 export function refreshRepo(repo, onChange) {
