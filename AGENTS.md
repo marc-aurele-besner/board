@@ -117,6 +117,7 @@ js/meetings.js        upcoming meetings with guests, each guest matched to conta
 js/capture.js         parseTask(), parseMoney() and makeTask(): one place for a task's shape
 js/palette.js         the Cmd/Ctrl+K search palette: jump, or capture a task, a Money entry or a recipe link
 js/search.js          what the full search page (modules/search.js, hidden) looks through, grouped by kind
+js/command-field.js   a shell command in an editor's colours, and its field: {{variable}} chips, Edit and Preview (Settings → Dev environment)
 js/slash-complete.js  the list of Claude Code skills a "/" opens under the caret of a task's description: narrowing, arrows, Enter or Tab
 js/task-query.js      the Tasks search: words plus #project, !priority, is:status, cat: and due: filters
 js/shortcuts.js       the single-key shortcuts ("g" then a letter) and the sheet that lists them
