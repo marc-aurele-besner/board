@@ -122,6 +122,10 @@ js/task-tree.js       the tree parentId makes: wouldLoop() and descendantsOf() (
 js/palette.js         the Cmd/Ctrl+K search palette: jump, or capture a task, a Money entry or a recipe link
 js/search.js          what the full search page (modules/search.js, hidden) looks through, grouped by kind
 js/settings-pages.js  the Settings pages by category (the rail, the lists, search and the palette), keyed by their ?section= (no DOM)
+js/locale.js          Appearance's date, time, number and week choices: dateLocale(), numberLocale() and weekStart(), which every date and number shown goes through (no DOM at load)
+js/appearance.js      Appearance's look and navigation choices in this browser: applyAppearance(), the start page, hidden top-bar sections, how links open, whether removals ask
+js/remove.js          removeWithUndo(): a removal from the board's data asks first, or happens at once with Undo
+js/modules/settings-appearance.js  Settings → Appearance
 js/command-field.js   a shell command in an editor's colours, and its field: {{variable}} chips, Edit and Preview (Settings → Coding Agents)
 js/slash-complete.js  the list of Claude Code skills a "/" opens under the caret of a task's description: narrowing, arrows, Enter or Tab
 js/task-query.js      the Tasks search: words plus #project, !priority, is:status, cat: and due: filters
@@ -186,6 +190,8 @@ tools/usage.js        reads Claude Code's transcripts for the runner: a task wor
 - **Old tabs.** An open tab learns from `GET /version` that the files changed and offers a reload. When a change must not meet a tab still running the old code (a data file's new shape that an old tab would save back in its old one), bump `APP_EPOCH` in `js/app-version-core.js` in the same commit: every older tab then reloads by itself.
 - **Typed data.** Each JSON file's shape is in `types/data/<name>.d.ts`, collected in `Collections` in `types/data.d.ts`, so `store.get('todos')` is typed in every file. To add a field: add it to the interface (optional, `field?: T`, since older files lack it), add it to the matching `types/fixtures/<name>.json`, then run `bun run typecheck`; every file that is checked and misuses the field fails. A new collection needs its own `.d.ts`, an entry in `Collections` (and `WorkerCollections` if only the runners write it), a fixture and a line in `types/fixtures.check.js`. Stored enum-like fields stay `string`; narrow them in code.
 - **JSDoc types.** Annotate exported functions and their parameters, and let inference do the rest. Import shared shapes with `/** @import { Task, Store } from '../types/data' */`. No `@ts-ignore`; an `any` or `@ts-expect-error` carries its reason on the same line (`// any: <reason>`). Fix a real bug the checker finds in its own commit; do not change code only to please the checker.
+- **Dates and numbers.** Format them with `dateLocale()` or `numberLocale()` from `js/locale.js` as the locale (`d.toLocaleDateString(dateLocale(), …)`), and start weeks on `weekStart()`, so Appearance's choices apply.
+- **Removals.** A removal from the board's data goes through `removeWithUndo()` in `js/remove.js` rather than `confirm()`.
 - **Theme.** Use the CSS variables in `:root`. Never hard-code colors in components. Dark values appear in two places (the `prefers-color-scheme` block and `:root[data-theme="dark"]`); update both when you change a token.
 - **Phone width.** Keep the 16px side gutter and avoid horizontal scroll. Inputs use 16px font size to prevent iOS zoom.
 - **Comments.** Explain why, not what. Keep them short.
