@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createNodeStore } from './worker/store.js';
 import { addTask, editTask, listTasks, showTask, SESSION_TASK_LIMIT, DEV_AUTO } from './worker/tasks.js';
+import { addImage, listImages, projectInfo, projectBrand, sessionPeers, IMAGE_MAX_BYTES } from './worker/context.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'board-tasks-'));
 const file = join(dir, 'todos.json');
@@ -41,7 +42,14 @@ try {
     ],
     categories: [],
   }));
-  writeFileSync(join(dir, 'projects.json'), JSON.stringify({ projects: [{ id: 'p1', name: 'One', localPath: '/work/one' }] }));
+  writeFileSync(join(dir, 'projects.json'), JSON.stringify({
+    projects: [
+      { id: 'p1', name: 'One', localPath: '/work/one', github: { org: 'acme', repos: ['acme/one'] }, profile: { text: 'What One is.', sources: [], updated: '', edited: false, usageId: '' },
+        brand: { images: [{ label: 'Logo', value: 'public/logo.svg' }], colors: [{ label: 'Primary', value: '#123456' }, { label: 'Primary', value: '#abcdef' }], fonts: [{ label: 'Body', value: 'Inter' }], links: [], notes: '', updated: '', usageId: '' } },
+      { id: 'p2', name: 'Two', github: { org: '', repos: [] } },
+    ],
+    categories: [],
+  }));
   const store = createNodeStore(dir);
   const scope = { session: 's1', roots: ['root'] };
 
@@ -78,6 +86,48 @@ try {
   expect(editTask(store, loose, top.id, { text: 'Loose, renamed' }).text === 'Loose, renamed', 'a session edits a task it made');
   expect(listTasks(store, loose).tasks.length === 1, 'a session with no root lists only what it made');
   expect(refused(() => addTask(store, { session: 's4', roots: ['root', 'other'] }, { text: 'x' }), 400), 'with two roots, the parent must be named');
+
+  // Project and brand: the root's project only.
+  const info = projectInfo(store, scope, {});
+  expect(info.id === 'p1' && info.profile.text === 'What One is.' && info.github.repos[0].url === 'https://github.com/acme/one', 'the project of the session\'s task is read');
+  expect(refused(() => projectInfo(store, scope, { project: 'p2' }), 403), 'another project cannot be read');
+  const brand = projectBrand(store, scope, {});
+  expect(brand.images[0].file === '/work/one/public/logo.svg', 'a brand image in the folder gets its full path');
+  expect(brand.css.includes('--brand-color-primary: #123456;') && brand.css.includes('--brand-color-primary-2: #abcdef;') && brand.css.includes('--brand-font-body: "Inter";'), 'the brand prints as CSS custom properties');
+
+  // Images: added from a file, sniffed, capped, scoped.
+  const png = join(dir, 'shot.png');
+  writeFileSync(png, Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(16)]));
+  const fake = join(dir, 'fake.png');
+  writeFileSync(fake, 'not an image');
+  const withImage = addImage(store, scope, 'root', { file: png });
+  expect(withImage.images.length === 1 && withImage.images[0].type === 'image/png' && readFileSync(withImage.images[0].file).length === 24, 'an image is copied into the data folder, on the root too');
+  expect(listImages(store, scope, 'root').images[0].name === 'shot.png', 'a task\'s images are listed');
+  expect(refused(() => addImage(store, scope, 'root', { file: fake }), 415), 'a file that is not an image is refused');
+  const big = join(dir, 'big.png');
+  writeFileSync(big, Buffer.alloc(IMAGE_MAX_BYTES + 1));
+  expect(refused(() => addImage(store, scope, 'root', { file: big }), 413), 'an image over the size cap is refused');
+  expect(refused(() => addImage(store, scope, 'other', { file: png }), 403), 'another task takes no image');
+  expect(refused(() => listImages(store, scope, 'other'), 403), 'another task\'s images cannot be read');
+
+  // Other sessions: the runners ask the command runner with the session's reach, and add the tasks' titles.
+  const realFetch = globalThis.fetch;
+  /** @type {string[]} */
+  let asked = [];
+  globalThis.fetch = /** @type {typeof fetch} */ (async (/** @type {string} */ _url, /** @type {RequestInit} */ init) => {
+    asked = JSON.parse(String(init.body)).tasks;
+    return new Response(JSON.stringify({ peers: [{ session: 's9', n: 2, tasks: ['child'], cwd: '/work/one', worktree: '', dir: '/work/one', branch: 'feat/x', commit: '', changes: 0, claude: true, state: 'running', started: 0 }] }));
+  });
+  try {
+    const peers = await sessionPeers(store, scope, 'token');
+    expect(asked.includes('root') && asked.includes('grandchild') && !asked.includes('other'), 'only the session\'s tasks are asked about');
+    expect(peers.peers[0].tasks[0].text === 'child', 'peers come back with their tasks\' titles');
+    let blocked = false;
+    await sessionPeers(store, scope, 'token', 'other').catch((err) => (blocked = err.status === 403));
+    expect(blocked, 'another task\'s sessions cannot be asked for');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 
   // A tab adds a task meanwhile: both survive the session's next write.
   store.flush();

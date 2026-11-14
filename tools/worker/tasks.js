@@ -139,11 +139,11 @@ function fieldsOf(body) {
 }
 
 /** @param {string} path */
-const expand = (path) => (path === '~' ? homedir() : path.startsWith('~/') ? homedir() + path.slice(1) : path);
+export const expand = (path) => (path === '~' ? homedir() : path.startsWith('~/') ? homedir() + path.slice(1) : path);
 
 // The project whose folder holds `cwd` (the deepest one), for a task with no parent.
 /** @param {DataStore} store @param {string} cwd */
-function projectOfFolder(store, cwd) {
+export function projectOfFolder(store, cwd) {
   if (!cwd) return null;
   let best = null;
   let length = 0;
