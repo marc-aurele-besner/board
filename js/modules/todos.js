@@ -5,8 +5,6 @@
 /** @import { SlashItem } from '../slash-complete.js' */
 /** @typedef {{ text: string, status: string[], priority: string[], project: string[], category: string[] }} ColFilter */
 /** @typedef {{ id: string, title: string, category: string, priority: string }} TidySuggestion */
-// What this section reads of repoStats(): the counts are there when status is 'ok'.
-/** @typedef {{ status: string, issues: number, prs: number, error?: string | null }} RepoState */
 import { h, uid, icon, statusOf, notice, todayISO } from '../ui.js';
 import { makeTask } from '../capture.js';
 import { wouldLoop } from '../task-tree.js';
@@ -14,10 +12,11 @@ import { AUTO_SOURCES, autoSourceLink } from '../automations.js';
 import { toast } from '../toast.js';
 import { createProject, projectIcon, labelsOf, projectTree, moveProject, labelColor } from './projects.js';
 import { editText, pickChip, pickButton, pickMulti, pill } from '../inline.js';
-import { repoStats, createIssue, getIssue, githubLink } from '../github.js';
+import { createIssue, getIssue } from '../github.js';
 import { openDialog } from '../modal.js';
 import { issuesOf, prsOf, addTaskArtifacts, moveToReview } from '../task-links.js';
 import { workPill } from '../task-work.js';
+import { projectPill } from '../project-work.js';
 import { openLinkedinComposer, whenText } from '../linkedin-composer.js';
 import { LINKEDIN } from '../linkedin-core.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
@@ -73,7 +72,7 @@ const isDefaultSort = (s) => s.key === DEFAULT_SORT.key && s.dir === DEFAULT_SOR
 /**
  * @type {{ layout: string, query: string, filter: string, status: string[], category: string[], expanded: Set<string>, collapsed: Set<string>,
  *   selected: Set<string>, lastPicked: string | null, dragId: string | null, dragStatus: string | null, creatingProject: boolean,
- *   showProject: boolean, sort: { key: string, dir: string }, colFilter: ColFilter,
+ *   sort: { key: string, dir: string }, colFilter: ColFilter,
  *   tidy: { status: string, items: TidySuggestion[], error?: string }, focusTask: string }}
  */
 const view = {
@@ -92,7 +91,6 @@ const view = {
   dragId: null,
   dragStatus: null,
   creatingProject: false,
-  showProject: false,
   sort: { ...DEFAULT_SORT },
   colFilter: emptyColFilter(),
   tidy: { status: 'idle', items: [] },
@@ -1981,84 +1979,43 @@ function tidyPanel(store) {
       })));
 }
 
-// --- Project bar and details ---
+// --- Project bar ---
 
-// Project summary under the title. "Show more" reveals the project's details.
 // The labels a project carries, as objects with names.
 /** @param {Store} store @param {Project} p */
 const labelsFor = (store, p) => /** @type {ProjectLabel[]} */ (labelsOf(p)
   .map((id) => (store.get('projects').categories ?? []).find((c) => c.id === id))
   .filter(Boolean));
 
-// Beside the pencil: opens the project's website in a new tab, when it has one.
-/** @param {Project | undefined} p */
-const projectWebsiteButton = (p) => p?.website
-  ? h('a', { href: p.website, target: '_blank', rel: 'noopener', class: 'icon-btn', title: `Open ${p.website}`, 'aria-label': 'Open project website' }, icon('globe'))
-  : null;
-
-// After the website: each repo on GitHub (the org when there is no repo), then Dev's Explorer and a terminal in the
-// project's local folder.
-/** @param {Project | undefined} p */
-function projectLinkButtons(p) {
-  if (!p) return [];
-  const gh = (/** @type {string} */ path) => h('a', {
-    href: `https://github.com/${path}`, target: '_blank', rel: 'noopener', class: 'icon-btn', title: `Open ${path} on GitHub`, 'aria-label': `Open ${path} on GitHub`,
-  }, icon('github'));
-  const repos = p.github.repos.length ? p.github.repos : p.github.org ? [p.github.org] : [];
-  return [
-    ...repos.map(gh),
-    p.localPath ? h('a', { href: `#/dev?project=${p.id}&side=files`, class: 'icon-btn', title: `Browse ${p.localPath} in Dev`, 'aria-label': 'Open the project folder in Dev' }, icon('folder')) : null,
-    p.localPath ? h('a', { href: `#/dev?project=${p.id}`, class: 'icon-btn', title: `Open a terminal in ${p.localPath}`, 'aria-label': 'Open a terminal in the project folder' }, icon('terminal')) : null,
-  ];
-}
-
-// Inline after the title: labels, open count, and a toggle for the details panel.
+// After the title: the project's pill (js/project-work.js: an overview, its site, repos, files and Dev sessions), a
+// GitHub link for an org without repos, its labels, then its open tasks by status, each showing only those on a click.
 /** @param {Store} store @param {Project | undefined} p */
-function projectMeta(store, p) {
+function projectBar(store, p) {
   if (!p) return null;
-  const open = store.get(COLLECTION).items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done').length;
-  return h('span', { class: 'row meta-inline' },
-    labelsFor(store, p).map((l) => h('span', { class: 'pill tone-custom', style: { '--c': labelColor(l) } }, l.name)),
-    h('span', { class: 'muted small' }, `${open} open`),
-    h('button', {
-      type: 'button',
-      class: 'btn-small',
-      'aria-expanded': String(view.showProject),
-      onclick: () => {
-        view.showProject = !view.showProject;
-        store.refresh();
-      },
-    }, view.showProject ? 'Less' : 'More'));
-}
-
-/** @param {Store} store @param {Project} p */
-function projectDetails(store, p) {
-  const items = store.get(COLLECTION).items.filter((i) => i.projectId === p.id);
-  const done = items.filter((i) => statusOf(i) === 'done').length;
-  // Repo counts load in the background; the page refreshes when they arrive, but only while on this list.
-  const onLoad = () => {
-    if (location.hash.startsWith('#/todos')) store.refresh();
+  const open = store.get(COLLECTION).items.filter((i) => i.projectId === p.id && statusOf(i) !== 'done');
+  /** @param {string} key */
+  const only = (key) => {
+    view.status = view.status.length === 1 && view.status[0] === key ? ['open'] : [key];
+    store.refresh();
   };
-  return h('div', { class: 'project-details stack' },
-    p.description ? h('p', null, p.description) : h('p', { class: 'muted' }, 'No description yet. Use the pencil to add one.'),
-    h('div', { class: 'stats' },
-      h('div', null, h('strong', null, String(items.length - done)), h('span', { class: 'muted' }, 'open')),
-      h('div', null, h('strong', null, String(done)), h('span', { class: 'muted' }, 'done')),
-      labelsFor(store, p).length
-        ? h('div', null, h('strong', null, labelsFor(store, p).map((l) => l.name).join(', ')), h('span', { class: 'muted' }, 'labels'))
-        : null),
-    p.website ? h('p', null, h('a', { href: p.website, target: '_blank', rel: 'noopener' }, p.website)) : null,
-    p.github.org ? h('p', null, 'GitHub: ', githubLink(p.github.org)) : null,
-    p.github.repos.length
-      ? h('ul', { class: 'repo-summary' },
-          p.github.repos.map((r) => {
-            const s = /** @type {RepoState} */ (repoStats(r, onLoad));
-            const text = s.status === 'ok' ? `${s.issues} issues · ${s.prs} PRs` : s.status === 'loading' ? 'loading…' : s.error;
-            return h('li', null,
-              githubLink(r),
-              h('span', { class: 'muted' }, text));
-          }))
-      : null);
+  return h('span', { class: 'row meta-inline project-head' },
+    projectPill(store, p, { status: (id) => devWatch.status[id], onFilter: only }),
+    !p.github.repos.length && p.github.org
+      ? h('a', { href: `https://github.com/${p.github.org}`, target: '_blank', rel: 'noopener', class: 'icon-btn', title: `Open ${p.github.org} on GitHub`, 'aria-label': `Open ${p.github.org} on GitHub` }, icon('github'))
+      : null,
+    labelsFor(store, p).map((l) => h('span', { class: 'pill tone-custom', style: { '--c': labelColor(l) } }, l.name)),
+    h('span', { class: 'status-counts', role: 'group', 'aria-label': 'Open tasks by status' }, taskStatuses(store).filter((st) => st.key !== 'done').map((st) => {
+      const n = open.filter((i) => statusOf(i) === st.key).length;
+      if (!n) return null;
+      const on = view.status.length === 1 && view.status[0] === st.key;
+      return h('button', {
+        type: 'button',
+        class: on ? 'on' : '',
+        'aria-pressed': String(on),
+        title: on ? 'Show all open tasks again' : `Show only the tasks ${st.name.toLowerCase()}`,
+        onclick: () => only(st.key),
+      }, h('b', null, String(n)), ` ${st.name.toLowerCase()}`);
+    })));
 }
 
 // --- Page ---
@@ -2303,9 +2260,7 @@ function draw(root, store) {
             isProjectFilter(view.filter)
               ? h('a', { href: `#/projects?project=${view.filter}`, class: 'icon-btn', title: 'Open project', 'aria-label': 'Open project' }, icon('pencil'))
               : null,
-            projectWebsiteButton(projects.find((p) => p.id === view.filter)),
-            projectLinkButtons(projects.find((p) => p.id === view.filter)),
-            isProjectFilter(view.filter) ? projectMeta(store, projects.find((p) => p.id === view.filter)) : null),
+            isProjectFilter(view.filter) ? projectBar(store, projects.find((p) => p.id === view.filter)) : null),
           h('div', { class: 'row head-actions' },
             searchBox(store),
             // Searchable, and several values can be picked; a task matching any of them is shown.
@@ -2358,11 +2313,6 @@ function draw(root, store) {
             h('span', { class: 'muted small' }, `${visible.length} shown`))),
 
         listHint ? h('p', { class: 'muted small' }, listHint) : null,
-
-        isProjectFilter(view.filter) && view.showProject
-          // The list is reset to All above when its project is gone.
-          ? projectDetails(store, /** @type {Project} */ (projects.find((p) => p.id === view.filter)))
-          : null,
 
         tidyPanel(store),
 
@@ -2425,7 +2375,6 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
     // An empty status list shows everything; it is written as "all" so a reload does not fall back to Open.
     status: view.status.length ? view.status.join(',') : 'all',
     category: view.category.join(','),
-    more: view.showProject ? '1' : '',
     sort: isDefaultSort(view.sort) ? '' : view.sort.key ? `${view.sort.key}.${view.sort.dir}` : 'manual',
   }),
   restore: (/** @type {Record<string, string>} */ p = {}) => {
@@ -2434,7 +2383,6 @@ export default /** @satisfies {import('../../types/data').Module} */ ({
     view.query = p.q || '';
     view.status = !p.status ? ['open'] : p.status === 'all' ? [] : p.status.split(',');
     view.category = p.category ? p.category.split(',') : [];
-    view.showProject = p.more === '1';
     if (p.task) {
       view.focusTask = p.task;
       view.expanded.add(p.task);

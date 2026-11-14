@@ -25,8 +25,12 @@ import { imageFiles, dragsFiles } from './images.js';
 
 /**
  * What the row knows that this module does not: what each Dev session is doing, and how to link another issue or PR.
- * @typedef {{ status: (session: string) => RunnerStatus | undefined, onLink?: () => void }} WorkOptions
+ * `kind` makes it another popover than a task's (the project pill, js/project-work.js): it paints the parts itself.
+ * @typedef {{ status: (session: string) => RunnerStatus | undefined, onLink?: () => void, kind?: WorkKind }} WorkOptions
  * @typedef {{ id: string, cwd: string, name: string }} WorkSession
+ * @typedef {{ paint: (parts: WorkParts) => void }} WorkKind
+ * @typedef {{ store: Store, tab: string, big: boolean, head: HTMLElement, body: HTMLElement, foot: HTMLElement, repaint: () => void }} WorkParts
+ * @typedef {{ key: string, icon: IconName, label: string, count?: number }} WorkTabSpec
  */
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -89,6 +93,10 @@ function devWord(st) {
 const devLook = (st) => (st ? claudeState(st) : { key: 'idle', label: 'The runner has not answered for this session' });
 
 // ---------- The pill ----------
+
+// The tab the popover shows for the pill of `id`, or '' while it shows another pill's or none.
+/** @param {string} id */
+export const workTabOf = (id) => (pop.id === id ? pop.tab : '');
 
 /** @param {Store} store @param {Task} item @param {WorkOptions} options */
 export function workPill(store, item, options) {
@@ -154,15 +162,16 @@ export function workPill(store, item, options) {
 // ---------- The popover ----------
 
 /**
- * @type {{ id: string, tab: WorkTab, filter: string, shut: Set<string>, big: boolean, session: string,
+ * @type {{ id: string, tab: string, filter: string, shut: Set<string>, big: boolean, session: string,
  *   store: Store | null, options: WorkOptions | null, el: HTMLElement | null, head: HTMLElement | null,
  *   body: HTMLElement | null, slot: HTMLElement | null, foot: HTMLElement | null, unsub: (() => void) | null, frame: number,
  *   term: TermView | null, preview: string, site: string }}
  */
 const pop = { id: '', tab: 'prs', filter: 'all', shut: new Set(), big: false, session: '', store: null, options: null, el: null, head: null, body: null, slot: null, foot: null, unsub: null, frame: 0, term: null, preview: '', site: '' };
 
-/** @param {Store} store @param {string} id @param {WorkTab} tab @param {WorkOptions} options */
-function toggleWork(store, id, tab, options) {
+// Opens the popover on a tab, or closes it when that tab already shows. Its anchor is the element with data-work="id".
+/** @param {Store} store @param {string} id @param {string} tab @param {WorkOptions} options */
+export function toggleWork(store, id, tab, options) {
   if (pop.id === id && pop.tab === tab) return closeWork();
   if (pop.id !== id) {
     closeWork();
@@ -251,9 +260,37 @@ function place() {
   el.style.top = up ? `${r.top + scrollY - 4 - el.offsetHeight}px` : `${r.bottom + scrollY + 4}px`;
 }
 
+// The tabs, then Expand and Close.
+/** @param {WorkTabSpec[]} tabs */
+export function workHead(tabs) {
+  const { store, head } = pop;
+  if (!store || !head) return;
+  patch(head, h('div', null,
+    h('div', { class: 'work-tabs', role: 'tablist' }, tabs.map((t) => h('button', {
+      type: 'button',
+      role: 'tab',
+      class: `work-tab${pop.tab === t.key ? ' on' : ''}`,
+      'aria-selected': String(pop.tab === t.key),
+      onclick: () => {
+        pop.tab = t.key;
+        paint();
+        store.refresh();
+      },
+    }, icon(t.icon), t.label, t.count === undefined ? null : h('b', null, String(t.count))))),
+    h('button', { type: 'button', class: 'icon-btn', title: pop.big ? 'Back under the pill (Esc)' : 'Expand', 'aria-label': pop.big ? 'Back under the pill' : 'Expand', onclick: () => {
+      pop.big = !pop.big;
+      paint();
+    } }, icon(pop.big ? 'minimize' : 'maximize')),
+    h('button', { type: 'button', class: 'icon-btn', title: 'Close (Esc)', 'aria-label': 'Close', onclick: closeWork }, icon('x'))));
+}
+
 function paint() {
   const { store, options } = pop;
   if (!pop.el || !store || !options || !pop.head || !pop.body || !pop.foot || !pop.slot) return;
+  if (options.kind) {
+    options.kind.paint({ store, tab: pop.tab, big: pop.big, head: pop.head, body: pop.body, foot: pop.foot, repaint: paint });
+    return place();
+  }
   const item = store.get('todos').items.find((t) => t.id === pop.id);
   if (!item) return closeWork();
   const prs = prsOf(item);
@@ -263,28 +300,12 @@ function paint() {
   const previews = previewsOf(store, prs);
   /** @type {Record<WorkTab, number>} */
   const counts = { prs: prs.length, issues: issues.length, previews: previews.length, dev: sessions.length, artifacts: artifacts.length };
-  if (!counts[pop.tab]) pop.tab = TABS.find((t) => counts[t]) ?? 'prs';
+  if (!counts[/** @type {WorkTab} */ (pop.tab)]) pop.tab = TABS.find((t) => counts[t]) ?? 'prs';
 
   const states = stateCounts(store, prs);
   const filters = prs.length >= FILTER_FROM ? ['all', ...['open', 'merged', 'closed'].filter((s) => states[s])] : [];
   if (!filters.includes(pop.filter)) pop.filter = 'all';
-  patch(pop.head, h('div', null,
-    h('div', { class: 'work-tabs', role: 'tablist' }, TABS.filter((t) => counts[t]).map((t) => h('button', {
-      type: 'button',
-      role: 'tab',
-      class: `work-tab${pop.tab === t ? ' on' : ''}`,
-      'aria-selected': String(pop.tab === t),
-      onclick: () => {
-        pop.tab = t;
-        paint();
-        store.refresh();
-      },
-    }, icon(TAB_ICONS[t]), TAB_NAMES[t], h('b', null, String(counts[t]))))),
-    h('button', { type: 'button', class: 'icon-btn', title: pop.big ? 'Back under the row (Esc)' : 'Expand', 'aria-label': pop.big ? 'Back under the row' : 'Expand', onclick: () => {
-      pop.big = !pop.big;
-      paint();
-    } }, icon(pop.big ? 'minimize' : 'maximize')),
-    h('button', { type: 'button', class: 'icon-btn', title: 'Close (Esc)', 'aria-label': 'Close', onclick: closeWork }, icon('x'))));
+  workHead(TABS.filter((t) => counts[t]).map((t) => ({ key: t, icon: TAB_ICONS[t], label: TAB_NAMES[t], count: counts[t] })));
 
   pop.el.setAttribute('aria-label', `Work on “${item.text}”`);
   if (pop.tab === 'dev') {
@@ -305,7 +326,7 @@ function paint() {
       : pop.tab === 'issues' ? linkLines(store, issues, false, [])
         : pop.tab === 'previews' ? previewList(store, previews)
           : artifactList(store, artifacts)));
-    if (pop.tab === 'previews') showSite(previews);
+    if (pop.tab === 'previews') showPreviewSite(previews);
     else showPreview(store, pop.tab === 'artifacts' ? artifacts : []);
   }
 
@@ -440,21 +461,26 @@ const artifactList = (store, artifacts) => h('div', { class: 'work-lines' }, [..
 // sign in first (Vercel's Deployment Protection), then says so instead of showing a blank frame. The answer is kept
 // for the address until the site is loaded again. Without the runners, it is framed as it is.
 /** @param {PrPreview[]} previews */
-function showSite(previews) {
+function showPreviewSite(previews) {
   if (!pop.slot) return;
   const sites = [...previews].reverse().filter((p) => p.url);
   if (pop.site !== '-' && !sites.some((p) => p.url === pop.site)) pop.site = (sites.find((p) => p.state === 'ready') ?? sites[0])?.url ?? '';
   const p = sites.find((x) => x.url === pop.site);
   if (!p) return clearSlot();
-  const key = `site:${p.url}`;
-  const url = p.url;
+  showSite(p.url, [stateDot(p.state), h('span', { class: 'muted small work-preview-note' }, `${PROVIDER_NAMES[p.provider] ?? 'Preview'} · #${p.pr.number}`)]);
+}
+
+// A site in the frame below the list: `lead` before its address in the frame's bar, then the rest of `lead`.
+/** @param {string} url @param {(Node | null)[]} [lead] */
+export function showSite(url, lead = []) {
+  const key = `site:${url}`;
   const host = url.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   showFrame(key, () => previewFrame({
     site: url,
     head: [
-      stateDot(p.state),
+      lead[0] ?? null,
       h('span', { class: 'work-title', title: url }, host),
-      h('span', { class: 'muted small work-preview-note' }, `${PROVIDER_NAMES[p.provider] ?? 'Preview'} · #${p.pr.number}`),
+      ...lead.slice(1),
     ],
     actions: [
       h('a', { class: 'icon-btn', href: url, target: '_blank', rel: 'noopener noreferrer', title: 'Open the site in a new tab', 'aria-label': 'Open the site in a new tab' }, icon('globe')),
@@ -545,8 +571,16 @@ function showFrame(key, make) {
   }
   if (pop.slot.firstChild !== frame.el) pop.slot.replaceChildren(frame.el);
 }
-function clearSlot() {
+export function clearSlot() {
   if (pop.slot?.querySelector('.work-preview')) pop.slot.replaceChildren();
+}
+
+// Shows an element of the caller's below the list (a file read, for the project pill) until something replaces it.
+/** @param {HTMLElement} el */
+export function showInSlot(el) {
+  if (!pop.slot) return;
+  dropTerm();
+  if (pop.slot.firstChild !== el) pop.slot.replaceChildren(el);
 }
 /** @param {string} key */
 function forgetFrame(key) {
@@ -562,8 +596,22 @@ const reloadButton = (key, title) => h('button', { type: 'button', class: 'icon-
 } }, icon('refresh'));
 
 // With more than one session, a row each to pick the one the terminal shows.
+// The session the terminal shows, as picked in sessionList().
+export const workSession = () => pop.session;
+
+// Shows another tab of the open popover, and on the Dev tab the session `session` when one is given.
+/** @param {string} tab @param {string} [session] @param {boolean} [draw] false: only notes it, inside a paint */
+export function pickWorkTab(tab, session = '', draw = true) {
+  pop.tab = tab;
+  if (session) pop.session = session;
+  if (draw) {
+    paint();
+    pop.store?.refresh();
+  }
+}
+
 /** @param {WorkSession[]} sessions @param {WorkOptions} options */
-function sessionList(sessions, options) {
+export function sessionList(sessions, options) {
   if (!sessions.some((s) => s.id === pop.session)) pop.session = sessions[0]?.id ?? '';
   if (sessions.length < 2) return null;
   return h('div', { class: 'work-lines work-sessions' }, sessions.map((s, i) => {
@@ -590,7 +638,7 @@ function sessionList(sessions, options) {
  * a stream of its own. Views draw it: the popover's (which takes keys) and the peek's.
  * @typedef {{ session: string, term: Terminal, state: string, running: boolean, pid: number, exit: import('./modules/dev.js').Exit | null,
  *   command: string, cwd: string, mirror: boolean, frame: number, views: Set<TermView>, stop: () => void }} Reader
- * @typedef {{ view: ReturnType<typeof terminalView>, keys: boolean, el: HTMLElement, reader: Reader, bar: HTMLElement | null, head: HTMLElement | null,
+ * @typedef {{ view: ReturnType<typeof terminalView>, keys: boolean, el: HTMLElement, reader: Reader, itemId: string, bar: HTMLElement | null, head: HTMLElement | null,
  *   claude: HTMLElement | null, usage: HTMLElement | null, observer: ResizeObserver | null, fitted?: { cols: number, pid: number } }} TermView
  */
 /** @type {Map<string, Reader>} */
@@ -692,8 +740,9 @@ function detach(v) {
   readers.delete(r.session);
 }
 
+// The picked session's live terminal below the list; `item` is the task it works on.
 /** @param {Store} store @param {Task} item @param {WorkSession[]} sessions @param {WorkOptions} options */
-function showTerm(store, item, sessions, options) {
+export function showTerm(store, item, sessions, options) {
   const s = sessions.find((x) => x.id === pop.session);
   if (!s || !pop.slot) return dropTerm();
   if (pop.term?.reader.session !== s.id) {
@@ -749,7 +798,7 @@ function showTerm(store, item, sessions, options) {
   drawReader(pop.term.reader);
 }
 
-function dropTerm() {
+export function dropTerm() {
   if (!pop.term) return;
   pop.term.observer?.disconnect();
   detach(pop.term);
@@ -765,7 +814,7 @@ function termView(store, item, s, keys) {
   const bar = keys ? h('div', { class: 'work-term-bar' }) : null;
   const el = h('div', { class: keys ? 'work-term' : 'work-term peek' }, head, view.el, bar);
   /** @type {TermView} */
-  const v = { view, keys, el, reader, bar, head, claude: keys ? h('span', { class: 'term-claude', 'data-own': '' }) : null,
+  const v = { view, keys, el, reader, itemId: item.id, bar, head, claude: keys ? h('span', { class: 'term-claude', 'data-own': '' }) : null,
     usage: keys ? h('span', { class: 'term-claude work-usage', 'data-own': '' }) : null, observer: null };
   reader.views.add(v);
   if (keys) {
@@ -843,7 +892,7 @@ function paintBar(v) {
   if (!v.bar || !store) return;
   const base = runnerOf(store);
   // claude to pick up once nothing runs: in a terminal that ended, or one the runner no longer has.
-  const item = store.get('todos').items.find((t) => t.id === pop.id);
+  const item = store.get('todos').items.find((t) => t.id === v.itemId);
   const next = !c.running && r.state !== 'loading' && item ? pickUp(store, { id: r.session, command: c.command, cwd: c.cwd }) : null;
   /** @param {string} label @param {string} data @param {string} title */
   const key = (label, data, title) => h('button', { type: 'button', class: 'term-key', title, onclick: () => {
