@@ -3606,11 +3606,13 @@ code.tool-fail-call { font-size: 0.76rem; }
 .dev-default-badge { padding: 2px 10px; border-radius: 999px; font-size: 0.8rem; font-weight: 600; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .dev-model { display: inline-flex; gap: 6px; align-items: baseline; }
 .dev-model code { background: none; padding: 0; font-size: inherit; }
-.dev-fold { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 0; min-height: 0; border: none; background: none; color: inherit; text-align: left; font: inherit; cursor: pointer; }
-.dev-fold:hover { background: none; }
-.dev-fold > .icon { margin-top: 6px; color: var(--muted); }
-.dev-fold h2 { margin: 0 0 2px; }
-.dev-fold p { margin: 0; }
+.dev-flags { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.dev-flags > .dev-flag-grid { align-self: stretch; }
+.dev-flags-toggle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 0; min-height: 0; border: none; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.dev-flags-toggle:hover { background: none; }
+.dev-flags-toggle:hover .dev-env-label { color: var(--text); }
+.dev-flags-toggle > .icon { color: var(--muted); }
+.dev-flags-summary { font-size: 0.8rem; }
 .dev-agent-field { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; align-self: stretch; }
 .dev-agent-field > .chip-pick { align-self: flex-start; }
 .dev-agent-field > .dev-env-preview { color: var(--muted); font-size: 0.8rem; }

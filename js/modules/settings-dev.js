@@ -1,22 +1,21 @@
-// Settings → Dev environment, in the order things are chosen: the agents (a coding harness, the connection to a
-// provider, the models a task can pick), then each project's folder and agent, then, out of the way, the harnesses
-// themselves. Commands are edited in colour, with the variables they take as chips and a Preview of what a task runs.
+// Settings → Dev environment, in two tabs: the agents (the program they run, the connection to a provider, the models
+// a task can pick, and how the program takes them), and each project's folder and agent. Commands are edited in colour, with the variables they take as chips and a Preview of what a task runs.
 import { h, icon, notice, uid } from '../ui.js';
 import { editText, pickChip } from '../inline.js';
 import { pickFolder } from '../folder-picker.js';
-import { commandField } from '../command-field.js';
+import { commandField, codeLine } from '../command-field.js';
 import { projectIcon, projectTree, cleanLocalPath, LOCAL_PATH_ERROR } from './projects.js';
 import { DEFAULT_DEV_COMMAND, runnerOf } from './dev.js';
 import { agentLogo, brandLogo, projectAgentField, COMMAND_VARS, EXAMPLE_PROMPT } from './dev-agent-field.js';
 import {
-  CLAUDE_PROVIDER, DEFAULT_HARNESSES, DEV_MODEL_NAMES, agentsOf, defaultAgent, devAgents, devHarnesses, devTemplate,
+  DEFAULT_HARNESSES, DEV_MODEL_NAMES, agentsOf, defaultAgent, devAgents, devHarnesses, devTemplate,
   harnessOf, splitEnv, brandOf,
 } from '../dev-core.js';
 /** @import { Store, DevProvider, DevHarness, Project } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 
-// The last problem shown above the cards, and whether the harnesses are unfolded.
-const devEnvView = { error: '', harnesses: false };
+// The last problem shown above the cards, the tab shown (agents or projects), and the agents whose flags are unfolded.
+const devEnvView = { error: '', tab: 'agents', flags: new Set() };
 
 const fail = (/** @type {Store} */ store, /** @type {string} */ message) => {
   devEnvView.error = message;
@@ -61,7 +60,7 @@ function howItWorks(store) {
   const step = (/** @type {string} */ n, /** @type {string} */ title, /** @type {Child} */ text) =>
     h('li', null, h('span', { class: 'dev-how-n' }, n), h('div', null, h('strong', null, title), h('span', { class: 'muted small' }, text)));
   return h('ol', { class: 'dev-how' },
-    step('1', 'Agents', 'A coding harness (Claude Code, Codex…), connected to a provider, with the models you can pick.'),
+    step('1', 'Agents', 'A coding agent program (Claude Code, Codex…), connected to a provider, with the models you can pick.'),
     step('2', 'Projects', `Each runs its agent in its folder; ${defaultAgent(store).name} unless you pick another.`),
     step('3', 'Tasks', 'The Dev button runs the project’s agent. Right-click it to pick another agent’s model for that task.'));
 }
@@ -114,7 +113,7 @@ function agentsPanel(store, agents, harnesses, projects) {
     updateAgents(store, (list) => { list.push({ id: uid(), name, command, models: parseModels(form.elements.models.value) }); });
   };
   return panel('Agents',
-    'What a task can run. Pick the harness it runs on; put the variables that connect it to a provider (an API address, a key from the runner’s environment) at the start of its command. MiniMax runs Claude Code with MiniMax’s API, with the key from MINIMAX_API_KEY.',
+    'What a task can run. Pick the program it runs on; put the variables that connect it to a provider (an API address, a key from the runner’s environment) at the start of its command. MiniMax runs Claude Code with MiniMax’s API, with the key from MINIMAX_API_KEY.',
     h('ul', { class: 'dev-cards' },
       agents.map((agent) => {
         const harness = harnessOf(harnesses, agent.command);
@@ -180,15 +179,16 @@ function agentsPanel(store, agents, harnesses, projects) {
             h('span', { class: 'dev-env-label small' }, 'Models in a task’s menu'),
             editText({
               value: agent.models.join(', '),
-              placeholder: 'None: the harness picks the model',
+              placeholder: 'None: the program picks the model',
               allowEmpty: true,
               display: modelPills,
               onSave: (text) => patch(agent.id, { models: parseModels(text) }),
-            })));
+            })),
+          agentFlags(store, agent, harness, agents));
       })),
     h('form', { class: 'dev-preset-add', onsubmit: add },
       h('input', { name: 'name', placeholder: 'Name, such as Codex', 'aria-label': 'Agent name', autocomplete: 'off' }),
-      h('select', { name: 'harness', 'aria-label': 'Harness the agent runs on' }, harnesses.map((x) => h('option', { value: x.id }, x.name))),
+      h('select', { name: 'harness', 'aria-label': 'Program the agent runs' }, harnesses.map((x) => h('option', { value: x.id }, x.name))),
       h('input', { name: 'env', class: 'dev-env-command', placeholder: 'Connection variables (optional)', 'aria-label': 'Variables set before the harness command', autocomplete: 'off', spellcheck: false }),
       h('input', { name: 'models', placeholder: 'Models, comma separated (optional)', 'aria-label': 'Agent models', autocomplete: 'off', spellcheck: false }),
       h('button', { type: 'submit' }, icon('plus'), 'Add agent')));
@@ -212,93 +212,61 @@ const HARNESS_FLAGS = [
   ['prompt', 'Prompt', '-- {{prompt}}', 'The task, as the prompt, quoted'],
 ];
 
-// Agents and commands that run a removed harness's program are left as they are, run without its flags.
-/** @param {Store} store @param {DevHarness[]} harnesses @param {DevProvider[]} agents */
-function harnessesPanel(store, harnesses, agents) {
-  /** @param {string} id @param {Partial<DevHarness>} patch */
-  const patch = (id, patch) => updateHarnesses(store, (list) => {
-    const x = list.find((y) => y.id === id);
+// How the agent's program takes a task's model, effort and prompt: the flags of its harness, kept per program, so
+// every agent and project command that runs it shares them. A program the board does not know gets its own here.
+/** @param {Store} store @param {DevProvider} agent @param {DevHarness | null} harness @param {DevProvider[]} agents */
+function agentFlags(store, agent, harness, agents) {
+  const open = devEnvView.flags.has(agent.id);
+  const unfold = (/** @type {boolean} */ on) => {
+    if (on) devEnvView.flags.add(agent.id);
+    else devEnvView.flags.delete(agent.id);
+  };
+  if (!harness) {
+    const program = splitEnv(agent.command).rest.split(/\s+/)[0] ?? '';
+    return h('div', { class: 'dev-flags' },
+      h('span', { class: 'muted small' }, `The board does not know how ${program || 'this program'} takes a model or an effort, so a task’s are not passed; its prompt goes after --.`),
+      program
+        ? h('button', {
+            type: 'button',
+            class: 'btn-small',
+            onclick: () => {
+              unfold(true);
+              updateHarnesses(store, (list) => { list.push({ id: uid(), name: program.split('/').pop() ?? program, command: program, model: '', effort: '', prompt: '-- {{prompt}}' }); });
+            },
+          }, icon('plus'), 'Set its flags')
+        : null);
+  }
+  const harnesses = devHarnesses(store);
+  const shared = agents.filter((a) => a.id !== agent.id && harnessOf(harnesses, a.command)?.id === harness.id);
+  /** @param {Partial<DevHarness>} patch */
+  const save = (patch) => updateHarnesses(store, (list) => {
+    const x = list.find((y) => y.id === harness.id);
     if (x) Object.assign(x, patch);
   });
-  const add = (/** @type {SubmitEvent} */ e) => {
-    e.preventDefault();
-    const form = /** @type {HTMLFormElement & { elements: { name: HTMLInputElement, command: HTMLInputElement, model: HTMLInputElement, prompt: HTMLInputElement } }} */ (e.currentTarget);
-    const name = form.elements.name.value.trim();
-    const command = form.elements.command.value.trim();
-    if (!name || !command) return fail(store, 'A harness needs a name and a command.');
-    if (harnesses.some((x) => x.name.toLowerCase() === name.toLowerCase())) return fail(store, `A harness named "${name}" already exists.`);
-    const program = harnessOf(harnesses, command);
-    if (program) return fail(store, `${program.name} already runs this program.`);
-    updateHarnesses(store, (list) => {
-      list.push({ id: uid(), name, command, model: form.elements.model.value.trim(), effort: '', prompt: form.elements.prompt.value.trim() || '-- {{prompt}}' });
-    });
-  };
-  const open = devEnvView.harnesses;
-  return h('section', { class: 'card panel' },
+  return h('div', { class: 'dev-flags' },
     h('button', {
       type: 'button',
-      class: 'dev-fold',
+      class: 'dev-flags-toggle',
       'aria-expanded': String(open),
-      onclick: () => { devEnvView.harnesses = !open; store.refresh(); },
+      onclick: () => { unfold(!open); store.refresh(); },
     },
       icon(open ? 'chevron-down' : 'chevron-right'),
-      h('div', null,
-        h('h2', null, 'Advanced: coding harnesses'),
-        h('p', { class: 'muted' }, `How each program takes a task’s model, effort and prompt: ${harnesses.map((x) => x.name).join(', ')}. An agent runs the harness its command starts with. Status, done signal and usage are read for Claude Code only.`))),
+      h('span', { class: 'dev-env-label small' }, `How ${harness.name} takes the model, effort and prompt`),
+      open ? null : codeLine([harness.model, harness.effort, harness.prompt].filter(Boolean).join('  ').replace(/\{\{?(\w+)\}\}?/g, '{{$1}}'), 'dev-flags-summary')),
     open
       ? [
-          h('ul', { class: 'dev-cards' },
-            harnesses.map((harness) => {
-              const users = agents.filter((a) => harnessOf(harnesses, a.command)?.id === harness.id);
-              return h('li', { class: 'dev-card' },
-                cardHead(
-                  brandLogo(brandOf(harness.name, harness.command), 'terminal'),
-                  editText({
-                    value: harness.name,
-                    placeholder: 'Name',
-                    onSave: (name) => {
-                      const clean = name.trim();
-                      if (!clean) return fail(store, 'A harness needs a name.');
-                      if (harnesses.some((x) => x.id !== harness.id && x.name.toLowerCase() === clean.toLowerCase())) return fail(store, `A harness named "${clean}" already exists.`);
-                      patch(harness.id, { name: clean });
-                    },
-                  }),
-                  users.length ? `Runs ${users.map((a) => a.name).join(', ')}` : 'No agent yet',
-                  harness.id === CLAUDE_PROVIDER
-                    ? null
-                    : removeButton('Remove this harness. Agents that run its program keep their command, without its flags.',
-                        () => updateHarnesses(store, (list) => { list.splice(list.findIndex((x) => x.id === harness.id), 1); }), `Remove the harness ${harness.name}`)),
-                commandField({
-                  key: `harness-${harness.id}`,
-                  label: 'Command',
-                  value: harness.command,
-                  placeholder: 'program --flags',
-                  preview: (v) => devTemplate([{ ...harness, command: v }], v),
-                  examples: { model: harness.id === CLAUDE_PROVIDER ? 'opus' : 'model-name', effort: 'high', prompt: EXAMPLE_PROMPT },
-                  previewHint: 'What a task with a model and effort picked runs (examples).',
-                  onSave: (command) => {
-                    if (!command) return fail(store, 'A harness needs a command.');
-                    const other = harnessOf(harnesses.filter((x) => x.id !== harness.id), command);
-                    if (other) return fail(store, `${other.name} already runs this program.`);
-                    patch(harness.id, { command });
-                  },
-                }),
-                h('div', { class: 'dev-flag-grid' },
-                  HARNESS_FLAGS.map(([field, label, placeholder, about]) => commandField({
-                    key: `harness-${harness.id}-${field}`,
-                    label,
-                    value: (harness[field] ?? '').replace(/\{\{?(\w+)\}\}?/g, '{{$1}}'),
-                    placeholder,
-                    vars: [[field, about]],
-                    onSave: (text) => patch(harness.id, { [field]: text }),
-                  }))));
-            })),
-          h('form', { class: 'dev-preset-add', onsubmit: add },
-            h('input', { name: 'name', placeholder: 'Name, such as Qwen Code', 'aria-label': 'Harness name', autocomplete: 'off' }),
-            h('input', { name: 'command', placeholder: 'qwen --yolo', 'aria-label': 'Harness command', autocomplete: 'off', spellcheck: false }),
-            h('input', { name: 'model', class: 'dev-env-command', placeholder: '--model {{model}}', 'aria-label': 'Harness model flag', autocomplete: 'off', spellcheck: false }),
-            h('input', { name: 'prompt', class: 'dev-env-command', placeholder: '-- {{prompt}}', 'aria-label': 'How the harness takes its prompt', autocomplete: 'off', spellcheck: false }),
-            h('button', { type: 'submit' }, icon('plus'), 'Add harness')),
+          h('div', { class: 'dev-flag-grid' },
+            HARNESS_FLAGS.map(([field, label, placeholder, about]) => commandField({
+              key: `harness-${harness.id}-${field}`,
+              label,
+              value: (harness[field] ?? '').replace(/\{\{?(\w+)\}\}?/g, '{{$1}}'),
+              placeholder,
+              vars: [[field, about]],
+              onSave: (text) => save({ [field]: text }),
+            }))),
+          h('span', { class: 'muted small' }, shared.length
+            ? `Shared with ${shared.map((a) => a.name).join(', ')}, and any project command, that run ${harness.name}. Empty: not passed.`
+            : `Shared with any project command that runs ${harness.name}. Empty: not passed.`),
         ]
       : null);
 }
@@ -329,19 +297,31 @@ function projectRow(store, p, depth) {
       projectAgentField(store, p, (patch) => updateProject(store, p.id, patch))));
 }
 
+// The two tabs: the agents with their harnesses under them, and each project's folder and agent.
+const DEV_TABS = [['agents', 'Agents'], ['projects', 'Projects']];
+
 /** @param {Store} store */
 export function devEnvironmentCard(store) {
   const agents = devAgents(store);
   const harnesses = devHarnesses(store);
   const { projects } = store.get('projects');
+  const tab = devEnvView.tab === 'projects' ? 'projects' : 'agents';
   return h('div', { class: 'stack-lg' },
     howItWorks(store),
+    h('div', { class: 'sub-tabs', role: 'tablist', 'aria-label': 'Dev environment' },
+      DEV_TABS.map(([id, label]) => h('button', {
+        type: 'button',
+        role: 'tab',
+        class: `sub-tab${tab === id ? ' active' : ''}`,
+        'aria-selected': String(tab === id),
+        onclick: () => { devEnvView.tab = id; devEnvView.error = ''; store.refresh(); },
+      }, label, id === 'agents' ? h('span', { class: 'seg-count' }, String(agents.length)) : h('span', { class: 'seg-count' }, String(projects.length))))),
     devEnvView.error ? notice({ text: devEnvView.error }) : null,
-    agentsPanel(store, agents, harnesses, projects),
-    panel('Projects', 'Where each project’s terminals open, and the agent its tasks run with the task as the prompt.',
-      h('ul', { class: 'dev-env-list' },
-        projects.length
-          ? projectTree(projects).map(({ project, depth }) => projectRow(store, project, depth))
-          : h('li', { class: 'empty' }, 'No project yet. Create one in ', h('a', { href: '#/projects' }, 'Projects'), '.'))),
-    harnessesPanel(store, harnesses, agents));
+    tab === 'agents'
+      ? agentsPanel(store, agents, harnesses, projects)
+      : panel('Projects', 'Where each project’s terminals open, and the agent its tasks run with the task as the prompt.',
+          h('ul', { class: 'dev-env-list' },
+            projects.length
+              ? projectTree(projects).map(({ project, depth }) => projectRow(store, project, depth))
+              : h('li', { class: 'empty' }, 'No project yet. Create one in ', h('a', { href: '#/projects' }, 'Projects'), '.'))));
 }
