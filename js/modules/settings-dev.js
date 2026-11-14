@@ -9,7 +9,7 @@ import { sortable } from './settings-labels.js';
 import { DEFAULT_DEV_COMMAND, runnerOf } from './dev.js';
 import { agentLogo, projectAgentField, COMMAND_VARS, EXAMPLE_PROMPT } from './dev-agent-field.js';
 import {
-  DEFAULT_HARNESSES, DEV_MODEL_NAMES, agentsOf, defaultAgent, devAgents, devHarnesses, devTemplate,
+  DEV_MODEL_NAMES, agentEfforts, agentsOf, defaultAgent, devAgents, devHarnesses, devTemplate,
   harnessOf, splitEnv,
 } from '../dev-core.js';
 /** @import { Store, DevProvider, DevHarness, Project } from '../../types/data' */
@@ -80,30 +80,94 @@ function updateAgents(store, mutate) {
 // "opus, sonnet" or one per line, as a list without blanks or repeats.
 const parseModels = (/** @type {string} */ text) => [...new Set(text.split(/[\s,]+/).filter(Boolean))];
 
-// An agent's models as the chips they are edited as: each the value passed to --model (a claude alias names its model
-// in its tooltip), with × to remove it, then a field that adds one (Enter, or a comma, adds; several may be pasted).
-/** @param {DevProvider} agent @param {(models: string[]) => void} save */
-function modelsEditor(agent, save) {
+// The chip being dragged, and its list, so a chip of another list is not a drop target.
+/** @type {{ key: string, value: string } | null} */
+let chipDrag = null;
+
+// A list edited as chips (an agent's models or efforts): each the value passed to the program (a claude alias names
+// its model in its tooltip), with × to remove it, then a field that adds one (Enter, or a comma, adds; several may be
+// pasted). Their order is the task menu's: drag a chip, or focus it and press the left and right arrows.
+/** @param {{ key: string, values: string[], what: string, empty: string, save: (values: string[]) => void }} options */
+function chipsEditor({ key, values, what, empty, save }) {
   const add = (/** @type {HTMLInputElement} */ input) => {
-    const added = parseModels(input.value).filter((m) => !agent.models.includes(m));
+    const added = parseModels(input.value).filter((m) => !values.includes(m));
     input.value = '';
-    if (added.length) save([...agent.models, ...added]);
+    if (added.length) save([...values, ...added]);
   };
+  /** @param {string} from @param {string} to @param {boolean} after */
+  const move = (from, to, after) => {
+    const rest = values.filter((x) => x !== from);
+    rest.splice(rest.indexOf(to) + (after ? 1 : 0), 0, from);
+    if (rest.some((x, i) => x !== values[i])) save(rest);
+  };
+  /** @param {DragEvent & { currentTarget: HTMLElement }} e */
+  const after = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return e.clientX > r.left + r.width / 2;
+  };
+  /** @param {HTMLElement} el */
+  const clear = (el) => el.classList.remove('drop-before', 'drop-after');
   return h('div', { class: 'dev-models' },
-    agent.models.map((m) => h('span', { class: 'dev-model', title: DEV_MODEL_NAMES[m] ? `${m} runs ${DEV_MODEL_NAMES[m]} today` : m },
+    values.map((m) => h('span', {
+      class: 'dev-model',
+      title: `${DEV_MODEL_NAMES[m] ? `${m} runs ${DEV_MODEL_NAMES[m]} today. ` : ''}Drag, or press the left and right arrows, to reorder`,
+      draggable: 'true',
+      tabindex: '0',
+      'data-chip': `${key}:${m}`,
+      ondragstart: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
+        // The agent card around it is draggable too: this drag is the chip's alone.
+        e.stopPropagation();
+        chipDrag = { key, value: m };
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', m);
+        }
+        e.currentTarget.classList.add('dragging');
+      },
+      ondragend: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
+        e.stopPropagation();
+        chipDrag = null;
+        e.currentTarget.classList.remove('dragging');
+      },
+      ondragover: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
+        if (chipDrag?.key !== key || chipDrag.value === m) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const a = after(e);
+        e.currentTarget.classList.toggle('drop-before', !a);
+        e.currentTarget.classList.toggle('drop-after', a);
+      },
+      ondragleave: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => clear(e.currentTarget),
+      ondrop: (/** @type {DragEvent & { currentTarget: HTMLElement }} */ e) => {
+        if (chipDrag?.key !== key) return;
+        e.preventDefault();
+        e.stopPropagation();
+        clear(e.currentTarget);
+        move(chipDrag.value, m, after(e));
+        chipDrag = null;
+      },
+      onkeydown: (/** @type {KeyboardEvent} */ e) => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        e.preventDefault();
+        const to = values[values.indexOf(m) + (e.key === 'ArrowLeft' ? -1 : 1)];
+        if (to === undefined) return;
+        move(m, to, e.key === 'ArrowRight');
+        requestAnimationFrame(() => /** @type {HTMLElement | null} */ (document.querySelector(`[data-chip="${CSS.escape(`${key}:${m}`)}"]`))?.focus());
+      },
+    },
       h('code', null, m),
       h('button', {
         type: 'button',
         class: 'dev-model-x',
         'aria-label': `Remove ${m}`,
         title: `Remove ${m}`,
-        onclick: () => save(agent.models.filter((x) => x !== m)),
+        onclick: () => save(values.filter((x) => x !== m)),
       }, icon('x')))),
     h('input', {
       class: 'dev-model-add',
-      name: `models-${agent.id}`,
-      placeholder: agent.models.length ? 'Add a model' : 'Add a model (none: the program picks)',
-      'aria-label': `Add a model to ${agent.name}`,
+      name: key,
+      placeholder: values.length ? `Add ${what}` : `Add ${what} (${empty})`,
+      'aria-label': `Add ${what}`,
       autocomplete: 'off',
       spellcheck: false,
       onkeydown: (/** @type {KeyboardEvent & { currentTarget: HTMLInputElement }} */ e) => {
@@ -128,6 +192,7 @@ function agentsPanel(store, agents, harnesses, projects) {
   /** @param {DevProvider} agent */
   const remove = (agent) => {
     updateAgents(store, (list) => { list.splice(list.findIndex((x) => x.id === agent.id), 1); });
+    store.update('dev', (d) => { d.removedAgents = [...new Set([...(d.removedAgents ?? []), agent.id])]; });
     store.update('projects', (d) => {
       for (const p of d.projects) if (p.devPreset === agent.id) Object.assign(p, { devPreset: '', devCommand: agent.command });
     });
@@ -147,7 +212,7 @@ function agentsPanel(store, agents, harnesses, projects) {
     list.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
   }));
   return panel('Agents',
-    'What a task can run: a program’s command (claude, codex, gemini, opencode…), with the variables that connect it to a provider (an API address, a key from the runner’s environment) at the start of its command. MiniMax runs Claude Code with MiniMax’s API, with the key from MINIMAX_API_KEY.',
+    'What a task can run: a program’s command (claude, codex…), with the variables that connect it to a provider (an API address, a key from the runner’s environment) at the start of its command. MiniMax runs Claude Code with MiniMax’s API, with the key from MINIMAX_API_KEY.',
     h('ul', { class: 'dev-cards' },
       agents.map((agent) => {
         const harness = harnessOf(harnesses, agent.command);
@@ -199,9 +264,13 @@ function agentsPanel(store, agents, harnesses, projects) {
               patch(agent.id, { command });
             },
           }),
-          h('div', { class: 'cmd-field' },
-            h('span', { class: 'dev-env-label small' }, 'Models in a task’s menu'),
-            modelsEditor(agent, (models) => patch(agent.id, { models }))),
+          h('div', { class: 'dev-chip-fields' },
+            h('div', { class: 'cmd-field' },
+              h('span', { class: 'dev-env-label small' }, 'Models in a task’s menu'),
+              chipsEditor({ key: `models-${agent.id}`, values: agent.models, what: 'a model', empty: 'none: the program picks', save: (models) => patch(agent.id, { models }) })),
+            h('div', { class: 'cmd-field' },
+              h('span', { class: 'dev-env-label small' }, 'Efforts in a task’s menu'),
+              chipsEditor({ key: `efforts-${agent.id}`, values: agentEfforts(store, agent), what: 'an effort', empty: 'none: no Effort menu', save: (efforts) => patch(agent.id, { efforts }) }))),
           agentFlags(store, agent, harness, agents));
       })),
     h('form', { class: 'dev-preset-add', onsubmit: add },
@@ -217,7 +286,7 @@ function agentsPanel(store, agents, harnesses, projects) {
 function updateHarnesses(store, mutate) {
   devEnvView.error = '';
   store.update('dev', (d) => {
-    d.harnesses ??= DEFAULT_HARNESSES.map((x) => ({ ...x }));
+    d.harnesses = devHarnesses(store).map((x) => ({ ...x }));
     mutate(d.harnesses);
   });
 }

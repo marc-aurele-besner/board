@@ -24,6 +24,8 @@ export const DEV_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 // claude's own aliases (opus, sonnet, haiku, which subagents use) point at MiniMax's model too.
 export const CLAUDE_PROVIDER = 'claude';
 const MINIMAX_MODEL = 'MiniMax-M3';
+// Codex runs with no sandbox or approvals, as claude runs with --dangerously-skip-permissions; it picks its model.
+const CODEX_COMMAND = 'codex --dangerously-bypass-approvals-and-sandbox';
 /** @type {DevProvider[]} */
 export const DEFAULT_PROVIDERS = [
   { id: CLAUDE_PROVIDER, name: 'Claude', command: DEFAULT_DEV_COMMAND, models: DEV_MODELS },
@@ -40,18 +42,33 @@ export const DEFAULT_PROVIDERS = [
     ].join(' '),
     models: [MINIMAX_MODEL, 'MiniMax-M2.7'],
   },
+  { id: 'codex', name: 'Codex', command: CODEX_COMMAND, models: [], efforts: ['low', 'medium', 'high'] },
 ];
+// Built-in agents added after agents could be saved: added to a saved list too, unless removed from it.
+const LATER_AGENTS = ['codex'];
 
 // The agents of dev.json: its providers (the built-in ones until edited), then the command presets saved before
 // agents replaced them, as agents with no models under the same id, so projects and Cron steps that picked one
 // still find it. Settings' first change saves them as agents.
 /** @param {Partial<DevData> | undefined} data @returns {DevProvider[]} */
 export function agentsOf(data) {
-  const agents = data?.providers ?? DEFAULT_PROVIDERS;
+  const saved = data?.providers;
+  const agents = saved
+    ? [...saved, ...DEFAULT_PROVIDERS.filter((a) => LATER_AGENTS.includes(a.id) && !saved.some((x) => x.id === a.id) && !data?.removedAgents?.includes(a.id))]
+    : DEFAULT_PROVIDERS;
   const legacy = (data?.presets ?? []).filter((p) => !agents.some((a) => a.id === p.id));
   return legacy.length ? [...agents, ...legacy.map((p) => ({ id: p.id, name: p.name, command: p.command, models: [] }))] : agents;
 }
 export const devAgents = (/** @type {DataStore} */ store) => agentsOf(store.get(COLLECTION));
+
+// The efforts a task can pick for an agent: its own list, else every level when its program takes an effort and no
+// variables point it at another provider (MiniMax's API takes none), else none.
+/** @param {DataStore} store @param {DevProvider} agent */
+export function agentEfforts(store, agent) {
+  if (agent.efforts) return agent.efforts;
+  const harness = harnessOf(devHarnesses(store), agent.command);
+  return harness?.effort?.trim() && !splitEnv(agent.command).env ? DEV_EFFORTS : [];
+}
 
 // The agent of projects that pick none: the one chosen in Settings, else Claude, else the first.
 /** @param {DataStore} store @returns {DevProvider} */
@@ -119,11 +136,12 @@ export const DEV_MODEL_NAMES = { fable: 'Fable 5.2', opus: 'Opus 5.5', sonnet: '
 /** @type {DevHarness[]} */
 export const DEFAULT_HARNESSES = [
   { id: CLAUDE_PROVIDER, name: 'Claude Code', command: DEFAULT_DEV_COMMAND, model: '--model {{model}}', effort: '--effort {{effort}}', prompt: '-- {{prompt}}' },
-  { id: 'codex', name: 'Codex CLI', command: 'codex --dangerously-bypass-approvals-and-sandbox', model: '--model {{model}}', effort: '-c model_reasoning_effort={{effort}}', prompt: '-- {{prompt}}' },
-  { id: 'gemini', name: 'Gemini CLI', command: 'gemini --yolo', model: '--model {{model}}', effort: '', prompt: '--prompt-interactive {{prompt}}' },
-  { id: 'opencode', name: 'OpenCode', command: 'opencode', model: '--model {{model}}', effort: '', prompt: '--prompt {{prompt}}' },
+  { id: 'codex', name: 'Codex CLI', command: CODEX_COMMAND, model: '--model {{model}}', effort: '-c model_reasoning_effort={{effort}}', prompt: '-- {{prompt}}' },
 ];
-export const devHarnesses = (/** @type {DataStore} */ store) => store.get(COLLECTION)?.harnesses ?? DEFAULT_HARNESSES;
+// Built-in harnesses no longer offered, dropped from a saved list too.
+const RETIRED_HARNESSES = ['gemini', 'opencode'];
+export const devHarnesses = (/** @type {DataStore} */ store) =>
+  store.get(COLLECTION)?.harnesses?.filter((x) => !RETIRED_HARNESSES.includes(x.id)) ?? DEFAULT_HARNESSES;
 
 // The variables a harness flag or a Dev command can hold.
 export const DEV_VARS = ['model', 'effort', 'prompt'];

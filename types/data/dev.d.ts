@@ -16,6 +16,9 @@ export interface DevProvider {
   name: string;
   command: string;
   models: string[];
+  // The efforts a task can pick for it; missing: every level when its program takes one and no variables connect it
+  // to another provider, else none (agentEfforts in js/dev-core.js).
+  efforts?: string[];
 }
 
 // A coding harness in Settings → Dev environment: a CLI that runs an agent in a terminal (Claude Code, Codex CLI…).
@@ -43,6 +46,8 @@ export interface DevData {
   providers?: DevProvider[];
   // The agent of projects that pick none; '' or missing means Claude.
   defaultAgent?: string;
+  // Built-in agents removed in Settings, so one added in a later version (Codex) is not added back.
+  removedAgents?: string[];
   // Missing until one is edited: the built-in harnesses (DEFAULT_HARNESSES in js/dev-core.js).
   harnesses?: DevHarness[];
   schemaVersion?: number;
