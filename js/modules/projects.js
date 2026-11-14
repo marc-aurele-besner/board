@@ -32,6 +32,7 @@ import { contactsBlock, contactsPanel } from './project-contacts.js';
 import { resizableSide } from '../side-resize.js';
 import { PALETTE, makeProject, createProject } from '../projects-core.js';
 import { dateLocale } from '../locale.js';
+import { removeWithUndo } from '../remove.js';
 
 export { makeProject, createProject };
 
@@ -330,19 +331,25 @@ function quickCreate(store, name) {
 
 /** @param {Store} store @param {Project} project */
 function deleteProject(store, project) {
-  if (!confirm(`Delete project "${project.name}"? Its todos stay, but move to Personal.`)) return;
-  store.update('todos', (t) => {
-    t.items.forEach((i) => {
-      if (i.projectId === project.id) i.projectId = null;
-    });
-    // Task categories scoped to this project have nothing left to apply to.
-    if (Array.isArray(t.categories)) t.categories = t.categories.filter((c) => !(c.scope === 'project' && c.projectId === project.id));
+  removeWithUndo(store, {
+    ask: `Delete project "${project.name}"? Its todos stay, but move to Personal.`,
+    done: `Deleted ${project.name}`,
+    collections: ['projects', 'todos'],
+    run: () => {
+      store.update('todos', (t) => {
+        t.items.forEach((i) => {
+          if (i.projectId === project.id) i.projectId = null;
+        });
+        // Task categories scoped to this project have nothing left to apply to.
+        if (Array.isArray(t.categories)) t.categories = t.categories.filter((c) => !(c.scope === 'project' && c.projectId === project.id));
+      });
+      store.update(COLLECTION, (d) => {
+        d.projects = d.projects.filter((p) => p.id !== project.id);
+      });
+      view.selectedId = null;
+      view.mode = 'view';
+    },
   });
-  store.update(COLLECTION, (d) => {
-    d.projects = d.projects.filter((p) => p.id !== project.id);
-  });
-  view.selectedId = null;
-  view.mode = 'view';
 }
 
 // Category management. Deleting a category clears it from its projects and removes
@@ -377,19 +384,25 @@ function renameCategory(store, category, name) {
 function deleteCategory(store, category) {
   const { projects } = store.get(COLLECTION);
   const count = projects.filter((p) => labelsOf(p).includes(category.id)).length;
-  if (!confirm(`Delete category "${category.name}"? ${count} project${count === 1 ? '' : 's'} will become uncategorized.`)) return;
-  store.update(COLLECTION, (d) => {
-    d.categories = d.categories.filter((c) => c.id !== category.id);
-    d.projects.forEach((p) => {
-      p.labels = labelsOf(p).filter((x) => x !== category.id);
-    });
+  removeWithUndo(store, {
+    ask: `Delete category "${category.name}"? ${count} project${count === 1 ? '' : 's'} will become uncategorized.`,
+    done: `Deleted ${category.name}`,
+    collections: ['projects', 'todos'],
+    run: () => {
+      store.update(COLLECTION, (d) => {
+        d.categories = d.categories.filter((c) => c.id !== category.id);
+        d.projects.forEach((p) => {
+          p.labels = labelsOf(p).filter((x) => x !== category.id);
+        });
+      });
+      const todos = store.get('todos');
+      if (Array.isArray(todos.categories)) {
+        store.update('todos', (t) => {
+          t.categories = withoutLabel(t.categories, category.id);
+        });
+      }
+    },
   });
-  const todos = store.get('todos');
-  if (Array.isArray(todos.categories)) {
-    store.update('todos', (t) => {
-      t.categories = withoutLabel(t.categories, category.id);
-    });
-  }
 }
 
 /** @param {Store} store @param {string} id */

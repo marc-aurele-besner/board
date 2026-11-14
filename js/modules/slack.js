@@ -19,6 +19,8 @@ import {
   postMessage, editMessage, deleteMessage, react, markRead, customEmoji, fileData, slackLink,
 } from '../slack.js';
 import { dateLocale } from '../locale.js';
+import { removeWithUndo } from '../remove.js';
+import { askBeforeRemoving } from '../appearance.js';
 /** @import { Store, SlackData, SlackWorkspace, SlackChannel, SlackGroup, Project } from '../../types/data' */
 /** @import { Child } from '../../types/ui' */
 /** @import { MenuEntry } from '../menu.js' */
@@ -815,6 +817,25 @@ function sectionMenu(store, section) {
 
 /** @param {Store} store @param {SlackWorkspace} w */
 export function confirmRemove(store, w) {
+  const remove = () => {
+    const prefix = `${w.id}|`;
+    if (view.open.startsWith(prefix)) view.open = '';
+    change(store, (d) => {
+      d.workspaces = d.workspaces.filter((x) => x.id !== w.id);
+      delete d.channels[w.id];
+      delete d.users[w.id];
+      d.muted = d.muted.filter((k) => !k.startsWith(prefix));
+      d.order = d.order.filter((k) => !k.startsWith(prefix));
+      d.collapsed = d.collapsed.filter((k) => k !== w.id);
+      for (const k of Object.keys(d.projects)) if (k.startsWith(prefix)) delete d.projects[k];
+      for (const g of d.groups) g.items = g.items.filter((k) => !k.startsWith(prefix));
+    });
+  };
+  // With Appearance's "Ask before removing" off: at once, with Undo.
+  if (!askBeforeRemoving()) {
+    removeWithUndo(store, { ask: '', done: `Removed ${w.name}`, collections: ['slack'], run: remove });
+    return;
+  }
   const dialog = openDialog({
     title: `Remove ${w.name}?`,
     body: h('div', { class: 'stack' },
@@ -826,18 +847,7 @@ export function confirmRemove(store, w) {
           class: 'danger',
           onclick: () => {
             dialog.close();
-            const prefix = `${w.id}|`;
-            if (view.open.startsWith(prefix)) view.open = '';
-            change(store, (d) => {
-              d.workspaces = d.workspaces.filter((x) => x.id !== w.id);
-              delete d.channels[w.id];
-              delete d.users[w.id];
-              d.muted = d.muted.filter((k) => !k.startsWith(prefix));
-              d.order = d.order.filter((k) => !k.startsWith(prefix));
-              d.collapsed = d.collapsed.filter((k) => k !== w.id);
-              for (const k of Object.keys(d.projects)) if (k.startsWith(prefix)) delete d.projects[k];
-              for (const g of d.groups) g.items = g.items.filter((k) => !k.startsWith(prefix));
-            });
+            remove();
           },
         }, 'Remove'))),
   });

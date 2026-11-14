@@ -11,6 +11,7 @@ import { barChart, legend } from '../chart.js';
 import { openDialog } from '../modal.js';
 import { toast } from '../toast.js';
 import { dateLocale, daysIntoWeek } from '../locale.js';
+import { removeWithUndo } from '../remove.js';
 /** @import { Store, FinanceEntry, Recurring, AiContentPart } from '../../types/data' */
 /** @import { PickOption } from '../inline.js' */
 
@@ -1091,9 +1092,15 @@ function updateRecurring(store, id, patch) {
 // Stops future entries. The entries it already added stay, as one-off lines.
 /** @param {Store} store @param {string} id */
 function removeRecurring(store, id) {
-  if (!confirm('Stop this recurring expense? The entries it already added stay in Money.')) return;
-  store.update(COLLECTION, (d) => {
-    d.recurring = d.recurring.filter((r) => r.id !== id);
+  removeWithUndo(store, {
+    ask: 'Stop this recurring expense? The entries it already added stay in Money.',
+    done: 'Recurring expense stopped',
+    collections: ['finance'],
+    run: () => {
+      store.update(COLLECTION, (d) => {
+        d.recurring = d.recurring.filter((r) => r.id !== id);
+      });
+    },
   });
 }
 
