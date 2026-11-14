@@ -22,7 +22,7 @@ import { LINKEDIN } from '../linkedin-core.js';
 import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startDevSession, openSession, runnerOf } from './dev.js';
-import { DEV_MODEL_NAMES, DEV_EFFORTS, ASK_LABELS, claudeState, devAgents, taskAgent, taskAgentCommand, projectAgent } from '../dev-core.js';
+import { DEV_MODEL_NAMES, DEV_EFFORTS, ASK_LABELS, claudeState, devAgents, taskAgent, taskAgentCommand, projectAgent, agentEfforts } from '../dev-core.js';
 import { agentLogo } from './dev-agent-field.js';
 import { DONE_ASK } from '../dev-done.js';
 import { openMenu, copyItem } from '../menu.js';
@@ -928,12 +928,15 @@ async function devTasks(store, items) {
   const ids = items.map((i) => i.id);
   // Several tasks share one session: the first one that picked an agent or model (or effort) sets it.
   const picked = items.find((i) => i.devModel || i.devProvider);
-  const effort = items.find((i) => i.devEffort)?.devEffort ?? '';
+  const pickedEffort = items.find((i) => i.devEffort)?.devEffort ?? '';
   // A picked agent runs its own command in place of the project's, unless the project already runs it
   // (taskAgentCommand). A removed agent's model would mean nothing to the project's command: it takes its default.
   const agent = taskAgent(store, picked);
   const model = agent ? picked?.devModel ?? '' : '';
   const devCommand = taskAgentCommand(store, folder, agent);
+  // An effort the agent that runs does not take (MiniMax's) is left out.
+  const runs = agent ?? projectAgent(store, folder);
+  const effort = runs && !agentEfforts(store, runs).includes(pickedEffort) ? '' : pickedEffort;
   let started;
   try {
     started = await startDevSession({ store, claude: true, prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}\n\n${DONE_ASK}`, projectId: folder?.id, taskIds: ids, title: items[0].text, model, effort, devCommand });
@@ -1030,9 +1033,9 @@ function devControl(store, item) {
   return h('span', { class: 'dev-control' }, devButton(store, item));
 }
 
-// The task's agent, model and effort: Project default leaves the project's agent (or command) to choose. Saved on
-// the task, so its Dev button starts every session with them. The rows of the task's right-click menu: its model and
-// effort, and a new session.
+// The task's agent, model and effort, in one flat list: Project default leaves the project's agent (or command) to
+// choose; each agent's models under its name; the effort, when the agent that runs takes one. Saved on the task, so
+// its Dev button starts every session with them. Also a new session.
 /** @param {Store} store @param {Task} item @returns {MenuEntry[]} */
 function devOptionEntries(store, item) {
   const model = item.devModel ?? '';
@@ -1050,28 +1053,29 @@ function devOptionEntries(store, item) {
   const name = (/** @type {string} */ v) => DEV_MODEL_NAMES[v] ?? v[0].toUpperCase() + v.slice(1);
   const project = projectsOf(store).find((p) => p.id === item.projectId);
   const own = projectAgent(store, project);
-  // An agent with no models is one row, run with the model its harness picks.
+  // A project with a command of its own may run anything: every level is offered.
+  const runs = agent ?? own;
+  const efforts = runs ? agentEfforts(store, runs) : DEV_EFFORTS;
   /** @type {MenuEntry[]} */
-  const modelRows = [
-    { label: 'Project default', icon: own ? () => agentLogo(store, own) : icon('terminal'), hint: own ? own.name : 'Its own command', checked: !agent, onSelect: () => set({ devModel: '', devProvider: '' }) },
-    ...devAgents(store).flatMap((a) => /** @type {MenuEntry[]} */ (['-', ...(a.models.length
-      ? a.models.map((v) => ({
-          label: name(v),
-          icon: () => agentLogo(store, a),
-          hint: a.name,
-          checked: agent?.id === a.id && model === v,
-          onSelect: () => set({ devModel: v, devProvider: a.id }),
-        }))
-      : [{ label: a.name, icon: () => agentLogo(store, a), hint: 'Its default model', checked: agent?.id === a.id && !model, onSelect: () => set({ devModel: '', devProvider: a.id }) }])])),
-  ];
-  const shown = agent ? (model ? `${name(model)} · ${agent.name}` : agent.name) : 'Project default';
+  const agentRows = devAgents(store).flatMap((a) => /** @type {MenuEntry[]} */ (a.models.length
+    ? ['-', { label: a.name, icon: () => agentLogo(store, a), heading: true }, ...a.models.map((v) => ({
+        label: name(v),
+        checked: agent?.id === a.id && model === v,
+        onSelect: () => set({ devModel: v, devProvider: a.id }),
+      }))]
+    // An agent with no models is one row, run with the model its program picks.
+    : ['-', { label: a.name, icon: () => agentLogo(store, a), hint: 'Its default model', checked: agent?.id === a.id && !model, onSelect: () => set({ devModel: '', devProvider: a.id }) }]));
   return [
-    { label: 'Agent & model', icon: () => { const a = agent ?? own; return a ? agentLogo(store, a) : icon('terminal'); }, hint: shown, items: modelRows },
-    { label: 'Effort', hint: effort || 'Default', items: [
-      { label: 'Default', checked: !effort, onSelect: () => set({ devEffort: '' }) },
-      '-',
-      ...DEV_EFFORTS.map((v) => ({ label: name(v), checked: effort === v, onSelect: () => set({ devEffort: v }) })),
-    ] },
+    { label: 'Project default', icon: own ? () => agentLogo(store, own) : icon('terminal'), hint: own ? own.name : 'Its own command', checked: !agent, onSelect: () => set({ devModel: '', devProvider: '' }) },
+    ...agentRows,
+    '-',
+    efforts.length
+      ? { label: 'Effort', hint: effort && efforts.includes(effort) ? name(effort) : 'Default', items: [
+          { label: 'Default', checked: !effort || !efforts.includes(effort), onSelect: () => set({ devEffort: '' }) },
+          '-',
+          ...efforts.map((v) => ({ label: name(v), checked: effort === v, onSelect: () => set({ devEffort: v }) })),
+        ] }
+      : null,
     '-',
     { label: 'Start a new session', icon: icon('terminal'), onSelect: () => devTasks(store, [item]) },
   ];

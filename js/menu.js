@@ -5,11 +5,11 @@ import { toast } from './toast.js';
 
 /** @import { Child } from '../types/ui' */
 /**
- * A row of a menu: an action, a submenu (`items`), or '-' for a separator. `checked` shows a tick, `hint` a muted
- * word on the right. `search` puts a field with that placeholder atop the submenu, which keeps the rows whose label
+ * A row of a menu: an action, a submenu (`items`), a `heading` (a muted title over the rows after it, not a row
+ * itself), or '-' for a separator. `checked` shows a tick, `hint` a muted word on the right. `search` puts a field with that placeholder atop the submenu, which keeps the rows whose label
  * holds what is typed.
  * @typedef {{ label: string, icon?: Child | (() => Child), hint?: string, checked?: boolean, danger?: boolean,
- *   onSelect?: () => void, items?: MenuEntry[], search?: string }} MenuItem
+ *   onSelect?: () => void, items?: MenuEntry[], search?: string, heading?: boolean }} MenuItem
  * @typedef {MenuItem | '-' | null | false} MenuEntry
  */
 
@@ -98,6 +98,11 @@ function panelOf(entries, depth, search) {
       return;
     }
     const item = /** @type {MenuItem} */ (entry);
+    if (item.heading) {
+      const lead = typeof item.icon === 'function' ? item.icon() : item.icon;
+      panel.append(h('div', { class: 'menu-heading', role: 'presentation' }, lead ?? null, h('span', null, item.label)));
+      return;
+    }
     const sub = item.items?.filter((x) => x);
     const lead = typeof item.icon === 'function' ? item.icon() : item.icon;
     const row = h('button', {

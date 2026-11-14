@@ -8,9 +8,10 @@
   ],
   "providers": [
     { "id": "claude", "name": "Claude", "command": "claude --worktree", "models": ["opus", "sonnet"] },
-    { "id": "minimax", "name": "MiniMax", "command": "ANTHROPIC_BASE_URL=https://api.example.com claude --worktree", "models": ["MiniMax-M3"] }
+    { "id": "minimax", "name": "MiniMax", "command": "ANTHROPIC_BASE_URL=https://api.example.com claude --worktree", "models": ["MiniMax-M3"], "efforts": [] }
   ],
   "defaultAgent": "claude",
+  "removedAgents": ["minimax"],
   "harnesses": [
     { "id": "claude", "name": "Claude Code", "command": "claude --worktree", "model": "--model {{model}}", "effort": "--effort {{effort}}", "prompt": "-- {{prompt}}" },
     { "id": "codex", "name": "Codex CLI", "command": "codex", "model": "--model {{model}}", "effort": "", "prompt": "-- {{prompt}}" }
