@@ -218,6 +218,12 @@ export interface BingSettings {
   relay?: string;
 }
 
+// Settings → Search consoles: the project websites left out of Monitoring → Search.
+export interface SearchSettings {
+  // Project ids switched off; every other project website is on.
+  off?: string[];
+}
+
 export interface ResendSettings {
   // Project id -> that project's Resend API key.
   keys: Record<string, string>;
@@ -316,6 +322,7 @@ export interface Settings {
   netlify?: DeploySettings;
   analytics: AnalyticsSettings;
   bing: BingSettings;
+  search?: SearchSettings;
   linkedin?: LinkedinSettings;
   resend: ResendSettings;
   gmail: GmailSettings;

@@ -65,6 +65,11 @@ export function autoSourceLink({ auto, projectId }) {
 /** @type {ToolsData} */
 export const TOOLS_DEFAULTS = { sites: {}, every: 60, providers: [], status: {} };
 export const sitesOf = (/** @type {DataStore} */ store) => store.get('projects').projects.filter((p) => hostOf(p.website ?? ''));
+// The websites Monitoring → Search reads: every project website not switched off in Settings → Search consoles.
+export const searchSitesOf = (/** @type {DataStore} */ store) => {
+  const off = new Set(store.get('settings').search?.off ?? []);
+  return sitesOf(store).filter((p) => !off.has(p.id));
+};
 export const siteData = (/** @type {DataStore} */ store, /** @type {string} */ projectId) => /** @type {Site} */ (store.get('tools').sites[projectId] ?? {});
 export const autoTaskFor = (/** @type {DataStore} */ store, /** @type {string} */ kind, /** @type {string | undefined} */ ref) =>
   store.get('todos').items.find((t) => t.auto === kind && t.autoRef === ref && statusOf(t) !== 'done') ?? null;
