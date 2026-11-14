@@ -1650,6 +1650,17 @@ button.run-chip.preview-link { min-height: 28px; padding: 3px 10px; border-radiu
 .pool-title { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
 .pool-title > strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 1.02rem; }
 .pool-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pool-title > .outdated-pill { align-self: flex-start; }
+/* Where a position lives: exchange and version, chain, fee tier, as one muted line with dots between, no pills. */
+.lp-venue { display: inline-flex; align-items: center; gap: 5px; font-size: 0.78rem; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lp-venue + .lp-venue::before { content: '·'; margin-right: 1px; opacity: 0.7; }
+.lp-venue .logo.xs { width: 14px; height: 14px; }
+.lp-farm { display: inline-flex; align-items: center; gap: 3px; flex: none; font-size: 0.78rem; color: var(--income); font-weight: 600; }
+.pool-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lp-farm .icon { width: 12px; height: 12px; }
+.lp-chip .logo.xs { width: 14px; height: 14px; }
+.lp-kinds { flex-wrap: wrap; gap: 6px 14px; }
+.lp-kinds > .lp-filters + .lp-filters { padding-left: 14px; border-left: 1px solid var(--border); }
 .pool-open { margin-left: auto; align-self: flex-start; }
 
 .logo { position: relative; display: inline-flex; flex: none; width: 34px; height: 34px; border-radius: 50%; overflow: hidden; background: var(--surface-2); box-shadow: 0 0 0 2px var(--surface); }
@@ -1669,10 +1680,7 @@ button.run-chip.preview-link { min-height: 28px; padding: 3px 10px; border-radiu
 /* .row sets display, which would otherwise keep the pickers on screen once a link has named the chain. */
 .lp-pickers[hidden], .lp-detected[hidden] { display: none; }
 .lp-detected { margin: 0; }
-.dex-pill, .farm-pill { font-size: 0.72rem; font-weight: 600; padding: 1px 7px; border-radius: 6px; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); }
-.farm-pill { color: var(--income); background: color-mix(in srgb, var(--income) 12%, transparent); border-color: transparent; }
 .lp-with-reward { display: inline-flex; flex-direction: column; align-items: inherit; gap: 2px; }
-.fee-pill { font-size: 0.72rem; font-weight: 600; padding: 1px 7px; border-radius: 6px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); font-variant-numeric: tabular-nums; }
 .status-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
 .status-pill.in { color: var(--income); background: color-mix(in srgb, var(--income) 12%, transparent); }
 .status-pill.out { color: var(--expense); background: color-mix(in srgb, var(--expense) 12%, transparent); }
@@ -1710,6 +1718,8 @@ button.run-chip.preview-link { min-height: 28px; padding: 3px 10px; border-radiu
 
 .pool-foot { display: flex; justify-content: space-between; gap: 8px; min-width: 0; }
 .pool-foot > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pool-foot > .pool-meta { flex-wrap: nowrap; min-width: 0; }
+.pool-foot .lp-venue { font-size: inherit; }
 
 .pool-card.ghost { pointer-events: none; border-style: dashed; box-shadow: none; animation: fadeUp 0.4s ease both; animation-delay: calc(var(--i, 0) * 80ms); }
 .pool-card.ghost:hover { transform: none; }
@@ -2699,6 +2709,7 @@ button.json-key:hover { background: color-mix(in srgb, var(--accent) 15%, transp
 .pool-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.02rem; text-decoration: none; }
 .pool-name:hover { text-decoration: underline; }
 .range-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px; }
+.range-side { display: inline-flex; align-items: center; gap: 4px; flex: none; }
 .range-cell { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .icon-btn.flip-btn { width: 24px; height: 24px; min-height: 0; min-width: 0; padding: 0; flex: none; display: inline-flex; align-items: center; justify-content: center; }
 .icon-btn.flip-btn .icon { width: 14px; height: 14px; }
