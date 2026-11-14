@@ -58,9 +58,9 @@ export interface Project {
   iconUrl?: string;
   // Folder on this machine where Dev opens terminals; may start with ~.
   localPath?: string;
-  // What Dev runs for a task; '' uses the default.
+  // What Dev runs for a task when the project picks no agent; '' uses the default agent.
   devCommand?: string;
-  // A preset id from Settings → Dev environment; runs instead of devCommand.
+  // The id of its agent in Settings → Dev environment (a preset's, before agents); runs instead of devCommand.
   devPreset?: string;
   // Project label ids. Older files have `categoryId` instead; migrateProjectShape() fills it.
   labels?: string[];

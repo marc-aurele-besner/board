@@ -10,6 +10,7 @@
     { "id": "claude", "name": "Claude", "command": "claude --worktree", "models": ["opus", "sonnet"] },
     { "id": "minimax", "name": "MiniMax", "command": "ANTHROPIC_BASE_URL=https://api.example.com claude --worktree", "models": ["MiniMax-M3"] }
   ],
+  "defaultAgent": "claude",
   "harnesses": [
     { "id": "claude", "name": "Claude Code", "command": "claude --worktree", "model": "--model {{model}}", "effort": "--effort {{effort}}", "prompt": "-- {{prompt}}" },
     { "id": "codex", "name": "Codex CLI", "command": "codex", "model": "--model {{model}}", "effort": "", "prompt": "-- {{prompt}}" }

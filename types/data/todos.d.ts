@@ -86,10 +86,11 @@ export interface Task {
   cronRun?: string;
   // The Dev session that last worked on it.
   devSession?: string;
-  // The model and effort its Dev sessions run claude with (--model, --effort); missing or '' for the default.
+  // The model and effort its Dev sessions run with (--model, --effort for claude); missing or '' for the default.
   devModel?: string;
   devEffort?: string;
-  // The provider of devModel when it is not Claude's (Settings → Dev environment); its command runs the session.
+  // The agent it picked in its right-click menu (Settings → Dev environment); missing for its project's. A devModel
+  // without it was picked from Claude's models, before agents named theirs.
   devProvider?: string;
   images?: TaskImage[];
   worktrees?: TaskWorktree[];

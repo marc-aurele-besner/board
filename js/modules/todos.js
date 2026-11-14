@@ -22,7 +22,7 @@ import { LINKEDIN } from '../linkedin-core.js';
 import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startDevSession, openSession, runnerOf } from './dev.js';
-import { DEV_MODEL_NAMES, DEV_EFFORTS, ASK_LABELS, CLAUDE_PROVIDER, claudeState, devProviders, taskProvider } from '../dev-core.js';
+import { DEV_MODEL_NAMES, DEV_EFFORTS, ASK_LABELS, claudeState, devAgents, taskAgent, taskAgentCommand, projectAgent } from '../dev-core.js';
 import { DONE_ASK } from '../dev-done.js';
 import { openMenu, copyItem } from '../menu.js';
 import { sessionStatus, runnerInfo, listSkills } from '../terminal.js';
@@ -925,14 +925,14 @@ async function devTasks(store, items) {
   const list = items.map((i) => taskMarkdown(store, i, projects, images.get(i.id))).join('\n');
   const folder = items.map((i) => projects.find((p) => p.id === i.projectId)).find((p) => p?.localPath);
   const ids = items.map((i) => i.id);
-  // Several tasks share one session: the first one that picked a model (or effort) sets it.
-  const picked = items.find((i) => i.devModel);
+  // Several tasks share one session: the first one that picked an agent or model (or effort) sets it.
+  const picked = items.find((i) => i.devModel || i.devProvider);
   const effort = items.find((i) => i.devEffort)?.devEffort ?? '';
-  // A model of a provider other than Claude runs with that provider's command, in place of the project's. A
-  // removed provider's model would mean nothing to the project's command: the session takes its default.
-  const provider = taskProvider(store, picked?.devProvider);
-  const model = picked?.devProvider && !provider ? '' : picked?.devModel ?? '';
-  const devCommand = provider?.command ?? '';
+  // A picked agent runs its own command in place of the project's, unless the project already runs it
+  // (taskAgentCommand). A removed agent's model would mean nothing to the project's command: it takes its default.
+  const agent = taskAgent(store, picked);
+  const model = agent ? picked?.devModel ?? '' : '';
+  const devCommand = taskAgentCommand(store, folder, agent);
   let started;
   try {
     started = await startDevSession({ store, claude: true, prompt: `Work on ${items.length === 1 ? 'this task' : 'these tasks'}:\n\n${list}\n\n${DONE_ASK}`, projectId: folder?.id, taskIds: ids, title: items[0].text, model, effort, devCommand });
@@ -1029,15 +1029,14 @@ function devControl(store, item) {
   return h('span', { class: 'dev-control' }, devButton(store, item));
 }
 
-// The task's model and effort: Default leaves the project's command (or claude) to choose. Saved on the task, so
-// its Dev button starts every session with them. The rows of the task's right-click menu: its model and effort, and
-// a new session.
+// The task's agent, model and effort: Project default leaves the project's agent (or command) to choose. Saved on
+// the task, so its Dev button starts every session with them. The rows of the task's right-click menu: its model and
+// effort, and a new session.
 /** @param {Store} store @param {Task} item @returns {MenuEntry[]} */
 function devOptionEntries(store, item) {
   const model = item.devModel ?? '';
   const effort = item.devEffort ?? '';
-  // Claude's models keep the project's command; another provider's run its own command (devProvider).
-  const provider = taskProvider(store, item.devProvider)?.id ?? CLAUDE_PROVIDER;
+  const agent = taskAgent(store, item);
   /** @param {Partial<Pick<Task, 'devModel' | 'devEffort' | 'devProvider'>>} patch */
   const set = (patch) => store.update(COLLECTION, (d) => {
     const t = d.items.find((x) => x.id === item.id);
@@ -1048,19 +1047,24 @@ function devOptionEntries(store, item) {
     }
   });
   const name = (/** @type {string} */ v) => DEV_MODEL_NAMES[v] ?? v[0].toUpperCase() + v.slice(1);
-  const providers = devProviders(store).filter((p) => p.models.length);
+  const project = projectsOf(store).find((p) => p.id === item.projectId);
+  const own = projectAgent(store, project);
+  // An agent with no models is one row, run with the model its harness picks.
   /** @type {MenuEntry[]} */
   const modelRows = [
-    { label: 'Default', checked: !model, onSelect: () => set({ devModel: '', devProvider: '' }) },
-    ...providers.flatMap((p) => /** @type {MenuEntry[]} */ (['-', ...p.models.map((v) => ({
-      label: name(v),
-      hint: p.name,
-      checked: model === v && provider === p.id,
-      onSelect: () => set({ devModel: v, devProvider: p.id === CLAUDE_PROVIDER ? '' : p.id }),
-    }))])),
+    { label: 'Project default', hint: own ? own.name : 'Its own command', checked: !agent, onSelect: () => set({ devModel: '', devProvider: '' }) },
+    ...devAgents(store).flatMap((a) => /** @type {MenuEntry[]} */ (['-', ...(a.models.length
+      ? a.models.map((v) => ({
+          label: name(v),
+          hint: a.name,
+          checked: agent?.id === a.id && model === v,
+          onSelect: () => set({ devModel: v, devProvider: a.id }),
+        }))
+      : [{ label: a.name, hint: 'Its default model', checked: agent?.id === a.id && !model, onSelect: () => set({ devModel: '', devProvider: a.id }) }])])),
   ];
+  const shown = agent ? (model ? `${name(model)} · ${agent.name}` : agent.name) : 'Project default';
   return [
-    { label: 'Model', hint: model ? name(model) : 'Default', items: modelRows },
+    { label: 'Agent & model', hint: shown, items: modelRows },
     { label: 'Effort', hint: effort || 'Default', items: [
       { label: 'Default', checked: !effort, onSelect: () => set({ devEffort: '' }) },
       '-',

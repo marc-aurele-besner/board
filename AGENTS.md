@@ -102,6 +102,7 @@ js/deploy-panel.js    a preview's panel: state, commit, timings, error, links an
 js/images.js          which pasted or dropped files are images claude reads
 js/task-images.js     a task's images: kept in the data folder, shown on the task, saved through the runner for claude
 js/task-worktrees.js  the worktrees Dev sessions made for tasks; removed through the runner once their tasks are done, their terminals closed
+js/modules/dev-agent-field.js  a project's agent pick (or its own command), shared by Settings → Dev environment and a project's page; agents' logos
 js/modules/dev-worktrees.js  Dev's Worktrees panel: the repo's worktrees, whether each is in use, and removing them
 js/modules/dev-uses.js  the skills and MCP panels of Dev's bar: a session's skills (what each does, its turns) and its MCP calls by server and tool (failures, time per call)
 js/modules/dev-pr.js   Dev's pull request view: the branch against the default branch, file list, diffs as cards that fold, Viewed marks
