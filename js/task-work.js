@@ -34,6 +34,8 @@ const TAB_NAMES = /** @type {Record<WorkTab, string>} */ ({ prs: 'PRs', issues: 
 const TAB_ICONS = /** @type {Record<WorkTab, IconName>} */ ({ prs: 'pull-request', issues: 'repo', previews: 'globe', dev: 'terminal', artifacts: 'sparkle' });
 /** @type {Record<string, string>} */
 const LINK_STATES = { open: 'open', merged: 'merged', closed: 'closed', completed: 'closed as completed', not_planned: 'closed as not planned' };
+// The PR state filters' icons, coloured as GitHub colours the states.
+const FILTER_ICONS = /** @type {Record<string, IconName>} */ ({ all: 'list', open: 'pull-request', merged: 'pr-merged', closed: 'pr-closed' });
 // Above this many PRs, the PRs tab offers its state filters.
 const FILTER_FROM = 4;
 const PEEK_DELAY = 350;
@@ -287,13 +289,13 @@ function paint() {
     dropTerm();
     const filterRow = pop.tab === 'prs' && filters.length > 2 ? h('div', { class: 'work-filters', role: 'group', 'aria-label': 'Show' }, filters.map((f) => h('button', {
       type: 'button',
-      class: `work-filter${pop.filter === f ? ' on' : ''}`,
+      class: `work-filter${f === 'all' ? '' : ` gh-${f}`}${pop.filter === f ? ' on' : ''}`,
       'aria-pressed': String(pop.filter === f),
       onclick: () => {
         pop.filter = f;
         paint();
       },
-    }, f === 'all' ? `All ${prs.length}` : `${f[0].toUpperCase()}${f.slice(1)} ${states[f]}`))) : null;
+    }, icon(FILTER_ICONS[f] ?? 'list'), f === 'all' ? `All ${prs.length}` : `${f[0].toUpperCase()}${f.slice(1)} ${states[f]}`))) : null;
     patch(pop.body, h('div', null, filterRow, pop.tab === 'prs' ? prList(store, prs, previews)
       : pop.tab === 'issues' ? linkLines(store, issues, false, [])
         : pop.tab === 'previews' ? previewList(store, previews)
