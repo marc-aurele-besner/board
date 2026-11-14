@@ -1733,7 +1733,8 @@ button.work-session.on { background: color-mix(in srgb, var(--accent) 9%, var(--
 .work-term { display: flex; flex-direction: column; min-height: 0; flex: 1; border-top: 1px solid var(--border); }
 .work-term > .term-out.term-view { flex: 1 1 340px; height: auto; max-height: none; min-height: 120px; font-size: 0.74rem; }
 .work-pop.big .work-term > .term-out.term-view { flex: 1; height: auto; font-size: 0.8rem; }
-.work-term-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 2px 6px 2px 10px; border-bottom: 1px solid var(--border); font-size: 0.8rem; }
+.work-term-head { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px 8px; padding: 2px 6px 2px 10px; border-bottom: 1px solid var(--border); font-size: 0.8rem; }
+@media (max-width: 600px) { .work-term-head { flex-wrap: wrap; } }
 .work-term-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.work-cwd { min-height: 0; max-width: 260px; padding: 1px 6px; border: none; background: none; color: var(--muted); font: 0.75rem ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
 button.work-cwd:hover { background: var(--surface-2); color: var(--text); }
