@@ -15,9 +15,10 @@ import { linkState } from './link-states.js';
 import { previewsOf, askMissing } from './previews.js';
 import { openDeployPanel, stateDot, PROVIDER_NAMES, STATE_NAMES } from './deploy-panel.js';
 import { claudeState } from './dev-core.js';
-import { terminalView, liveSession, onSessionPaint, terminalBackground, openSession, exitText, keyData, wheelData, runnerOf, pickUp, resumeSession } from './modules/dev.js';
+import { terminalView, liveSession, onSessionPaint, terminalBackground, openSession, exitText, keyData, wheelData, runnerOf, pickUp, resumeSession, followClaude, fitTerminal, imagePaths } from './modules/dev.js';
 import { attachSession, sendInput, stopCommand } from './terminal.js';
 import { createTerminal } from './vt.js';
+import { imageFiles, dragsFiles } from './images.js';
 
 /**
  * What the row knows that this module does not: what each Dev session is doing, and how to link another issue or PR.
@@ -201,13 +202,13 @@ function build(store) {
 /** @param {PointerEvent} e */
 function onOutside(e) {
   const t = /** @type {Element} */ (e.target);
-  if (pop.el?.contains(t) || t.closest?.(`[data-work="${CSS.escape(pop.id)}"]`) || t.closest?.('.modal-overlay, .popover.menu, .toast')) return;
+  if (pop.el?.contains(t) || t.closest?.(`[data-work="${CSS.escape(pop.id)}"]`) || t.closest?.('.modal-overlay, .popover.menu, .turns-pop, .toast')) return;
   closeWork();
 }
 
 /** @param {KeyboardEvent} e */
 function onKey(e) {
-  if (e.key !== 'Escape' || !pop.el || document.querySelector('.modal-overlay')) return;
+  if (e.key !== 'Escape' || !pop.el || document.querySelector('.modal-overlay, .turns-pop')) return;
   // Escape in the terminal goes to claude, as in Dev.
   if (pop.term?.view.el.contains(/** @type {Node} */ (e.target))) return;
   e.stopPropagation();
@@ -428,7 +429,8 @@ function sessionList(sessions, options) {
  * a stream of its own. Views draw it: the popover's (which takes keys) and the peek's.
  * @typedef {{ session: string, term: Terminal, state: string, running: boolean, pid: number, exit: import('./modules/dev.js').Exit | null,
  *   command: string, cwd: string, mirror: boolean, frame: number, views: Set<TermView>, stop: () => void }} Reader
- * @typedef {{ view: ReturnType<typeof terminalView>, keys: boolean, el: HTMLElement, reader: Reader, bar: HTMLElement | null, head: HTMLElement | null }} TermView
+ * @typedef {{ view: ReturnType<typeof terminalView>, keys: boolean, el: HTMLElement, reader: Reader, bar: HTMLElement | null, head: HTMLElement | null,
+ *   claude: HTMLElement | null, observer: ResizeObserver | null, fitted?: { cols: number, pid: number } }} TermView
  */
 /** @type {Map<string, Reader>} */
 const readers = new Map();
@@ -444,6 +446,10 @@ function drawReader(r) {
   r.frame = 0;
   const c = current(r);
   for (const v of r.views) {
+    if (v.keys && c.running && pop.store && (c.term.cols !== v.fitted?.cols || c.pid !== v.fitted?.pid)) {
+      v.fitted = { cols: c.term.cols, pid: c.pid };
+      fitTerminal(pop.store, v.view.el, c.term, c.pid);
+    }
     v.view.paint(c.term, v.keys && c.running);
     if (v.bar) paintBar(v);
   }
@@ -504,7 +510,7 @@ function readerOf(store, session) {
 async function resume(store, item, session, next) {
   const own = store.get('todos').items.filter((t) => t.devSession === session).map((t) => t.id);
   try {
-    await resumeSession(store, session, next, own.length ? own : [item.id]);
+    await resumeSession(store, session, next, own.length ? own : [item.id], pop.term?.reader.session === session ? pop.term.view.el : undefined);
   } catch (err) {
     return toast(/** @type {Error} */ (err).message);
   }
@@ -536,7 +542,15 @@ function showTerm(store, item, sessions, options) {
   }
   const look = devLook(options.status(s.id));
   const head = pop.term.head;
+  const term = pop.term;
+  const openDev = () => {
+    const taskIds = store.get('todos').items.filter((t) => t.devSession === s.id).map((t) => t.id);
+    closeWork();
+    openSession({ id: s.id, cwd: s.cwd || options.status(s.id)?.cwd || '', taskIds: taskIds.length ? taskIds : [item.id] });
+  };
   if (head) {
+    // Expanded, the head has what Dev's bar shows of claude: its turns, subagents, tools, skills and MCP calls.
+    const claude = pop.big ? term.claude : null;
     patch(head, h('div', null,
       h('span', { class: `work-dot is-${look.key}`, 'aria-hidden': 'true' }),
       h('span', { class: 'work-term-state' }, look.label),
@@ -546,24 +560,32 @@ function showTerm(store, item, sessions, options) {
         title: `${s.cwd || options.status(s.id)?.cwd}\nClick to copy the folder path`,
         onclick: () => navigator.clipboard.writeText(s.cwd || options.status(s.id)?.cwd || '').then(() => toast('Folder path copied'), () => toast('Could not copy')),
       }, (s.cwd || options.status(s.id)?.cwd || '').split('/').pop()) : null,
+      claude,
       h('span', { class: 'grow' }),
       h('button', { type: 'button', class: 'icon-btn', title: 'Copy the output', 'aria-label': 'Copy the output', onclick: () => copyOutput(/** @type {TermView} */ (pop.term)) }, icon('copy')),
-      h('button', {
-        type: 'button',
-        class: 'btn-small',
-        title: 'Open this terminal in Dev',
-        onclick: () => {
-          const taskIds = store.get('todos').items.filter((t) => t.devSession === s.id).map((t) => t.id);
-          closeWork();
-          openSession({ id: s.id, cwd: s.cwd || options.status(s.id)?.cwd || '', taskIds: taskIds.length ? taskIds : [item.id] });
+      h('button', { type: 'button', class: 'btn-small', title: 'Open this terminal in Dev', onclick: openDev }, icon('terminal'), 'Open in Dev')));
+    if (claude) {
+      const c = current(term.reader);
+      followClaude(store, claude, {
+        id: s.id,
+        running: c.running,
+        cwd: c.cwd || s.cwd,
+        type: (text) => {
+          const now = current(term.reader);
+          if (!now.running || !now.pid) return toast('Nothing runs in this terminal.');
+          sendInput(runnerOf(store), now.pid, { data: text });
+          term.view.el.focus({ preventScroll: true });
         },
-      }, icon('terminal'), 'Open in Dev')));
+        openDev,
+      });
+    }
   }
   drawReader(pop.term.reader);
 }
 
 function dropTerm() {
   if (!pop.term) return;
+  pop.term.observer?.disconnect();
   detach(pop.term);
   pop.term.el.remove();
   pop.term = null;
@@ -577,10 +599,37 @@ function termView(store, item, s, keys) {
   const bar = keys ? h('div', { class: 'work-term-bar' }) : null;
   const el = h('div', { class: keys ? 'work-term' : 'work-term peek' }, head, view.el, bar);
   /** @type {TermView} */
-  const v = { view, keys, el, reader, bar, head };
+  const v = { view, keys, el, reader, bar, head, claude: keys ? h('span', { class: 'term-claude', 'data-own': '' }) : null, observer: null };
   reader.views.add(v);
   if (keys) {
     const base = runnerOf(store);
+    // The program is fitted to the view, as Dev fits it to its own: a wider one would run off the edge.
+    v.observer = new ResizeObserver(() => fitView(store, v));
+    v.observer.observe(view.el);
+    /** @param {File[]} images */
+    const typeImages = async (images) => {
+      const pid = current(reader).pid;
+      const text = await imagePaths(store, images);
+      const c = current(reader);
+      if (!text || !c.running || c.pid !== pid) return;
+      sendInput(base, pid, { data: c.term.paste ? `\x1b[200~${text}\x1b[201~` : text });
+      view.el.focus({ preventScroll: true });
+    };
+    view.el.addEventListener('dragover', (e) => {
+      if (!dragsFiles(e)) return;
+      e.preventDefault();
+      view.el.classList.add('dropping');
+    });
+    view.el.addEventListener('dragleave', () => view.el.classList.remove('dropping'));
+    view.el.addEventListener('drop', (e) => {
+      if (!dragsFiles(e)) return;
+      e.preventDefault();
+      view.el.classList.remove('dropping');
+      const images = imageFiles(e.dataTransfer);
+      if (!images.length) return toast('Only PNG, JPEG, GIF and WebP images can be dropped here');
+      if (!current(reader).running) return toast('Start claude in this terminal first, then drop the image');
+      typeImages(images);
+    });
     view.el.addEventListener('keydown', (e) => {
       const c = current(reader);
       if (!c.running || !c.pid) return;
@@ -596,6 +645,9 @@ function termView(store, item, s, keys) {
       const c = current(reader);
       if (!c.running || !c.pid) return;
       e.preventDefault();
+      // An image pasted goes to claude as the path of a copy the runner saved, as in Dev.
+      const images = imageFiles(e.clipboardData);
+      if (images.length) return typeImages(images);
       const text = (e.clipboardData?.getData('text') ?? '').replace(/\r?\n/g, '\r');
       if (text) sendInput(base, c.pid, { data: c.term.paste ? `\x1b[200~${text}\x1b[201~` : text });
     });
@@ -607,6 +659,12 @@ function termView(store, item, s, keys) {
     }, { passive: false });
   }
   return v;
+}
+
+/** @param {Store} store @param {TermView} v */
+function fitView(store, v) {
+  const c = current(v.reader);
+  if (c.running && c.pid && fitTerminal(store, v.view.el, c.term, c.pid)) drawReader(v.reader);
 }
 
 // The bar under the terminal, as in Dev: what runs, the keys a mouse needs, and Stop.
