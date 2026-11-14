@@ -1,5 +1,5 @@
 // Monitoring tabs for the project websites: visitors (Google Analytics) and search (Google Search Console, Bing, or both added together).
-import { h, empty, notice, progress, icon, refreshIcon } from '../ui.js';
+import { h, empty, notice, noticePills, progress, icon, refreshIcon } from '../ui.js';
 import { setupBanner } from '../integrations.js';
 import { isConnected } from '../google.js';
 import { analyticsReport, searchReport, bingReport, mergeSearchRows, mergeSearchReports } from '../webstats.js';
@@ -242,7 +242,8 @@ const daysIn = (/** @type {DayBuckets} */ b, /** @type {SearchReport} */ d) => b
 
 // Reads every site from each engine in `sources`, one cache entry per engine and site, so All, Google and
 // Bing share what is loaded. A site counts once one engine answered: `parts` are its reports, `d` those
-// merged, `google` the one the indexing card reads. Each failure is named, with its engine when two are read.
+// merged, `google` the one the indexing card reads. Each failure is named, with its engine when two are read,
+// as a notice for searchBar()'s pill.
 /** @param {Store} store @param {Project[]} sites @param {SearchEngine[]} sources @param {DayBuckets} b */
 function loadSearch(store, sites, sources, b) {
   const entries = sites.flatMap((p) => sources.map((engine) => {
@@ -260,10 +261,15 @@ function loadSearch(store, sites, sources, b) {
       const g = mine.find((e) => e.engine === 'google')?.entry;
       return parts.length ? [{ p, parts, d: mergeSearchReports(parts), google: g?.status === 'ok' ? g.data : null }] : [];
     }),
-    failed: entries.flatMap((e) => (e.entry.status === 'error' ? [`${hostOf(e.p.website)}${on(e.engine)} (${e.entry.error})`] : [])),
-    errors: entries.flatMap((e) => (e.entry.status === 'error' ? [e.entry.error] : [])),
+    failed: entries.flatMap((e) => (e.entry.status === 'error' ? [{ text: `${hostOf(e.p.website)}${on(e.engine)}: ${e.entry.error}` }] : [])),
   };
 }
+
+// The engine buttons, with the sites that could not be read folded into a pill before them, as the Inbox
+// does with its read errors: a banner naming every failed site pushed the numbers far down the page.
+/** @param {HTMLElement} engines @param {ReturnType<typeof loadSearch>} all */
+const searchBar = (engines, all) => h('div', { class: 'row pills-start' }, noticePills('search', all.failed), engines);
+const unread = () => empty('No search data could be read. The alert pill above says why.');
 
 /** @param {Store} store @param {MonitoringView} view @param {PeriodWindow} w */
 export function searchTab(store, view, w) {
@@ -311,10 +317,10 @@ export function searchTab(store, view, w) {
   if (!p) return searchAll(store, view, sites, engines, b, all, note);
   const head = h('div', { class: 'row between' }, siteChips(store, view, sites, p), refreshButton(store, all.keys));
   if (all.loading) return h('div', { class: 'stack-lg' }, engines, head, progress(`Reading search data for ${hostOf(p.website)}…`));
-  // One engine failing leaves the other's numbers standing, with the failure named above them.
-  const failed = all.failed.length ? notice({ text: sources.length > 1 ? `Could not read: ${all.failed.join('; ')}` : all.errors[0] }) : null;
+  // One engine failing leaves the other's numbers standing, with the failure in the pill above them.
+  const bar = searchBar(engines, all);
   const x = all.ok[0];
-  if (!x) return h('div', { class: 'stack-lg' }, engines, head, failed);
+  if (!x) return h('div', { class: 'stack-lg' }, bar, head, unread());
   const d = x.d;
   // Totals come from each engine's own days, so Bing's days (no position) leave the average position alone.
   const total = searchTotals(x.parts.flatMap((r) => daysIn(b, r)));
@@ -322,7 +328,7 @@ export function searchTab(store, view, w) {
   const format = [null, fmt, fmt, pct, (/** @type {number} */ n) => (n ? n.toFixed(1) : '—')];
   const clickSeries = [{ name: 'Clicks', color: 'var(--accent)', values: b.days.map((day) => d.days[day]?.clicks ?? 0) }];
   const impSeries = [{ name: 'Impressions', color: 'var(--info)', values: b.days.map((day) => d.days[day]?.impressions ?? 0) }];
-  return h('div', { class: 'stack-lg' }, engines, head, failed,
+  return h('div', { class: 'stack-lg' }, bar, head,
     h('p', { class: 'muted small' }, `${hostOf(p.website)} · ${d.site}. Search data arrives two to three days late.${note}`),
     h('div', { class: 'summary' },
       stat('Clicks', fmt(total.clicks)),
@@ -406,9 +412,9 @@ function searchTotals(rows) {
  */
 function searchAll(store, view, sites, engines, b, all, note) {
   const head = h('div', { class: 'row between' }, siteChips(store, view, sites, null), refreshButton(store, all.keys));
-  const failed = all.failed.length ? notice({ text: `Could not read: ${all.failed.join('; ')}` }) : null;
   if (all.loading) return h('div', { class: 'stack-lg' }, engines, head, progress(`Reading search data for ${sites.length} site${sites.length === 1 ? '' : 's'}…`));
-  if (!all.ok.length) return h('div', { class: 'stack-lg' }, engines, head, failed);
+  const bar = searchBar(engines, all);
+  if (!all.ok.length) return h('div', { class: 'stack-lg' }, bar, head, unread());
   // Every engine's report of every site, unmerged: totals and rows are added up from these.
   const parts = all.ok.flatMap((x) => x.parts);
   const total = searchTotals(parts.flatMap((r) => daysIn(b, r)));
@@ -421,7 +427,7 @@ function searchAll(store, view, sites, engines, b, all, note) {
   }).sort((a, c) => c[1] - a[1] || c[2] - a[2]);
   const clickSeries = [{ name: 'Clicks', color: 'var(--accent)', values: daySum('clicks') }];
   const impSeries = [{ name: 'Impressions', color: 'var(--info)', values: daySum('impressions') }];
-  return h('div', { class: 'stack-lg' }, engines, head, failed,
+  return h('div', { class: 'stack-lg' }, bar, head,
     h('p', { class: 'muted small' }, `${all.ok.length} site${all.ok.length === 1 ? '' : 's'} added together. Search data arrives two to three days late.${note}`),
     h('div', { class: 'summary' },
       stat('Clicks', fmt(total.clicks)),
