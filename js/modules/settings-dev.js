@@ -5,6 +5,7 @@ import { editText } from '../inline.js';
 import { pickFolder } from '../folder-picker.js';
 import { commandField, codeLine } from '../command-field.js';
 import { projectIcon, projectTree, cleanLocalPath, LOCAL_PATH_ERROR } from './projects.js';
+import { sortable } from './settings-labels.js';
 import { DEFAULT_DEV_COMMAND, runnerOf } from './dev.js';
 import { agentLogo, projectAgentField, COMMAND_VARS, EXAMPLE_PROMPT } from './dev-agent-field.js';
 import {
@@ -141,6 +142,10 @@ function agentsPanel(store, agents, harnesses, projects) {
     if (agents.some((x) => x.name.toLowerCase() === name.toLowerCase())) return fail(store, `An agent named "${name}" already exists.`);
     updateAgents(store, (list) => { list.push({ id: uid(), name, command, models: parseModels(form.elements.models.value) }); });
   };
+  // Their order is the order of a task's Agent & model menu.
+  const order = sortable('agents', agents.map((a) => a.id), (ids) => updateAgents(store, (list) => {
+    list.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+  }));
   return panel('Agents',
     'What a task can run: a program’s command (claude, codex, gemini, opencode…), with the variables that connect it to a provider (an API address, a key from the runner’s environment) at the start of its command. MiniMax runs Claude Code with MiniMax’s API, with the key from MINIMAX_API_KEY.',
     h('ul', { class: 'dev-cards' },
@@ -148,9 +153,9 @@ function agentsPanel(store, agents, harnesses, projects) {
         const harness = harnessOf(harnesses, agent.command);
         const isDefault = agent.id === fallback.id;
         const users = projects.filter((p) => p.devPreset === agent.id || (isDefault && !p.devPreset && !p.devCommand?.trim())).length;
-        return h('li', { class: `dev-card${isDefault ? ' is-default' : ''}` },
+        return h('li', { class: `dev-card${isDefault ? ' is-default' : ''}`, ...order.row(agent.id) },
           cardHead(
-            agentLogo(store, agent),
+            [order.grip(agent.id, agent.name), agentLogo(store, agent)],
             editText({
               value: agent.name,
               placeholder: 'Name',

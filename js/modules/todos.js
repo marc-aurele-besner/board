@@ -23,6 +23,7 @@ import { linkState } from '../link-states.js';
 import { recordsOfTask, sumUsage, usageLine, usageTitle } from '../dev-usage.js';
 import { startDevSession, openSession, runnerOf } from './dev.js';
 import { DEV_MODEL_NAMES, DEV_EFFORTS, ASK_LABELS, claudeState, devAgents, taskAgent, taskAgentCommand, projectAgent } from '../dev-core.js';
+import { agentLogo } from './dev-agent-field.js';
 import { DONE_ASK } from '../dev-done.js';
 import { openMenu, copyItem } from '../menu.js';
 import { sessionStatus, runnerInfo, listSkills } from '../terminal.js';
@@ -1052,19 +1053,20 @@ function devOptionEntries(store, item) {
   // An agent with no models is one row, run with the model its harness picks.
   /** @type {MenuEntry[]} */
   const modelRows = [
-    { label: 'Project default', hint: own ? own.name : 'Its own command', checked: !agent, onSelect: () => set({ devModel: '', devProvider: '' }) },
+    { label: 'Project default', icon: own ? () => agentLogo(store, own) : icon('terminal'), hint: own ? own.name : 'Its own command', checked: !agent, onSelect: () => set({ devModel: '', devProvider: '' }) },
     ...devAgents(store).flatMap((a) => /** @type {MenuEntry[]} */ (['-', ...(a.models.length
       ? a.models.map((v) => ({
           label: name(v),
+          icon: () => agentLogo(store, a),
           hint: a.name,
           checked: agent?.id === a.id && model === v,
           onSelect: () => set({ devModel: v, devProvider: a.id }),
         }))
-      : [{ label: a.name, hint: 'Its default model', checked: agent?.id === a.id && !model, onSelect: () => set({ devModel: '', devProvider: a.id }) }])])),
+      : [{ label: a.name, icon: () => agentLogo(store, a), hint: 'Its default model', checked: agent?.id === a.id && !model, onSelect: () => set({ devModel: '', devProvider: a.id }) }])])),
   ];
   const shown = agent ? (model ? `${name(model)} · ${agent.name}` : agent.name) : 'Project default';
   return [
-    { label: 'Agent & model', hint: shown, items: modelRows },
+    { label: 'Agent & model', icon: () => { const a = agent ?? own; return a ? agentLogo(store, a) : icon('terminal'); }, hint: shown, items: modelRows },
     { label: 'Effort', hint: effort || 'Default', items: [
       { label: 'Default', checked: !effort, onSelect: () => set({ devEffort: '' }) },
       '-',

@@ -3600,6 +3600,13 @@ code.tool-fail-call { font-size: 0.76rem; }
 .dev-how li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .dev-how li > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .dev-how-n { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-weight: 700; font-size: 0.85rem; }
+.dev-card.dragging { opacity: 0.4; }
+.dev-card.drop-before { box-shadow: 0 -2px 0 var(--accent); }
+.dev-card.drop-after { box-shadow: 0 2px 0 var(--accent); }
+.dev-card-head > .grip { align-self: center; margin-right: -6px; }
+/* An agent's logo in a menu row, at the size of its other icons. */
+.menu-lead .dev-logo { width: 16px; height: 16px; border: none; border-radius: 0; background: none; }
+.menu-lead .dev-logo .icon { width: 15px; height: 15px; }
 .dev-card.is-default { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
 .dev-default-badge { padding: 2px 10px; border-radius: 999px; font-size: 0.8rem; font-weight: 600; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .dev-model { display: inline-flex; gap: 2px; align-items: center; }
