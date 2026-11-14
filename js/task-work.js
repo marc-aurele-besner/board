@@ -435,10 +435,10 @@ const artifactList = (store, artifacts) => h('div', { class: 'work-lines' }, [..
     h('a', { class: 'btn-small', href: a.url, target: '_blank', rel: 'noopener' }, 'Open')))));
 
 // A preview deployment's site, shown below the list in a frame (js/preview-frame.js, with its device sizes and
-// console): the newest ready one first, '-' for none. Before it is framed, the runners read its headers: a site that
-// forbids being framed (X-Frame-Options, or a CSP frame-ancestors that leaves the board out), or that asks to sign in
-// first (Vercel's Deployment Protection), says so instead of showing a blank frame. Without the runners, it is framed
-// as it is.
+// console): the newest ready one first, '-' for none. It loads at once, while the runners read its headers: a site
+// that forbids being framed (X-Frame-Options, or a CSP frame-ancestors that leaves the board out), or that asks to
+// sign in first (Vercel's Deployment Protection), then says so instead of showing a blank frame. The answer is kept
+// for the address until the site is loaded again. Without the runners, it is framed as it is.
 /** @param {PrPreview[]} previews */
 function showSite(previews) {
   if (!pop.slot) return;
@@ -461,22 +461,35 @@ function showSite(previews) {
       reloadButton(key, 'Load the site again'),
     ],
     load: async () => {
-      const refused = await framable(url);
-      return { url, refused, sandbox: 'allow-scripts allow-same-origin allow-forms allow-popups', title: `Preview of ${host}` };
+      const known = verdicts.get(url);
+      const content = { url, sandbox: 'allow-scripts allow-same-origin allow-forms allow-popups', title: `Preview of ${host}` };
+      return known === undefined ? { ...content, check: framable(url) } : { ...content, refused: known };
     },
   }));
 }
 
-// Why a site cannot be shown in a frame here, or '' when it can (or the runners could not tell).
+// What framable() found for each address: why it cannot be framed, or '' when it can.
+/** @type {Map<string, string>} */
+const verdicts = new Map();
+
+// Why a site cannot be shown in a frame here, or '' when it can (or the runners could not tell). Only its headers are
+// read, the page itself is left for the frame.
 /** @param {string} url */
 async function framable(url) {
   /** @type {{ status: number, url: string, headers: [string, string][] }} */
   let answer;
   try {
-    answer = await workerCall('POST', '/http', { method: 'GET', url, headers: [] }, 20000);
+    answer = await workerCall('POST', '/http', { method: 'GET', url, headers: [], headersOnly: true }, 20000);
   } catch {
     return '';
   }
+  const reason = refusalOf(answer);
+  verdicts.set(url, reason);
+  return reason;
+}
+
+/** @param {{ status: number, url: string, headers: [string, string][] }} answer */
+function refusalOf(answer) {
   const header = (/** @type {string} */ name) => answer.headers.find(([k]) => k.toLowerCase() === name)?.[1] ?? '';
   if (answer.status === 401 || answer.status === 403 || /vercel\.com\/(login|sso)/.test(answer.url)) {
     return 'This preview asks to sign in first (Vercel’s Deployment Protection, or a password), which cannot happen inside the board. Open it in a tab, or turn the protection off for previews.';
@@ -544,6 +557,7 @@ function forgetFrame(key) {
 /** @param {string} key @param {string} title */
 const reloadButton = (key, title) => h('button', { type: 'button', class: 'icon-btn', title, 'aria-label': title, onclick: () => {
   forgetFrame(key);
+  if (key.startsWith('site:')) verdicts.delete(key.slice(5));
   paint();
 } }, icon('refresh'));
 
