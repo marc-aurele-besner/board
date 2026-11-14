@@ -3598,6 +3598,23 @@ code.tool-fail-call { font-size: 0.76rem; }
 .dev-logo.is-ai-mistral { color: var(--brand-mistral); }
 .dev-models { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .dev-model { padding: 1px 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+.dev-how { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dev-how li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.dev-how li > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dev-how-n { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-weight: 700; font-size: 0.85rem; }
+.dev-card.is-default { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.dev-default-badge { padding: 2px 10px; border-radius: 999px; font-size: 0.8rem; font-weight: 600; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.dev-model { display: inline-flex; gap: 6px; align-items: baseline; }
+.dev-model code { background: none; padding: 0; font-size: inherit; }
+.dev-fold { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 0; min-height: 0; border: none; background: none; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.dev-fold:hover { background: none; }
+.dev-fold > .icon { margin-top: 6px; color: var(--muted); }
+.dev-fold h2 { margin: 0 0 2px; }
+.dev-fold p { margin: 0; }
+.dev-agent-field { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; align-self: stretch; }
+.dev-agent-field > .chip-pick { align-self: flex-start; }
+.dev-agent-field > .dev-env-preview { color: var(--muted); font-size: 0.8rem; }
+.chip-pick.dev-agent-pick { min-height: 34px; padding: 4px 10px; font-size: 0.9rem; }
 .dev-flag-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 /* A command field: the text typed over its own colours, so it reads like an editor. Both layers share font,
    padding and wrapping, so every character sits on its colour. */
@@ -3626,6 +3643,7 @@ code.cmd-code { background: none; padding: 0; }
   .dev-preset-row > button { grid-area: remove; }
   .dev-preset-row .dev-provider-fields { grid-area: command; }
   .dev-flag-grid { grid-template-columns: minmax(0, 1fr); }
+  .dev-how { grid-template-columns: minmax(0, 1fr); }
   .dev-card-head { flex-wrap: wrap; }
   .dev-card-tools { width: 100%; justify-content: flex-end; }
   .cmd-editor > .cmd-layer, .cmd-editor > .cmd-input { font-size: 16px; }
