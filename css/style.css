@@ -2087,7 +2087,13 @@ label.check { cursor: pointer; }
 
 /* Tasks: a deadline column, and flags for late, automated and unsorted tasks */
 .todo-head, .todo-row { grid-template-columns: 20px 20px minmax(200px, 1fr) 156px 124px 140px 150px 136px 150px; }
-.todo-title-cell { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; }
+/* The title runs as text, so its work pill and the chips after it end its last line when they fit there, rather than
+   taking a line of their own. */
+.todo-title-cell { display: block; }
+.todo-title-cell > * { vertical-align: middle; margin-right: 6px; }
+.todo-title-cell > :last-child { margin-right: 0; }
+.todo-title-cell > .todo-title { display: inline; }
+.todo-title-cell > .editable-field { width: 100%; margin-right: 0; }
 .due-input { font-size: 0.82rem; padding: 3px 6px; min-height: 28px; border-color: transparent; background: transparent; color: var(--muted); }
 .due-input:hover, .due-input:focus { border-color: var(--border); background: var(--surface); color: var(--text); }
 /* Sized to its button (not the whole Deadline column), so the picker opens right under the button. */
